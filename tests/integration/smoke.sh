@@ -81,6 +81,12 @@ extension_assertion=$("${compose[@]}" exec -T postgres psql --username matchplan
 printf '%s\n' "$extension_assertion" | grep -Fx 'timescaledb=2.29.1' >/dev/null
 printf '%s\n' "$extension_assertion" | grep -Fx 'vector=0.8.6' >/dev/null
 
+webhook_claim_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
+  --tuples-only --no-align --command \
+  "SELECT count(*) FROM information_schema.columns \
+   WHERE table_name = 'payment_webhook_inbox' AND column_name = 'processing_at';")
+test "$webhook_claim_assertion" = 1
+
 bash "$repository_root/tests/integration/marketplace-smoke.sh"
 
 echo 'MatchPlane end-to-end smoke test passed'

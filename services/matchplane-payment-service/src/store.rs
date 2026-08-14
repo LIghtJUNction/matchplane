@@ -359,8 +359,9 @@ impl PaymentStore {
         Ok(payment)
     }
 
-    /// Persists and applies one authenticated provider callback. The inbox is written before the
-    /// provider-specific state change so a process crash can safely retry a `received` event.
+    /// Persists and applies one authenticated provider callback. The inbox claims the event
+    /// before the provider-specific state change so concurrent deliveries cannot apply it twice;
+    /// a stale claim is retryable after a process crash.
     pub async fn process_webhook(
         &self,
         gateway_id: PaymentGatewayId,
@@ -392,8 +393,8 @@ impl PaymentStore {
         let mut transaction = self.pool.begin().await?;
         let inserted = sqlx::query(
             "INSERT INTO payment_webhook_inbox \
-             (gateway_id, provider_event_id, payload_hash, event_type, provider_reference, status) \
-             VALUES ($1, $2, $3, $4, $5, 'received') \
+             (gateway_id, provider_event_id, payload_hash, event_type, provider_reference, status, processing_at) \
+             VALUES ($1, $2, $3, $4, $5, 'processing', clock_timestamp()) \
              ON CONFLICT (gateway_id, provider_event_id) DO NOTHING",
         )
         .bind(gateway_id.into_uuid())
@@ -405,7 +406,7 @@ impl PaymentStore {
         .await?;
         if inserted.rows_affected() == 0 {
             let row = sqlx::query(
-                "SELECT payload_hash, status FROM payment_webhook_inbox \
+                "SELECT payload_hash, status, processing_at FROM payment_webhook_inbox \
                  WHERE gateway_id = $1 AND provider_event_id = $2 FOR UPDATE",
             )
             .bind(gateway_id.into_uuid())
@@ -426,9 +427,22 @@ impl PaymentStore {
                     status,
                 });
             }
+            if status == "processing"
+                && row
+                    .try_get::<Option<OffsetDateTime>, _>("processing_at")?
+                    .is_some_and(|processing_at| {
+                        processing_at > OffsetDateTime::now_utc() - time::Duration::minutes(5)
+                    })
+            {
+                transaction.commit().await?;
+                return Ok(WebhookReceipt {
+                    duplicate: true,
+                    status,
+                });
+            }
             sqlx::query(
-                "UPDATE payment_webhook_inbox SET status = 'received', failure_reason = NULL, \
-                 processed_at = NULL WHERE gateway_id = $1 AND provider_event_id = $2",
+                "UPDATE payment_webhook_inbox SET status = 'processing', processing_at = clock_timestamp(), \
+                 failure_reason = NULL, processed_at = NULL WHERE gateway_id = $1 AND provider_event_id = $2",
             )
             .bind(gateway_id.into_uuid())
             .bind(provider_event_id)
@@ -479,7 +493,7 @@ impl PaymentStore {
         failure_reason: Option<&str>,
     ) -> Result<(), StoreError> {
         sqlx::query(
-            "UPDATE payment_webhook_inbox SET status = $3, failure_reason = $4, \
+            "UPDATE payment_webhook_inbox SET status = $3, failure_reason = $4, processing_at = NULL, \
              processed_at = CASE WHEN $3 IN ('processed', 'ignored') THEN clock_timestamp() ELSE NULL END \
              WHERE gateway_id = $1 AND provider_event_id = $2",
         )
@@ -521,6 +535,23 @@ impl PaymentStore {
             return Ok(false);
         };
         let payment = payment_from_row(&row)?;
+        if event.merchant_order_id.as_deref() != Some(payment.merchant_order_id.as_str())
+            && event.merchant_order_id.is_some()
+        {
+            return Err(StoreError::Invalid(
+                "provider webhook merchant order does not match the payment".to_owned(),
+            ));
+        }
+        if !webhook_reference_matches(
+            payment.provider_reference.as_deref(),
+            event.provider_reference.as_deref(),
+            Some(payment.merchant_order_id.as_str()),
+            event.merchant_order_id.as_deref(),
+        ) {
+            return Err(StoreError::Invalid(
+                "provider webhook reference does not match the payment".to_owned(),
+            ));
+        }
         if let Some(amount) = &event.amount {
             let expected = exact(&payment.amount)?;
             if amount.currency != payment.currency
@@ -625,6 +656,24 @@ impl PaymentStore {
         };
         let refund_id = RefundId::from_uuid(row.try_get("id")?);
         let refund = self.refund(refund_id).await?;
+        let payment = self.payment(refund.payment_id).await?;
+        if event.merchant_order_id.as_deref() != Some(payment.merchant_order_id.as_str())
+            && event.merchant_order_id.is_some()
+        {
+            return Err(StoreError::Invalid(
+                "provider webhook merchant order does not match the refund payment".to_owned(),
+            ));
+        }
+        if !webhook_reference_matches(
+            refund.provider_reference.as_deref(),
+            event.provider_reference.as_deref(),
+            Some(payment.merchant_order_id.as_str()),
+            event.merchant_order_id.as_deref(),
+        ) {
+            return Err(StoreError::Invalid(
+                "provider webhook reference does not match the refund".to_owned(),
+            ));
+        }
         if let Some(amount) = &event.amount
             && (amount.currency != refund.currency
                 || i16::from(amount.scale) != refund.currency_scale
@@ -1492,6 +1541,25 @@ fn reconciliation_transition_allowed(from: &str, to: &str) -> bool {
         }
 }
 
+fn webhook_reference_matches(
+    stored_reference: Option<&str>,
+    reported_reference: Option<&str>,
+    merchant_order_id: Option<&str>,
+    reported_merchant_order_id: Option<&str>,
+) -> bool {
+    let (Some(stored), Some(reported)) = (stored_reference, reported_reference) else {
+        return true;
+    };
+    if stored == reported {
+        return true;
+    }
+    // Hosted Alipay/WeChat flows initially persist our merchant order as the provider
+    // reference and later replace it with the provider's transaction id. Only allow that
+    // one-way normalization when the callback independently echoes the same order id.
+    stored == merchant_order_id.unwrap_or_default()
+        && reported_merchant_order_id == merchant_order_id
+}
+
 fn reconciliation_can_become_unknown(status: &str) -> bool {
     matches!(
         status,
@@ -1514,7 +1582,10 @@ pub fn is_unknown(error: &PaymentError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{reconciliation_can_become_unknown, reconciliation_transition_allowed};
+    use super::{
+        reconciliation_can_become_unknown, reconciliation_transition_allowed,
+        webhook_reference_matches,
+    };
 
     #[test]
     fn reconciliation_never_downgrades_terminal_payments() {
@@ -1533,5 +1604,31 @@ mod tests {
             "authorized"
         ));
         assert!(reconciliation_can_become_unknown("authorized"));
+    }
+
+    #[test]
+    fn webhook_reference_accepts_provider_transaction_upgrade() {
+        assert!(webhook_reference_matches(
+            Some("merchant-order"),
+            Some("provider-transaction"),
+            Some("merchant-order"),
+            Some("merchant-order"),
+        ));
+    }
+
+    #[test]
+    fn webhook_reference_rejects_mismatched_provider_identity() {
+        assert!(!webhook_reference_matches(
+            Some("stored-provider"),
+            Some("different-provider"),
+            Some("merchant-order"),
+            Some("merchant-order"),
+        ));
+        assert!(!webhook_reference_matches(
+            Some("merchant-order"),
+            Some("provider-transaction"),
+            Some("merchant-order"),
+            Some("different-order"),
+        ));
     }
 }

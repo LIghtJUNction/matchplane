@@ -1,8 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This bootstrap provisions the local test profile. Production mode must use the
+# packaged production template and an explicit TLS/provider onboarding runbook.
+if [[ ${MATCHPLANE_ENVIRONMENT:-test} != test ]]; then
+  echo 'configure-ubuntu-host.sh only provisions the test environment' >&2
+  exit 1
+fi
+
 if [[ $(id -u) -ne 0 ]]; then
   echo 'configure-ubuntu-host.sh must run as root' >&2
+  exit 1
+fi
+
+node_id=${MATCHPLANE_NODE_ID:-}
+if [[ -z $node_id ]]; then
+  node_id=$(cat /proc/sys/kernel/random/uuid)
+fi
+if [[ ! $node_id =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+  echo 'MATCHPLANE_NODE_ID must be a UUID' >&2
+  exit 1
+fi
+if [[ $node_id == 00000000-0000-7000-8000-00000000000a ]]; then
+  echo 'MATCHPLANE_NODE_ID must not use the development default' >&2
   exit 1
 fi
 
@@ -83,7 +103,7 @@ environment_file=$(mktemp /etc/matchplane/matchplane.env.XXXXXX)
 trap 'rm -f "$environment_file"' EXIT
 {
   printf '%s\n' 'MATCHPLANE_ENVIRONMENT=test'
-  printf '%s\n' 'MATCHPLANE_NODE_ID=00000000-0000-7000-8000-00000000000a'
+  printf 'MATCHPLANE_NODE_ID=%s\n' "$node_id"
   printf '%s\n' 'MATCHPLANE_GRPC_ADDR=127.0.0.1:50051'
   printf 'MATCHPLANE_DATABASE_URL=postgres://matchplane:%s@127.0.0.1:5432/matchplane\n' \
     "$database_password"

@@ -157,7 +157,10 @@ Provider callbacks are received at
 uses RSA2, WeChat Pay v3 uses platform RSA verification plus API-v3 AES-GCM resource decryption,
 and Waffo uses its configured RSA public key. Every verified event is bound to the configured
 gateway and merchant order, checked against the stored amount, deduplicated by provider event id,
-and applied to the payment/refund state machine. Unknown or mismatched events are retained in the
+and applied to the payment/refund state machine. Inbox rows are claimed before state application;
+concurrent deliveries are acknowledged without double-applying, and a claim older than five
+minutes is retryable after a process crash. Provider references are also checked against the
+merchant order/payment identity before mutation. Unknown or mismatched events are retained in the
 inbox for audit and never mutate a payment. Successful EPay and Alipay callbacks receive the
 provider-required plain-text `success` acknowledgement; WeChat receives `{"code":"SUCCESS"}` and
 Waffo receives `{"code":"0"}`.

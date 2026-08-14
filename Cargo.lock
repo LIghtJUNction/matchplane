@@ -1644,7 +1644,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "matchplane-cache"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "redis",
  "serde",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-config"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "config",
  "matchplane-domain",
@@ -1667,7 +1667,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-domain"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hex",
  "serde",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-engine"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "matchplane-domain",
  "serde",
@@ -1691,7 +1691,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-event-relay"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "matchplane-config",
@@ -1704,7 +1704,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-events"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "futures-util",
  "rdkafka",
@@ -1714,7 +1714,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-federation-hub"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "hex",
@@ -1734,7 +1734,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-gateway"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1759,7 +1759,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-matcher"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "matchplane-config",
@@ -1776,7 +1776,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-observability"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "metrics-exporter-prometheus",
  "opentelemetry",
@@ -1790,7 +1790,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-payment-service"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-payments"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -1844,7 +1844,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-projector"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "hex",
@@ -1862,7 +1862,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-protocol"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "matchplane-domain",
  "prost",
@@ -1878,7 +1878,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-storage"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bigdecimal",
  "matchplane-domain",
@@ -1898,7 +1898,7 @@ dependencies = [
 
 [[package]]
 name = "matchplane-vector-worker"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "matchplane-config",
@@ -4450,7 +4450,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "clap",
