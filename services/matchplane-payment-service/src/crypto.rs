@@ -7,7 +7,6 @@ use aes_gcm::{
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use matchplane_config::Environment;
 use sha2::{Digest, Sha256};
-use subtle::ConstantTimeEq;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -141,51 +140,4 @@ fn decode_key(bytes: &[u8]) -> Result<[u8; 32], CryptoError> {
     decoded.try_into().map_err(|_| {
         CryptoError::Configuration("invoice data key must contain exactly 32 bytes".to_owned())
     })
-}
-
-#[derive(Clone)]
-pub struct AdminAuth {
-    token_hash: [u8; 32],
-}
-
-impl std::fmt::Debug for AdminAuth {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("AdminAuth([REDACTED])")
-    }
-}
-
-impl AdminAuth {
-    pub fn load(environment: Environment) -> Result<Self, CryptoError> {
-        let token = if let Ok(path) = env::var("MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE") {
-            fs::read_to_string(path)
-                .map_err(|error| {
-                    CryptoError::Configuration(format!("admin token file cannot be read: {error}"))
-                })?
-                .trim()
-                .to_owned()
-        } else if environment != Environment::Production {
-            env::var("MATCHPLANE_PAYMENT_ADMIN_TOKEN")
-                .unwrap_or_else(|_| "matchplane-development-admin".to_owned())
-        } else {
-            return Err(CryptoError::Configuration(
-                "production requires MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE".to_owned(),
-            ));
-        };
-        if token.len() < 24 {
-            return Err(CryptoError::Configuration(
-                "admin token must contain at least 24 bytes".to_owned(),
-            ));
-        }
-        Ok(Self {
-            token_hash: Sha256::digest(token.as_bytes()).into(),
-        })
-    }
-
-    pub fn verify_bearer(&self, authorization: Option<&str>) -> bool {
-        let Some(token) = authorization.and_then(|value| value.strip_prefix("Bearer ")) else {
-            return false;
-        };
-        let candidate: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        bool::from(self.token_hash.ct_eq(&candidate))
-    }
 }

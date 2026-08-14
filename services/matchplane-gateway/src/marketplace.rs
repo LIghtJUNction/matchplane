@@ -6,15 +6,17 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
 };
 use matchplane_domain::{
-    AssetId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId, TenantId,
-    VehicleListingId, ViewingAppointmentId,
+    AssetId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId, PromotionCampaignId,
+    TenantId, VehicleListingId, ViewingAppointmentId,
 };
 use matchplane_storage::{
-    AuthenticatedParty, ConfirmOfflineDeal, CreateBuyerVehicleRequest, CreateMarketplaceParty,
-    CreateOfflineDeal, CreateVehicleListing, CreateViewingAppointment, EncryptedContact,
-    ExposureMetrics, FinalizeOfflineDeal, MarketplaceParty, OfflineDeal, OfflineDealOutcome,
-    OfflineDealProgress, RecommendVehicleListings, RecommendedListing, RecordExposure,
-    ReleaseContact, TransitionViewingAppointment, VehicleListing, ViewingAppointment,
+    AcceptContactExchange, AuthenticatedParty, ConfirmOfflineDeal, CreateBuyerVehicleRequest,
+    CreateMarketplaceParty, CreateOfflineDeal, CreateSellerPromotion, CreateVehicleListing,
+    CreateViewingAppointment, EncryptedContact, ExposureMetrics, FinalizeOfflineDeal,
+    MarketplaceParty, OfflineDeal, OfflineDealOutcome, OfflineDealProgress,
+    RecommendVehicleListings, RecommendedListing, RecordExposure, RecordSellerPromotionEvent,
+    ReleaseContact, SellerPromotionCampaign, SellerPromotionEventOutcome,
+    TransitionViewingAppointment, VehicleListing, ViewingAppointment,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -102,6 +104,12 @@ pub(super) struct FinalizeDealRequest {
     party_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct AcceptContactRequest {
+    tenant_id: String,
+    party_id: String,
+}
+
 #[derive(Deserialize)]
 pub(super) struct CreateViewingRequest {
     viewing_id: Option<String>,
@@ -142,6 +150,38 @@ pub(super) struct ExposureResponse {
     duplicate: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct CreatePromotionRequest {
+    campaign_id: Option<String>,
+    tenant_id: String,
+    sponsor_party_id: String,
+    target_kind: String,
+    target_key: String,
+    #[serde(default = "default_promotion_policy")]
+    policy: String,
+    pricing_model: String,
+    currency: String,
+    currency_scale: i16,
+    unit_price: String,
+    budget_amount: String,
+    #[serde(default)]
+    settings: Value,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    starts_at: Option<OffsetDateTime>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    ends_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PromotionEventRequest {
+    tenant_id: String,
+    actor_party_id: String,
+    event_type: String,
+    deduplication_key: String,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    occurred_at: Option<OffsetDateTime>,
+}
+
 #[derive(Debug, Serialize)]
 pub(super) struct CounterpartContact {
     party_id: MarketplacePartyId,
@@ -177,17 +217,8 @@ pub(super) async fn create_party(
             "role must be buyer, seller, or both".to_owned(),
         ));
     }
-    if !request.contact.is_object()
-        || request
-            .contact
-            .as_object()
-            .is_some_and(|map| map.is_empty())
-    {
-        return Err(ApiError::bad_request(
-            "contact must be a non-empty JSON object".to_owned(),
-        ));
-    }
-    let contact_bytes = serde_json::to_vec(&request.contact)
+    let contact = normalize_contact(&request.contact)?;
+    let contact_bytes = serde_json::to_vec(&contact)
         .map_err(|error| ApiError::bad_request(format!("contact is invalid: {error}")))?;
     if contact_bytes.len() > 16 * 1024 {
         return Err(ApiError::bad_request(
@@ -361,6 +392,22 @@ pub(super) async fn create_offline_deal(
     Ok((status, Json(outcome)))
 }
 
+pub(super) async fn offline_deals(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PartyQuery>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<OfflineDeal>>, ApiError> {
+    let tenant_id = parse_id(&query.tenant_id)?;
+    let party_id = parse_id(&query.party_id)?;
+    authenticate(&state, &headers, tenant_id, party_id).await?;
+    state
+        .store
+        .offline_deals_for_party(tenant_id, party_id)
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
 pub(super) async fn offline_deal(
     State(state): State<Arc<AppState>>,
     Path(offline_deal_id): Path<String>,
@@ -380,6 +427,28 @@ pub(super) async fn offline_deal(
         return Err(ApiError::not_found("offline deal was not found"));
     }
     Ok(Json(deal))
+}
+
+pub(super) async fn accept_contact_exchange(
+    State(state): State<Arc<AppState>>,
+    Path(offline_deal_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<AcceptContactRequest>,
+) -> Result<Json<OfflineDeal>, ApiError> {
+    let tenant_id = parse_id(&request.tenant_id)?;
+    let seller_party_id = parse_id(&request.party_id)?;
+    let party = authenticate(&state, &headers, tenant_id, seller_party_id).await?;
+    require_role(&party, "seller")?;
+    state
+        .store
+        .accept_contact_exchange(&AcceptContactExchange {
+            tenant_id,
+            offline_deal_id: parse_id(&offline_deal_id)?,
+            seller_party_id,
+        })
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
 }
 
 pub(super) async fn confirm_offline_deal(
@@ -630,6 +699,98 @@ pub(super) async fn exposure_metrics(
         .map_err(ApiError::from)
 }
 
+pub(super) async fn create_seller_promotion(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<CreatePromotionRequest>,
+) -> Result<(StatusCode, Json<SellerPromotionCampaign>), ApiError> {
+    validate_text(&request.target_kind, "target_kind", 64)?;
+    validate_text(&request.target_key, "target_key", 256)?;
+    validate_currency(&request.currency)?;
+    let tenant_id = parse_id(&request.tenant_id)?;
+    let sponsor_party_id = parse_id(&request.sponsor_party_id)?;
+    let party = authenticate(&state, &headers, tenant_id, sponsor_party_id).await?;
+    require_role(&party, "seller")?;
+    let settings = if request.settings.is_null() {
+        serde_json::json!({})
+    } else {
+        request.settings
+    };
+    if !settings.is_object() {
+        return Err(ApiError::bad_request(
+            "settings must be a JSON object".to_owned(),
+        ));
+    }
+    let campaign = state
+        .store
+        .create_seller_promotion(&CreateSellerPromotion {
+            campaign_id: request
+                .campaign_id
+                .as_deref()
+                .map(parse_id::<PromotionCampaignId>)
+                .transpose()?
+                .unwrap_or_default(),
+            tenant_id,
+            sponsor_party_id,
+            target_kind: request.target_kind,
+            target_key: request.target_key,
+            policy: request.policy,
+            pricing_model: request.pricing_model,
+            currency: request.currency,
+            currency_scale: request.currency_scale,
+            unit_price: non_negative_exact(&request.unit_price, "unit_price")?,
+            budget_amount: positive_exact(&request.budget_amount, "budget_amount")?,
+            settings,
+            starts_at: request.starts_at.unwrap_or_else(OffsetDateTime::now_utc),
+            ends_at: request.ends_at,
+        })
+        .await?;
+    Ok((StatusCode::CREATED, Json(campaign)))
+}
+
+pub(super) async fn seller_promotion(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    Query(query): Query<PartyQuery>,
+    headers: HeaderMap,
+) -> Result<Json<SellerPromotionCampaign>, ApiError> {
+    let tenant_id = parse_id(&query.tenant_id)?;
+    let party_id = parse_id(&query.party_id)?;
+    let party = authenticate(&state, &headers, tenant_id, party_id).await?;
+    require_role(&party, "seller")?;
+    state
+        .store
+        .seller_promotion(tenant_id, parse_id(&campaign_id)?, party_id)
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+pub(super) async fn record_seller_promotion_event(
+    State(state): State<Arc<AppState>>,
+    Path(campaign_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<PromotionEventRequest>,
+) -> Result<Json<SellerPromotionEventOutcome>, ApiError> {
+    let tenant_id = parse_id(&request.tenant_id)?;
+    let actor_party_id = parse_id(&request.actor_party_id)?;
+    let party = authenticate(&state, &headers, tenant_id, actor_party_id).await?;
+    require_role(&party, "buyer")?;
+    state
+        .store
+        .record_seller_promotion_event(&RecordSellerPromotionEvent {
+            tenant_id,
+            campaign_id: parse_id(&campaign_id)?,
+            actor_party_id: Some(actor_party_id),
+            event_type: request.event_type,
+            deduplication_key: request.deduplication_key,
+            occurred_at: request.occurred_at.unwrap_or_else(OffsetDateTime::now_utc),
+        })
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
 async fn authenticate(
     state: &AppState,
     headers: &HeaderMap,
@@ -663,6 +824,10 @@ fn require_role(party: &AuthenticatedParty, role: &str) -> Result<(), ApiError> 
     } else {
         Err(ApiError::forbidden(format!("{role} role is required")))
     }
+}
+
+fn default_promotion_policy() -> String {
+    "seller_promotion".to_owned()
 }
 
 fn contact_aad(tenant_id: TenantId, party_id: MarketplacePartyId) -> Vec<u8> {
@@ -718,6 +883,47 @@ fn validate_text(value: &str, field: &str, maximum: usize) -> Result<(), ApiErro
     Ok(())
 }
 
+fn normalize_contact(contact: &Value) -> Result<Value, ApiError> {
+    let object = contact.as_object().ok_or_else(|| {
+        ApiError::bad_request("contact must contain phone and/or wechat".to_owned())
+    })?;
+    let mut normalized = serde_json::Map::new();
+    for field in ["phone", "wechat"] {
+        let Some(value) = object.get(field) else {
+            continue;
+        };
+        let value = value
+            .as_str()
+            .ok_or_else(|| ApiError::bad_request(format!("contact.{field} must be a string")))?;
+        let value = value.trim();
+        if value.is_empty() || value.len() > 64 || value.bytes().any(|byte| byte.is_ascii_control())
+        {
+            return Err(ApiError::bad_request(format!(
+                "contact.{field} must contain 1..=64 printable bytes"
+            )));
+        }
+        if field == "phone" {
+            let digit_count = value.bytes().filter(u8::is_ascii_digit).count();
+            if !(6..=20).contains(&digit_count)
+                || !value.bytes().all(|byte| {
+                    byte.is_ascii_digit() || matches!(byte, b'+' | b'-' | b' ' | b'(' | b')')
+                })
+            {
+                return Err(ApiError::bad_request(
+                    "contact.phone must be a valid phone number".to_owned(),
+                ));
+            }
+        }
+        normalized.insert(field.to_owned(), Value::String(value.to_owned()));
+    }
+    if normalized.is_empty() {
+        return Err(ApiError::bad_request(
+            "contact must include at least one of phone or wechat".to_owned(),
+        ));
+    }
+    Ok(Value::Object(normalized))
+}
+
 fn validate_currency(currency: &str) -> Result<(), ApiError> {
     if currency.len() == 3 && currency.bytes().all(|byte| byte.is_ascii_uppercase()) {
         Ok(())
@@ -744,4 +950,35 @@ fn non_negative_exact(value: &str, field: &str) -> Result<i128, ApiError> {
         )));
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn contact_exchange_keeps_only_phone_and_wechat() {
+        let normalized = normalize_contact(&json!({
+            "phone": " +86 138 0000 0000 ",
+            "wechat": "seller_mp",
+            "private_note": "must not be shared",
+        }))
+        .expect("contact should be valid");
+
+        assert_eq!(
+            normalized,
+            json!({
+                "phone": "+86 138 0000 0000",
+                "wechat": "seller_mp",
+            })
+        );
+    }
+
+    #[test]
+    fn contact_exchange_requires_a_supported_channel() {
+        let error = normalize_contact(&json!({"email": "seller@example.invalid"}))
+            .expect_err("email-only contact must be rejected");
+        assert!(error.message.contains("phone or wechat"));
+    }
 }

@@ -13,8 +13,8 @@ BuildRequires:  cargo
 BuildRequires:  cmake
 BuildRequires:  gcc-c++
 BuildRequires:  libcurl-devel
-BuildRequires:  nodejs
-BuildRequires:  npm
+BuildRequires:  curl
+BuildRequires:  unzip
 BuildRequires:  protobuf-compiler
 BuildRequires:  protobuf-devel
 BuildRequires:  rust
@@ -30,12 +30,12 @@ Valkey projections, and a federated gRPC control plane.
 %autosetup
 
 %build
-npm ci --ignore-scripts --prefix web
-npm run build --prefix web
+bun install --frozen-lockfile --cwd web
+bun run --cwd web build
 cargo build --release --locked --workspace --bins
 
 %check
-npm test --prefix web
+bun run --cwd web test
 cargo test --release --locked --workspace
 
 %install

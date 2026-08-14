@@ -2,4 +2,6 @@
 .github
 target
 dist
+web/out
+web/.next
 deploy/compose/data

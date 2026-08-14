@@ -1,13 +1,13 @@
 //! Privacy-aware vehicle discovery and offline introduction persistence.
 
 use matchplane_domain::{
-    AssetId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId, PaymentId, TenantId,
-    VehicleListingId, ViewingAppointmentId,
+    AssetId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId, PaymentId,
+    PromotionCampaignId, TenantId, VehicleListingId, ViewingAppointmentId,
 };
 use matchplane_payments::calculate_commission;
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -263,6 +263,9 @@ pub struct OfflineDeal {
     /// First successful contact release.
     #[serde(with = "time::serde::rfc3339::option")]
     pub contact_released_at: Option<OffsetDateTime>,
+    /// Seller's explicit consent to exchange phone/WeChat contact details.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub seller_contact_consent_at: Option<OffsetDateTime>,
     /// Final offline vehicle price, once agreed.
     pub final_amount: Option<String>,
     /// Currency.
@@ -427,6 +430,17 @@ pub struct ReleaseContact {
     pub request_fingerprint: Option<Vec<u8>>,
 }
 
+/// Seller-authorized request to exchange contact details with the matched buyer.
+#[derive(Debug)]
+pub struct AcceptContactExchange {
+    /// Tenant scope.
+    pub tenant_id: TenantId,
+    /// Introduction ID.
+    pub offline_deal_id: OfflineDealId,
+    /// The matched seller granting consent.
+    pub seller_party_id: MarketplacePartyId,
+}
+
 /// Encrypted counterpart contact returned only after authorization checks and an audit write.
 #[derive(Debug)]
 pub struct ContactEnvelope {
@@ -483,6 +497,117 @@ pub struct ExposureMetrics {
     /// Most recent exposure event.
     #[serde(with = "time::serde::rfc3339::option")]
     pub last_event_at: Option<OffsetDateTime>,
+}
+
+/// Seller-funded campaign that pays for qualified exposure while keeping the target domain-neutral.
+#[derive(Debug, Clone, Serialize)]
+pub struct SellerPromotionCampaign {
+    /// Campaign identifier.
+    pub campaign_id: PromotionCampaignId,
+    /// Tenant authority scope.
+    pub tenant_id: TenantId,
+    /// Party funding the campaign.
+    pub sponsor_party_id: MarketplacePartyId,
+    /// Vertical adapter key, for example `vehicle_listing`.
+    pub target_kind: String,
+    /// Target identifier owned by the vertical adapter.
+    pub target_key: String,
+    /// Revenue policy selected by the tenant.
+    pub policy: String,
+    /// `fixed`, `cpm`, `cpc`, or `cpl`.
+    pub pricing_model: String,
+    /// ISO 4217 currency.
+    pub currency: String,
+    /// Currency decimal scale.
+    pub currency_scale: i16,
+    /// Price per billable unit, or per thousand impressions for CPM.
+    pub unit_price: String,
+    /// Maximum amount the campaign can spend.
+    pub budget_amount: String,
+    /// Amount accrued by billable events.
+    pub spent_amount: String,
+    /// Number of billable events observed.
+    pub billable_units: i64,
+    /// Adapter-owned targeting and presentation settings.
+    pub settings: Value,
+    /// Campaign lifecycle state.
+    pub status: String,
+    /// Campaign start time.
+    #[serde(with = "time::serde::rfc3339")]
+    pub starts_at: OffsetDateTime,
+    /// Optional campaign end time.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub ends_at: Option<OffsetDateTime>,
+    /// Optimistic version.
+    pub version: i64,
+    /// Creation time.
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    /// Last update.
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+}
+
+/// Validated command to start a seller promotion campaign.
+#[derive(Debug)]
+pub struct CreateSellerPromotion {
+    /// Stable campaign identifier.
+    pub campaign_id: PromotionCampaignId,
+    /// Tenant authority scope.
+    pub tenant_id: TenantId,
+    /// Authenticated seller funding the campaign.
+    pub sponsor_party_id: MarketplacePartyId,
+    /// Vertical adapter key.
+    pub target_kind: String,
+    /// Vertical-owned target identifier.
+    pub target_key: String,
+    /// `seller_promotion` or `hybrid`.
+    pub policy: String,
+    /// `fixed`, `cpm`, `cpc`, or `cpl`.
+    pub pricing_model: String,
+    /// ISO 4217 currency.
+    pub currency: String,
+    /// Currency decimal scale.
+    pub currency_scale: i16,
+    /// Price per event, or per thousand impressions for CPM.
+    pub unit_price: i128,
+    /// Maximum campaign spend.
+    pub budget_amount: i128,
+    /// Adapter-owned campaign settings.
+    pub settings: Value,
+    /// Campaign start time.
+    pub starts_at: OffsetDateTime,
+    /// Optional campaign end time.
+    pub ends_at: Option<OffsetDateTime>,
+}
+
+/// Authenticated event that may consume a campaign budget.
+#[derive(Debug)]
+pub struct RecordSellerPromotionEvent {
+    /// Tenant authority scope.
+    pub tenant_id: TenantId,
+    /// Campaign receiving the event.
+    pub campaign_id: PromotionCampaignId,
+    /// Authenticated viewer when known.
+    pub actor_party_id: Option<MarketplacePartyId>,
+    /// `impression`, `click`, `qualified_lead`, or `contact_exchange`.
+    pub event_type: String,
+    /// Caller-stable deduplication key.
+    pub deduplication_key: String,
+    /// Business event time.
+    pub occurred_at: OffsetDateTime,
+}
+
+/// Result of recording one campaign event.
+#[derive(Debug, Clone, Serialize)]
+pub struct SellerPromotionEventOutcome {
+    /// Campaign after applying the event.
+    #[serde(flatten)]
+    pub campaign: SellerPromotionCampaign,
+    /// Whether the event was already recorded.
+    pub duplicate: bool,
+    /// Amount charged by this event in campaign currency units.
+    pub charged_amount: String,
 }
 
 impl PgStore {
@@ -947,6 +1072,89 @@ impl PgStore {
         offline_deal_from_row(&row)
     }
 
+    /// Lists introductions visible to one authenticated demand or supply participant.
+    pub async fn offline_deals_for_party(
+        &self,
+        tenant_id: TenantId,
+        party_id: MarketplacePartyId,
+    ) -> Result<Vec<OfflineDeal>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT id, tenant_id, listing_id, buyer_request_id, seller_party_id, \
+                    buyer_party_id, match_score, match_reasons, status, contact_released_at, \
+                    seller_contact_consent_at, final_amount::text AS final_amount, currency, \
+                    currency_scale, commission_bps, commission_amount::text AS commission_amount, \
+                    commission_collection, commission_payment_id, seller_confirmed_at, \
+                    buyer_confirmed_at, completed_at, expires_at, version, created_at, updated_at \
+             FROM offline_deals WHERE tenant_id = $1 \
+               AND (seller_party_id = $2 OR buyer_party_id = $2) \
+             ORDER BY created_at DESC LIMIT 100",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(party_id.into_uuid())
+        .fetch_all(self.pool())
+        .await?;
+        rows.iter().map(offline_deal_from_row).collect()
+    }
+
+    /// Records the seller's explicit consent before either side can retrieve phone/WeChat data.
+    pub async fn accept_contact_exchange(
+        &self,
+        command: &AcceptContactExchange,
+    ) -> Result<OfflineDeal, StorageError> {
+        let mut transaction = self.pool().begin().await?;
+        serializable(&mut transaction).await?;
+        let deal = offline_deal_in(&mut transaction, command.offline_deal_id, true).await?;
+        if deal.tenant_id != command.tenant_id {
+            return Err(StorageError::NotFound("offline deal"));
+        }
+        if deal.seller_party_id != command.seller_party_id {
+            return Err(StorageError::Forbidden(
+                "only the matched seller can accept contact exchange".to_owned(),
+            ));
+        }
+        ensure_party_role(
+            &mut transaction,
+            command.tenant_id,
+            command.seller_party_id,
+            "seller",
+        )
+        .await?;
+        if deal.expires_at <= OffsetDateTime::now_utc()
+            || matches!(deal.status.as_str(), "declined" | "expired" | "disputed")
+        {
+            return Err(StorageError::Conflict(
+                "offline introduction is no longer available".to_owned(),
+            ));
+        }
+        if deal.seller_contact_consent_at.is_none() {
+            sqlx::query(
+                "UPDATE offline_deals SET seller_contact_consent_at = clock_timestamp(), \
+                 version = version + 1 WHERE tenant_id = $1 AND id = $2 \
+                 AND seller_contact_consent_at IS NULL",
+            )
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.offline_deal_id.into_uuid())
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "INSERT INTO offline_deal_events \
+                 (id, tenant_id, offline_deal_id, actor_party_id, event_type, to_status, metadata) \
+                 VALUES ($1, $2, $3, $4, 'seller_contact_consent', $5, \
+                         jsonb_build_object('channels', jsonb_build_array('phone', 'wechat')))",
+            )
+            .bind(Uuid::now_v7())
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.offline_deal_id.into_uuid())
+            .bind(command.seller_party_id.into_uuid())
+            .bind(&deal.status)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        let deal = offline_deal_in(&mut transaction, command.offline_deal_id, false).await?;
+        transaction.commit().await?;
+        Ok(deal)
+    }
+
     /// Records one side's face-to-face price confirmation and completes only after both sides
     /// agree and the disclosed platform commission is captured.
     pub async fn confirm_offline_deal(
@@ -1300,6 +1508,13 @@ impl PgStore {
                 "offline introduction is no longer available".to_owned(),
             ));
         }
+        if deal.seller_contact_consent_at.is_none() {
+            insert_contact_audit(&mut transaction, command, target_party_id, "denied").await?;
+            transaction.commit().await?;
+            return Err(StorageError::Conflict(
+                "seller consent is required before contact exchange".to_owned(),
+            ));
+        }
 
         let commission_amount = exact_optional(deal.commission_amount.as_deref())?.unwrap_or(0);
         let mut commission_payment_id = deal.commission_payment_id;
@@ -1466,6 +1681,97 @@ impl PgStore {
         })
     }
 
+    /// Creates a seller-funded promotion campaign for a vertical-owned target.
+    pub async fn create_seller_promotion(
+        &self,
+        command: &CreateSellerPromotion,
+    ) -> Result<SellerPromotionCampaign, StorageError> {
+        validate_promotion_command(command)?;
+        let mut transaction = self.pool().begin().await?;
+        ensure_party_role(
+            &mut transaction,
+            command.tenant_id,
+            command.sponsor_party_id,
+            "seller",
+        )
+        .await?;
+        if command.target_kind == "vehicle_listing" {
+            let owner: Uuid = sqlx::query_scalar(
+                "SELECT seller_party_id FROM vehicle_listings \
+                 WHERE tenant_id = $1 AND id = $2",
+            )
+            .bind(command.tenant_id.into_uuid())
+            .bind(Uuid::parse_str(&command.target_key).map_err(|_| {
+                StorageError::InvalidData("vehicle listing target_key is invalid".to_owned())
+            })?)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(StorageError::NotFound("vehicle listing"))?;
+            if owner != command.sponsor_party_id.into_uuid() {
+                return Err(StorageError::Forbidden(
+                    "seller promotion target is not owned by the sponsor".to_owned(),
+                ));
+            }
+        }
+        sqlx::query(
+            "INSERT INTO seller_promotion_campaigns \
+             (id, tenant_id, sponsor_party_id, target_kind, target_key, policy, pricing_model, \
+              currency, currency_scale, unit_price, budget_amount, settings, status, starts_at, ends_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11::numeric, $12, 'active', $13, $14)",
+        )
+        .bind(command.campaign_id.into_uuid())
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.sponsor_party_id.into_uuid())
+        .bind(&command.target_kind)
+        .bind(&command.target_key)
+        .bind(&command.policy)
+        .bind(&command.pricing_model)
+        .bind(&command.currency)
+        .bind(command.currency_scale)
+        .bind(command.unit_price.to_string())
+        .bind(command.budget_amount.to_string())
+        .bind(&command.settings)
+        .bind(command.starts_at)
+        .bind(command.ends_at)
+        .execute(&mut *transaction)
+        .await?;
+        let campaign = seller_promotion_in(&mut transaction, command.campaign_id, false).await?;
+        transaction.commit().await?;
+        Ok(campaign)
+    }
+
+    /// Returns a campaign only to its funding seller.
+    pub async fn seller_promotion(
+        &self,
+        tenant_id: TenantId,
+        campaign_id: PromotionCampaignId,
+        sponsor_party_id: MarketplacePartyId,
+    ) -> Result<SellerPromotionCampaign, StorageError> {
+        let campaign = seller_promotion_in_pool(self.pool(), campaign_id).await?;
+        if campaign.tenant_id != tenant_id {
+            return Err(StorageError::NotFound("seller promotion campaign"));
+        }
+        if campaign.sponsor_party_id != sponsor_party_id {
+            return Err(StorageError::Forbidden(
+                "promotion metrics are visible only to its sponsor".to_owned(),
+            ));
+        }
+        Ok(campaign)
+    }
+
+    /// Records one idempotent campaign event and atomically accrues the seller's spend.
+    pub async fn record_seller_promotion_event(
+        &self,
+        command: &RecordSellerPromotionEvent,
+    ) -> Result<SellerPromotionEventOutcome, StorageError> {
+        validate_promotion_event(command)?;
+        let mut transaction = self.pool().begin().await?;
+        serializable(&mut transaction).await?;
+        let outcome = record_seller_promotion_event_in(&mut transaction, command).await?;
+        transaction.commit().await?;
+        Ok(outcome)
+    }
+
     async fn buyer_vehicle_request(
         &self,
         request_id: BuyerRequestId,
@@ -1477,6 +1783,318 @@ impl PgStore {
             .ok_or(StorageError::NotFound("buyer vehicle request"))?;
         buyer_request_from_row(&row)
     }
+}
+
+const PROMOTION_SELECT: &str = "SELECT id, tenant_id, sponsor_party_id, target_kind, target_key, \
+        policy, pricing_model, currency, currency_scale, unit_price::text AS unit_price, \
+        budget_amount::text AS budget_amount, spent_amount::text AS spent_amount, billable_units, \
+        settings, status, starts_at, ends_at, version, created_at, updated_at \
+        FROM seller_promotion_campaigns WHERE id = $1";
+
+const PROMOTION_SELECT_FOR_UPDATE: &str = "SELECT id, tenant_id, sponsor_party_id, target_kind, target_key, \
+        policy, pricing_model, currency, currency_scale, unit_price::text AS unit_price, \
+        budget_amount::text AS budget_amount, spent_amount::text AS spent_amount, billable_units, \
+        settings, status, starts_at, ends_at, version, created_at, updated_at \
+        FROM seller_promotion_campaigns WHERE id = $1 FOR UPDATE";
+
+async fn seller_promotion_in(
+    transaction: &mut Transaction<'_, Postgres>,
+    campaign_id: PromotionCampaignId,
+    for_update: bool,
+) -> Result<SellerPromotionCampaign, StorageError> {
+    let statement = if for_update {
+        PROMOTION_SELECT_FOR_UPDATE
+    } else {
+        PROMOTION_SELECT
+    };
+    let row = sqlx::query(statement)
+        .bind(campaign_id.into_uuid())
+        .fetch_optional(&mut **transaction)
+        .await?
+        .ok_or(StorageError::NotFound("seller promotion campaign"))?;
+    seller_promotion_from_row(&row)
+}
+
+async fn seller_promotion_in_pool(
+    pool: &PgPool,
+    campaign_id: PromotionCampaignId,
+) -> Result<SellerPromotionCampaign, StorageError> {
+    let row = sqlx::query(PROMOTION_SELECT)
+        .bind(campaign_id.into_uuid())
+        .fetch_optional(pool)
+        .await?
+        .ok_or(StorageError::NotFound("seller promotion campaign"))?;
+    seller_promotion_from_row(&row)
+}
+
+fn seller_promotion_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<SellerPromotionCampaign, StorageError> {
+    Ok(SellerPromotionCampaign {
+        campaign_id: PromotionCampaignId::from_uuid(row.try_get("id")?),
+        tenant_id: TenantId::from_uuid(row.try_get("tenant_id")?),
+        sponsor_party_id: MarketplacePartyId::from_uuid(row.try_get("sponsor_party_id")?),
+        target_kind: row.try_get("target_kind")?,
+        target_key: row.try_get("target_key")?,
+        policy: row.try_get("policy")?,
+        pricing_model: row.try_get("pricing_model")?,
+        currency: row.try_get("currency")?,
+        currency_scale: row.try_get("currency_scale")?,
+        unit_price: row.try_get("unit_price")?,
+        budget_amount: row.try_get("budget_amount")?,
+        spent_amount: row.try_get("spent_amount")?,
+        billable_units: row.try_get("billable_units")?,
+        settings: row.try_get("settings")?,
+        status: row.try_get("status")?,
+        starts_at: row.try_get("starts_at")?,
+        ends_at: row.try_get("ends_at")?,
+        version: row.try_get("version")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+async fn record_seller_promotion_event_in(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &RecordSellerPromotionEvent,
+) -> Result<SellerPromotionEventOutcome, StorageError> {
+    let campaign_id = command.campaign_id;
+    let campaign = seller_promotion_in(transaction, campaign_id, true).await?;
+    if campaign.tenant_id != command.tenant_id {
+        return Err(StorageError::NotFound("seller promotion campaign"));
+    }
+    if let Some(row) = sqlx::query(
+        "SELECT charged_amount::text AS charged_amount FROM seller_promotion_events \
+         WHERE tenant_id = $1 AND campaign_id = $2 AND deduplication_key = $3",
+    )
+    .bind(command.tenant_id.into_uuid())
+    .bind(campaign_id.into_uuid())
+    .bind(&command.deduplication_key)
+    .fetch_optional(&mut **transaction)
+    .await?
+    {
+        return Ok(SellerPromotionEventOutcome {
+            campaign,
+            duplicate: true,
+            charged_amount: row.try_get("charged_amount")?,
+        });
+    }
+    let now = OffsetDateTime::now_utc();
+    if campaign.status != "active" {
+        return Err(StorageError::Conflict(
+            "seller promotion campaign is not active".to_owned(),
+        ));
+    }
+    if campaign.starts_at > now {
+        return Err(StorageError::Conflict(
+            "seller promotion campaign has not started".to_owned(),
+        ));
+    }
+    if campaign.ends_at.is_some_and(|ends_at| ends_at <= now) {
+        sqlx::query(
+            "UPDATE seller_promotion_campaigns SET status = 'expired', version = version + 1 \
+             WHERE tenant_id = $1 AND id = $2",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(campaign_id.into_uuid())
+        .execute(&mut **transaction)
+        .await?;
+        return Err(StorageError::Conflict(
+            "seller promotion campaign has expired".to_owned(),
+        ));
+    }
+
+    let prior_units = campaign.billable_units;
+    let unit_price = exact(&campaign.unit_price)?;
+    let budget_amount = exact(&campaign.budget_amount)?;
+    let spent_amount = exact(&campaign.spent_amount)?;
+    let (unit_increment, calculated_charge) = promotion_charge(
+        &campaign.pricing_model,
+        &command.event_type,
+        prior_units,
+        unit_price,
+    );
+    let new_units = prior_units
+        .checked_add(unit_increment)
+        .ok_or_else(|| StorageError::InvalidData("promotion event count overflow".to_owned()))?;
+    let remaining = budget_amount.saturating_sub(spent_amount);
+    let charged_amount = calculated_charge.min(remaining).max(0);
+    let new_spent = spent_amount
+        .checked_add(charged_amount)
+        .ok_or_else(|| StorageError::InvalidData("promotion spend overflow".to_owned()))?;
+    let next_status = if new_spent >= budget_amount {
+        "exhausted"
+    } else {
+        "active"
+    };
+    sqlx::query(
+        "UPDATE seller_promotion_campaigns SET spent_amount = $3::numeric, billable_units = $4, \
+         status = $5, version = version + 1 WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(command.tenant_id.into_uuid())
+    .bind(campaign_id.into_uuid())
+    .bind(new_spent.to_string())
+    .bind(new_units)
+    .bind(next_status)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO seller_promotion_events \
+         (id, tenant_id, campaign_id, actor_party_id, event_type, billable_units, charged_amount, \
+          currency, currency_scale, deduplication_key, occurred_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9, $10, $11)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(command.tenant_id.into_uuid())
+    .bind(campaign_id.into_uuid())
+    .bind(command.actor_party_id.map(MarketplacePartyId::into_uuid))
+    .bind(&command.event_type)
+    .bind(unit_increment)
+    .bind(charged_amount.to_string())
+    .bind(&campaign.currency)
+    .bind(campaign.currency_scale)
+    .bind(&command.deduplication_key)
+    .bind(command.occurred_at)
+    .execute(&mut **transaction)
+    .await?;
+    let campaign = seller_promotion_in(transaction, campaign_id, false).await?;
+    Ok(SellerPromotionEventOutcome {
+        campaign,
+        duplicate: false,
+        charged_amount: charged_amount.to_string(),
+    })
+}
+
+fn promotion_charge(
+    pricing_model: &str,
+    event_type: &str,
+    prior_units: i64,
+    unit_price: i128,
+) -> (i64, i128) {
+    match pricing_model {
+        "cpm" if event_type == "impression" => {
+            let new_units = prior_units.saturating_add(1);
+            let previous_blocks = i128::from(prior_units / 1_000);
+            let new_blocks = i128::from(new_units / 1_000);
+            (1, (new_blocks - previous_blocks).saturating_mul(unit_price))
+        }
+        "cpc" if event_type == "click" => (1, unit_price),
+        // CPL charges on the qualified inquiry. A later contact exchange is still recorded for
+        // audit, but is not double-billed for the same seller promotion funnel.
+        "cpl" if event_type == "qualified_lead" => (1, unit_price),
+        "fixed" if event_type == "qualified_lead" && prior_units == 0 => (1, unit_price),
+        _ => (0, 0),
+    }
+}
+
+async fn bill_promotions_for_exposure(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &RecordExposure,
+) -> Result<(), StorageError> {
+    let event_type = match command.event_type.as_str() {
+        "impression" => "impression",
+        "detail_view" | "favorite" => "click",
+        "inquiry" => "qualified_lead",
+        "matched_contact" => "contact_exchange",
+        _ => return Ok(()),
+    };
+    let campaigns = sqlx::query(
+        "SELECT id FROM seller_promotion_campaigns \
+         WHERE tenant_id = $1 AND target_kind = 'vehicle_listing' AND target_key = $2 \
+           AND status = 'active' AND starts_at <= $3 \
+           AND (ends_at IS NULL OR ends_at > $3) FOR UPDATE",
+    )
+    .bind(command.tenant_id.into_uuid())
+    .bind(command.listing_id.to_string())
+    .bind(command.occurred_at)
+    .fetch_all(&mut **transaction)
+    .await?;
+    for row in campaigns {
+        let campaign_id = PromotionCampaignId::from_uuid(row.try_get("id")?);
+        let promotion_event = RecordSellerPromotionEvent {
+            tenant_id: command.tenant_id,
+            campaign_id,
+            actor_party_id: command.viewer_party_id,
+            event_type: event_type.to_owned(),
+            deduplication_key: format!("exposure:{}", command.deduplication_key),
+            occurred_at: command.occurred_at,
+        };
+        match record_seller_promotion_event_in(transaction, &promotion_event).await {
+            Ok(_) | Err(StorageError::Conflict(_)) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn validate_promotion_command(command: &CreateSellerPromotion) -> Result<(), StorageError> {
+    if command.target_kind.trim().is_empty()
+        || command.target_kind.len() > 64
+        || command.target_key.trim().is_empty()
+        || command.target_key.len() > 256
+    {
+        return Err(StorageError::InvalidData(
+            "promotion target is invalid".to_owned(),
+        ));
+    }
+    if !matches!(command.policy.as_str(), "seller_promotion" | "hybrid") {
+        return Err(StorageError::InvalidData(
+            "promotion policy must be seller_promotion or hybrid".to_owned(),
+        ));
+    }
+    if !matches!(
+        command.pricing_model.as_str(),
+        "fixed" | "cpm" | "cpc" | "cpl"
+    ) {
+        return Err(StorageError::InvalidData(
+            "unsupported promotion pricing model".to_owned(),
+        ));
+    }
+    validate_currency_code(&command.currency)?;
+    if command.currency_scale < 0
+        || command.currency_scale > 18
+        || command.unit_price < 0
+        || command.budget_amount <= 0
+        || command
+            .ends_at
+            .is_some_and(|ends_at| ends_at <= command.starts_at)
+    {
+        return Err(StorageError::InvalidData(
+            "promotion price, budget, or time window is invalid".to_owned(),
+        ));
+    }
+    if !command.settings.is_object() {
+        return Err(StorageError::InvalidData(
+            "promotion settings must be a JSON object".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_promotion_event(command: &RecordSellerPromotionEvent) -> Result<(), StorageError> {
+    if !matches!(
+        command.event_type.as_str(),
+        "impression" | "click" | "qualified_lead" | "contact_exchange"
+    ) {
+        return Err(StorageError::InvalidData(
+            "unsupported seller promotion event".to_owned(),
+        ));
+    }
+    if command.deduplication_key.trim().is_empty() || command.deduplication_key.len() > 240 {
+        return Err(StorageError::InvalidData(
+            "promotion deduplication key is invalid".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_currency_code(currency: &str) -> Result<(), StorageError> {
+    if currency.len() != 3 || !currency.bytes().all(|byte| byte.is_ascii_uppercase()) {
+        return Err(StorageError::InvalidData(
+            "currency must be a three-letter uppercase ISO code".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 const LISTING_SELECT: &str = "SELECT l.id, l.tenant_id, l.domain_id, l.asset_id, l.seller_party_id, \
@@ -1491,6 +2109,7 @@ const BUYER_REQUEST_SELECT: &str = "SELECT id, tenant_id, domain_id, buyer_party
 
 const OFFLINE_DEAL_SELECT: &str = "SELECT id, tenant_id, listing_id, buyer_request_id, seller_party_id, \
         buyer_party_id, match_score, match_reasons, status, contact_released_at, \
+        seller_contact_consent_at, \
         final_amount::text AS final_amount, currency, currency_scale, commission_bps, \
         commission_amount::text AS commission_amount, commission_collection, commission_payment_id, \
         seller_confirmed_at, buyer_confirmed_at, completed_at, expires_at, version, created_at, updated_at \
@@ -1595,6 +2214,7 @@ fn offline_deal_from_row(row: &sqlx::postgres::PgRow) -> Result<OfflineDeal, Sto
         match_reasons: row.try_get("match_reasons")?,
         status: row.try_get("status")?,
         contact_released_at: row.try_get("contact_released_at")?,
+        seller_contact_consent_at: row.try_get("seller_contact_consent_at")?,
         final_amount: row.try_get("final_amount")?,
         currency: row.try_get("currency")?,
         currency_scale: row.try_get("currency_scale")?,
@@ -1867,7 +2487,11 @@ async fn insert_exposure(
     .bind(command.occurred_at)
     .execute(&mut **transaction)
     .await?;
-    Ok(result.rows_affected() == 1)
+    let inserted = result.rows_affected() == 1;
+    if inserted {
+        bill_promotions_for_exposure(transaction, command).await?;
+    }
+    Ok(inserted)
 }
 
 async fn insert_contact_audit(
@@ -2011,5 +2635,27 @@ mod tests {
         assert!((0.59..=0.61).contains(&score));
         assert_eq!(reasons, ["attribute_match:make", "within_budget"]);
         assert!(suitability(&requirements, &attributes, 350_000, None, Some(300_000)).is_none());
+    }
+
+    #[test]
+    fn promotion_pricing_is_deterministic_and_does_not_double_bill_contact() {
+        assert_eq!(
+            promotion_charge("cpm", "impression", 999, 50_000),
+            (1, 50_000)
+        );
+        assert_eq!(promotion_charge("cpm", "impression", 1_000, 50_000), (1, 0));
+        assert_eq!(
+            promotion_charge("cpm", "impression", 1_999, 50_000),
+            (1, 50_000)
+        );
+        assert_eq!(promotion_charge("cpm", "click", 1_000, 50_000), (0, 0));
+        assert_eq!(
+            promotion_charge("cpl", "qualified_lead", 0, 5_000),
+            (1, 5_000)
+        );
+        assert_eq!(
+            promotion_charge("cpl", "contact_exchange", 1, 5_000),
+            (0, 0)
+        );
     }
 }

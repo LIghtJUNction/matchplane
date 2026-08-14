@@ -7,6 +7,10 @@ use matchplane_domain::FederationNodeId;
 use serde::Deserialize;
 use thiserror::Error;
 
+pub mod auth;
+
+pub use auth::{AuthError, BearerToken};
+
 /// Deployment safety profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]

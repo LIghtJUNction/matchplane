@@ -21,8 +21,8 @@ binaries=(
 )
 
 install -d "$root/usr/bin" "$root/etc/matchplane" "$root/usr/lib/systemd/system"
-if [[ ! -f $repository_root/web/dist/index.html ]]; then
-  echo 'web/dist is missing; run npm ci and npm run build in web/' >&2
+if [[ ! -f $repository_root/web/out/index.html ]]; then
+  echo 'web/out is missing; run bun install and bun run build in web/' >&2
   exit 1
 fi
 
@@ -39,6 +39,6 @@ install -Dm0644 "$repository_root/README.md" "$root/usr/share/doc/matchplane/REA
 install -Dm0644 "$repository_root/ARCHITECTURE.md" "$root/usr/share/doc/matchplane/ARCHITECTURE.md"
 install -Dm0644 "$repository_root/docs/marketplace-payments.md" \
   "$root/usr/share/doc/matchplane/marketplace-payments.md"
-cp -a "$repository_root/web/dist/." "$root/usr/share/matchplane/web/"
+cp -a "$repository_root/web/out/." "$root/usr/share/matchplane/web/"
 find "$root/usr/share/matchplane/web" -type d -exec chmod 0755 {} +
 find "$root/usr/share/matchplane/web" -type f -exec chmod 0644 {} +

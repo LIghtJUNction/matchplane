@@ -115,6 +115,14 @@ id_type!(
     MarketplacePartyId
 );
 id_type!(
+    #[doc = "Identifies a domain-neutral demand/supply introduction."]
+    MatchIntroductionId
+);
+id_type!(
+    #[doc = "Identifies a seller-funded promotion campaign."]
+    PromotionCampaignId
+);
+id_type!(
     #[doc = "Identifies a vehicle offered by a seller."]
     VehicleListingId
 );

@@ -8,6 +8,7 @@ payment_url=${MATCHPLANE_PAYMENT_BASE_URL:-http://127.0.0.1:8081}
 tenant_id=00000000-0000-7000-8000-000000000100
 domain_id=00000000-0000-7000-8000-000000000101
 asset_id=00000000-0000-7000-8000-000000000601
+campaign_id=00000000-0000-7000-8000-000000000901
 admin_authorization='authorization: Bearer matchplane-development-admin'
 
 wait_for() {
@@ -47,7 +48,14 @@ listing=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg asset
       "$base_url/v1/marketplace/listings")
 listing_id=$(jq -er '.listing_id' <<<"$listing")
 test "$(jq -r '.commission_bps' <<<"$listing")" = 100
-test "$(jq -r '.commission_collection' <<<"$listing")" = preauthorized
+test "$(jq -r '.commission_collection' <<<"$listing")" = postpaid
+
+promotion=$(jq -nc --arg tenant "$tenant_id" --arg seller "$seller_id" --arg target "$listing_id" \
+  '{campaign_id:"00000000-0000-7000-8000-000000000901",tenant_id:$tenant,sponsor_party_id:$seller,target_kind:"vehicle_listing",target_key:$target,policy:"seller_promotion",pricing_model:"cpl",currency:"USD",currency_scale:2,unit_price:"5000",budget_amount:"100000",settings:{surface:"ai_recommendation"}}' \
+  | curl --fail-with-body --silent --header 'content-type: application/json' \
+      --header "authorization: Bearer $seller_token" --data-binary @- \
+      "$base_url/v1/marketplace/promotions")
+test "$(jq -r '.status' <<<"$promotion")" = active
 
 buyer_request=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg buyer "$buyer_id" \
   '{tenant_id:$tenant,domain_id:$domain,buyer_party_id:$buyer,narrative:"CI buyer requirements",requirements:{make:"MatchPlane",model_year:2026},budget_min:"2000000",budget_max:"3000000",currency:"USD",currency_scale:2}' \
@@ -73,10 +81,38 @@ deal=$(jq -nc --arg tenant "$tenant_id" --arg listing "$listing_id" --arg reques
       "$base_url/v1/marketplace/offline-deals")
 deal_id=$(jq -er '.offline_deal_id' <<<"$deal")
 
-contact_before_payment=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+contact_before_seller_consent=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --header "authorization: Bearer $buyer_token" \
   "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&party_id=$buyer_id")
-test "$contact_before_payment" = 409
+test "$contact_before_seller_consent" = 409
+
+curl --fail-with-body --silent --header "authorization: Bearer $seller_token" \
+  "$base_url/v1/marketplace/offline-deals?tenant_id=$tenant_id&party_id=$seller_id" \
+  | jq -e --arg deal "$deal_id" 'length == 1 and .[0].offline_deal_id == $deal' >/dev/null
+
+curl --fail-with-body --silent --header 'content-type: application/json' \
+  --header "authorization: Bearer $seller_token" \
+  --data "{\"tenant_id\":\"$tenant_id\",\"party_id\":\"$seller_id\"}" \
+  "$base_url/v1/marketplace/offline-deals/$deal_id/contact/accept" \
+  | jq -e '.seller_contact_consent_at != null' >/dev/null
+
+contact_after_seller_consent=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --header "authorization: Bearer $buyer_token" \
+  "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&party_id=$buyer_id")
+test "$contact_after_seller_consent" = 200
+
+contact=$(curl --fail-with-body --silent --header "authorization: Bearer $buyer_token" \
+  "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&party_id=$buyer_id")
+test "$(jq -r '.counterpart.party_id' <<<"$contact")" = "$seller_id"
+test "$(jq -r '.counterpart.contact.phone' <<<"$contact")" = 13800000001
+test "$(jq -r '.counterpart.contact.wechat' <<<"$contact")" = ci_seller
+test "$(jq -r '.vehicle_settlement' <<<"$contact")" = offline_direct_between_buyer_and_seller
+
+seller_contact=$(curl --fail-with-body --silent --header "authorization: Bearer $seller_token" \
+  "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&party_id=$seller_id")
+test "$(jq -r '.counterpart.party_id' <<<"$seller_contact")" = "$buyer_id"
+test "$(jq -r '.counterpart.contact.phone' <<<"$seller_contact")" = 13800000002
+test "$(jq -r '.counterpart.contact.wechat' <<<"$seller_contact")" = ci_buyer
 
 payment_request=$(jq -nc --arg tenant "$tenant_id" --arg deal "$deal_id" --arg seller "$seller_id" \
   '{tenant_id:$tenant,offline_deal_id:$deal,payer_party_id:$seller,merchant_order_id:("ci-offline-commission-"+$deal),idempotency_key:("ci-authorize-"+$deal),transaction_channel:"offline_direct",purpose:"platform_commission",amount:{amount:"25000",currency:"USD",scale:2},commission_amount:"25000",method:"card",notify_url:"https://example.invalid/payment-notify",return_url:"https://example.invalid/payment-return",description:"CI offline commission"}')
@@ -110,6 +146,7 @@ contact=$(curl --fail-with-body --silent --header "authorization: Bearer $buyer_
   "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&party_id=$buyer_id")
 test "$(jq -r '.counterpart.party_id' <<<"$contact")" = "$seller_id"
 test "$(jq -r '.counterpart.contact.phone' <<<"$contact")" = 13800000001
+test "$(jq -r '.counterpart.contact.wechat' <<<"$contact")" = ci_seller
 test "$(jq -r '.vehicle_settlement' <<<"$contact")" = offline_direct_between_buyer_and_seller
 
 starts_at=$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%SZ')
@@ -213,9 +250,14 @@ curl --fail-with-body --silent --header "authorization: Bearer $seller_token" \
   "$base_url/v1/marketplace/listings/$listing_id/exposure-metrics?tenant_id=$tenant_id&party_id=$seller_id" \
   | jq -e '.impressions == 1 and .inquiries == 1 and .matched_contacts == 1' >/dev/null
 
+promotion_metrics=$(curl --fail-with-body --silent --header "authorization: Bearer $seller_token" \
+  "$base_url/v1/marketplace/promotions/$campaign_id?tenant_id=$tenant_id&party_id=$seller_id")
+jq -e '.status == "active" and .billable_units == 1 and .spent_amount == "5000"' \
+  <<<"$promotion_metrics" >/dev/null
+
 privacy_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
   --tuples-only --no-align --command \
   "SELECT bool_and(position(convert_to('138000000', 'UTF8') in contact_ciphertext)=0), (SELECT bool_and(position(convert_to('CI inspection center', 'UTF8') in location_ciphertext)=0) FROM viewing_appointments), (SELECT bool_and(position(convert_to('CI Seller Ltd', 'UTF8') in billing_details_ciphertext)=0) FROM invoice_requests), (SELECT count(*) FROM contact_access_audit WHERE decision='denied'), (SELECT count(*) FROM contact_access_audit WHERE decision='allowed') FROM marketplace_parties;")
-test "$privacy_assertion" = 't|t|t|1|1'
+test "$privacy_assertion" = 't|t|t|1|4'
 
 echo 'MatchPlane offline marketplace smoke test passed'

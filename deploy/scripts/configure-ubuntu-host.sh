@@ -23,6 +23,7 @@ create_hex_secret /etc/matchplane/secrets/database.password 24
 create_hex_secret /etc/matchplane/secrets/contact-data.key 32
 create_hex_secret /etc/matchplane/secrets/invoice-data.key 32
 create_hex_secret /etc/matchplane/secrets/payment-admin.token 32
+create_hex_secret /etc/matchplane/secrets/gateway-admin.token 32
 
 database_password=$(tr -d '\r\n' </etc/matchplane/secrets/database.password)
 if [[ ! $database_password =~ ^[0-9a-f]{48}$ ]]; then
@@ -102,6 +103,8 @@ trap 'rm -f "$environment_file"' EXIT
   printf '%s\n' 'MATCHPLANE_INVOICE_DATA_KEY_VERSION=1'
   printf '%s\n' \
     'MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/payment-admin.token'
+  printf '%s\n' \
+    'MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/gateway-admin.token'
 } >"$environment_file"
 install -m 0640 -o root -g matchplane "$environment_file" \
   /etc/matchplane/matchplane.env

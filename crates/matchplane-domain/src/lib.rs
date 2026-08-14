@@ -6,6 +6,7 @@
 
 mod envelope;
 mod ids;
+mod marketplace;
 mod matching;
 mod models;
 mod numeric;
@@ -14,9 +15,12 @@ pub use envelope::{EventEnvelope, PayloadHash, StreamKind};
 pub use ids::{
     AccountId, AssetId, AssetSchemaId, BuyerRequestId, CausationId, CorrelationId, DomainId,
     EmbeddingModelId, EventId, FederationNodeId, FederationSubscriptionId, InvoiceId,
-    LedgerEntryId, MarketId, MarketplacePartyId, OfflineDealId, OrderId, PaymentGatewayId,
-    PaymentId, RefundId, ReservationId, ShardId, TenantId, TradeId, VehicleListingId,
-    ViewingAppointmentId,
+    LedgerEntryId, MarketId, MarketplacePartyId, MatchIntroductionId, OfflineDealId, OrderId,
+    PaymentGatewayId, PaymentId, PromotionCampaignId, RefundId, ReservationId, ShardId, TenantId,
+    TradeId, VehicleListingId, ViewingAppointmentId,
+};
+pub use marketplace::{
+    ContactChannel, MatchIntent, MatchIntroduction, MatchSide, RevenuePolicy, SellerPromotion,
 };
 pub use matching::{EngineCommand, EngineCommandKind, EngineEvent, MatchingEvent};
 pub use models::{

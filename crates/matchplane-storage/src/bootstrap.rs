@@ -180,6 +180,19 @@ impl PgStore {
             .await?;
         }
 
+        // The automotive demo is intentionally an offline-direct market: the seller's explicit
+        // contact consent is enough to introduce both parties before any optional postpaid
+        // platform commission is settled. Production tenants configure this per market.
+        sqlx::query(
+            "UPDATE markets SET settlement_mode = 'offline_direct', \
+                    offline_commission_collection = 'postpaid' \
+             WHERE tenant_id = $1 AND domain_id = $2",
+        )
+        .bind(ids.tenant_id.into_uuid())
+        .bind(ids.automotive_domain_id.into_uuid())
+        .execute(&mut *transaction)
+        .await?;
+
         for (id, owner, asset, available) in [
             (ids.buyer_quote_account_id, "buyer", "USD", "1000000000"),
             (ids.buyer_base_account_id, "buyer", "AUTO", "0"),

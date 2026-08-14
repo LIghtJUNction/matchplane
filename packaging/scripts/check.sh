@@ -24,16 +24,16 @@ if command -v systemd-analyze >/dev/null 2>&1; then
 fi
 
 if [[ ${MATCHPLANE_BUILD_PACKAGES:-0} == 1 ]]; then
-  npm ci --ignore-scripts --prefix web
-  npm run check --prefix web
+  bun install --frozen-lockfile --cwd web
+  bun run --cwd web check
   cargo build --release --locked --workspace --bins
   output_directory=$(mktemp -d)
   trap 'rm -rf "$output_directory"' EXIT
-  packaging/scripts/archive.sh 0.1.0 target/release "$output_directory"
-  tar --list --zstd --file "$output_directory/matchplane-0.1.0-linux-x86_64.tar.zst" >/dev/null
+  packaging/scripts/archive.sh 0.1.3 target/release "$output_directory"
+  tar --list --zstd --file "$output_directory/matchplane-0.1.3-linux-x86_64.tar.zst" >/dev/null
   if command -v dpkg-deb >/dev/null 2>&1; then
-    packaging/ubuntu/build-deb.sh 0.1.0 target/release "$output_directory"
-    dpkg-deb --info "$output_directory/matchplane_0.1.0_amd64.deb" >/dev/null
+    packaging/ubuntu/build-deb.sh 0.1.3 target/release "$output_directory"
+    dpkg-deb --info "$output_directory/matchplane_0.1.3_amd64.deb" >/dev/null
   fi
 fi
 

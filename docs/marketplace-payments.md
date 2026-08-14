@@ -1,32 +1,42 @@
 # Marketplace, offline deals, and payments
 
-MatchPlane treats vehicle discovery, vehicle settlement, and platform commission as three separate
+MatchPlane treats demand/supply discovery, contact exchange, and platform revenue as separate
 concerns:
 
-1. Sellers publish schema-validated vehicles. Recommendation impressions, detail views, favorites,
-   inquiries, and privacy-cleared contacts form an auditable exposure funnel.
+1. Supply participants publish schema-validated offers. Recommendation impressions, detail views,
+   favorites, inquiries, and privacy-cleared contacts form an auditable exposure funnel.
 2. Buyers store a narrative, structured requirements, and exact budget bounds. Recommendations are
    ranked by explainable attribute and budget fit; a rendered recommendation records an impression.
-3. An offline introduction connects exactly one listing and buyer request. Vehicle funds can move
-   directly between buyer and seller. The platform never describes its commission as part of the
-   vehicle price or as a hidden spread.
+3. An introduction connects exactly one demand intent and one supply offer. The parties may exchange
+   phone/WeChat details and continue outside the platform. The primary monetization is a seller
+   promotion/exposure fee; the platform never describes any fee as part of the offer price or as a
+   hidden spread.
 
-The market owns the commission rate and collection policy. Sellers cannot lower the rate on a
-listing. The default `preauthorized` policy requires the matched seller to authorize the disclosed
-commission before either side can retrieve the other's contact. `postpaid` permits contact first but
-still requires captured commission before MatchPlane marks the deal completed.
+The market owns the revenue policy and collection rules. Sellers cannot lower a tenant's configured
+promotion price. A `seller_promotion` policy charges for the selected exposure/lead event and does
+not depend on a later off-platform transaction. An optional `preauthorized` transaction fee requires
+the matched seller to authorize the disclosed fee before contact; `postpaid` permits contact first
+but still requires captured fee before MatchPlane marks a transaction completed.
+
+Seller promotion campaigns are created with `POST /v1/marketplace/promotions`. They target a
+vertical-owned key (the vehicle adapter uses `vehicle_listing`) and choose `fixed`, `cpm`, `cpc`,
+or `cpl` pricing. Recommendation/detail/inquiry/contact events are deduplicated and accrue spend
+atomically against the campaign budget; campaign metrics are visible only to the sponsoring seller.
 
 ## Privacy and identity
 
 `POST /v1/marketplace/parties` returns a high-entropy bearer token exactly once. PostgreSQL stores
-only its SHA-256 digest. Contact records and viewing locations use AES-256-GCM with context-bound
-associated data; production requires `MATCHPLANE_CONTACT_DATA_KEY_FILE`. Every allowed or denied
-contact access is written to `contact_access_audit`.
+only its SHA-256 digest. Party contact data is restricted to a phone number and/or WeChat ID;
+viewing locations use AES-256-GCM with context-bound associated data. Production requires
+`MATCHPLANE_CONTACT_DATA_KEY_FILE`. Every allowed or denied contact access is written to
+`contact_access_audit`.
 
 All later marketplace endpoints require `Authorization: Bearer <party token>` together with the
-tenant and party IDs. A matched buyer receives only the seller contact, and the seller receives only
-the buyer contact. A seller's token is also required when creating an offline commission payment;
-merely supplying the seller UUID is insufficient.
+tenant and party IDs. A buyer's introduction is a contact request; the seller must explicitly accept
+the request at `/v1/marketplace/offline-deals/{id}/contact/accept` before either side can retrieve
+the other side's phone/WeChat details. A matched buyer receives only the seller contact, and the
+seller receives only the buyer contact. A seller's token is also required when creating an offline
+commission payment; merely supplying the seller UUID is insufficient.
 
 ## Offline lifecycle
 
@@ -37,7 +47,9 @@ buyer request + seller listing
             |
       offline deal proposed (seller inquiry)
             |
-  seller commission preauthorization [default]
+      seller accepts contact request
+            |
+  seller promotion event (impression / qualified lead)
             |
    audited counterpart contact release
             |
@@ -65,12 +77,16 @@ Key gateway endpoints are:
 - `POST /v1/marketplace/buyer-requests`
 - `POST /v1/marketplace/buyer-requests/{id}/recommendations`
 - `POST /v1/marketplace/offline-deals`
+- `POST /v1/marketplace/offline-deals/{id}/contact/accept`
 - `GET /v1/marketplace/offline-deals/{id}/contact`
 - `GET|POST /v1/marketplace/offline-deals/{id}/viewings`
 - `POST /v1/marketplace/viewings/{id}/{confirm|complete|cancel}`
 - `POST /v1/marketplace/offline-deals/{id}/confirm`
 - `POST /v1/marketplace/offline-deals/{id}/finalize`
 - `GET /v1/marketplace/listings/{id}/exposure-metrics`
+- `POST /v1/marketplace/promotions`
+- `GET /v1/marketplace/promotions/{id}`
+- `POST /v1/marketplace/promotions/{id}/events`
 
 ## Isolated payment service
 
@@ -109,6 +125,7 @@ In production, configure:
 
 - `MATCHPLANE_INVOICE_DATA_KEY_FILE` with a 32-byte AES key;
 - `MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE` with a random token of at least 24 bytes;
+- `MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE` with a separate random token for the core gateway APIs;
 - gateway-specific secret files referenced from administrator-created gateway configurations;
 - the WeChat merchant ID, certificate serial, API v3 key, private key, and AppID after merchant
   onboarding;

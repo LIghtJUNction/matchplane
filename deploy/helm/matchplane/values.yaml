@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/lightjunction/matchplane
-  tag: 0.1.0
+  tag: 0.1.3
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -10,7 +10,8 @@ fullnameOverride: ''
 runtime:
   # This secret must provide database-url and valkey-url keys.
   existingSecret: matchplane-runtime
-  # This secret must provide contact-data.key, invoice-data.key, and payment-admin.token.
+  # This secret must provide contact-data.key, invoice-data.key, payment-admin.token, and
+  # gateway-admin.token.
   existingApplicationSecret: matchplane-application-secrets
   # This secret must provide server.crt, server.key, and client-ca.crt keys.
   existingTlsSecret: matchplane-federation-tls
@@ -28,6 +29,7 @@ runtime:
   invoiceDataKeyPath: /run/matchplane/application-secrets/invoice-data.key
   invoiceDataKeyVersion: 1
   paymentAdminTokenPath: /run/matchplane/application-secrets/payment-admin.token
+  gatewayAdminTokenPath: /run/matchplane/application-secrets/gateway-admin.token
 
 gateway:
   replicas: 2

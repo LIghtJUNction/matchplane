@@ -12,7 +12,8 @@ verticals.
 ## Prerequisites
 
 - Rust 1.97.0 (installed automatically by `rust-toolchain.toml` when using rustup)
-- Node.js 22.23.2 or newer (the web dependency lock uses npm)
+- Bun 1.3.14 or newer (the Next.js web dependency lock uses Bun)
+- just 1.40.0 or newer (repository task runner)
 - Docker 29+ with Compose
 - `protoc` 35+
 
@@ -20,10 +21,10 @@ verticals.
 
 ```sh
 cp .env.example .env
-make compose-config
-make dev
-make migrate
-make smoke
+just compose-config
+just dev
+just migrate
+just smoke
 ```
 
 In regions where Alpine's official CDN is slow, set `MATCHPLANE_ALPINE_MIRROR` to a trusted HTTPS
@@ -33,10 +34,10 @@ mirror before building the PostgreSQL image. Alpine package signatures are still
 The marketplace HTTP API listens on `http://127.0.0.1:8080`; the isolated payment API listens on
 `http://127.0.0.1:8081`. Both expose `/health/live`, `/health/ready`, and `/metrics`.
 
-The responsive buyer, seller, and platform workspaces live in `web/`. Run `npm ci --prefix web`
-followed by `npm run dev --prefix web`; the Vite development server listens on
-`http://127.0.0.1:4173` and proxies the marketplace and payment APIs. Production builds are staged
-under `/usr/share/matchplane/web` in every Linux package.
+The responsive buyer, seller, and platform workspaces live in `web/`. Run `bun install --cwd web`
+followed by `bun run --cwd web dev`; the Next.js development server listens on
+`http://127.0.0.1:4173`. Static production builds are exported to `web/out` and staged under
+`/usr/share/matchplane/web` in every Linux package.
 
 Vehicle discovery supports seller exposure analytics and explainable buyer recommendations. Offline
 introductions release encrypted buyer/seller contact details only to the matched parties, support
@@ -47,7 +48,7 @@ separate from the platform's disclosed commission. See
 ## Quality gates
 
 ```sh
-make check
+just check
 ```
 
 Packaging definitions live under `packaging/` for AUR (`matchplane-git` and

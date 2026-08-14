@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useEffect, useState } from "react";
 import {
   Bell,
@@ -16,6 +18,12 @@ import { PlatformDashboard } from "./components/PlatformDashboard";
 import { Brand, IconButton, spring } from "./components/Primitives";
 import { SellerDashboard } from "./components/SellerDashboard";
 import { recommendations } from "./data";
+import {
+  createBuyerIntroduction,
+  isLiveMarketplaceEnabled,
+  listingIdFromBackend,
+  readPartySession,
+} from "./api";
 import type { VehicleListing, WorkspaceRole } from "./types";
 
 const roles: Array<{ id: WorkspaceRole; label: string; shortLabel: string; icon: typeof CarFront }> = [
@@ -25,8 +33,9 @@ const roles: Array<{ id: WorkspaceRole; label: string; shortLabel: string; icon:
 ];
 
 export function App() {
-  const [role, setRole] = useState<WorkspaceRole>(() => roleFromLocation());
-  const [listing, setListing] = useState<VehicleListing | null>(() => listingFromLocation());
+  const [role, setRole] = useState<WorkspaceRole>("buyer");
+  const [listing, setListing] = useState<VehicleListing | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -41,10 +50,17 @@ export function App() {
   }, [notice]);
 
   useEffect(() => {
+    setRole(roleFromLocation());
+    setListing(listingFromLocation());
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
     const url = new URL(window.location.href);
     url.searchParams.set("role", role);
     window.history.replaceState(null, "", url);
-  }, [role]);
+  }, [hydrated, role]);
 
   const selectRole = (nextRole: WorkspaceRole) => {
     setRole(nextRole);
@@ -120,9 +136,38 @@ export function App() {
         <ListingSheet
           listing={listing}
           onClose={closeListing}
-          onContact={(selected) => {
-            closeListing();
-            setNotice(`${selected.title} 的联系与看车申请已提交`);
+          onContact={async (selected) => {
+            if (!isLiveMarketplaceEnabled()) {
+              closeListing();
+              setNotice(`${selected.title} 的联系与看车申请已提交`);
+              return;
+            }
+            const session = readPartySession("buyer");
+            const listingId = listingIdFromBackend(selected);
+            if (!session || !listingId) {
+              setNotice("实时撮合需要先配置买家凭证和已接入的车源 ID；当前未发送申请");
+              return;
+            }
+            try {
+              await createBuyerIntroduction({
+                session,
+                domainId:
+                  process.env.NEXT_PUBLIC_MATCHPLANE_DOMAIN_ID ??
+                  "00000000-0000-7000-8000-000000000101",
+                listingId,
+                narrative: "希望在线下看车并与卖家直接沟通",
+                requirements: {},
+                budgetMin: "2000000",
+                budgetMax: "3000000",
+                currency: "USD",
+                currencyScale: 2,
+                exposureKey: `web-contact-${Date.now()}`,
+              });
+              closeListing();
+              setNotice("联系申请已真实写入撮合系统，等待卖家明确同意后交换电话/微信");
+            } catch (error) {
+              setNotice(error instanceof Error ? error.message : "联系申请未发送，请稍后重试");
+            }
           }}
         />
         <ModeDialog
@@ -153,11 +198,13 @@ export function App() {
 }
 
 function roleFromLocation(): WorkspaceRole {
+  if (typeof window === "undefined") return "buyer";
   const requested = new URLSearchParams(window.location.search).get("role");
   return requested === "seller" || requested === "platform" ? requested : "buyer";
 }
 
 function listingFromLocation(): VehicleListing | null {
+  if (typeof window === "undefined") return null;
   const requested = new URLSearchParams(window.location.search).get("listing");
   return recommendations.find((listing) => listing.id === requested) ?? null;
 }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
-use matchplane_config::AppConfig;
+use matchplane_config::{AppConfig, BearerToken};
 use matchplane_observability::{Telemetry, init};
 use serde::Serialize;
 use sqlx::PgPool;
@@ -32,7 +32,7 @@ struct AppState {
     telemetry: Telemetry,
     invoice_cipher: crypto::InvoiceCipher,
     invoices: InvoiceStore,
-    admin_auth: crypto::AdminAuth,
+    admin_auth: BearerToken,
     admin: AdminStore,
 }
 
@@ -54,8 +54,13 @@ async fn main() -> anyhow::Result<()> {
     let shutdown_telemetry = telemetry.clone();
     let invoice_cipher = crypto::InvoiceCipher::load(config.environment)
         .context("invoice encryption configuration is invalid")?;
-    let admin_auth = crypto::AdminAuth::load(config.environment)
-        .context("payment administrator authentication is invalid")?;
+    let admin_auth = BearerToken::load(
+        config.environment,
+        "MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE",
+        "MATCHPLANE_PAYMENT_ADMIN_TOKEN",
+        "matchplane-development-admin",
+    )
+    .context("payment administrator authentication is invalid")?;
     let pool = PgPool::connect(&config.database_url)
         .await
         .context("payment service could not connect to PostgreSQL")?;

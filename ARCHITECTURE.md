@@ -30,19 +30,28 @@ The relational current state and append-only `domain_events` are committed toget
 restores the most recent checksum-verified snapshot, then replays the PostgreSQL event log. Valkey
 is rebuilt from facts whenever its sequence has a gap.
 
-## Marketplace and revenue flow
+## Marketplace, negotiation, and revenue flow
 
-Seller listings and buyer requests are separate from the exchange order book. Explainable matching
-creates an `offline_deal`; seller exposure events measure the path from impression to inquiry and
-released contact. Contacts and viewing locations are encrypted at the HTTP boundary, and every
-contact decision is audited.
+Seller listings and buyer requests are vertical adapters around the same domain-neutral concepts:
+the demand/supply participant, a structured intent, an explainable introduction, and a consented
+contact exchange. The low-level participant identity is identical on both sides; “buyer” and
+“seller” are automotive labels, not separate account implementations. A future dating or services
+vertical can reuse the same primitives and replace only its schema, ranking features, copy, and
+safety policy.
+
+Explainable matching creates an `offline_deal`; seller exposure events measure the path from
+impression to inquiry and contact consent. Contacts and viewing locations are encrypted at the HTTP
+boundary, and every contact decision is audited. The seller must accept a contact request before
+either party can retrieve the other party's allow-listed phone/WeChat details.
 
 For `offline_direct`, buyer and seller settle the vehicle price with each other. The isolated payment
-service handles only the platform commission. The default policy requires seller preauthorization
-before contact release, then captures the exact commission derived from the price confirmed by both
-parties. Online order-book trades use the same market-owned fee rate: the ledger debits the buyer's
-gross amount, credits the seller's net amount, and credits the platform commission account in a
-separate posting. Trade facts expose all four values rather than embedding a hidden spread.
+service is optional. The primary off-platform revenue policy is seller-funded promotion: fixed,
+impression, click, or qualified-lead campaigns are charged while the offer is being promoted, so
+the platform does not need to observe a later WeChat/telephone transaction. A tenant may also opt
+into a disclosed transaction fee or a hybrid policy. Online order-book trades use the market-owned
+fee rate only when that policy is enabled; the ledger debits the buyer's gross amount, credits the
+seller's net amount, and credits the platform commission account in a separate posting. Trade facts
+expose all four values rather than embedding a hidden spread.
 
 Payment gateway configuration is data-driven but credentials remain outside PostgreSQL. Test and
 production routing are independent, mode switches are versioned and audited, and unresolved old-mode

@@ -4,12 +4,12 @@ use anyhow::Context;
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use matchplane_cache::{CachedBook, ValkeyCache};
-use matchplane_config::AppConfig;
+use matchplane_config::{AppConfig, BearerToken};
 use matchplane_domain::{
     AccountId, AssetId, CorrelationId, MarketId, OrderId, OrderIntent, OrderSide, Price, Quantity,
 };
@@ -39,6 +39,7 @@ struct AppState {
     telemetry: Telemetry,
     node_id: matchplane_domain::FederationNodeId,
     contact_cipher: privacy::ContactCipher,
+    operator_auth: BearerToken,
 }
 
 #[derive(Debug, Serialize)]
@@ -123,6 +124,13 @@ async fn main() -> anyhow::Result<()> {
     .context("gateway observability initialization failed")?;
     let contact_cipher = privacy::ContactCipher::load(config.environment)
         .context("marketplace contact encryption configuration is invalid")?;
+    let operator_auth = BearerToken::load(
+        config.environment,
+        "MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE",
+        "MATCHPLANE_GATEWAY_ADMIN_TOKEN",
+        "matchplane-development-gateway-admin",
+    )
+    .context("gateway operator authentication configuration is invalid")?;
     let shutdown_telemetry = telemetry.clone();
     let store = PgStore::connect(&config.database_url, 20)
         .await
@@ -136,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
         telemetry,
         node_id: config.node_id,
         contact_cipher,
+        operator_auth,
     });
     let app = Router::new()
         .route("/health/live", get(live))
@@ -164,11 +173,15 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/v1/marketplace/offline-deals",
-            post(marketplace::create_offline_deal),
+            get(marketplace::offline_deals).post(marketplace::create_offline_deal),
         )
         .route(
             "/v1/marketplace/offline-deals/{offline_deal_id}",
             get(marketplace::offline_deal),
+        )
+        .route(
+            "/v1/marketplace/offline-deals/{offline_deal_id}/contact/accept",
+            post(marketplace::accept_contact_exchange),
         )
         .route(
             "/v1/marketplace/offline-deals/{offline_deal_id}/contact",
@@ -197,6 +210,18 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/v1/marketplace/listings/{listing_id}/exposure-metrics",
             get(marketplace::exposure_metrics),
+        )
+        .route(
+            "/v1/marketplace/promotions",
+            post(marketplace::create_seller_promotion),
+        )
+        .route(
+            "/v1/marketplace/promotions/{campaign_id}",
+            get(marketplace::seller_promotion),
+        )
+        .route(
+            "/v1/marketplace/promotions/{campaign_id}/events",
+            post(marketplace::record_seller_promotion_event),
         )
         .with_state(state)
         .layer(CatchPanicLayer::new())
@@ -249,14 +274,20 @@ async fn metrics(State(state): State<Arc<AppState>>) -> String {
     state.telemetry.render_metrics()
 }
 
-async fn demo() -> Result<Json<DemoBootstrap>, ApiError> {
+async fn demo(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<DemoBootstrap>, ApiError> {
+    require_operator(&state, &headers)?;
     DemoBootstrap::local().map(Json).map_err(ApiError::from)
 }
 
 async fn place_order(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<PlaceOrderRequest>,
 ) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
+    require_operator(&state, &headers)?;
     let order_id = request
         .order_id
         .as_deref()
@@ -322,7 +353,9 @@ async fn place_order(
 async fn order(
     State(state): State<Arc<AppState>>,
     Path(order_id): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<StoredOrder>, ApiError> {
+    require_operator(&state, &headers)?;
     state
         .store
         .order(parse_id(&order_id)?)
@@ -334,7 +367,9 @@ async fn order(
 async fn account(
     State(state): State<Arc<AppState>>,
     Path(account_id): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<matchplane_storage::StoredAccount>, ApiError> {
+    require_operator(&state, &headers)?;
     state
         .store
         .account(parse_id::<AccountId>(&account_id)?)
@@ -346,7 +381,9 @@ async fn account(
 async fn book(
     State(state): State<Arc<AppState>>,
     Path(market_id): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<CachedBook>, ApiError> {
+    require_operator(&state, &headers)?;
     let _: MarketId = parse_id(&market_id)?;
     state
         .cache
@@ -362,7 +399,9 @@ async fn book(
 async fn trades(
     State(state): State<Arc<AppState>>,
     Path(market_id): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<StoredTrade>>, ApiError> {
+    require_operator(&state, &headers)?;
     state
         .store
         .recent_trades(parse_id(&market_id)?, 100)
@@ -373,8 +412,10 @@ async fn trades(
 
 async fn upsert_embedding(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<EmbeddingRequest>,
 ) -> Result<StatusCode, ApiError> {
+    require_operator(&state, &headers)?;
     let record = VectorRecord {
         tenant_id: parse_id(&request.tenant_id)?,
         domain_id: parse_id(&request.domain_id)?,
@@ -392,8 +433,10 @@ async fn upsert_embedding(
 
 async fn search_candidates(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<CandidateRequest>,
 ) -> Result<Json<Vec<CandidateMatch>>, ApiError> {
+    require_operator(&state, &headers)?;
     let record = VectorRecord {
         tenant_id: parse_id(&request.tenant_id)?,
         domain_id: parse_id(&request.domain_id)?,
@@ -407,6 +450,19 @@ async fn search_candidates(
         .await
         .map(Json)
         .map_err(ApiError::from)
+}
+
+fn require_operator(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
+    let authorization = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    if state.operator_auth.verify_bearer(authorization) {
+        Ok(())
+    } else {
+        Err(ApiError::unauthorized(
+            "gateway operator bearer token is required",
+        ))
+    }
 }
 
 fn parse_id<T>(value: &str) -> Result<T, ApiError>

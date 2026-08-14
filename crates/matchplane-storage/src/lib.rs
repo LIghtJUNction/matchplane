@@ -13,12 +13,13 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use thiserror::Error;
 
 pub use marketplace::{
-    AuthenticatedParty, BuyerVehicleRequest, ConfirmOfflineDeal, ContactEnvelope,
-    CreateBuyerVehicleRequest, CreateMarketplaceParty, CreateOfflineDeal, CreateVehicleListing,
-    CreateViewingAppointment, EncryptedContact, ExposureMetrics, FinalizeOfflineDeal,
-    MarketplaceParty, OfflineDeal, OfflineDealOutcome, OfflineDealProgress,
-    RecommendVehicleListings, RecommendedListing, RecordExposure, ReleaseContact,
-    TransitionViewingAppointment, VehicleListing, ViewingAppointment,
+    AcceptContactExchange, AuthenticatedParty, BuyerVehicleRequest, ConfirmOfflineDeal,
+    ContactEnvelope, CreateBuyerVehicleRequest, CreateMarketplaceParty, CreateOfflineDeal,
+    CreateSellerPromotion, CreateVehicleListing, CreateViewingAppointment, EncryptedContact,
+    ExposureMetrics, FinalizeOfflineDeal, MarketplaceParty, OfflineDeal, OfflineDealOutcome,
+    OfflineDealProgress, RecommendVehicleListings, RecommendedListing, RecordExposure,
+    RecordSellerPromotionEvent, ReleaseContact, SellerPromotionCampaign,
+    SellerPromotionEventOutcome, TransitionViewingAppointment, VehicleListing, ViewingAppointment,
 };
 pub use types::{
     BookSnapshot, CandidateMatch, DemoBootstrap, FederationReservation, FederationTransition,

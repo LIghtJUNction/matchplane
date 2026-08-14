@@ -10,6 +10,8 @@ publish.workspace = true
 config.workspace = true
 matchplane-domain.workspace = true
 serde.workspace = true
+sha2.workspace = true
+subtle.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 
