@@ -670,10 +670,10 @@ impl PaymentStore {
             "SELECT r.id FROM payment_refunds r \
              JOIN payment_intents p ON p.id = r.payment_id \
              WHERE p.gateway_id = $1 AND (\
-                ($2::text IS NOT NULL AND r.id::text = $2) OR \
-                ($3::text IS NOT NULL AND r.provider_reference = $3) OR \
+                ($2::text IS NOT NULL AND (r.id::text = $2 OR r.provider_reference = $2)) OR \
+                ($3::text IS NOT NULL AND p.provider_reference = $3) OR \
                 ($4::text IS NOT NULL AND p.merchant_order_id = $4 AND r.status IN ('requested', 'pending', 'unknown'))\
-             ) ORDER BY r.created_at DESC LIMIT 1",
+             ) ORDER BY (r.status IN ('requested', 'pending', 'unknown')) DESC, r.created_at DESC LIMIT 1",
         )
         .bind(gateway_id.into_uuid())
         .bind(event.refund_reference.as_deref())
@@ -695,13 +695,21 @@ impl PaymentStore {
             ));
         }
         if !webhook_reference_matches(
-            refund.provider_reference.as_deref(),
+            payment.provider_reference.as_deref(),
             event.provider_reference.as_deref(),
             Some(payment.merchant_order_id.as_str()),
             event.merchant_order_id.as_deref(),
         ) {
             return Err(StoreError::Invalid(
-                "provider webhook reference does not match the refund".to_owned(),
+                "provider webhook reference does not match the refund payment".to_owned(),
+            ));
+        }
+        if let Some(refund_reference) = event.refund_reference.as_deref()
+            && refund_reference != refund.refund_id.to_string()
+            && refund.provider_reference.as_deref() != Some(refund_reference)
+        {
+            return Err(StoreError::Invalid(
+                "provider webhook refund reference does not match the refund".to_owned(),
             ));
         }
         if let Some(amount) = &event.amount
@@ -714,9 +722,9 @@ impl PaymentStore {
             ));
         }
         let provider_reference = event
-            .provider_reference
+            .refund_reference
             .clone()
-            .or_else(|| event.refund_reference.clone())
+            .or_else(|| refund.provider_reference.clone())
             .unwrap_or_else(|| refund_id.to_string());
         let outcome = RefundOutcome {
             refund_id,
@@ -991,6 +999,9 @@ impl PaymentStore {
             let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
             let execute = matches!(operation_status.as_str(), "started" | "unknown")
                 && payment.status == "capture_pending";
+            if execute {
+                validate_capture_target(&mut transaction, &payment, amount).await?;
+            }
             transaction.commit().await?;
             return Ok(PreparedOperation {
                 payment,
@@ -1016,6 +1027,7 @@ impl PaymentStore {
                 "capture must be positive and not exceed authorization".to_owned(),
             ));
         }
+        validate_capture_target(&mut transaction, &payment, amount).await?;
         sqlx::query(
             "INSERT INTO payment_operations \
              (id, tenant_id, payment_id, operation, idempotency_key, request_hash, amount, status) \
@@ -1064,7 +1076,15 @@ impl PaymentStore {
     ) -> Result<PaymentRecord, StoreError> {
         let mut transaction = self.pool.begin().await?;
         let payment = payment_in_for_update(&mut transaction, payment_id).await?;
+        let target_invalid = payment.status == "capture_pending"
+            && matches!(outcome, Ok(result) if result.status == PaymentStatus::Captured)
+            && match validate_capture_target(&mut transaction, &payment, amount).await {
+                Ok(()) => false,
+                Err(StoreError::Conflict(_) | StoreError::Invalid(_)) => true,
+                Err(error) => return Err(error),
+            };
         let (operation_status, payment_status, provider_status) = match outcome {
+            _ if target_invalid => ("unknown", "unknown", "capture_target_invalid"),
             Ok(result) if result.status == PaymentStatus::Captured => {
                 ("succeeded", "captured", result.provider_status.as_str())
             }
@@ -1524,6 +1544,66 @@ async fn gateway_in(
     .await?
     .ok_or(StoreError::NotFound("enabled payment gateway"))?;
     gateway_from_row(&row).map_err(StoreError::from)
+}
+
+async fn validate_capture_target(
+    transaction: &mut Transaction<'_, Postgres>,
+    payment: &PaymentRecord,
+    amount: i128,
+) -> Result<(), StoreError> {
+    let Some(offline_deal_id) = payment.offline_deal_id else {
+        return Ok(());
+    };
+    if payment.transaction_channel != "offline_direct" || payment.purpose != "platform_commission" {
+        return Err(StoreError::Invalid(
+            "offline deal capture must be a platform commission payment".to_owned(),
+        ));
+    }
+    let row = sqlx::query(
+        "SELECT seller_party_id, status, commission_amount::text AS commission_amount, \
+                currency, currency_scale, expires_at \
+         FROM offline_deals WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+    )
+    .bind(payment.tenant_id.into_uuid())
+    .bind(offline_deal_id.into_uuid())
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(StoreError::NotFound("offline deal"))?;
+    let seller_party_id: Uuid = row.try_get("seller_party_id")?;
+    if payment.payer_party_id.map(MarketplacePartyId::into_uuid) != Some(seller_party_id) {
+        return Err(StoreError::Invalid(
+            "offline commission must be captured from the matched seller".to_owned(),
+        ));
+    }
+    let status: String = row.try_get("status")?;
+    if matches!(
+        status.as_str(),
+        "declined" | "expired" | "disputed" | "completed"
+    ) {
+        return Err(StoreError::Conflict(
+            "offline deal is not available for commission capture".to_owned(),
+        ));
+    }
+    let expires_at: OffsetDateTime = row.try_get("expires_at")?;
+    if expires_at <= OffsetDateTime::now_utc() {
+        return Err(StoreError::Conflict(
+            "offline deal has expired before commission capture".to_owned(),
+        ));
+    }
+    let commission_amount = exact(&row.try_get::<String, _>("commission_amount")?)?;
+    if amount != commission_amount {
+        return Err(StoreError::Invalid(
+            "commission capture must equal the current offline deal commission".to_owned(),
+        ));
+    }
+    if payment.currency != row.try_get::<String, _>("currency")?
+        || payment.currency_scale != row.try_get::<i16, _>("currency_scale")?
+    {
+        return Err(StoreError::Invalid(
+            "commission capture currency must match the offline deal".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn gateway_from_row(row: &sqlx::postgres::PgRow) -> Result<GatewayConfig, PaymentError> {

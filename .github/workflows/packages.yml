@@ -6,7 +6,7 @@ on:
       version:
         description: Version without a leading v
         required: true
-        default: 0.1.6
+        default: 0.1.7
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
@@ -63,7 +63,7 @@ jobs:
       VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.version }}
     steps:
       - name: Install current Fedora packaging toolchain
-        run: dnf install --assumeyes cargo cmake curl gcc-c++ git gzip libcurl-devel protobuf-compiler protobuf-devel rpm-build rust systemd-rpm-macros unzip
+        run: dnf install --assumeyes cargo cmake curl gcc-c++ git gzip libcurl-devel nodejs protobuf-compiler protobuf-devel rpm-build rust systemd-rpm-macros unzip
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Normalize version

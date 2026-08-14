@@ -1089,7 +1089,8 @@ impl PgStore {
             });
         }
         let row = sqlx::query(
-            "SELECT l.seller_party_id, l.asking_amount::text AS asking_amount, l.currency, \
+            "SELECT l.seller_party_id, l.expires_at AS listing_expires_at, \
+                    l.asking_amount::text AS asking_amount, l.currency, \
                     l.currency_scale, l.commission_bps, l.commission_collection, a.attributes, \
                     r.buyer_party_id, r.requirements, r.budget_min::text AS budget_min, \
                     r.budget_max::text AS budget_max \
@@ -1121,6 +1122,14 @@ impl PgStore {
         if seller_party_id == buyer_party_id {
             return Err(StorageError::InvalidData(
                 "buyer and seller must be different parties".to_owned(),
+            ));
+        }
+        if let Some(listing_expires_at) =
+            row.try_get::<Option<OffsetDateTime>, _>("listing_expires_at")?
+            && command.expires_at > listing_expires_at
+        {
+            return Err(StorageError::Conflict(
+                "offline deal expiry cannot outlive the vehicle listing".to_owned(),
             ));
         }
         let asking_amount_text: String = row.try_get("asking_amount")?;

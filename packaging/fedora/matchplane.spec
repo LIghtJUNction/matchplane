@@ -14,6 +14,7 @@ BuildRequires:  cmake
 BuildRequires:  gcc-c++
 BuildRequires:  libcurl-devel
 BuildRequires:  curl
+BuildRequires:  nodejs
 BuildRequires:  unzip
 BuildRequires:  protobuf-compiler
 BuildRequires:  protobuf-devel
@@ -31,14 +32,17 @@ Valkey projections, and a federated gRPC control plane.
 
 %build
 bun install --frozen-lockfile --cwd web
-bun run --cwd web build
+# Bun's JavaScriptCore runtime has crashed intermittently in Fedora's containerized
+# builders while collecting Next.js page data. Keep Bun for the locked install, but
+# use Fedora's supported Node.js runtime for the deterministic build step.
+(cd web && node node_modules/next/dist/bin/next build)
 # Fedora's containerized builders can expose a large CPU count with a much
 # smaller memory limit. Serialize the workspace build so concurrent linker
 # processes do not exhaust the package-builder's memory.
 CARGO_BUILD_JOBS=1 cargo build --release --locked --workspace --bins
 
 %check
-bun run --cwd web test
+(cd web && node node_modules/vitest/vitest.mjs run)
 CARGO_BUILD_JOBS=1 cargo test --release --locked --workspace
 
 %install

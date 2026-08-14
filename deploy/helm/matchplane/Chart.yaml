@@ -2,8 +2,8 @@ apiVersion: v2
 name: matchplane
 description: Federated AI matching infrastructure services
 type: application
-version: 0.1.6
-appVersion: 0.1.6
+version: 0.1.7
+appVersion: 0.1.7
 kubeVersion: '>=1.30.0-0'
 annotations:
   artifacthub.io/license: LicenseRef-MatchPlane-Pending
