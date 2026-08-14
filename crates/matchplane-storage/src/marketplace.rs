@@ -2718,6 +2718,28 @@ async fn insert_exposure_with_billing(
     bill: bool,
 ) -> Result<bool, StorageError> {
     validate_exposure(command)?;
+    if bill {
+        // Re-check the authorization at the billing boundary. Recommendation results are read
+        // before this transaction begins, so an operator revocation can otherwise race a stale
+        // result into a seller-funded exposure charge.
+        let eligible: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM vehicle_listings l \
+             JOIN marketplace_asset_authorizations aa \
+               ON aa.tenant_id = l.tenant_id AND aa.domain_id = l.domain_id \
+              AND aa.asset_id = l.asset_id AND aa.seller_party_id = l.seller_party_id \
+             WHERE l.tenant_id = $1 AND l.id = $2 \
+               AND l.status IN ('active', 'reserved') AND aa.status = 'active')",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.listing_id.into_uuid())
+        .fetch_one(&mut **transaction)
+        .await?;
+        if !eligible {
+            return Err(StorageError::Conflict(
+                "listing authorization is no longer active".to_owned(),
+            ));
+        }
+    }
     let result = sqlx::query(
         "INSERT INTO seller_exposure_events \
          (id, tenant_id, listing_id, viewer_party_id, event_type, source, deduplication_key, occurred_at) \
