@@ -1,0 +1,19 @@
+[package]
+name = "matchplane-event-relay"
+description = "Transactional outbox relay for MatchPlane"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+matchplane-config.workspace = true
+matchplane-events.workspace = true
+matchplane-observability.workspace = true
+matchplane-storage.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

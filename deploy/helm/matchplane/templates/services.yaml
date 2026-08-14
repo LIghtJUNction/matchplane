@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "matchplane.fullname" . }}-gateway
+  labels:
+    {{- include "matchplane.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.gateway.service.type }}
+  selector:
+    {{- include "matchplane.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+  ports:
+    - name: http
+      port: {{ .Values.gateway.service.port }}
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "matchplane.fullname" . }}-payment-service
+  labels:
+    {{- include "matchplane.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.paymentService.service.type }}
+  selector:
+    {{- include "matchplane.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: payment-service
+  ports:
+    - name: http
+      port: {{ .Values.paymentService.service.port }}
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "matchplane.fullname" . }}-federation-hub
+  labels:
+    {{- include "matchplane.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.federationHub.service.type }}
+  selector:
+    {{- include "matchplane.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: federation-hub
+  ports:
+    - name: grpc
+      port: {{ .Values.federationHub.service.port }}
+      targetPort: grpc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "matchplane.fullname" . }}-matcher
+  labels:
+    {{- include "matchplane.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "matchplane.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: matcher

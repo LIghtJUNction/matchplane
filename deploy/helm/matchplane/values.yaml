@@ -1,0 +1,76 @@
+image:
+  repository: ghcr.io/lightjunction/matchplane
+  tag: 0.1.0
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ''
+fullnameOverride: ''
+
+runtime:
+  # This secret must provide database-url and valkey-url keys.
+  existingSecret: matchplane-runtime
+  # This secret must provide contact-data.key, invoice-data.key, and payment-admin.token.
+  existingApplicationSecret: matchplane-application-secrets
+  # This secret must provide server.crt, server.key, and client-ca.crt keys.
+  existingTlsSecret: matchplane-federation-tls
+  environment: production
+  nodeId: 00000000-0000-7000-8000-00000000000a
+  kafkaBrokers: matchplane-kafka-bootstrap:9093
+  logFilter: info,matchplane=info
+  otlpEndpoint: https://otel-collector:4317
+  requireTls: true
+  tlsCertificatePath: /run/matchplane/tls/server.crt
+  tlsPrivateKeyPath: /run/matchplane/tls/server.key
+  tlsClientCaPath: /run/matchplane/tls/client-ca.crt
+  contactDataKeyPath: /run/matchplane/application-secrets/contact-data.key
+  contactDataKeyVersion: 1
+  invoiceDataKeyPath: /run/matchplane/application-secrets/invoice-data.key
+  invoiceDataKeyVersion: 1
+  paymentAdminTokenPath: /run/matchplane/application-secrets/payment-admin.token
+
+gateway:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 8080
+
+paymentService:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 8080
+
+matcher:
+  replicas: 1
+
+federationHub:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 50051
+
+workers:
+  eventRelayReplicas: 2
+  projectorReplicas: 2
+  vectorWorkerReplicas: 2
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: '2'
+    memory: 1Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 12001
+  runAsGroup: 12001
+  fsGroup: 12001
+  seccompProfile:
+    type: RuntimeDefault
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

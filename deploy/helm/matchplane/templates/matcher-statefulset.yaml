@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "matchplane.fullname" . }}-matcher
+  labels:
+    {{- include "matchplane.labels" . | nindent 4 }}
+    app.kubernetes.io/component: matcher
+spec:
+  serviceName: {{ include "matchplane.fullname" . }}-matcher
+  replicas: {{ .Values.matcher.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "matchplane.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: matcher
+  template:
+    metadata:
+      labels:
+        {{- include "matchplane.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: matcher
+    spec:
+      serviceAccountName: {{ include "matchplane.fullname" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: matcher
+          image: {{ include "matchplane.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/matchplane-matcher"]
+          env:
+            {{- include "matchplane.environment" . | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

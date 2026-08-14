@@ -1,0 +1,26 @@
+[package]
+name = "matchplane-storage"
+description = "PostgreSQL persistence and transactional boundaries for MatchPlane"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+bigdecimal.workspace = true
+matchplane-domain.workspace = true
+matchplane-engine.workspace = true
+matchplane-events.workspace = true
+matchplane-payments.workspace = true
+matchplane-protocol.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+time.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

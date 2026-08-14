@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package matchplane.v1;
+
+import "google/protobuf/timestamp.proto";
+
+enum OrderSide {
+  ORDER_SIDE_UNSPECIFIED = 0;
+  ORDER_SIDE_BUY = 1;
+  ORDER_SIDE_SELL = 2;
+}
+
+message PlaceLimitOrder {
+  string order_id = 1;
+  string tenant_id = 2;
+  string domain_id = 3;
+  string market_id = 4;
+  OrderSide side = 5;
+  string price = 6;
+  string quantity = 7;
+  google.protobuf.Timestamp submitted_at = 8;
+  optional google.protobuf.Timestamp expires_at = 9;
+  string idempotency_key = 10;
+  string reservation_account_id = 11;
+  string settlement_account_id = 12;
+  string reservation_amount = 13;
+}
+
+message CancelOrder {
+  string order_id = 1;
+}
+
+message MatchingCommand {
+  oneof command {
+    PlaceLimitOrder place_limit_order = 1;
+    CancelOrder cancel_order = 2;
+    CancelOrder expire_order = 3;
+  }
+}
+
+message TradeExecuted {
+  string trade_id = 1;
+  string tenant_id = 2;
+  string domain_id = 3;
+  string market_id = 4;
+  string maker_order_id = 5;
+  string taker_order_id = 6;
+  string buy_order_id = 7;
+  string sell_order_id = 8;
+  string price = 9;
+  string quantity = 10;
+  google.protobuf.Timestamp occurred_at = 11;
+}
+
+message OrderAccepted {
+  string order_id = 1;
+  uint64 accepted_sequence = 2;
+}
+
+message OrderClosed {
+  string order_id = 1;
+  string released_quantity = 2;
+  string status = 3;
+}
+
+message MatchingFact {
+  oneof fact {
+    OrderAccepted order_accepted = 1;
+    TradeExecuted trade_executed = 2;
+    OrderClosed order_closed = 3;
+  }
+}
+
+message PriceLevel {
+  string price = 1;
+  string quantity = 2;
+}
+
+message OrderBookDelta {
+  string market_id = 1;
+  uint64 command_sequence = 2;
+  repeated PriceLevel bids = 3;
+  repeated PriceLevel asks = 4;
+  bytes state_hash = 5;
+}

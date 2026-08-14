@@ -1,0 +1,28 @@
+[Unit]
+Description=MatchPlane isolated payment, refund, and invoice service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=matchplane
+Group=matchplane
+EnvironmentFile=/etc/matchplane/matchplane.env
+Environment=MATCHPLANE_HTTP_ADDR=127.0.0.1:8081
+ExecStart=/usr/bin/matchplane-payment-service
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

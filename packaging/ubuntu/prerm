@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+case "${1:-}" in
+  remove|deconfigure|failed-upgrade)
+    if command -v systemctl >/dev/null 2>&1; then
+      set -- matchplane-gateway.service matchplane-payment-service.service \
+        matchplane-event-relay.service matchplane-matcher.service \
+        matchplane-projector.service matchplane-vector-worker.service \
+        matchplane-federation-hub.service
+      systemctl stop "$@" || true
+    fi
+    ;;
+  upgrade)
+    # Keep active processes serving until postinst can atomically restart them.
+    ;;
+esac

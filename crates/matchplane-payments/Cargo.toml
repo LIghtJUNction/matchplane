@@ -1,0 +1,30 @@
+[package]
+name = "matchplane-payments"
+description = "Provider-neutral payment, refund, invoice, and gateway contracts for MatchPlane"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+aes-gcm.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+hex.workspace = true
+md-5.workspace = true
+matchplane-domain.workspace = true
+reqwest.workspace = true
+rsa.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+signature.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

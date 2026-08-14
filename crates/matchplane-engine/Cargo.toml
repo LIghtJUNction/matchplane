@@ -1,0 +1,19 @@
+[package]
+name = "matchplane-engine"
+description = "Pure deterministic price-time matching engine for MatchPlane"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+matchplane-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+time.workspace = true
+
+[lints]
+workspace = true

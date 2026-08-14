@@ -1,0 +1,155 @@
+name: Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without a leading v
+        required: true
+        default: 0.1.0
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  portable-and-deb:
+    # Build on the oldest supported Ubuntu LTS so the binaries remain compatible
+    # with both the deployment host and newer Ubuntu releases.
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Normalize version
+        run: echo "VERSION=${VERSION#v}" >> "$GITHUB_ENV"
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes cmake libcurl4-openssl-dev libprotobuf-dev protobuf-compiler zstd
+      - name: Install current pinned Rust toolchain
+        run: rustup toolchain install 1.97.0 --profile minimal
+      - name: Install pinned Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22.23.2
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build web client
+        run: npm ci --ignore-scripts --prefix web && npm run check --prefix web
+      - name: Build release binaries
+        run: cargo build --release --locked --workspace --bins
+      - name: Verify runtime linkage
+        run: |
+          for binary in matchplane-event-relay matchplane-federation-hub matchplane-gateway matchplane-matcher matchplane-payment-service matchplane-projector matchplane-vector-worker xtask; do
+            ldd "target/release/$binary"
+          done
+      - name: Build portable archive
+        run: packaging/scripts/archive.sh "$VERSION" target/release dist
+      - name: Build Ubuntu package
+        run: packaging/ubuntu/build-deb.sh "$VERSION" target/release dist
+      - name: Inspect Ubuntu package
+        run: dpkg-deb --info "dist/matchplane_${VERSION}_amd64.deb" && dpkg-deb --contents "dist/matchplane_${VERSION}_amd64.deb"
+      - name: Upload portable and Ubuntu artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: portable-and-deb
+          path: dist/*
+          if-no-files-found: error
+
+  rpm:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    env:
+      VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.version }}
+    steps:
+      - name: Install current Fedora packaging toolchain
+        run: dnf install --assumeyes cargo cmake gcc-c++ git gzip libcurl-devel nodejs npm protobuf-compiler protobuf-devel rpm-build rust systemd-rpm-macros
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Normalize version
+        run: echo "VERSION=${VERSION#v}" >> "$GITHUB_ENV"
+      - name: Build Fedora RPM and SRPM
+        run: packaging/fedora/build-rpm.sh "$VERSION" dist
+      - name: Inspect Fedora packages
+        run: rpm -qip dist/*.rpm
+      - name: Upload Fedora artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fedora-rpm
+          path: dist/*.rpm
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [portable-and-deb, rpm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: '*'
+          path: dist
+          merge-multiple: true
+      - name: Publish GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --repo "$GITHUB_REPOSITORY"
+          fi
+
+  aur:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Install current Arch build toolchain
+        run: pacman -Syu --noconfirm base-devel cargo cmake curl git nodejs npm openssh protobuf rust zstd
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download portable release asset
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: portable-and-deb
+          path: dist
+      - name: Render and build both AUR packages
+        run: |
+          version=${VERSION#v}
+          archive="dist/matchplane-${version}-linux-x86_64.tar.zst"
+          digest=$(sha256sum "$archive" | cut -d' ' -f1)
+          sed -e "s/__VERSION__/${version}/g" -e "s/__SHA256__/${digest}/g" \
+            packaging/aur/matchplane-bin/PKGBUILD.in > packaging/aur/matchplane-bin/PKGBUILD
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          su builder -c 'cd packaging/aur/matchplane-git && makepkg --syncdeps --noconfirm --cleanbuild'
+          su builder -c 'cd packaging/aur/matchplane-git && makepkg --printsrcinfo > .SRCINFO'
+          su builder -c 'cd packaging/aur/matchplane-bin && makepkg --syncdeps --noconfirm --cleanbuild'
+          su builder -c 'cd packaging/aur/matchplane-bin && makepkg --printsrcinfo > .SRCINFO'
+      - name: Publish matchplane-git and matchplane-bin to AUR
+        run: |
+          test -n "$AUR_SSH_PRIVATE_KEY"
+          install -d -m 0700 /root/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /root/.ssh/id_ed25519
+          chmod 0600 /root/.ssh/id_ed25519
+          ssh-keyscan aur.archlinux.org >> /root/.ssh/known_hosts
+          git config --global user.name 'LIghtJUNction'
+          git config --global user.email 'lightjunction.me@gmail.com'
+          for package in matchplane-git matchplane-bin; do
+            checkout="/tmp/aur-${package}"
+            git clone "ssh://aur@aur.archlinux.org/${package}.git" "$checkout"
+            cp "packaging/aur/${package}/PKGBUILD" "packaging/aur/${package}/.SRCINFO" \
+              "packaging/aur/${package}/matchplane.install" "$checkout/"
+            git -C "$checkout" add PKGBUILD .SRCINFO matchplane.install
+            if ! git -C "$checkout" diff --cached --quiet; then
+              git -C "$checkout" commit -m "Update to ${VERSION#v}"
+              git -C "$checkout" push origin master
+            fi
+          done

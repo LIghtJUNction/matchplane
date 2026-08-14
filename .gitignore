@@ -1,0 +1,12 @@
+/target/
+/.env
+/.idea/
+/.vscode/
+*.log
+*.pid
+*.swp
+deploy/compose/data/
+dist/
+result/
+/web/node_modules/
+/web/dist/

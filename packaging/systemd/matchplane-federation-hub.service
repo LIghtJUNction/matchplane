@@ -1,0 +1,24 @@
+[Unit]
+Description=MatchPlane federation control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=matchplane
+Group=matchplane
+EnvironmentFile=/etc/matchplane/matchplane.env
+ExecStart=/usr/bin/matchplane-federation-hub
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

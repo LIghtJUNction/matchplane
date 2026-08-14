@@ -1,0 +1,11 @@
+Package: matchplane
+Version: __VERSION__
+Section: net
+Priority: optional
+Architecture: amd64
+Installed-Size: __INSTALLED_SIZE__
+Maintainer: LIghtJUNction <lightjunction.me@gmail.com>
+Depends: ca-certificates, libc6, libgcc-s1, zlib1g
+Description: Federated AI matching infrastructure
+ MatchPlane combines deterministic matching, PostgreSQL authority,
+ Kafka facts, Valkey projections, and a federated gRPC control plane.

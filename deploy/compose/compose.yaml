@@ -1,0 +1,196 @@
+name: matchplane
+
+x-matchplane-service: &matchplane-service
+  image: matchplane/services:dev
+  build:
+    context: ../..
+    dockerfile: deploy/compose/service.Dockerfile
+  restart: unless-stopped
+  environment: &matchplane-environment
+    MATCHPLANE_ENVIRONMENT: development
+    MATCHPLANE_NODE_ID: 00000000-0000-7000-8000-00000000000a
+    MATCHPLANE_HTTP_ADDR: 0.0.0.0:8080
+    MATCHPLANE_GRPC_ADDR: 0.0.0.0:50051
+    MATCHPLANE_DATABASE_URL: postgres://${MATCHPLANE_POSTGRES_USER:-matchplane}:${MATCHPLANE_POSTGRES_PASSWORD:-matchplane_dev_only}@postgres:5432/${MATCHPLANE_POSTGRES_DB:-matchplane}
+    MATCHPLANE_KAFKA_BROKERS: kafka:19092
+    MATCHPLANE_VALKEY_URL: redis://:${MATCHPLANE_VALKEY_PASSWORD:-matchplane_dev_only}@valkey:6379/
+    MATCHPLANE_LOG_FILTER: info,matchplane=debug
+    MATCHPLANE_OTLP_ENDPOINT: http://otel-collector:4317
+    MATCHPLANE_REQUIRE_TLS: "false"
+    MATCHPLANE_TLS_CERTIFICATE_PATH: ""
+    MATCHPLANE_TLS_PRIVATE_KEY_PATH: ""
+    MATCHPLANE_TLS_CLIENT_CA_PATH: ""
+  depends_on: &matchplane-dependencies
+    migration:
+      condition: service_completed_successfully
+    kafka-init:
+      condition: service_completed_successfully
+    valkey:
+      condition: service_healthy
+  networks:
+    - matchplane
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  postgres:
+    image: matchplane/postgres:18.4-timescale2.29.1-vector0.8.6
+    build:
+      context: postgres
+      dockerfile: Dockerfile
+      args:
+        ALPINE_MIRROR: ${MATCHPLANE_ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
+    restart: unless-stopped
+    shm_size: 1gb
+    environment:
+      POSTGRES_USER: ${MATCHPLANE_POSTGRES_USER:-matchplane}
+      POSTGRES_PASSWORD: ${MATCHPLANE_POSTGRES_PASSWORD:-matchplane_dev_only}
+      POSTGRES_DB: ${MATCHPLANE_POSTGRES_DB:-matchplane}
+      TIMESCALEDB_TELEMETRY: "off"
+    ports:
+      - "127.0.0.1:${MATCHPLANE_POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - matchplane
+
+  valkey:
+    image: valkey/valkey:9.1.1-alpine@sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328
+    restart: unless-stopped
+    command:
+      - valkey-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60"
+      - "1"
+      - --requirepass
+      - ${MATCHPLANE_VALKEY_PASSWORD:-matchplane_dev_only}
+    ports:
+      - "127.0.0.1:${MATCHPLANE_VALKEY_HOST_PORT:-6379}:6379"
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${MATCHPLANE_VALKEY_PASSWORD:-matchplane_dev_only}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - matchplane
+
+  kafka:
+    image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:19092,CONTROLLER://:19093,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:19093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 12
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+    ports:
+      - "127.0.0.1:${MATCHPLANE_KAFKA_HOST_PORT:-9092}:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    networks:
+      - matchplane
+
+  kafka-init:
+    image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-euc"]
+    command:
+      - |
+        for topic in \
+          matchplane.commands.v1 \
+          matchplane.domain-events.v1 \
+          matchplane.order-book-deltas.v1 \
+          matchplane.market-summaries.v1 \
+          matchplane.node-health.v1; do
+          /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server kafka:19092 \
+            --create --if-not-exists \
+            --topic "$${topic}" \
+            --partitions 12 \
+            --replication-factor 1
+        done
+    networks:
+      - matchplane
+
+  migration:
+    <<: *matchplane-service
+    restart: "no"
+    entrypoint: ["/usr/local/bin/xtask"]
+    command: ["initialize"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    <<: *matchplane-service
+    entrypoint: ["/usr/local/bin/matchplane-gateway"]
+    ports:
+      - "127.0.0.1:${MATCHPLANE_GATEWAY_HOST_PORT:-8080}:8080"
+
+  payment-service:
+    <<: *matchplane-service
+    entrypoint: ["/usr/local/bin/matchplane-payment-service"]
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${MATCHPLANE_PAYMENT_HOST_PORT:-8081}:8080"
+
+  event-relay:
+    <<: *matchplane-service
+    entrypoint: ["/usr/local/bin/matchplane-event-relay"]
+
+  matcher:
+    <<: *matchplane-service
+    entrypoint: ["/usr/local/bin/matchplane-matcher"]
+
+  projector:
+    <<: *matchplane-service
+    entrypoint: ["/usr/local/bin/matchplane-projector"]
+
+  vector-worker:
+    <<: *matchplane-service
+    entrypoint: ["/usr/local/bin/matchplane-vector-worker"]
+
+  federation-hub:
+    <<: *matchplane-service
+    entrypoint: ["/usr/local/bin/matchplane-federation-hub"]
+    ports:
+      - "127.0.0.1:${MATCHPLANE_FEDERATION_HOST_PORT:-50051}:50051"
+
+volumes:
+  postgres-data:
+  valkey-data:
+  kafka-data:
+
+networks:
+  matchplane:
+    driver: bridge

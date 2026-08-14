@@ -1,0 +1,31 @@
+[package]
+name = "matchplane-gateway"
+description = "HTTP command and query gateway for MatchPlane"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+aes-gcm.workspace = true
+axum.workspace = true
+base64.workspace = true
+hex.workspace = true
+matchplane-cache.workspace = true
+matchplane-config.workspace = true
+matchplane-domain.workspace = true
+matchplane-observability.workspace = true
+matchplane-storage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

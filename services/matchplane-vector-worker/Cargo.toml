@@ -1,0 +1,18 @@
+[package]
+name = "matchplane-vector-worker"
+description = "Caller-supplied embedding ingestion and candidate worker for MatchPlane"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+matchplane-config.workspace = true
+matchplane-observability.workspace = true
+matchplane-storage.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

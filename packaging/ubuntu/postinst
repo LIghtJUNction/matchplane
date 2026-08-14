@@ -1,0 +1,34 @@
+#!/bin/sh
+set -e
+
+previous_version=${2:-}
+
+if command -v systemd-sysusers >/dev/null 2>&1; then
+  systemd-sysusers matchplane.conf
+fi
+if command -v systemd-tmpfiles >/dev/null 2>&1; then
+  systemd-tmpfiles --create matchplane.conf
+fi
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+  if [ "${1:-}" = configure ] && [ -n "$previous_version" ]; then
+    set -- matchplane-gateway.service matchplane-payment-service.service \
+      matchplane-event-relay.service matchplane-matcher.service \
+      matchplane-projector.service matchplane-vector-worker.service \
+      matchplane-federation-hub.service
+    if [ "$previous_version" = 0.1.0 ]; then
+      # The first 0.1.0 prerm stopped units during upgrade. Recover only units
+      # the administrator had enabled; later packages preserve active state.
+      for unit in "$@"; do
+        if systemctl is-enabled --quiet "$unit"; then
+          systemctl restart "$unit" || true
+        fi
+      done
+    else
+      # Upgrade only units that were already running. Intentionally stopped
+      # services remain stopped, while active processes load the new binary.
+      systemctl try-restart "$@" || true
+    fi
+  fi
+fi
+printf '%s\n' 'Configure /etc/matchplane/matchplane.env before enabling services.'

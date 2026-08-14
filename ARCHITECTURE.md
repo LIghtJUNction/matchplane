@@ -1,0 +1,69 @@
+# MatchPlane architecture
+
+## Authority and consistency
+
+PostgreSQL is the final source of truth. Every externally visible command is first persisted with
+its idempotency record and transactional outbox row. Kafka publication is at-least-once; consumers
+guard PostgreSQL effects with `consumer_inbox` and guard Valkey projections with an atomic stream
+sequence. No correctness property relies on a cache lock or Kafka exactly-once mode.
+
+Each market is a logical order-book shard. Kafka keys commands by `market_id`, while a PostgreSQL
+lease with a monotonically increasing fencing token prevents a stale matcher from writing. The
+matcher runs a single-threaded event loop per owned shard and invokes the pure
+`matchplane-engine` state transition library.
+
+## Data flow
+
+```text
+Client -> Gateway -> PostgreSQL(order + outbox)
+                         |
+                    Event relay -> Kafka command partition
+                                      |
+                                  Matcher -> deterministic engine
+                                      |
+                         PostgreSQL(inbox + facts + outbox)
+                                      |
+                    Event relay -> Kafka facts -> Projector -> Valkey
+```
+
+The relational current state and append-only `domain_events` are committed together. A matcher
+restores the most recent checksum-verified snapshot, then replays the PostgreSQL event log. Valkey
+is rebuilt from facts whenever its sequence has a gap.
+
+## Marketplace and revenue flow
+
+Seller listings and buyer requests are separate from the exchange order book. Explainable matching
+creates an `offline_deal`; seller exposure events measure the path from impression to inquiry and
+released contact. Contacts and viewing locations are encrypted at the HTTP boundary, and every
+contact decision is audited.
+
+For `offline_direct`, buyer and seller settle the vehicle price with each other. The isolated payment
+service handles only the platform commission. The default policy requires seller preauthorization
+before contact release, then captures the exact commission derived from the price confirmed by both
+parties. Online order-book trades use the same market-owned fee rate: the ledger debits the buyer's
+gross amount, credits the seller's net amount, and credits the platform commission account in a
+separate posting. Trade facts expose all four values rather than embedding a hidden spread.
+
+Payment gateway configuration is data-driven but credentials remain outside PostgreSQL. Test and
+production routing are independent, mode switches are versioned and audited, and unresolved old-mode
+payments block a switch. Refunds reserve aggregate refundable capacity transactionally. Issued
+invoices are immutable; refunds create correction requests and encrypted red-letter artifacts.
+
+## Federation
+
+Node A owns automotive data, node B owns electronics data, and node C is a federation hub. A and B
+publish standardized book deltas, summaries, and health facts. C maintains rebuildable aggregate
+views and routes AI candidates back to their source node. Cross-node settlement uses an expiring,
+idempotent `reserve -> confirm/abort` saga; each source node retains final commit authority.
+
+Control-plane RPC uses gRPC with protocol negotiation and mTLS hooks. Kafka carries order-book and
+domain facts. Every envelope contains the mandatory identity, lineage, shard, version, timestamp,
+and payload hash fields described in ADR 0003.
+
+## Deployment
+
+A, B, and C should run in independent Kubernetes failure domains. Stateless APIs and workers use
+Deployments; matchers use StatefulSets for stable process identity; databases and Kafka are
+operator-managed in production. The Helm chart accepts external PostgreSQL, Kafka, and Valkey
+endpoints. Local Compose provides a single-node KRaft Kafka, Valkey, and a reproducible PostgreSQL
+image containing both TimescaleDB and pgvector.

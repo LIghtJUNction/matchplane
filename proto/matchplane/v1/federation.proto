@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package matchplane.v1;
+
+import "google/protobuf/timestamp.proto";
+
+service FederationControl {
+  rpc Negotiate(NegotiateRequest) returns (NegotiateResponse);
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+  rpc Confirm(ConfirmRequest) returns (ReservationResult);
+  rpc Abort(AbortRequest) returns (ReservationResult);
+}
+
+message ProtocolVersion {
+  uint32 major = 1;
+  uint32 minor = 2;
+}
+
+message NegotiateRequest {
+  string source_node_id = 1;
+  repeated ProtocolVersion supported_versions = 2;
+  string nonce = 3;
+  google.protobuf.Timestamp occurred_at = 4;
+  bytes signature = 5;
+}
+
+message NegotiateResponse {
+  ProtocolVersion selected_version = 1;
+  string target_node_id = 2;
+}
+
+message ReserveRequest {
+  string event_id = 1;
+  string correlation_id = 2;
+  string causation_id = 3;
+  string source_node_id = 4;
+  string tenant_id = 5;
+  string domain_id = 6;
+  string market_id = 7;
+  string shard_id = 8;
+  uint64 shard_sequence = 9;
+  uint32 schema_version = 10;
+  google.protobuf.Timestamp occurred_at = 11;
+  bytes payload_hash = 12;
+  string order_id = 13;
+  string quantity = 14;
+  string idempotency_key = 15;
+  google.protobuf.Timestamp expires_at = 16;
+  int64 fencing_token = 17;
+  string nonce = 18;
+  bytes signature = 19;
+}
+
+message ReserveResponse {
+  string reservation_id = 1;
+  int64 reservation_version = 2;
+  int64 fencing_token = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message ConfirmRequest {
+  string reservation_id = 1;
+  string idempotency_key = 2;
+  int64 reservation_version = 3;
+  int64 fencing_token = 4;
+  string nonce = 5;
+  bytes signature = 6;
+  string source_node_id = 7;
+}
+
+message AbortRequest {
+  string reservation_id = 1;
+  string idempotency_key = 2;
+  int64 reservation_version = 3;
+  int64 fencing_token = 4;
+  string reason = 5;
+  string nonce = 6;
+  bytes signature = 7;
+  string source_node_id = 8;
+}
+
+message ReservationResult {
+  string reservation_id = 1;
+  string status = 2;
+  int64 reservation_version = 3;
+}
