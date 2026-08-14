@@ -188,7 +188,22 @@ impl AdminStore {
         serializable(&mut transaction).await?;
         let provider_id = mutation.provider_id.unwrap_or_else(Uuid::now_v7);
         let before = invoice_provider_in_optional(&mut transaction, provider_id, true).await?;
-        if before.is_some() {
+        if let Some(current) = before.as_ref() {
+            let has_invoice_history: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM invoice_requests \
+                 WHERE tenant_id = $1 AND provider_key = $2 AND provider_mode = $3)",
+            )
+            .bind(mutation.tenant_id.into_uuid())
+            .bind(&current.provider_key)
+            .bind(current.mode.as_str())
+            .fetch_one(&mut *transaction)
+            .await?;
+            if has_invoice_history {
+                return Err(StoreError::Conflict(
+                    "invoice provider configuration is immutable after invoice history exists; create a new provider for rotation"
+                        .to_owned(),
+                ));
+            }
             let active_mode: Option<String> = sqlx::query_scalar(
                 "SELECT active_mode FROM invoice_settings \
                  WHERE tenant_id = $1 AND active_provider_id = $2 FOR UPDATE",
@@ -409,6 +424,20 @@ impl AdminStore {
         let action = if let Some(current) = &before {
             if current.tenant_id != mutation.tenant_id {
                 return Err(StoreError::NotFound("payment gateway"));
+            }
+            let has_payment_history: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM payment_intents \
+                 WHERE tenant_id = $1 AND gateway_id = $2)",
+            )
+            .bind(mutation.tenant_id.into_uuid())
+            .bind(gateway_id.into_uuid())
+            .fetch_one(&mut *transaction)
+            .await?;
+            if has_payment_history {
+                return Err(StoreError::Conflict(
+                    "payment gateway configuration is immutable after payment history exists; create a new gateway for rotation"
+                        .to_owned(),
+                ));
             }
             if mutation.expected_version != Some(current.version) {
                 return Err(StoreError::Conflict(format!(

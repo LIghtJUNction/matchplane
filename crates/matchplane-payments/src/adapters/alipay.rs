@@ -63,6 +63,7 @@ impl AlipayGateway {
         Ok(Self {
             descriptor,
             client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
                 .timeout(Duration::from_secs(15))
                 .build()?,
             gateway_url: reqwest::Url::parse(gateway_url).map_err(|error| {

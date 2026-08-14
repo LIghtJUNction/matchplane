@@ -62,6 +62,7 @@ impl WaffoGateway {
         Ok(Self {
             descriptor,
             client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
                 .timeout(Duration::from_secs(15))
                 .build()?,
             base_url: reqwest::Url::parse(base_url).map_err(|error| {

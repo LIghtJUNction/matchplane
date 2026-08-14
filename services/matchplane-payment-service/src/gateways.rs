@@ -1,4 +1,4 @@
-use std::{env, fs, str::FromStr, sync::Arc};
+use std::{env, fs, path::Path, str::FromStr, sync::Arc};
 
 use matchplane_domain::PaymentGatewayId;
 use matchplane_payments::{
@@ -178,19 +178,33 @@ pub(crate) fn resolve_secret(reference: &str) -> Result<SecretString, PaymentErr
                 "secret file reference must be absolute".to_owned(),
             ));
         }
-        let value = fs::read_to_string(path).map_err(|error| {
+        let canonical = fs::canonicalize(path).map_err(|error| {
+            PaymentError::Credential(format!("secret file unavailable: {error}"))
+        })?;
+        let allowed = [
+            Path::new("/etc/matchplane/secrets"),
+            Path::new("/run/secrets"),
+        ];
+        if !allowed.iter().any(|root| canonical.starts_with(root)) {
+            return Err(PaymentError::Credential(
+                "secret file must be inside an approved secret directory".to_owned(),
+            ));
+        }
+        let value = fs::read_to_string(canonical).map_err(|error| {
             PaymentError::Credential(format!("secret file unavailable: {error}"))
         })?;
         return Ok(SecretString::new(value.trim().to_owned().into_boxed_str()));
     }
     if let Some(name) = reference.strip_prefix("env:") {
-        if !(name.starts_with("MATCHPLANE_PAYMENT_") || name.starts_with("MATCHPLANE_INVOICE_"))
+        if !(name.starts_with("MATCHPLANE_PAYMENT_GATEWAY_")
+            || name.starts_with("MATCHPLANE_PAYMENT_PROVIDER_")
+            || name.starts_with("MATCHPLANE_INVOICE_PROVIDER_"))
             || !name
                 .bytes()
                 .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
         {
             return Err(PaymentError::Credential(
-                "secret environment reference must use MATCHPLANE_PAYMENT_* or MATCHPLANE_INVOICE_*"
+                "secret environment reference must use a dedicated gateway/provider prefix"
                     .to_owned(),
             ));
         }

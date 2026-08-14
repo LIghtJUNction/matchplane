@@ -162,6 +162,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/candidates/search", post(search_candidates))
         .route("/v1/marketplace/parties", post(marketplace::create_party))
         .route(
+            "/v1/admin/marketplace/asset-authorizations",
+            post(marketplace::set_asset_authorization),
+        )
+        .route(
             "/v1/marketplace/listings",
             post(marketplace::create_listing),
         )

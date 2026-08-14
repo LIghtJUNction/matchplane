@@ -13,9 +13,10 @@ use matchplane_storage::{
     AcceptContactExchange, AuthenticatedParty, ConfirmOfflineDeal, CreateBuyerVehicleRequest,
     CreateMarketplaceParty, CreateOfflineDeal, CreateSellerPromotion, CreateVehicleListing,
     CreateViewingAppointment, EncryptedContact, ExposureMetrics, FinalizeOfflineDeal,
-    MarketplaceParty, OfflineDeal, OfflineDealOutcome, OfflineDealProgress,
-    RecommendVehicleListings, RecommendedListing, RecordExposure, ReleaseContact,
-    SellerPromotionCampaign, TransitionViewingAppointment, VehicleListing, ViewingAppointment,
+    MarketplaceAssetAuthorization, MarketplaceParty, OfflineDeal, OfflineDealOutcome,
+    OfflineDealProgress, RecommendVehicleListings, RecommendedListing, RecordExposure,
+    ReleaseContact, SellerPromotionCampaign, SetMarketplaceAssetAuthorization,
+    TransitionViewingAppointment, VehicleListing, ViewingAppointment,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -23,7 +24,7 @@ use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
-use crate::{ApiError, AppState, parse_exact, parse_id};
+use crate::{ApiError, AppState, parse_exact, parse_id, require_operator};
 
 #[derive(Deserialize)]
 pub(super) struct CreatePartyRequest {
@@ -55,6 +56,17 @@ pub(super) struct CreateListingRequest {
     currency_scale: i16,
     #[serde(default, with = "time::serde::rfc3339::option")]
     expires_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct AssetAuthorizationRequest {
+    tenant_id: String,
+    domain_id: String,
+    asset_id: String,
+    seller_party_id: String,
+    enabled: bool,
+    authorized_by: String,
+    reason: String,
 }
 
 #[derive(Deserialize)]
@@ -138,10 +150,6 @@ pub(super) struct ExposureRequest {
     tenant_id: String,
     viewer_party_id: String,
     event_type: String,
-    source: String,
-    deduplication_key: String,
-    #[serde(default, with = "time::serde::rfc3339::option")]
-    occurred_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Serialize)]
@@ -281,6 +289,27 @@ pub(super) async fn create_listing(
         })
         .await?;
     Ok((StatusCode::CREATED, Json(listing)))
+}
+
+pub(super) async fn set_asset_authorization(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<AssetAuthorizationRequest>,
+) -> Result<(StatusCode, Json<MarketplaceAssetAuthorization>), ApiError> {
+    require_operator(&state, &headers)?;
+    let authorization = state
+        .store
+        .set_marketplace_asset_authorization(&SetMarketplaceAssetAuthorization {
+            tenant_id: parse_id(&request.tenant_id)?,
+            domain_id: parse_id(&request.domain_id)?,
+            asset_id: parse_id(&request.asset_id)?,
+            seller_party_id: parse_id(&request.seller_party_id)?,
+            enabled: request.enabled,
+            authorized_by: request.authorized_by,
+            reason: request.reason,
+        })
+        .await?;
+    Ok((StatusCode::OK, Json(authorization)))
 }
 
 pub(super) async fn create_buyer_request(
@@ -646,16 +675,25 @@ pub(super) async fn record_exposure(
     let viewer_party_id = parse_id(&request.viewer_party_id)?;
     let party = authenticate(&state, &headers, tenant_id, viewer_party_id).await?;
     require_role(&party, "buyer")?;
+    let listing_id = parse_id(&listing_id)?;
+    let occurred_at = OffsetDateTime::now_utc();
+    let deduplication_key = format!(
+        "public:{}:{}:{}:{}",
+        viewer_party_id,
+        listing_id,
+        request.event_type,
+        occurred_at.date()
+    );
     let inserted = state
         .store
         .record_seller_exposure(&RecordExposure {
             tenant_id,
-            listing_id: parse_id(&listing_id)?,
+            listing_id,
             viewer_party_id: Some(viewer_party_id),
             event_type: request.event_type,
-            source: request.source,
-            deduplication_key: request.deduplication_key,
-            occurred_at: request.occurred_at.unwrap_or_else(OffsetDateTime::now_utc),
+            source: "buyer_client".to_owned(),
+            deduplication_key,
+            occurred_at,
         })
         .await?;
     Ok((

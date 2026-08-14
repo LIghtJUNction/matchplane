@@ -99,6 +99,52 @@ pub struct CreateVehicleListing {
     pub expires_at: Option<OffsetDateTime>,
 }
 
+/// Operator-approved authorization allowing one seller to publish one catalog asset.
+#[derive(Debug)]
+pub struct SetMarketplaceAssetAuthorization {
+    /// Tenant authority scope.
+    pub tenant_id: TenantId,
+    /// Automotive domain.
+    pub domain_id: DomainId,
+    /// Catalog asset being authorized.
+    pub asset_id: AssetId,
+    /// Seller receiving or losing authorization.
+    pub seller_party_id: MarketplacePartyId,
+    /// Whether the authorization is active.
+    pub enabled: bool,
+    /// Operator or workflow actor that made the decision.
+    pub authorized_by: String,
+    /// Human-readable audit reason.
+    pub reason: String,
+}
+
+/// Durable seller-to-asset authorization state.
+#[derive(Debug, Clone, Serialize)]
+pub struct MarketplaceAssetAuthorization {
+    /// Tenant authority scope.
+    pub tenant_id: TenantId,
+    /// Automotive domain.
+    pub domain_id: DomainId,
+    /// Catalog asset.
+    pub asset_id: AssetId,
+    /// Authorized seller.
+    pub seller_party_id: MarketplacePartyId,
+    /// `active` or `revoked`.
+    pub status: String,
+    /// Actor recorded for the latest decision.
+    pub authorized_by: String,
+    /// Audit reason recorded for the latest decision.
+    pub reason: String,
+    /// Optimistic version.
+    pub version: i64,
+    /// Creation timestamp.
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    /// Last decision timestamp.
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+}
+
 /// Seller listing returned to buyers without private contact details.
 #[derive(Debug, Clone, Serialize)]
 pub struct VehicleListing {
@@ -646,6 +692,67 @@ impl PgStore {
         party_from_row(&row)
     }
 
+    /// Grants or revokes a seller's explicit right to publish one catalog asset.
+    pub async fn set_marketplace_asset_authorization(
+        &self,
+        command: &SetMarketplaceAssetAuthorization,
+    ) -> Result<MarketplaceAssetAuthorization, StorageError> {
+        if command.authorized_by.trim().is_empty() || command.authorized_by.len() > 256 {
+            return Err(StorageError::InvalidData(
+                "authorized_by must contain 1..=256 bytes".to_owned(),
+            ));
+        }
+        if command.reason.trim().is_empty() || command.reason.len() > 2_000 {
+            return Err(StorageError::InvalidData(
+                "authorization reason must contain 1..=2000 bytes".to_owned(),
+            ));
+        }
+        let mut transaction = self.pool().begin().await?;
+        serializable(&mut transaction).await?;
+        ensure_party_role(
+            &mut transaction,
+            command.tenant_id,
+            command.seller_party_id,
+            "seller",
+        )
+        .await?;
+        let asset_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM assets \
+             WHERE tenant_id = $1 AND domain_id = $2 AND id = $3 AND status = 'active')",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.asset_id.into_uuid())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !asset_exists {
+            return Err(StorageError::NotFound("active vehicle asset"));
+        }
+        let status = if command.enabled { "active" } else { "revoked" };
+        let row = sqlx::query(
+            "INSERT INTO marketplace_asset_authorizations \
+             (tenant_id, domain_id, asset_id, seller_party_id, status, authorized_by, reason) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             ON CONFLICT (tenant_id, domain_id, asset_id, seller_party_id) DO UPDATE SET \
+                 status = EXCLUDED.status, authorized_by = EXCLUDED.authorized_by, \
+                 reason = EXCLUDED.reason, version = marketplace_asset_authorizations.version + 1 \
+             RETURNING tenant_id, domain_id, asset_id, seller_party_id, status, authorized_by, \
+                       reason, version, created_at, updated_at",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.asset_id.into_uuid())
+        .bind(command.seller_party_id.into_uuid())
+        .bind(status)
+        .bind(&command.authorized_by)
+        .bind(&command.reason)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let authorization = asset_authorization_from_row(&row)?;
+        transaction.commit().await?;
+        Ok(authorization)
+    }
+
     /// Authenticates a high-entropy party capability within one tenant.
     pub async fn authenticate_marketplace_party(
         &self,
@@ -693,6 +800,22 @@ impl PgStore {
             "seller",
         )
         .await?;
+        let authorized: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM marketplace_asset_authorizations \
+             WHERE tenant_id = $1 AND domain_id = $2 AND asset_id = $3 \
+               AND seller_party_id = $4 AND status = 'active')",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.asset_id.into_uuid())
+        .bind(command.seller_party_id.into_uuid())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !authorized {
+            return Err(StorageError::Forbidden(
+                "seller is not authorized to publish this vehicle asset".to_owned(),
+            ));
+        }
         let policy = sqlx::query(
             "SELECT commission_bps, offline_commission_collection, price_scale \
              FROM markets WHERE tenant_id = $1 AND domain_id = $2 AND quote_asset_key = $3 \
@@ -1621,7 +1744,9 @@ impl PgStore {
         validate_exposure(command)?;
         let mut transaction = self.pool().begin().await?;
         let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM vehicle_listings WHERE tenant_id = $1 AND id = $2)",
+            "SELECT EXISTS(SELECT 1 FROM vehicle_listings \
+             WHERE tenant_id = $1 AND id = $2 AND status = 'active' \
+               AND (expires_at IS NULL OR expires_at > clock_timestamp()))",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(command.listing_id.into_uuid())
@@ -1630,7 +1755,10 @@ impl PgStore {
         if !exists {
             return Err(StorageError::NotFound("vehicle listing"));
         }
-        let inserted = insert_exposure(&mut transaction, command).await?;
+        // Client telemetry is useful for seller-facing analytics, but it is not trusted evidence
+        // for seller-funded billing. Only server-observed recommendation, inquiry, and contact
+        // flows call the billable helper below.
+        let inserted = insert_exposure_unbilled(&mut transaction, command).await?;
         transaction.commit().await?;
         Ok(inserted)
     }
@@ -2283,6 +2411,23 @@ fn party_from_row(row: &sqlx::postgres::PgRow) -> Result<MarketplaceParty, Stora
     })
 }
 
+fn asset_authorization_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<MarketplaceAssetAuthorization, StorageError> {
+    Ok(MarketplaceAssetAuthorization {
+        tenant_id: TenantId::from_uuid(row.try_get("tenant_id")?),
+        domain_id: DomainId::from_uuid(row.try_get("domain_id")?),
+        asset_id: AssetId::from_uuid(row.try_get("asset_id")?),
+        seller_party_id: MarketplacePartyId::from_uuid(row.try_get("seller_party_id")?),
+        status: row.try_get("status")?,
+        authorized_by: row.try_get("authorized_by")?,
+        reason: row.try_get("reason")?,
+        version: row.try_get("version")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
 async fn ensure_party_role(
     transaction: &mut Transaction<'_, Postgres>,
     tenant_id: TenantId,
@@ -2470,6 +2615,21 @@ async fn insert_exposure(
     transaction: &mut Transaction<'_, Postgres>,
     command: &RecordExposure,
 ) -> Result<bool, StorageError> {
+    insert_exposure_with_billing(transaction, command, true).await
+}
+
+async fn insert_exposure_unbilled(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &RecordExposure,
+) -> Result<bool, StorageError> {
+    insert_exposure_with_billing(transaction, command, false).await
+}
+
+async fn insert_exposure_with_billing(
+    transaction: &mut Transaction<'_, Postgres>,
+    command: &RecordExposure,
+    bill: bool,
+) -> Result<bool, StorageError> {
     validate_exposure(command)?;
     let result = sqlx::query(
         "INSERT INTO seller_exposure_events \
@@ -2488,7 +2648,7 @@ async fn insert_exposure(
     .execute(&mut **transaction)
     .await?;
     let inserted = result.rows_affected() == 1;
-    if inserted {
+    if inserted && bill {
         bill_promotions_for_exposure(transaction, command).await?;
     }
     Ok(inserted)

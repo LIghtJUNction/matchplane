@@ -40,6 +40,14 @@ buyer=$(jq -nc --arg tenant "$tenant_id" \
 buyer_id=$(jq -er '.party_id' <<<"$buyer")
 buyer_token=$(jq -er '.access_token' <<<"$buyer")
 
+jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg asset "$asset_id" \
+  --arg seller "$seller_id" \
+  '{tenant_id:$tenant,domain_id:$domain,asset_id:$asset,seller_party_id:$seller,enabled:true,authorized_by:"ci-admin",reason:"integration smoke seller authorization"}' \
+  | curl --fail-with-body --silent --header 'content-type: application/json' \
+      --header "authorization: Bearer matchplane-development-gateway-admin" --data-binary @- \
+      "$base_url/v1/admin/marketplace/asset-authorizations" \
+  | jq -e --arg seller "$seller_id" '.status == "active" and .seller_party_id == $seller' >/dev/null
+
 listing=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg asset "$asset_id" \
   --arg seller "$seller_id" \
   '{tenant_id:$tenant,domain_id:$domain,asset_id:$asset,seller_party_id:$seller,asking_amount:"2500000",currency:"USD",currency_scale:2}' \

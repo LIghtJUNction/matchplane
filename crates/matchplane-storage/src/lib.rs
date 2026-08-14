@@ -16,10 +16,11 @@ pub use marketplace::{
     AcceptContactExchange, AuthenticatedParty, BuyerVehicleRequest, ConfirmOfflineDeal,
     ContactEnvelope, CreateBuyerVehicleRequest, CreateMarketplaceParty, CreateOfflineDeal,
     CreateSellerPromotion, CreateVehicleListing, CreateViewingAppointment, EncryptedContact,
-    ExposureMetrics, FinalizeOfflineDeal, MarketplaceParty, OfflineDeal, OfflineDealOutcome,
-    OfflineDealProgress, RecommendVehicleListings, RecommendedListing, RecordExposure,
-    RecordSellerPromotionEvent, ReleaseContact, SellerPromotionCampaign,
-    SellerPromotionEventOutcome, TransitionViewingAppointment, VehicleListing, ViewingAppointment,
+    ExposureMetrics, FinalizeOfflineDeal, MarketplaceAssetAuthorization, MarketplaceParty,
+    OfflineDeal, OfflineDealOutcome, OfflineDealProgress, RecommendVehicleListings,
+    RecommendedListing, RecordExposure, RecordSellerPromotionEvent, ReleaseContact,
+    SellerPromotionCampaign, SellerPromotionEventOutcome, SetMarketplaceAssetAuthorization,
+    TransitionViewingAppointment, VehicleListing, ViewingAppointment,
 };
 pub use types::{
     BookSnapshot, CandidateMatch, DemoBootstrap, FederationReservation, FederationTransition,

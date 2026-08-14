@@ -514,7 +514,7 @@ pub async fn capture(
     let payment_id = parse_id(&payment_id)?;
     let tenant_id = parse_id(&request.tenant_id)?;
     let amount = exact_positive(&request.amount, "amount")?;
-    let request_hash = hash(&request)?;
+    let request_hash = hash(&(payment_id, &request))?;
     let prepared = state
         .store
         .prepare_capture(
@@ -594,7 +594,7 @@ pub async fn refund(
 ) -> Result<(StatusCode, Json<RefundResponse>), ApiError> {
     require_admin(&state, &headers)?;
     let payment_id = parse_id(&payment_id)?;
-    let refund_id =
+    let requested_refund_id =
         parse_optional_id::<RefundId>(request.refund_id.as_deref())?.unwrap_or_else(RefundId::new);
     let tenant_id = parse_id(&request.tenant_id)?;
     let amount = exact_positive(&request.amount, "amount")?;
@@ -611,11 +611,11 @@ pub async fn refund(
             "refund reason must contain 1..=2000 bytes",
         ));
     }
-    let request_hash = hash(&request)?;
+    let request_hash = hash(&(payment_id, &request))?;
     let prepared = state
         .store
         .prepare_refund(&NewRefund {
-            refund_id,
+            refund_id: requested_refund_id,
             tenant_id,
             payment_id,
             idempotency_key: request.idempotency_key.clone(),
@@ -624,6 +624,9 @@ pub async fn refund(
             reason: request.reason.clone(),
         })
         .await?;
+    // Retries after an unknown provider outcome must reuse the durable refund identifier returned
+    // by the idempotency record; generating a fresh provider request number could double-refund.
+    let refund_id = prepared.refund.refund_id;
     if !prepared.execute {
         return Ok((
             StatusCode::OK,

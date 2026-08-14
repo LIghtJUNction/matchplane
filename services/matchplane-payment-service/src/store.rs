@@ -224,8 +224,10 @@ impl PaymentStore {
         }
 
         if let Some(offline_deal_id) = command.offline_deal_id {
-            let seller_party_id: Uuid = sqlx::query_scalar(
-                "SELECT seller_party_id FROM offline_deals \
+            let deal = sqlx::query(
+                "SELECT seller_party_id, commission_amount::text AS commission_amount, \
+                        currency, currency_scale, status, expires_at \
+                 FROM offline_deals \
                  WHERE tenant_id = $1 AND id = $2 FOR SHARE",
             )
             .bind(command.tenant_id.into_uuid())
@@ -233,10 +235,38 @@ impl PaymentStore {
             .fetch_optional(&mut *transaction)
             .await?
             .ok_or(StoreError::NotFound("offline deal"))?;
+            let seller_party_id: Uuid = deal.try_get("seller_party_id")?;
             if command.payer_party_id.map(MarketplacePartyId::into_uuid) != Some(seller_party_id) {
                 return Err(StoreError::Invalid(
                     "offline commission must be paid or authorized by the matched seller".into(),
                 ));
+            }
+            let commission_amount = exact(&deal.try_get::<String, _>("commission_amount")?)?;
+            if command.currency != deal.try_get::<String, _>("currency")?
+                || command.currency_scale != deal.try_get::<i16, _>("currency_scale")?
+            {
+                return Err(StoreError::Invalid(
+                    "offline commission currency must match the deal".to_owned(),
+                ));
+            }
+            if command.amount < commission_amount {
+                return Err(StoreError::Invalid(
+                    "offline commission authorization cannot be below the stored deal commission"
+                        .to_owned(),
+                ));
+            }
+            let status: String = deal.try_get("status")?;
+            if matches!(
+                status.as_str(),
+                "declined" | "expired" | "disputed" | "completed"
+            ) {
+                return Err(StoreError::Conflict(
+                    "offline deal is not available for commission authorization".to_owned(),
+                ));
+            }
+            let expires_at: OffsetDateTime = deal.try_get("expires_at")?;
+            if expires_at <= OffsetDateTime::now_utc() {
+                return Err(StoreError::Conflict("offline deal has expired".to_owned()));
             }
         }
 
@@ -939,7 +969,7 @@ impl PaymentStore {
         let mut transaction = self.pool.begin().await?;
         serializable(&mut transaction).await?;
         if let Some(row) = sqlx::query(
-            "SELECT request_hash, status FROM payment_operations \
+            "SELECT payment_id, operation, request_hash, status FROM payment_operations \
              WHERE tenant_id = $1 AND idempotency_key = $2 FOR UPDATE",
         )
         .bind(tenant_id.into_uuid())
@@ -947,6 +977,11 @@ impl PaymentStore {
         .fetch_optional(&mut *transaction)
         .await?
         {
+            let stored_payment_id: Uuid = row.try_get("payment_id")?;
+            let operation: String = row.try_get("operation")?;
+            if stored_payment_id != payment_id.into_uuid() || operation != "capture" {
+                return Err(StoreError::IdempotencyConflict);
+            }
             let stored_hash: Vec<u8> = row.try_get("request_hash")?;
             if stored_hash != request_hash {
                 return Err(StoreError::IdempotencyConflict);
@@ -1039,10 +1074,12 @@ impl PaymentStore {
             Err(_) => ("failed", "authorized", "provider_rejected"),
         };
         sqlx::query(
-            "UPDATE payment_operations SET status = $3, provider_status = $4 \
-             WHERE tenant_id = $1 AND idempotency_key = $2",
+            "UPDATE payment_operations SET status = $4, provider_status = $5 \
+             WHERE tenant_id = $1 AND payment_id = $2 AND operation = 'capture' \
+               AND idempotency_key = $3",
         )
         .bind(payment.tenant_id.into_uuid())
+        .bind(payment_id.into_uuid())
         .bind(idempotency_key)
         .bind(operation_status)
         .bind(provider_status)
@@ -1085,7 +1122,7 @@ impl PaymentStore {
         let mut transaction = self.pool.begin().await?;
         serializable(&mut transaction).await?;
         if let Some(row) = sqlx::query(
-            "SELECT id, request_hash, status FROM payment_refunds \
+            "SELECT id, payment_id, request_hash, status FROM payment_refunds \
              WHERE tenant_id = $1 AND idempotency_key = $2 FOR UPDATE",
         )
         .bind(command.tenant_id.into_uuid())
@@ -1093,6 +1130,10 @@ impl PaymentStore {
         .fetch_optional(&mut *transaction)
         .await?
         {
+            let stored_payment_id: Uuid = row.try_get("payment_id")?;
+            if stored_payment_id != command.payment_id.into_uuid() {
+                return Err(StoreError::IdempotencyConflict);
+            }
             let stored_hash: Vec<u8> = row.try_get("request_hash")?;
             if stored_hash != command.request_hash {
                 return Err(StoreError::IdempotencyConflict);
@@ -1187,6 +1228,20 @@ impl PaymentStore {
             }
             Err(_) => ("failed", None, "provider_rejected"),
         };
+        if !refund_transition_allowed(&refund.status, status) {
+            insert_payment_event(
+                &mut transaction,
+                refund.tenant_id,
+                refund.payment_id,
+                "refund_stale_ignored",
+                Some(&refund.status),
+                &refund.status,
+                Some(provider_status),
+            )
+            .await?;
+            transaction.commit().await?;
+            return Ok(refund);
+        }
         sqlx::query(
             "UPDATE payment_refunds SET status = $2, \
                  provider_reference = COALESCE($3, provider_reference), provider_status = $4, \
@@ -1285,7 +1340,7 @@ impl PaymentStore {
             refund.tenant_id,
             refund.payment_id,
             "refund_result",
-            None,
+            Some(&refund.status),
             status,
             Some(provider_status),
         )
@@ -1573,6 +1628,19 @@ fn reconciliation_can_become_unknown(status: &str) -> bool {
     )
 }
 
+fn refund_transition_allowed(current: &str, target: &str) -> bool {
+    if current == target {
+        return true;
+    }
+    match current {
+        "requested" | "pending" | "unknown" => {
+            matches!(target, "pending" | "succeeded" | "failed" | "unknown")
+        }
+        "succeeded" | "failed" => false,
+        _ => false,
+    }
+}
+
 pub fn is_unknown(error: &PaymentError) -> bool {
     matches!(
         error,
@@ -1584,7 +1652,7 @@ pub fn is_unknown(error: &PaymentError) -> bool {
 mod tests {
     use super::{
         reconciliation_can_become_unknown, reconciliation_transition_allowed,
-        webhook_reference_matches,
+        refund_transition_allowed, webhook_reference_matches,
     };
 
     #[test]
@@ -1604,6 +1672,15 @@ mod tests {
             "authorized"
         ));
         assert!(reconciliation_can_become_unknown("authorized"));
+    }
+
+    #[test]
+    fn refund_transitions_never_regress_terminal_state() {
+        assert!(refund_transition_allowed("requested", "unknown"));
+        assert!(refund_transition_allowed("unknown", "succeeded"));
+        assert!(refund_transition_allowed("pending", "failed"));
+        assert!(!refund_transition_allowed("succeeded", "pending"));
+        assert!(!refund_transition_allowed("failed", "succeeded"));
     }
 
     #[test]

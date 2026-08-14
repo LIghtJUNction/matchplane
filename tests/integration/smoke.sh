@@ -97,6 +97,12 @@ invoice_admin_assertion=$("${compose[@]}" exec -T postgres psql --username match
              WHERE tenant_id = '$tenant_id' AND active_mode = 'test');")
 test "$invoice_admin_assertion" = '1|1|1'
 
+marketplace_authorization_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
+  --tuples-only --no-align --command \
+  "SELECT count(*) FROM information_schema.tables \
+   WHERE table_name = 'marketplace_asset_authorizations';")
+test "$marketplace_authorization_assertion" = 1
+
 bash "$repository_root/tests/integration/marketplace-smoke.sh"
 
 echo 'MatchPlane end-to-end smoke test passed'

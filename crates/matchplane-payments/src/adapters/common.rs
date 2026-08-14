@@ -12,14 +12,7 @@ use signature::{SignatureEncoding, Signer, Verifier};
 use crate::{Money, PaymentError};
 
 pub(super) fn require_https(base_url: &str) -> Result<(), PaymentError> {
-    let url = reqwest::Url::parse(base_url)
-        .map_err(|error| PaymentError::Invalid(format!("gateway URL is invalid: {error}")))?;
-    if url.scheme() != "https" {
-        return Err(PaymentError::Invalid(
-            "production gateway URL must use HTTPS".to_owned(),
-        ));
-    }
-    Ok(())
+    crate::validate_https_url(base_url, "production gateway URL").map(|_| ())
 }
 
 pub(super) fn sign_rsa_sha256(

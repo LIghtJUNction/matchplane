@@ -227,14 +227,7 @@ impl HttpInvoiceProvider {
             .ok_or_else(|| {
                 PaymentError::Invalid("invoice provider base_url is required".to_owned())
             })?;
-        let base_url = Url::parse(base_url).map_err(|error| {
-            PaymentError::Invalid(format!("invoice provider base_url is invalid: {error}"))
-        })?;
-        if base_url.scheme() != "https" || base_url.host_str().is_none() {
-            return Err(PaymentError::Invalid(
-                "production invoice provider base_url must use HTTPS and contain a host".to_owned(),
-            ));
-        }
+        let base_url = crate::validate_https_url(base_url, "invoice provider base_url")?;
         let path = |name: &str, default: &str| -> Result<String, PaymentError> {
             let value = settings
                 .get(name)
@@ -264,6 +257,7 @@ impl HttpInvoiceProvider {
             void_path: path("void_path", "/v1/invoices/{invoice_id}/void")?,
             red_letter_path: path("red_letter_path", "/v1/invoices/red-letter")?,
             client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
                 .timeout(Duration::from_secs(20))
                 .build()?,
             bearer_token,

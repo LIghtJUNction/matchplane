@@ -86,10 +86,10 @@ Key gateway endpoints are:
 - `GET /v1/marketplace/listings/{id}/exposure-metrics`
 - `POST /v1/marketplace/promotions`
 - `GET /v1/marketplace/promotions/{id}`
-- Promotion billing events are derived internally from authenticated listing exposure,
-  inquiry, match, and contact-exchange records. There is intentionally no public
-  `POST /v1/marketplace/promotions/{id}/events` endpoint: a buyer must not be able to
-  manufacture a seller's billable campaign activity.
+- `POST /v1/admin/marketplace/asset-authorizations`
+- Public detail/favorite telemetry is server-timestamped, deduplicated to one event per
+  buyer/listing/day, and recorded as non-billable. Seller-funded campaign billing is derived
+  only from server-observed recommendation, inquiry, match, and contact-exchange records.
 
 ## Isolated payment service
 
@@ -107,8 +107,9 @@ built-in adapters for:
 Test and production configurations are separate. An administrator changes the active mode with an
 optimistic version check. A switch is rejected unless the target mode has an enabled route and the
 old mode has no unresolved payment outcomes. Production gateway credentials are read from restricted
-files or explicitly allow-listed `MATCHPLANE_PAYMENT_*`/`MATCHPLANE_INVOICE_*` environment
-variables; they are not stored in the database.
+files or explicitly allow-listed `MATCHPLANE_PAYMENT_GATEWAY_*`,
+`MATCHPLANE_PAYMENT_PROVIDER_*`, and `MATCHPLANE_INVOICE_PROVIDER_*` environment variables;
+they are not stored in the database.
 
 Payment endpoints include authorization, manual capture, refunds, status reads, and invoice
 management. An administrator can call the idempotent
@@ -148,6 +149,10 @@ Invoice administration endpoints are:
 
 - `GET|POST /v1/admin/invoice-providers?tenant_id=...` to list or version-update providers;
 - `GET|POST /v1/admin/invoice-mode?tenant_id=...` to read or switch the active mode/provider.
+
+Seller listings require an explicit operator authorization for the tenant/domain/asset/seller
+tuple. Grant or revoke it with `POST /v1/admin/marketplace/asset-authorizations`; a seller token
+cannot claim an arbitrary catalog asset.
 
 Use `mode: "test", provider_key: "local_test"` for deterministic sandbox issuance. Production
 uses `mode: "production"` with `provider_key: "http_json"` (or `"fapiao_http"`), an HTTPS

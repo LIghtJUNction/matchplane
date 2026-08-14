@@ -561,7 +561,7 @@ async fn validate_invoice_source(
     match (command.payment_id, command.offline_deal_id, command.kind) {
         (Some(payment_id), _, kind) => {
             let row = sqlx::query(
-                "SELECT status, purpose, captured_amount::text AS captured_amount, \
+                "SELECT status, purpose, offline_deal_id, captured_amount::text AS captured_amount, \
                         refunded_amount::text AS refunded_amount, commission_amount::text AS commission_amount, \
                         commission_refunded_amount::text AS commission_refunded_amount, currency, currency_scale \
                  FROM payment_intents WHERE tenant_id = $1 AND id = $2 FOR SHARE",
@@ -571,6 +571,14 @@ async fn validate_invoice_source(
             .fetch_optional(&mut **transaction)
             .await?
             .ok_or(StoreError::NotFound("invoice payment"))?;
+            let payment_offline_deal_id = row
+                .try_get::<Option<Uuid>, _>("offline_deal_id")?
+                .map(OfflineDealId::from_uuid);
+            if payment_offline_deal_id != command.offline_deal_id {
+                return Err(StoreError::Invalid(
+                    "invoice source deal must match the payment's offline deal".to_owned(),
+                ));
+            }
             let status: String = row.try_get("status")?;
             if status != "captured" {
                 return Err(StoreError::Conflict(
