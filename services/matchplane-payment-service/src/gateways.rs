@@ -184,13 +184,14 @@ pub(crate) fn resolve_secret(reference: &str) -> Result<SecretString, PaymentErr
         return Ok(SecretString::new(value.trim().to_owned().into_boxed_str()));
     }
     if let Some(name) = reference.strip_prefix("env:") {
-        if !name.starts_with("MATCHPLANE_PAYMENT_")
+        if !(name.starts_with("MATCHPLANE_PAYMENT_") || name.starts_with("MATCHPLANE_INVOICE_"))
             || !name
                 .bytes()
                 .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
         {
             return Err(PaymentError::Credential(
-                "secret environment reference must use MATCHPLANE_PAYMENT_*".to_owned(),
+                "secret environment reference must use MATCHPLANE_PAYMENT_* or MATCHPLANE_INVOICE_*"
+                    .to_owned(),
             ));
         }
         let value = env::var(name).map_err(|_| {

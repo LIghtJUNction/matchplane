@@ -147,6 +147,14 @@ async fn main() -> anyhow::Result<()> {
             "/v1/admin/payment-mode",
             get(api::payment_setting).post(api::switch_payment_mode),
         )
+        .route(
+            "/v1/admin/invoice-providers",
+            get(api::admin_invoice_providers).post(api::mutate_invoice_provider),
+        )
+        .route(
+            "/v1/admin/invoice-mode",
+            get(api::invoice_setting).post(api::switch_invoice_mode),
+        )
         .with_state(state)
         .layer(CatchPanicLayer::new())
         .layer(CompressionLayer::new())

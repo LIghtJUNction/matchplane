@@ -87,6 +87,16 @@ webhook_claim_assertion=$("${compose[@]}" exec -T postgres psql --username match
    WHERE table_name = 'payment_webhook_inbox' AND column_name = 'processing_at';")
 test "$webhook_claim_assertion" = 1
 
+invoice_admin_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
+  --tuples-only --no-align --command \
+  "SELECT (SELECT count(*) FROM information_schema.tables \
+             WHERE table_name = 'invoice_config_audit'), \
+          (SELECT count(*) FROM information_schema.tables \
+             WHERE table_name = 'invoice_mode_audit'), \
+          (SELECT count(*) FROM invoice_settings \
+             WHERE tenant_id = '$tenant_id' AND active_mode = 'test');")
+test "$invoice_admin_assertion" = '1|1|1'
+
 bash "$repository_root/tests/integration/marketplace-smoke.sh"
 
 echo 'MatchPlane end-to-end smoke test passed'

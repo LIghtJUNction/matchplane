@@ -22,7 +22,9 @@ use url::Url;
 use crate::{
     AppState,
     admin::{
-        GatewayMutation, GatewayRecord, ModeSwitch, PaymentSetting, RouteMutation, RouteRecord,
+        GatewayMutation, GatewayRecord, InvoiceModeSwitch, InvoiceProviderMutation,
+        InvoiceProviderRecord, InvoiceSetting, ModeSwitch, PaymentSetting, RouteMutation,
+        RouteRecord,
     },
     gateways::GatewayFactory,
     invoices::{EncryptedArtifact, InvoiceRecord, NewInvoice, invoice_kind},
@@ -1014,6 +1016,62 @@ pub async fn mutate_route(
     state
         .admin
         .mutate_route(&request)
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+pub async fn admin_invoice_providers(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<TenantQuery>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<InvoiceProviderRecord>>, ApiError> {
+    require_admin(&state, &headers)?;
+    state
+        .admin
+        .invoice_providers(query.tenant_id)
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+pub async fn mutate_invoice_provider(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<InvoiceProviderMutation>,
+) -> Result<Json<InvoiceProviderRecord>, ApiError> {
+    require_admin(&state, &headers)?;
+    state
+        .admin
+        .mutate_invoice_provider(&request)
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+pub async fn invoice_setting(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<TenantQuery>,
+    headers: HeaderMap,
+) -> Result<Json<InvoiceSetting>, ApiError> {
+    require_admin(&state, &headers)?;
+    state
+        .admin
+        .invoice_setting(query.tenant_id)
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+pub async fn switch_invoice_mode(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<InvoiceModeSwitch>,
+) -> Result<Json<InvoiceSetting>, ApiError> {
+    require_admin(&state, &headers)?;
+    state
+        .admin
+        .switch_invoice_mode(&request)
         .await
         .map(Json)
         .map_err(ApiError::from)

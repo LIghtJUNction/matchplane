@@ -36,11 +36,11 @@ if [[ ${MATCHPLANE_BUILD_PACKAGES:-0} == 1 ]]; then
   cargo build --release --locked --workspace --bins
   output_directory=$(mktemp -d)
   trap 'rm -rf "$output_directory"' EXIT
-  packaging/scripts/archive.sh 0.1.4 target/release "$output_directory"
-  tar --list --zstd --file "$output_directory/matchplane-0.1.4-linux-x86_64.tar.zst" >/dev/null
+  packaging/scripts/archive.sh 0.1.5 target/release "$output_directory"
+  tar --list --zstd --file "$output_directory/matchplane-0.1.5-linux-x86_64.tar.zst" >/dev/null
   if command -v dpkg-deb >/dev/null 2>&1; then
-    packaging/ubuntu/build-deb.sh 0.1.4 target/release "$output_directory"
-    dpkg-deb --info "$output_directory/matchplane_0.1.4_amd64.deb" >/dev/null
+    packaging/ubuntu/build-deb.sh 0.1.5 target/release "$output_directory"
+    dpkg-deb --info "$output_directory/matchplane_0.1.5_amd64.deb" >/dev/null
   fi
 fi
 

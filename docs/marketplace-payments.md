@@ -107,8 +107,8 @@ built-in adapters for:
 Test and production configurations are separate. An administrator changes the active mode with an
 optimistic version check. A switch is rejected unless the target mode has an enabled route and the
 old mode has no unresolved payment outcomes. Production gateway credentials are read from restricted
-files or explicitly allow-listed `MATCHPLANE_PAYMENT_*` environment variables; they are not stored in
-the database.
+files or explicitly allow-listed `MATCHPLANE_PAYMENT_*`/`MATCHPLANE_INVOICE_*` environment
+variables; they are not stored in the database.
 
 Payment endpoints include authorization, manual capture, refunds, status reads, and invoice
 management. An administrator can call the idempotent
@@ -136,9 +136,23 @@ In production, configure:
   onboarding;
 - the Alipay application ID and RSA2 keys after signing the appropriate website payment product.
 
-The administrator API is rooted at `/v1/admin/payment-*` and requires the payment administrator
-bearer token. The packaged systemd deployment binds the payment API to `127.0.0.1:8081`; Compose
-publishes it on configurable host port `MATCHPLANE_PAYMENT_HOST_PORT` (default `8081`).
+The administrator API is rooted at `/v1/admin/payment-*` and `/v1/admin/invoice-*` and requires the
+payment administrator bearer token. Payment gateway and route mutations are version-checked and
+audited. Invoice provider mutations are version-checked and audited without returning secret
+references; switching the invoice mode preflights the selected provider, refuses local-test
+providers in production, and refuses to switch while invoices are outstanding. The packaged
+systemd deployment binds the payment API to `127.0.0.1:8081`; Compose publishes it on configurable
+host port `MATCHPLANE_PAYMENT_HOST_PORT` (default `8081`).
+
+Invoice administration endpoints are:
+
+- `GET|POST /v1/admin/invoice-providers?tenant_id=...` to list or version-update providers;
+- `GET|POST /v1/admin/invoice-mode?tenant_id=...` to read or switch the active mode/provider.
+
+Use `mode: "test", provider_key: "local_test"` for deterministic sandbox issuance. Production
+uses `mode: "production"` with `provider_key: "http_json"` (or `"fapiao_http"`), an HTTPS
+`settings.base_url`, and a `file:`/`env:` credential reference. Keep the reference itself out of
+logs and source control; the service resolves it only while validating or issuing.
 
 Invoice issuance is deliberately fail-closed until a real tax-invoice provider adapter is
 configured. `local_test` only runs in test mode and produces deterministic sandbox artifacts; it
