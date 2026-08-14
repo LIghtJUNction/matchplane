@@ -810,6 +810,7 @@ impl PgStore {
             ));
         }
         let mut transaction = self.pool().begin().await?;
+        serializable(&mut transaction).await?;
         ensure_party_role(
             &mut transaction,
             command.tenant_id,
@@ -817,18 +818,22 @@ impl PgStore {
             "seller",
         )
         .await?;
-        let authorized: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM marketplace_asset_authorizations \
+        // Lock the authorization row so revocation and listing creation use one ordering:
+        // party -> authorization -> listing.  A revoked grant may therefore either win before
+        // this transaction (and reject publication) or wait for this listing to commit and then
+        // withdraw it atomically; it cannot leave an unauthorized active listing behind.
+        let authorization_status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM marketplace_asset_authorizations \
              WHERE tenant_id = $1 AND domain_id = $2 AND asset_id = $3 \
-               AND seller_party_id = $4 AND status = 'active')",
+               AND seller_party_id = $4 FOR SHARE",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(command.domain_id.into_uuid())
         .bind(command.asset_id.into_uuid())
         .bind(command.seller_party_id.into_uuid())
-        .fetch_one(&mut *transaction)
+        .fetch_optional(&mut *transaction)
         .await?;
-        if !authorized {
+        if authorization_status.as_deref() != Some("active") {
             return Err(StorageError::Forbidden(
                 "seller is not authorized to publish this vehicle asset".to_owned(),
             ));
@@ -959,6 +964,10 @@ impl PgStore {
              WHERE l.tenant_id = $1 AND l.domain_id = $2 AND l.currency = $3 \
                AND l.currency_scale = $4 AND l.status = 'active' AND a.status = 'active' \
                AND l.seller_party_id <> $5 \
+               AND EXISTS (SELECT 1 FROM marketplace_asset_authorizations aa \
+                           WHERE aa.tenant_id = l.tenant_id AND aa.domain_id = l.domain_id \
+                             AND aa.asset_id = l.asset_id AND aa.seller_party_id = l.seller_party_id \
+                             AND aa.status = 'active') \
                AND (l.expires_at IS NULL OR l.expires_at > clock_timestamp()) \
              ORDER BY l.published_at DESC, l.id LIMIT 500",
         )
@@ -1009,6 +1018,7 @@ impl PgStore {
         recommendations.truncate(command.limit.clamp(1, 100));
 
         let mut transaction = self.pool().begin().await?;
+        serializable(&mut transaction).await?;
         for recommendation in &recommendations {
             // A caller-controlled session key must not manufacture billable impressions. Scope
             // the server-observed recommendation exposure to one buyer/listing/day instead.
@@ -1085,15 +1095,15 @@ impl PgStore {
                     r.budget_max::text AS budget_max \
              FROM vehicle_listings l \
              JOIN assets a ON a.tenant_id = l.tenant_id AND a.domain_id = l.domain_id AND a.id = l.asset_id \
+             JOIN marketplace_asset_authorizations aa \
+               ON aa.tenant_id = l.tenant_id AND aa.domain_id = l.domain_id \
+              AND aa.asset_id = l.asset_id AND aa.seller_party_id = l.seller_party_id \
              JOIN buyer_vehicle_requests r ON r.tenant_id = l.tenant_id AND r.domain_id = l.domain_id \
              WHERE l.tenant_id = $1 AND l.id = $2 AND r.id = $3 \
                AND l.status = 'active' AND r.status IN ('active', 'matched') \
                AND l.currency = r.currency AND l.currency_scale = r.currency_scale \
                AND (l.expires_at IS NULL OR l.expires_at > clock_timestamp()) \
-               AND EXISTS (SELECT 1 FROM marketplace_asset_authorizations aa \
-                           WHERE aa.tenant_id = l.tenant_id AND aa.domain_id = l.domain_id \
-                             AND aa.asset_id = l.asset_id AND aa.seller_party_id = l.seller_party_id \
-                             AND aa.status = 'active') FOR SHARE OF l, r",
+               AND aa.status = 'active' FOR SHARE OF aa, l, r",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(command.listing_id.into_uuid())
@@ -1512,6 +1522,16 @@ impl PgStore {
                 "viewing can be proposed only after contact release".to_owned(),
             ));
         }
+        if deal.expires_at <= OffsetDateTime::now_utc() {
+            return Err(StorageError::Conflict(
+                "offline introduction has expired; viewing is no longer available".to_owned(),
+            ));
+        }
+        if command.ends_at > deal.expires_at {
+            return Err(StorageError::InvalidData(
+                "viewing must end before the offline introduction expires".to_owned(),
+            ));
+        }
         sqlx::query(
             "INSERT INTO viewing_appointments \
              (id, tenant_id, offline_deal_id, proposed_by, starts_at, ends_at, \
@@ -1565,6 +1585,12 @@ impl PgStore {
         let mut transaction = self.pool().begin().await?;
         let deal = offline_deal_in(&mut transaction, offline_deal_id, false).await?;
         validate_deal_participant(&mut transaction, &deal, tenant_id, actor_party_id).await?;
+        if deal.expires_at <= OffsetDateTime::now_utc() {
+            return Err(StorageError::Conflict(
+                "offline introduction has expired; viewing details are no longer available"
+                    .to_owned(),
+            ));
+        }
         let rows = sqlx::query(
             "SELECT id, tenant_id, offline_deal_id, proposed_by, starts_at, ends_at, \
                     location_ciphertext, location_nonce, encryption_key_version, status, \
@@ -1602,6 +1628,12 @@ impl PgStore {
             command.actor_party_id,
         )
         .await?;
+        if deal.expires_at <= OffsetDateTime::now_utc() {
+            return Err(StorageError::Conflict(
+                "offline introduction has expired; viewing transitions are no longer available"
+                    .to_owned(),
+            ));
+        }
         let target = match (current.status.as_str(), command.action.as_str()) {
             ("proposed", "confirm") if command.actor_party_id != current.proposed_by => "confirmed",
             ("proposed" | "confirmed", "cancel") => "cancelled",
@@ -2489,20 +2521,25 @@ async fn ensure_listing_authorized(
     listing_id: VehicleListingId,
     seller_party_id: MarketplacePartyId,
 ) -> Result<(), StorageError> {
-    let authorized: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM vehicle_listings l \
+    // Lock both records in the same authorization -> listing order used by revocation and
+    // listing creation. This turns every downstream contact/settlement check into a commit-time
+    // authorization boundary instead of an unlocked boolean read.
+    let authorized_listing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT l.id FROM vehicle_listings l \
          JOIN marketplace_asset_authorizations aa \
            ON aa.tenant_id = l.tenant_id AND aa.domain_id = l.domain_id \
           AND aa.asset_id = l.asset_id AND aa.seller_party_id = l.seller_party_id \
          WHERE l.tenant_id = $1 AND l.id = $2 AND l.seller_party_id = $3 \
-           AND l.status IN ('active', 'reserved') AND aa.status = 'active')",
+           AND l.status IN ('active', 'reserved') AND aa.status = 'active' \
+           AND (l.expires_at IS NULL OR l.expires_at > clock_timestamp()) \
+         FOR SHARE OF aa, l",
     )
     .bind(tenant_id.into_uuid())
     .bind(listing_id.into_uuid())
     .bind(seller_party_id.into_uuid())
-    .fetch_one(&mut **transaction)
+    .fetch_optional(&mut **transaction)
     .await?;
-    if !authorized {
+    if authorized_listing.is_none() {
         return Err(StorageError::Conflict(
             "listing authorization is no longer active".to_owned(),
         ));
@@ -2722,19 +2759,21 @@ async fn insert_exposure_with_billing(
         // Re-check the authorization at the billing boundary. Recommendation results are read
         // before this transaction begins, so an operator revocation can otherwise race a stale
         // result into a seller-funded exposure charge.
-        let eligible: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM vehicle_listings l \
+        let eligible_listing: Option<Uuid> = sqlx::query_scalar(
+            "SELECT l.id FROM vehicle_listings l \
              JOIN marketplace_asset_authorizations aa \
                ON aa.tenant_id = l.tenant_id AND aa.domain_id = l.domain_id \
               AND aa.asset_id = l.asset_id AND aa.seller_party_id = l.seller_party_id \
              WHERE l.tenant_id = $1 AND l.id = $2 \
-               AND l.status IN ('active', 'reserved') AND aa.status = 'active')",
+               AND l.status IN ('active', 'reserved') AND aa.status = 'active' \
+               AND (l.expires_at IS NULL OR l.expires_at > clock_timestamp()) \
+             FOR SHARE OF aa, l",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(command.listing_id.into_uuid())
-        .fetch_one(&mut **transaction)
+        .fetch_optional(&mut **transaction)
         .await?;
-        if !eligible {
+        if eligible_listing.is_none() {
             return Err(StorageError::Conflict(
                 "listing authorization is no longer active".to_owned(),
             ));
