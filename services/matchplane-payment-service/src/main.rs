@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
-use matchplane_config::{AppConfig, BearerToken};
+use matchplane_config::{AppConfig, BearerToken, Environment};
 use matchplane_observability::{Telemetry, init};
 use serde::Serialize;
 use sqlx::PgPool;
@@ -10,10 +10,13 @@ use tokio::{net::TcpListener, signal};
 use tower_http::{
     catch_panic::CatchPanicLayer,
     compression::CompressionLayer,
+    limit::RequestBodyLimitLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
+    timeout::TimeoutLayer,
     trace::TraceLayer,
 };
 use tracing::info;
+use url::Url;
 
 mod admin;
 mod api;
@@ -34,6 +37,8 @@ struct AppState {
     invoices: InvoiceStore,
     admin_auth: BearerToken,
     admin: AdminStore,
+    environment: Environment,
+    payment_callback_origin: Option<Url>,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,6 +66,14 @@ async fn main() -> anyhow::Result<()> {
         "matchplane-development-admin",
     )
     .context("payment administrator authentication is invalid")?;
+    let payment_callback_origin = if config.payment_callback_origin.is_empty() {
+        None
+    } else {
+        Some(
+            Url::parse(&config.payment_callback_origin)
+                .context("payment callback origin is invalid")?,
+        )
+    };
     let pool = PgPool::connect(&config.database_url)
         .await
         .context("payment service could not connect to PostgreSQL")?;
@@ -71,6 +84,8 @@ async fn main() -> anyhow::Result<()> {
         telemetry,
         invoice_cipher,
         admin_auth,
+        environment: config.environment,
+        payment_callback_origin,
     });
     let app = Router::new()
         .route("/health/live", get(live))
@@ -131,6 +146,11 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state)
         .layer(CatchPanicLayer::new())
         .layer(CompressionLayer::new())
+        .layer(RequestBodyLimitLayer::new(1_048_576))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(30),
+        ))
         .layer(TraceLayer::new_for_http())
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid));

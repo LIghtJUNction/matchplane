@@ -16,7 +16,8 @@ runtime:
   # This secret must provide server.crt, server.key, and client-ca.crt keys.
   existingTlsSecret: matchplane-federation-tls
   environment: production
-  nodeId: 00000000-0000-7000-8000-00000000000a
+  # Override with a unique UUID per federation node before a production install.
+  nodeId: ''
   kafkaBrokers: matchplane-kafka-bootstrap:9093
   logFilter: info,matchplane=info
   otlpEndpoint: https://otel-collector:4317

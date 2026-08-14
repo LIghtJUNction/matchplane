@@ -7,6 +7,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use matchplane_config::Environment;
 use matchplane_domain::{InvoiceId, MarketplacePartyId, OfflineDealId, PaymentId, RefundId};
 use matchplane_payments::{
     AuthorizePayment, CapturePayment, InvoiceKind, InvoiceProvider, InvoiceRecipient, IssueInvoice,
@@ -16,6 +17,7 @@ use matchplane_payments::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
+use url::Url;
 
 use crate::{
     AppState,
@@ -251,7 +253,11 @@ pub async fn authorize(
     headers: HeaderMap,
     Json(request): Json<AuthorizeRequest>,
 ) -> Result<(StatusCode, Json<PaymentResponse>), ApiError> {
-    validate_payment_request(&request)?;
+    validate_payment_request(
+        &request,
+        state.payment_callback_origin.as_ref(),
+        state.environment,
+    )?;
     let request_hash = hash(&request)?;
     let payment_id = parse_optional_id::<PaymentId>(request.payment_id.as_deref())?
         .unwrap_or_else(PaymentId::new);
@@ -524,6 +530,14 @@ pub async fn refund(
         parse_optional_id::<RefundId>(request.refund_id.as_deref())?.unwrap_or_else(RefundId::new);
     let tenant_id = parse_id(&request.tenant_id)?;
     let amount = exact_positive(&request.amount, "amount")?;
+    if let Some(notify_url) = request.notify_url.as_deref() {
+        validate_callback_url(
+            notify_url,
+            "notify_url",
+            state.payment_callback_origin.as_ref(),
+            state.environment,
+        )?;
+    }
     if request.reason.trim().is_empty() || request.reason.len() > 2_000 {
         return Err(ApiError::bad_request(
             "refund reason must contain 1..=2000 bytes",
@@ -967,7 +981,11 @@ pub async fn switch_payment_mode(
         .map_err(ApiError::from)
 }
 
-fn validate_payment_request(request: &AuthorizeRequest) -> Result<(), ApiError> {
+fn validate_payment_request(
+    request: &AuthorizeRequest,
+    callback_origin: Option<&Url>,
+    environment: Environment,
+) -> Result<(), ApiError> {
     if request.merchant_order_id.trim().is_empty() || request.merchant_order_id.len() > 200 {
         return Err(ApiError::bad_request(
             "merchant_order_id must contain 1..=200 bytes",
@@ -978,6 +996,18 @@ fn validate_payment_request(request: &AuthorizeRequest) -> Result<(), ApiError> 
             "idempotency_key must contain 1..=200 bytes",
         ));
     }
+    validate_callback_url(
+        &request.notify_url,
+        "notify_url",
+        callback_origin,
+        environment,
+    )?;
+    validate_callback_url(
+        &request.return_url,
+        "return_url",
+        callback_origin,
+        environment,
+    )?;
     match (
         request.transaction_channel.as_str(),
         request.purpose.as_str(),
@@ -990,6 +1020,46 @@ fn validate_payment_request(request: &AuthorizeRequest) -> Result<(), ApiError> 
             "offline_direct accepts only a platform_commission payment linked to both offline_deal_id and payer_party_id",
         )),
     }
+}
+
+fn validate_callback_url(
+    value: &str,
+    field: &str,
+    callback_origin: Option<&Url>,
+    environment: Environment,
+) -> Result<(), ApiError> {
+    if value.trim().is_empty() || value.len() > 2_048 {
+        return Err(ApiError::bad_request(format!(
+            "{field} must contain 1..=2048 bytes"
+        )));
+    }
+    let url = Url::parse(value)
+        .map_err(|_| ApiError::bad_request(format!("{field} must be a valid URL")))?;
+    if url.host_str().is_none()
+        || url.username() != ""
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(ApiError::bad_request(format!(
+            "{field} must contain a host and no credentials or fragment"
+        )));
+    }
+    if environment == Environment::Production && url.scheme() != "https" {
+        return Err(ApiError::bad_request(format!(
+            "{field} must use HTTPS in production"
+        )));
+    }
+    if let Some(origin) = callback_origin {
+        let same_origin = url.scheme() == origin.scheme()
+            && url.host_str() == origin.host_str()
+            && url.port_or_known_default() == origin.port_or_known_default();
+        if !same_origin {
+            return Err(ApiError::bad_request(format!(
+                "{field} must use the configured payment callback origin"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn validated_amount(money: &Money) -> Result<i128, ApiError> {
@@ -1171,4 +1241,42 @@ fn exact_positive(value: &str, field: &str) -> Result<i128, ApiError> {
             Err(ApiError::bad_request(format!("{field} must be positive")))
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn callback_urls_must_match_the_configured_production_origin() {
+        let origin = Url::parse("https://payments.example.com").expect("origin is valid");
+
+        assert!(
+            validate_callback_url(
+                "https://payments.example.com/return",
+                "return_url",
+                Some(&origin),
+                Environment::Production,
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_callback_url(
+                "https://evil.example/return",
+                "return_url",
+                Some(&origin),
+                Environment::Production,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_callback_url(
+                "http://payments.example.com/return",
+                "return_url",
+                Some(&origin),
+                Environment::Production,
+            )
+            .is_err()
+        );
+    }
 }

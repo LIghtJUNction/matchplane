@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use axum::{
@@ -24,7 +24,9 @@ use tokio::{net::TcpListener, sync::Mutex};
 use tower_http::{
     catch_panic::CatchPanicLayer,
     compression::CompressionLayer,
+    limit::RequestBodyLimitLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
+    timeout::TimeoutLayer,
     trace::TraceLayer,
 };
 use tracing::{error, info};
@@ -222,6 +224,11 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state)
         .layer(CatchPanicLayer::new())
         .layer(CompressionLayer::new())
+        .layer(RequestBodyLimitLayer::new(1_048_576))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(30),
+        ))
         .layer(TraceLayer::new_for_http())
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid));

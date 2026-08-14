@@ -85,6 +85,8 @@ pub struct ValidatedConfig {
     pub tls_private_key_path: String,
     /// PEM client CA path.
     pub tls_client_ca_path: String,
+    /// Platform-owned HTTPS origin used to build and validate payment callbacks.
+    pub payment_callback_origin: String,
 }
 
 /// Configuration loading and validation failures.

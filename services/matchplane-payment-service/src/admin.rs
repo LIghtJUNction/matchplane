@@ -31,7 +31,9 @@ pub struct GatewayRecord {
     pub kind: GatewayKind,
     pub mode: GatewayMode,
     pub settings: Value,
-    pub credential_secret_ref: Option<String>,
+    /// Whether credentials are configured. The secret file/environment reference is never
+    /// returned to API clients.
+    pub credential_configured: bool,
     pub enabled: bool,
     pub version: i64,
     #[serde(with = "time::serde::rfc3339")]
@@ -429,7 +431,9 @@ fn gateway_from_row(row: &sqlx::postgres::PgRow) -> Result<GatewayRecord, StoreE
         kind: GatewayKind::from_str(&row.try_get::<String, _>("gateway_kind")?)?,
         mode: GatewayMode::from_str(&row.try_get::<String, _>("mode")?)?,
         settings: row.try_get("settings")?,
-        credential_secret_ref: row.try_get("credential_secret_ref")?,
+        credential_configured: row
+            .try_get::<Option<String>, _>("credential_secret_ref")?
+            .is_some(),
         enabled: row.try_get("enabled")?,
         version: row.try_get("version")?,
         created_at: row.try_get("created_at")?,

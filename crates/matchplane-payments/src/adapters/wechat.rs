@@ -1,4 +1,7 @@
-use std::{fmt, time::SystemTime};
+use std::{
+    fmt,
+    time::{Duration, SystemTime},
+};
 
 use async_trait::async_trait;
 use secrecy::SecretString;
@@ -66,7 +69,9 @@ impl WechatPayGateway {
         require_https(base_url)?;
         Ok(Self {
             descriptor,
-            client: reqwest::Client::builder().build()?,
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()?,
             base_url: reqwest::Url::parse(base_url).map_err(|error| {
                 PaymentError::Invalid(format!("WeChat Pay base URL is invalid: {error}"))
             })?,

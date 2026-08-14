@@ -30,7 +30,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 - name: MATCHPLANE_ENVIRONMENT
   value: {{ .Values.runtime.environment | quote }}
 - name: MATCHPLANE_NODE_ID
-  value: {{ .Values.runtime.nodeId | quote }}
+  value: {{ required "runtime.nodeId must be a unique UUID" .Values.runtime.nodeId | quote }}
 - name: MATCHPLANE_DATABASE_URL
   valueFrom:
     secretKeyRef:

@@ -15,8 +15,7 @@ use matchplane_storage::{
     CreateViewingAppointment, EncryptedContact, ExposureMetrics, FinalizeOfflineDeal,
     MarketplaceParty, OfflineDeal, OfflineDealOutcome, OfflineDealProgress,
     RecommendVehicleListings, RecommendedListing, RecordExposure, ReleaseContact,
-    SellerPromotionCampaign,
-    TransitionViewingAppointment, VehicleListing, ViewingAppointment,
+    SellerPromotionCampaign, TransitionViewingAppointment, VehicleListing, ViewingAppointment,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

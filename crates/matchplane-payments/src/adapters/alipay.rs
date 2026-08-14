@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, time::Duration};
 
 use async_trait::async_trait;
 use secrecy::SecretString;
@@ -58,7 +58,9 @@ impl AlipayGateway {
         require_https(gateway_url)?;
         Ok(Self {
             descriptor,
-            client: reqwest::Client::builder().build()?,
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()?,
             gateway_url: reqwest::Url::parse(gateway_url).map_err(|error| {
                 PaymentError::Invalid(format!("Alipay gateway URL is invalid: {error}"))
             })?,

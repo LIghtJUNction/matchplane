@@ -129,6 +129,8 @@ In production, configure:
 - `MATCHPLANE_INVOICE_DATA_KEY_FILE` with a 32-byte AES key;
 - `MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE` with a random token of at least 24 bytes;
 - `MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE` with a separate random token for the core gateway APIs;
+- `MATCHPLANE_PAYMENT_CALLBACK_ORIGIN` with the platform-owned HTTPS origin used by payment
+  provider return and notification URLs. Marketplace callers cannot select another origin;
 - gateway-specific secret files referenced from administrator-created gateway configurations;
 - the WeChat merchant ID, certificate serial, API v3 key, private key, and AppID after merchant
   onboarding;
@@ -137,3 +139,9 @@ In production, configure:
 The administrator API is rooted at `/v1/admin/payment-*` and requires the payment administrator
 bearer token. The packaged systemd deployment binds the payment API to `127.0.0.1:8081`; Compose
 publishes it on configurable host port `MATCHPLANE_PAYMENT_HOST_PORT` (default `8081`).
+
+Invoice issuance is deliberately fail-closed until a real tax-invoice provider adapter is
+configured. `local_test` only runs in test mode and produces deterministic sandbox artifacts; it
+must never be selected for production issuance. The provider trait and encrypted invoice/correction
+lifecycle are ready for the provider-specific adapter and credentials to be added during merchant
+onboarding.
