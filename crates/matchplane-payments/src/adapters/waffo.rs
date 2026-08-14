@@ -7,8 +7,9 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::{
     AuthorizePayment, CapturePayment, GatewayDescriptor, GatewayKind, GatewayMode, GatewayStatus,
-    PaymentError, PaymentGateway, PaymentMethod, PaymentOutcome, PaymentStatus, QueryPayment,
-    RefundOutcome, RefundPayment, RefundStatus, VoidPayment,
+    PaymentError, PaymentGateway, PaymentMethod, PaymentOutcome, PaymentStatus, PaymentWebhook,
+    QueryPayment, RefundOutcome, RefundPayment, RefundStatus, RefundWebhook, VoidPayment,
+    WebhookEvent, WebhookRequest,
 };
 
 use super::common::{require_https, sign_rsa_sha256, verify_rsa_sha256};
@@ -294,5 +295,119 @@ impl PaymentGateway for WaffoGateway {
             healthy: true,
             message: "Waffo production configuration and signing keys loaded".to_owned(),
         })
+    }
+
+    fn webhook(&self, request: &WebhookRequest) -> Result<WebhookEvent, PaymentError> {
+        let signature = request
+            .header("X-SIGNATURE")
+            .ok_or(PaymentError::Signature)?;
+        verify_rsa_sha256(&self.waffo_public_key, &request.body, signature)?;
+        let value: Value = serde_json::from_slice(&request.body)?;
+        let data = value.get("data").unwrap_or(&value);
+        if let Some(merchant_id) = data
+            .get("merchantId")
+            .or_else(|| data.get("merchant_id"))
+            .and_then(Value::as_str)
+            && merchant_id != self.merchant_id
+        {
+            return Err(PaymentError::Signature);
+        }
+        let provider_event_id = data
+            .get("eventId")
+            .or_else(|| data.get("id"))
+            .or_else(|| value.get("eventId"))
+            .and_then(Value::as_str)
+            .or_else(|| data.get("acquiringOrderId").and_then(Value::as_str))
+            .ok_or_else(|| {
+                PaymentError::Invalid("Waffo webhook omitted event identity".to_owned())
+            })?
+            .to_owned();
+        let merchant_order_id = data
+            .get("merchantOrderId")
+            .or_else(|| data.get("merchant_order_id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let provider_reference = data
+            .get("acquiringOrderId")
+            .or_else(|| data.get("transactionId"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if data.get("refundStatus").is_some() || data.get("acquiringRefundId").is_some() {
+            let provider_status = data
+                .get("refundStatus")
+                .and_then(Value::as_str)
+                .unwrap_or("PROCESSING");
+            let status = match provider_status {
+                "REFUND_SUCCESS" | "SUCCESS" => RefundStatus::Succeeded,
+                "REFUND_FAIL" | "FAILED" => RefundStatus::Failed,
+                _ => RefundStatus::Pending,
+            };
+            let amount = data
+                .get("refundAmount")
+                .or_else(|| data.get("refund_amount"))
+                .and_then(Value::as_str)
+                .map(|value| {
+                    super::common::decimal_money(
+                        value,
+                        data.get("currency")
+                            .or_else(|| data.get("orderCurrency"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("CNY"),
+                        2,
+                    )
+                })
+                .transpose()?;
+            return Ok(WebhookEvent::Refund(RefundWebhook {
+                provider_event_id,
+                event_type: "waffo.refund".to_owned(),
+                merchant_order_id,
+                provider_reference,
+                refund_reference: data
+                    .get("acquiringRefundId")
+                    .or_else(|| data.get("refundRequestId"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                status,
+                provider_status: provider_status.to_owned(),
+                amount,
+            }));
+        }
+        let provider_status = data
+            .get("orderStatus")
+            .or_else(|| data.get("status"))
+            .and_then(Value::as_str)
+            .unwrap_or("UNKNOWN");
+        let status = match provider_status {
+            "PAY_SUCCESS" | "SUCCESS" => PaymentStatus::Captured,
+            "AUTHED_WAITING_CAPTURE" => PaymentStatus::Authorized,
+            "AUTHORIZATION_REQUIRED" => PaymentStatus::RequiresAction,
+            "ORDER_CLOSE" | "CLOSED" => PaymentStatus::Voided,
+            "FAILED" | "PAY_ERROR" => PaymentStatus::Failed,
+            _ => PaymentStatus::Pending,
+        };
+        let amount = data
+            .get("orderAmount")
+            .or_else(|| data.get("amount"))
+            .and_then(Value::as_str)
+            .map(|value| {
+                super::common::decimal_money(
+                    value,
+                    data.get("orderCurrency")
+                        .or_else(|| data.get("currency"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("CNY"),
+                    2,
+                )
+            })
+            .transpose()?;
+        Ok(WebhookEvent::Payment(PaymentWebhook {
+            provider_event_id,
+            event_type: "waffo.payment".to_owned(),
+            merchant_order_id,
+            provider_reference,
+            status,
+            provider_status: provider_status.to_owned(),
+            amount,
+        }))
     }
 }

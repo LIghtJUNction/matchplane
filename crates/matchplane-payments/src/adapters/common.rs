@@ -9,7 +9,7 @@ use rsa::{
 use secrecy::{ExposeSecret, SecretString};
 use signature::{SignatureEncoding, Signer, Verifier};
 
-use crate::PaymentError;
+use crate::{Money, PaymentError};
 
 pub(super) fn require_https(base_url: &str) -> Result<(), PaymentError> {
     let url = reqwest::Url::parse(base_url)
@@ -49,4 +49,43 @@ pub(super) fn verify_rsa_sha256(
     VerifyingKey::<Sha256>::new(public_key)
         .verify(message, &signature)
         .map_err(|_| PaymentError::Signature)
+}
+
+/// Parses a provider decimal amount without introducing floating-point rounding.
+pub(super) fn decimal_money(value: &str, currency: &str, scale: u8) -> Result<Money, PaymentError> {
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('-') || value.starts_with('+') {
+        return Err(PaymentError::Invalid(
+            "provider amount is invalid".to_owned(),
+        ));
+    }
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    if whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.len() > usize::from(scale)
+    {
+        return Err(PaymentError::Invalid(
+            "provider amount is invalid".to_owned(),
+        ));
+    }
+    let mut digits = whole.to_owned();
+    digits.push_str(fraction);
+    digits.extend(std::iter::repeat_n(
+        '0',
+        usize::from(scale) - fraction.len(),
+    ));
+    let amount = digits
+        .parse::<i128>()
+        .map_err(|_| PaymentError::Invalid("provider amount exceeds i128".to_owned()))?;
+    Money::new(amount, currency.to_owned(), scale)
+}
+
+pub(super) fn required_field<'a>(
+    value: Option<&'a str>,
+    field: &str,
+) -> Result<&'a str, PaymentError> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| PaymentError::Invalid(format!("provider webhook omitted {field}")))
 }

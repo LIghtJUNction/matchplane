@@ -1,12 +1,29 @@
 import type { VehicleListing } from "./types";
 
 const apiBase = (process.env.NEXT_PUBLIC_MATCHPLANE_API_BASE_URL ?? "/api").replace(/\/$/, "");
+const paymentApiBase = (
+  process.env.NEXT_PUBLIC_MATCHPLANE_PAYMENT_API_BASE_URL ?? "/payments-api"
+).replace(/\/$/, "");
 
 export interface PartySession {
   tenantId: string;
   partyId: string;
   role: "buyer" | "seller" | "both";
   accessToken: string;
+}
+
+/** Operator session supplied by the deployment's authenticated admin shell. */
+export interface AdminSession {
+  tenantId: string;
+  accessToken: string;
+}
+
+export interface PaymentSetting {
+  tenant_id: string;
+  active_mode: "test" | "production";
+  updated_by: string;
+  version: number;
+  updated_at: string;
 }
 
 export interface ContactExchange {
@@ -73,8 +90,82 @@ async function request<T>(path: string, init: RequestInit = {}, session?: PartyS
   return (await response.json()) as T;
 }
 
+async function paymentRequest<T>(
+  path: string,
+  init: RequestInit = {},
+  session?: AdminSession,
+): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("accept", "application/json");
+  if (init.body) headers.set("content-type", "application/json");
+  if (session) headers.set("authorization", `Bearer ${session.accessToken}`);
+  const response = await fetch(`${paymentApiBase}${path}`, { ...init, headers });
+  if (!response.ok) {
+    let message = `支付服务请求失败（${response.status}）`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // Preserve the HTTP status when an upstream error is not JSON.
+    }
+    throw new MarketplaceApiError(response.status, message);
+  }
+  return (await response.json()) as T;
+}
+
 export function isLiveMarketplaceEnabled(): boolean {
   return process.env.NEXT_PUBLIC_MATCHPLANE_LIVE_MODE === "true";
+}
+
+export function readAdminSession(): AdminSession | null {
+  try {
+    const raw = window.sessionStorage.getItem("matchplane.admin");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AdminSession;
+    if (
+      typeof parsed.tenantId !== "string" ||
+      !parsed.tenantId ||
+      typeof parsed.accessToken !== "string" ||
+      parsed.accessToken.length < 24
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function getPaymentSetting(
+  session: AdminSession,
+): Promise<PaymentSetting> {
+  return paymentRequest<PaymentSetting>(
+    `/v1/admin/payment-mode?tenant_id=${encodeURIComponent(session.tenantId)}`,
+    {},
+    session,
+  );
+}
+
+export function switchPaymentMode(input: {
+  session: AdminSession;
+  mode: "test" | "production";
+  expectedVersion: number;
+  reason: string;
+}): Promise<PaymentSetting> {
+  return paymentRequest<PaymentSetting>(
+    "/v1/admin/payment-mode",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        mode: input.mode,
+        expected_version: input.expectedVersion,
+        actor: "web-admin",
+        reason: input.reason,
+      }),
+    },
+    input.session,
+  );
 }
 
 export function readPartySession(role: PartySession["role"]): PartySession | null {

@@ -2,7 +2,8 @@ use matchplane_domain::{
     MarketplacePartyId, OfflineDealId, PaymentGatewayId, PaymentId, RefundId, TenantId,
 };
 use matchplane_payments::{
-    PaymentError, PaymentOutcome, PaymentStatus, RefundOutcome, calculate_commission_reversal,
+    PaymentError, PaymentOutcome, PaymentStatus, PaymentWebhook, RefundOutcome, RefundWebhook,
+    WebhookEvent, calculate_commission_reversal,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -134,6 +135,12 @@ pub struct PreparedRefund {
     pub execute: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct WebhookReceipt {
+    pub duplicate: bool,
+    pub status: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct PaymentStore {
     pool: PgPool,
@@ -168,6 +175,22 @@ impl PaymentStore {
         .fetch_one(&self.pool)
         .await
         .map_err(StoreError::from)
+    }
+
+    pub async fn webhook_gateway(
+        &self,
+        gateway_id: PaymentGatewayId,
+    ) -> Result<GatewayConfig, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, name, gateway_kind, mode, settings, credential_secret_ref \
+             FROM payment_gateway_configs \
+             WHERE id = $1 AND enabled AND mode = 'production'",
+        )
+        .bind(gateway_id.into_uuid())
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(StoreError::NotFound("enabled production payment gateway"))?;
+        gateway_from_row(&row).map_err(StoreError::from)
     }
 
     pub async fn prepare_authorization(
@@ -334,6 +357,296 @@ impl PaymentStore {
         let payment = payment_in(&mut transaction, outcome.payment_id).await?;
         transaction.commit().await?;
         Ok(payment)
+    }
+
+    /// Persists and applies one authenticated provider callback. The inbox is written before the
+    /// provider-specific state change so a process crash can safely retry a `received` event.
+    pub async fn process_webhook(
+        &self,
+        gateway_id: PaymentGatewayId,
+        event: &WebhookEvent,
+        payload_hash: &[u8],
+    ) -> Result<WebhookReceipt, StoreError> {
+        let (provider_event_id, event_type, provider_reference) = match event {
+            WebhookEvent::Payment(value) => (
+                value.provider_event_id.as_str(),
+                value.event_type.as_str(),
+                value.provider_reference.as_deref(),
+            ),
+            WebhookEvent::Refund(value) => (
+                value.provider_event_id.as_str(),
+                value.event_type.as_str(),
+                value.provider_reference.as_deref(),
+            ),
+        };
+        if provider_event_id.is_empty() || provider_event_id.len() > 256 {
+            return Err(StoreError::Invalid(
+                "provider webhook event id must contain 1..=256 bytes".to_owned(),
+            ));
+        }
+        if payload_hash.len() != 32 {
+            return Err(StoreError::Invalid(
+                "provider webhook payload hash must contain 32 bytes".to_owned(),
+            ));
+        }
+        let mut transaction = self.pool.begin().await?;
+        let inserted = sqlx::query(
+            "INSERT INTO payment_webhook_inbox \
+             (gateway_id, provider_event_id, payload_hash, event_type, provider_reference, status) \
+             VALUES ($1, $2, $3, $4, $5, 'received') \
+             ON CONFLICT (gateway_id, provider_event_id) DO NOTHING",
+        )
+        .bind(gateway_id.into_uuid())
+        .bind(provider_event_id)
+        .bind(payload_hash)
+        .bind(event_type)
+        .bind(provider_reference)
+        .execute(&mut *transaction)
+        .await?;
+        if inserted.rows_affected() == 0 {
+            let row = sqlx::query(
+                "SELECT payload_hash, status FROM payment_webhook_inbox \
+                 WHERE gateway_id = $1 AND provider_event_id = $2 FOR UPDATE",
+            )
+            .bind(gateway_id.into_uuid())
+            .bind(provider_event_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+            let stored_hash: Vec<u8> = row.try_get("payload_hash")?;
+            if stored_hash != payload_hash {
+                return Err(StoreError::Conflict(
+                    "provider webhook event id was reused with a different payload".to_owned(),
+                ));
+            }
+            let status: String = row.try_get("status")?;
+            if status == "processed" || status == "ignored" {
+                transaction.commit().await?;
+                return Ok(WebhookReceipt {
+                    duplicate: true,
+                    status,
+                });
+            }
+            sqlx::query(
+                "UPDATE payment_webhook_inbox SET status = 'received', failure_reason = NULL, \
+                 processed_at = NULL WHERE gateway_id = $1 AND provider_event_id = $2",
+            )
+            .bind(gateway_id.into_uuid())
+            .bind(provider_event_id)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+
+        let result = match event {
+            WebhookEvent::Payment(value) => self.apply_payment_webhook(gateway_id, value).await,
+            WebhookEvent::Refund(value) => self.apply_refund_webhook(gateway_id, value).await,
+        };
+        match result {
+            Ok(true) => {
+                self.finish_webhook(gateway_id, provider_event_id, "processed", None)
+                    .await?;
+                Ok(WebhookReceipt {
+                    duplicate: false,
+                    status: "processed".to_owned(),
+                })
+            }
+            Ok(false) => {
+                self.finish_webhook(gateway_id, provider_event_id, "ignored", None)
+                    .await?;
+                Ok(WebhookReceipt {
+                    duplicate: false,
+                    status: "ignored".to_owned(),
+                })
+            }
+            Err(error) => {
+                self.finish_webhook(
+                    gateway_id,
+                    provider_event_id,
+                    "failed",
+                    Some(&error.to_string()),
+                )
+                .await?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn finish_webhook(
+        &self,
+        gateway_id: PaymentGatewayId,
+        provider_event_id: &str,
+        status: &str,
+        failure_reason: Option<&str>,
+    ) -> Result<(), StoreError> {
+        sqlx::query(
+            "UPDATE payment_webhook_inbox SET status = $3, failure_reason = $4, \
+             processed_at = CASE WHEN $3 IN ('processed', 'ignored') THEN clock_timestamp() ELSE NULL END \
+             WHERE gateway_id = $1 AND provider_event_id = $2",
+        )
+        .bind(gateway_id.into_uuid())
+        .bind(provider_event_id)
+        .bind(status)
+        .bind(failure_reason)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn apply_payment_webhook(
+        &self,
+        gateway_id: PaymentGatewayId,
+        event: &PaymentWebhook,
+    ) -> Result<bool, StoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT id, tenant_id, gateway_id, offline_deal_id, payer_party_id, merchant_order_id, \
+                    transaction_channel, purpose, gateway_kind, gateway_mode, payment_method, \
+                    amount::text AS amount, captured_amount::text AS captured_amount, \
+                    refunded_amount::text AS refunded_amount, commission_amount::text AS commission_amount, \
+                    commission_refunded_amount::text AS commission_refunded_amount, currency, currency_scale, \
+                    status, provider_reference, redirect_url, provider_status, version, created_at, updated_at \
+             FROM payment_intents \
+             WHERE gateway_id = $1 AND (\
+                    ($2::text IS NOT NULL AND merchant_order_id = $2) OR \
+                    ($3::text IS NOT NULL AND provider_reference = $3)) \
+             ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
+        )
+        .bind(gateway_id.into_uuid())
+        .bind(event.merchant_order_id.as_deref())
+        .bind(event.provider_reference.as_deref())
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(row) = row else {
+            transaction.commit().await?;
+            return Ok(false);
+        };
+        let payment = payment_from_row(&row)?;
+        if let Some(amount) = &event.amount {
+            let expected = exact(&payment.amount)?;
+            if amount.currency != payment.currency
+                || i16::from(amount.scale) != payment.currency_scale
+                || amount.exact_amount()? > expected
+            {
+                return Err(StoreError::Invalid(
+                    "provider webhook amount does not match the payment".to_owned(),
+                ));
+            }
+        }
+        let target = event.status.as_str();
+        if target == "captured"
+            && event
+                .amount
+                .as_ref()
+                .map(matchplane_payments::Money::exact_amount)
+                .transpose()?
+                .is_some_and(|amount| amount <= 0)
+        {
+            return Err(StoreError::Invalid(
+                "provider webhook captured amount must be positive".to_owned(),
+            ));
+        }
+        if !reconciliation_transition_allowed(&payment.status, target) {
+            insert_payment_event(
+                &mut transaction,
+                payment.tenant_id,
+                payment.payment_id,
+                "provider_webhook_stale_ignored",
+                Some(&payment.status),
+                &payment.status,
+                Some(&event.provider_status),
+            )
+            .await?;
+            transaction.commit().await?;
+            return Ok(true);
+        }
+        let captured_amount = if target == "captured" {
+            let current = exact(&payment.captured_amount)?;
+            let reported = event
+                .amount
+                .as_ref()
+                .map(matchplane_payments::Money::exact_amount)
+                .transpose()?
+                .unwrap_or(exact(&payment.amount)?);
+            current.max(reported)
+        } else {
+            exact(&payment.captured_amount)?
+        };
+        sqlx::query(
+            "UPDATE payment_intents SET status = $2, \
+                 provider_reference = COALESCE(NULLIF($3, ''), provider_reference), \
+                 provider_status = $4, captured_amount = $5::numeric, \
+                 commission_amount = CASE WHEN $2 = 'captured' AND purpose = 'platform_commission' \
+                                      THEN $5::numeric ELSE commission_amount END, \
+                 version = version + 1 WHERE id = $1",
+        )
+        .bind(payment.payment_id.into_uuid())
+        .bind(target)
+        .bind(event.provider_reference.as_deref().unwrap_or(""))
+        .bind(&event.provider_status)
+        .bind(captured_amount.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        insert_payment_event(
+            &mut transaction,
+            payment.tenant_id,
+            payment.payment_id,
+            "provider_webhook",
+            Some(&payment.status),
+            target,
+            Some(&event.provider_status),
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    async fn apply_refund_webhook(
+        &self,
+        gateway_id: PaymentGatewayId,
+        event: &RefundWebhook,
+    ) -> Result<bool, StoreError> {
+        let row = sqlx::query(
+            "SELECT r.id FROM payment_refunds r \
+             JOIN payment_intents p ON p.id = r.payment_id \
+             WHERE p.gateway_id = $1 AND (\
+                ($2::text IS NOT NULL AND r.id::text = $2) OR \
+                ($3::text IS NOT NULL AND r.provider_reference = $3) OR \
+                ($4::text IS NOT NULL AND p.merchant_order_id = $4 AND r.status IN ('requested', 'pending', 'unknown'))\
+             ) ORDER BY r.created_at DESC LIMIT 1",
+        )
+        .bind(gateway_id.into_uuid())
+        .bind(event.refund_reference.as_deref())
+        .bind(event.provider_reference.as_deref())
+        .bind(event.merchant_order_id.as_deref())
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(false);
+        };
+        let refund_id = RefundId::from_uuid(row.try_get("id")?);
+        let refund = self.refund(refund_id).await?;
+        if let Some(amount) = &event.amount
+            && (amount.currency != refund.currency
+                || i16::from(amount.scale) != refund.currency_scale
+                || amount.exact_amount()? != exact(&refund.amount)?)
+        {
+            return Err(StoreError::Invalid(
+                "provider webhook refund amount does not match the refund".to_owned(),
+            ));
+        }
+        let provider_reference = event
+            .provider_reference
+            .clone()
+            .or_else(|| event.refund_reference.clone())
+            .unwrap_or_else(|| refund_id.to_string());
+        let outcome = RefundOutcome {
+            refund_id,
+            provider_reference,
+            status: event.status,
+            provider_status: event.provider_status.clone(),
+        };
+        self.complete_refund(refund_id, Ok(&outcome)).await?;
+        Ok(true)
     }
 
     pub async fn fail_authorization(

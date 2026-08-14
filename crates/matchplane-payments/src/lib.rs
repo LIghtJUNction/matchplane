@@ -15,13 +15,14 @@ pub use adapters::{AlipayGateway, EpayGateway, WaffoGateway, WechatPayGateway};
 pub use error::PaymentError;
 pub use gateway::PaymentGateway;
 pub use invoice::{
-    InvoiceArtifact, InvoiceOutcome, InvoiceProvider, InvoiceRecipient, IssueInvoice,
-    TestInvoiceProvider,
+    HttpInvoiceProvider, InvoiceArtifact, InvoiceOutcome, InvoiceProvider, InvoiceRecipient,
+    IssueInvoice, TestInvoiceProvider,
 };
 pub use test_gateway::TestGateway;
 pub use types::{
     AuthorizePayment, CapturePayment, GatewayCapabilities, GatewayDescriptor, GatewayKind,
     GatewayMode, GatewayStatus, InvoiceKind, InvoiceStatus, Money, PaymentMethod, PaymentOutcome,
-    PaymentStatus, PaymentToken, QueryPayment, RefundOutcome, RefundPayment, RefundStatus,
-    VoidPayment, calculate_commission, calculate_commission_reversal,
+    PaymentStatus, PaymentToken, PaymentWebhook, QueryPayment, RefundOutcome, RefundPayment,
+    RefundStatus, RefundWebhook, VoidPayment, WebhookEvent, WebhookRequest, calculate_commission,
+    calculate_commission_reversal,
 };

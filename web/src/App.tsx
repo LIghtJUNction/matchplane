@@ -20,9 +20,12 @@ import { SellerDashboard } from "./components/SellerDashboard";
 import { recommendations } from "./data";
 import {
   createBuyerIntroduction,
+  getPaymentSetting,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
+  readAdminSession,
   readPartySession,
+  switchPaymentMode,
 } from "./api";
 import type { VehicleListing, WorkspaceRole } from "./types";
 
@@ -37,6 +40,7 @@ export function App() {
   const [listing, setListing] = useState<VehicleListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
+  const [paymentModeVersion, setPaymentModeVersion] = useState(1);
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -62,6 +66,23 @@ export function App() {
     window.history.replaceState(null, "", url);
   }, [hydrated, role]);
 
+  useEffect(() => {
+    if (!hydrated || role !== "platform" || !isLiveMarketplaceEnabled()) return;
+    const session = readAdminSession();
+    if (!session) {
+      setNotice("管理员会话未连接，当前仅显示本地演示支付模式");
+      return;
+    }
+    void getPaymentSetting(session)
+      .then((setting) => {
+        setPaymentMode(setting.active_mode);
+        setPaymentModeVersion(setting.version);
+      })
+      .catch((error) => {
+        setNotice(error instanceof Error ? error.message : "支付模式读取失败");
+      });
+  }, [hydrated, role]);
+
   const selectRole = (nextRole: WorkspaceRole) => {
     setRole(nextRole);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -69,6 +90,31 @@ export function App() {
 
   const confirmModeChange = () => {
     const nextMode = paymentMode === "test" ? "production" : "test";
+    if (isLiveMarketplaceEnabled()) {
+      const session = readAdminSession();
+      if (!session) {
+        setModeDialogOpen(false);
+        setNotice("管理员会话未连接，无法修改真实支付模式");
+        return;
+      }
+      void switchPaymentMode({
+        session,
+        mode: nextMode,
+        expectedVersion: paymentModeVersion,
+        reason: `web-admin switch to ${nextMode}`,
+      })
+        .then((setting) => {
+          setPaymentMode(setting.active_mode);
+          setPaymentModeVersion(setting.version);
+          setModeDialogOpen(false);
+          setNotice(`支付系统已切换为${setting.active_mode === "test" ? "测试" : "生产"}模式`);
+        })
+        .catch((error) => {
+          setModeDialogOpen(false);
+          setNotice(error instanceof Error ? error.message : "支付模式切换失败");
+        });
+      return;
+    }
     setPaymentMode(nextMode);
     setModeDialogOpen(false);
     setNotice(`支付系统已切换为${nextMode === "test" ? "测试" : "生产"}模式`);

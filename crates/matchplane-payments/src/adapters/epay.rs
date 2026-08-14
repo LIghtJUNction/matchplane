@@ -4,14 +4,17 @@ use async_trait::async_trait;
 use md5::{Digest, Md5};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
+use subtle::ConstantTimeEq;
+use url::form_urlencoded;
 
 use crate::{
     AuthorizePayment, CapturePayment, GatewayDescriptor, GatewayKind, GatewayMode, GatewayStatus,
-    PaymentError, PaymentGateway, PaymentMethod, PaymentOutcome, PaymentStatus, QueryPayment,
-    RefundOutcome, RefundPayment, RefundStatus, VoidPayment,
+    PaymentError, PaymentGateway, PaymentMethod, PaymentOutcome, PaymentStatus, PaymentWebhook,
+    QueryPayment, RefundOutcome, RefundPayment, RefundStatus, VoidPayment, WebhookEvent,
+    WebhookRequest,
 };
 
-use super::common::require_https;
+use super::common::{decimal_money, require_https, required_field};
 
 /// EPay-compatible redirect, query, and refund adapter.
 pub struct EpayGateway {
@@ -20,6 +23,7 @@ pub struct EpayGateway {
     base_url: reqwest::Url,
     merchant_id: String,
     merchant_key: SecretString,
+    currency: String,
 }
 
 impl fmt::Debug for EpayGateway {
@@ -30,6 +34,7 @@ impl fmt::Debug for EpayGateway {
             .field("base_url", &self.base_url)
             .field("merchant_id", &self.merchant_id)
             .field("merchant_key", &"[REDACTED]")
+            .field("currency", &self.currency)
             .finish()
     }
 }
@@ -47,6 +52,18 @@ impl EpayGateway {
         merchant_id: impl Into<String>,
         merchant_key: SecretString,
     ) -> Result<Self, PaymentError> {
+        Self::with_currency(descriptor, base_url, merchant_id, merchant_key, "CNY")
+    }
+
+    /// Builds an EPay adapter with the callback currency used by the protocol, which omits a
+    /// currency field from its notification payload.
+    pub fn with_currency(
+        descriptor: GatewayDescriptor,
+        base_url: &str,
+        merchant_id: impl Into<String>,
+        merchant_key: SecretString,
+        currency: impl Into<String>,
+    ) -> Result<Self, PaymentError> {
         if descriptor.kind != GatewayKind::Epay || descriptor.mode != GatewayMode::Production {
             return Err(PaymentError::Invalid(
                 "EPay adapter requires a production epay descriptor".to_owned(),
@@ -63,6 +80,7 @@ impl EpayGateway {
             })?,
             merchant_id: merchant_id.into(),
             merchant_key,
+            currency: currency.into(),
         })
     }
 
@@ -233,6 +251,71 @@ impl PaymentGateway for EpayGateway {
             message: "EPay production configuration loaded".to_owned(),
         })
     }
+
+    fn webhook(&self, request: &WebhookRequest) -> Result<WebhookEvent, PaymentError> {
+        let params = form_urlencoded::parse(&request.body)
+            .into_owned()
+            .collect::<BTreeMap<_, _>>();
+        let provided = required_field(params.get("sign").map(String::as_str), "sign")?;
+        if params.get("sign_type").map(String::as_str) != Some("MD5")
+            || params.get("pid").map(String::as_str) != Some(self.merchant_id.as_str())
+        {
+            return Err(PaymentError::Signature);
+        }
+        let canonical = params
+            .iter()
+            .filter(|(key, value)| {
+                key.as_str() != "sign" && key.as_str() != "sign_type" && !value.is_empty()
+            })
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let mut hasher = Md5::new();
+        hasher.update(canonical.as_bytes());
+        hasher.update(self.merchant_key.expose_secret().as_bytes());
+        let expected = hex::encode(hasher.finalize());
+        if expected.as_bytes().ct_eq(provided.as_bytes()).unwrap_u8() != 1 {
+            return Err(PaymentError::Signature);
+        }
+        let status = required_field(
+            params.get("trade_status").map(String::as_str),
+            "trade_status",
+        )?;
+        let merchant_order_id = required_field(
+            params.get("out_trade_no").map(String::as_str),
+            "out_trade_no",
+        )?;
+        let provider_reference = params
+            .get("trade_no")
+            .filter(|value| !value.is_empty())
+            .cloned()
+            .unwrap_or_else(|| merchant_order_id.to_owned());
+        let provider_event_id = params
+            .get("trade_no")
+            .filter(|value| !value.is_empty())
+            .cloned()
+            .unwrap_or_else(|| format!("{merchant_order_id}:{status}"));
+        let normalized = match status {
+            "TRADE_SUCCESS" | "SUCCESS" | "TRADE_FINISHED" => PaymentStatus::Captured,
+            "TRADE_CLOSED" | "CLOSED" => PaymentStatus::Voided,
+            "WAIT_BUYER_PAY" | "NOTPAY" => PaymentStatus::RequiresAction,
+            _ => PaymentStatus::Pending,
+        };
+        let amount = params
+            .get("money")
+            .or_else(|| params.get("total_amount"))
+            .map(|value| decimal_money(value, &self.currency, 2))
+            .transpose()?;
+        Ok(WebhookEvent::Payment(PaymentWebhook {
+            provider_event_id,
+            event_type: format!("epay.{status}"),
+            merchant_order_id: Some(merchant_order_id.to_owned()),
+            provider_reference: Some(provider_reference),
+            status: normalized,
+            provider_status: status.to_owned(),
+            amount,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -291,5 +374,64 @@ mod tests {
             parameters.get("sign").map(String::as_str),
             Some("secret-key")
         );
+    }
+
+    #[test]
+    fn epay_webhook_requires_a_valid_md5_signature_and_normalizes_payment() {
+        let gateway = EpayGateway::new(
+            GatewayDescriptor {
+                gateway_id: PaymentGatewayId::new(),
+                name: "epay".to_owned(),
+                kind: GatewayKind::Epay,
+                mode: GatewayMode::Production,
+                capabilities: GatewayCapabilities {
+                    manual_capture: false,
+                    void: false,
+                    refund: true,
+                    partial_capture: false,
+                    partial_refund: false,
+                    status_query: true,
+                },
+            },
+            "https://pay.example.invalid/",
+            "merchant",
+            SecretString::new("secret-key".into()),
+        )
+        .expect("test gateway is valid");
+        let mut params = BTreeMap::from([
+            ("money".to_owned(), "100.00".to_owned()),
+            ("out_trade_no".to_owned(), "order-1".to_owned()),
+            ("pid".to_owned(), "merchant".to_owned()),
+            ("trade_no".to_owned(), "trade-1".to_owned()),
+            ("trade_status".to_owned(), "TRADE_SUCCESS".to_owned()),
+            ("type".to_owned(), "alipay".to_owned()),
+        ]);
+        let canonical = params
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let mut hasher = Md5::new();
+        hasher.update(canonical.as_bytes());
+        hasher.update(b"secret-key");
+        params.insert("sign".to_owned(), hex::encode(hasher.finalize()));
+        params.insert("sign_type".to_owned(), "MD5".to_owned());
+        let body = params
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        let event = gateway
+            .webhook(&WebhookRequest {
+                headers: Vec::new(),
+                body: body.into_bytes(),
+            })
+            .expect("callback signature should verify");
+        let WebhookEvent::Payment(event) = event else {
+            panic!("expected payment event");
+        };
+        assert_eq!(event.provider_event_id, "trade-1");
+        assert_eq!(event.status, PaymentStatus::Captured);
+        assert_eq!(event.amount.expect("amount").amount, "10000");
     }
 }

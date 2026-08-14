@@ -142,6 +142,22 @@ publishes it on configurable host port `MATCHPLANE_PAYMENT_HOST_PORT` (default `
 
 Invoice issuance is deliberately fail-closed until a real tax-invoice provider adapter is
 configured. `local_test` only runs in test mode and produces deterministic sandbox artifacts; it
-must never be selected for production issuance. The provider trait and encrypted invoice/correction
-lifecycle are ready for the provider-specific adapter and credentials to be added during merchant
-onboarding.
+must never be selected for production issuance. Production tenants can use the `http_json` (or
+`fapiao_http`) provider adapter. Its `invoice_provider_configs.settings` must contain an HTTPS
+`base_url` and optional `issue_path`, `void_path`, and `red_letter_path`; its credential reference
+must resolve to a bearer token. The provider must accept the documented JSON request and return
+`provider_reference`, `invoice_number`, and an optional bounded `artifact` object with
+`media_type` and base64 `content_base64`. The service encrypts the returned artifact before storing
+it, and rejects missing references, malformed artifacts, non-HTTPS endpoints, and local-test
+providers in production. This keeps vendor onboarding explicit while leaving the tax provider
+contract replaceable.
+
+Provider callbacks are received at
+`POST /payments-api/v1/payment-webhooks/{production_gateway_id}`. EPay callbacks use MD5, Alipay
+uses RSA2, WeChat Pay v3 uses platform RSA verification plus API-v3 AES-GCM resource decryption,
+and Waffo uses its configured RSA public key. Every verified event is bound to the configured
+gateway and merchant order, checked against the stored amount, deduplicated by provider event id,
+and applied to the payment/refund state machine. Unknown or mismatched events are retained in the
+inbox for audit and never mutate a payment. Successful EPay and Alipay callbacks receive the
+provider-required plain-text `success` acknowledgement; WeChat receives `{"code":"SUCCESS"}` and
+Waffo receives `{"code":"0"}`.

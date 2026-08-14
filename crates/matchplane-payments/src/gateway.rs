@@ -2,7 +2,8 @@ use async_trait::async_trait;
 
 use crate::{
     AuthorizePayment, CapturePayment, GatewayDescriptor, GatewayStatus, PaymentError,
-    PaymentOutcome, QueryPayment, RefundOutcome, RefundPayment, VoidPayment,
+    PaymentOutcome, QueryPayment, RefundOutcome, RefundPayment, VoidPayment, WebhookEvent,
+    WebhookRequest,
 };
 
 /// Standard provider interface used by all payment methods and gateway adapters.
@@ -28,4 +29,13 @@ pub trait PaymentGateway: std::fmt::Debug + Send + Sync {
 
     /// Checks provider reachability/configuration without performing a transaction.
     async fn health(&self) -> Result<GatewayStatus, PaymentError>;
+
+    /// Authenticates and normalizes a provider callback. Adapters that do not expose a documented
+    /// callback protocol fail closed instead of accepting an unsigned event.
+    fn webhook(&self, _request: &WebhookRequest) -> Result<WebhookEvent, PaymentError> {
+        Err(PaymentError::Unsupported {
+            gateway: "unknown",
+            operation: "webhook",
+        })
+    }
 }

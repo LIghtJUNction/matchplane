@@ -434,6 +434,78 @@ pub struct QueryPayment {
     pub provider_reference: Option<String>,
 }
 
+/// Raw provider callback passed to a gateway adapter for authentication and normalization.
+///
+/// The payment service deliberately keeps this transport-neutral so adapters can be exercised
+/// without coupling the payment domain to Axum or another HTTP framework.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebhookRequest {
+    /// Case-insensitive HTTP headers copied from the inbound request.
+    pub headers: Vec<(String, String)>,
+    /// Exact request body bytes used for signature verification.
+    pub body: Vec<u8>,
+}
+
+impl WebhookRequest {
+    /// Returns a header value using case-insensitive matching.
+    #[must_use]
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// Normalized, authenticated provider event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WebhookEvent {
+    /// Payment authorization/capture/status notification.
+    Payment(PaymentWebhook),
+    /// Refund status notification.
+    Refund(RefundWebhook),
+}
+
+/// Normalized payment webhook after provider signature verification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentWebhook {
+    /// Provider event id used for durable deduplication.
+    pub provider_event_id: String,
+    /// Provider event name retained for audit.
+    pub event_type: String,
+    /// Merchant order id, when the provider echoes it.
+    pub merchant_order_id: Option<String>,
+    /// Provider order reference, when distinct from the merchant order id.
+    pub provider_reference: Option<String>,
+    /// Normalized payment state.
+    pub status: PaymentStatus,
+    /// Provider state retained for reconciliation/audit.
+    pub provider_status: String,
+    /// Provider-reported amount, when available for invariant checks.
+    pub amount: Option<Money>,
+}
+
+/// Normalized refund webhook after provider signature verification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefundWebhook {
+    /// Provider event id used for durable deduplication.
+    pub provider_event_id: String,
+    /// Provider event name retained for audit.
+    pub event_type: String,
+    /// Original merchant order id, when available.
+    pub merchant_order_id: Option<String>,
+    /// Provider payment reference, when available.
+    pub provider_reference: Option<String>,
+    /// Our merchant refund reference, when echoed by the provider.
+    pub refund_reference: Option<String>,
+    /// Normalized refund state.
+    pub status: RefundStatus,
+    /// Provider state retained for reconciliation/audit.
+    pub provider_status: String,
+    /// Provider-reported refund amount, when available for invariant checks.
+    pub amount: Option<Money>,
+}
+
 /// Provider-neutral payment state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

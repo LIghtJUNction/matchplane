@@ -1,6 +1,7 @@
 use matchplane_domain::{InvoiceId, OfflineDealId, PaymentId, TenantId};
 use matchplane_payments::{InvoiceKind, InvoiceOutcome, PaymentError};
 use serde::Serialize;
+use serde_json::Value;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -65,6 +66,13 @@ pub struct NewInvoice {
 pub struct PreparedInvoice {
     pub invoice: InvoiceRecord,
     pub duplicate: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct InvoiceProviderConfig {
+    pub provider_key: String,
+    pub settings: Value,
+    pub credential_secret_ref: String,
 }
 
 #[derive(Debug)]
@@ -187,6 +195,33 @@ impl InvoiceStore {
             .await?
             .ok_or(StoreError::NotFound("invoice"))?;
         invoice_from_row(&row)
+    }
+
+    pub async fn provider_config(
+        &self,
+        invoice: &InvoiceRecord,
+    ) -> Result<InvoiceProviderConfig, StoreError> {
+        let row = sqlx::query(
+            "SELECT provider_key, mode, settings, credential_secret_ref \
+             FROM invoice_provider_configs \
+             WHERE tenant_id = $1 AND provider_key = $2 AND mode = $3 AND enabled",
+        )
+        .bind(invoice.tenant_id.into_uuid())
+        .bind(&invoice.provider_key)
+        .bind(&invoice.provider_mode)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(StoreError::NotFound("invoice provider configuration"))?;
+        let credential_secret_ref = row
+            .try_get::<Option<String>, _>("credential_secret_ref")?
+            .ok_or_else(|| {
+                StoreError::Invalid("invoice provider credential is missing".to_owned())
+            })?;
+        Ok(InvoiceProviderConfig {
+            provider_key: row.try_get("provider_key")?,
+            settings: row.try_get("settings")?,
+            credential_secret_ref,
+        })
     }
 
     pub async fn corrections(

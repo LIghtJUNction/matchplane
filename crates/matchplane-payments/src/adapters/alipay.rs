@@ -4,14 +4,18 @@ use async_trait::async_trait;
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use time::{OffsetDateTime, UtcOffset, format_description};
+use url::form_urlencoded;
 
 use crate::{
     AuthorizePayment, CapturePayment, GatewayDescriptor, GatewayKind, GatewayMode, GatewayStatus,
-    PaymentError, PaymentGateway, PaymentMethod, PaymentOutcome, PaymentStatus, QueryPayment,
-    RefundOutcome, RefundPayment, RefundStatus, VoidPayment,
+    PaymentError, PaymentGateway, PaymentMethod, PaymentOutcome, PaymentStatus, PaymentWebhook,
+    QueryPayment, RefundOutcome, RefundPayment, RefundStatus, RefundWebhook, VoidPayment,
+    WebhookEvent, WebhookRequest,
 };
 
-use super::common::{require_https, sign_rsa_sha256, verify_rsa_sha256};
+use super::common::{
+    decimal_money, require_https, required_field, sign_rsa_sha256, verify_rsa_sha256,
+};
 
 /// Direct Alipay OpenAPI RSA2 adapter for website and mobile website payments.
 pub struct AlipayGateway {
@@ -318,5 +322,101 @@ impl PaymentGateway for AlipayGateway {
             healthy: true,
             message: "Alipay OpenAPI adapter configuration and RSA2 keys loaded".to_owned(),
         })
+    }
+
+    fn webhook(&self, request: &WebhookRequest) -> Result<WebhookEvent, PaymentError> {
+        let params = form_urlencoded::parse(&request.body)
+            .into_owned()
+            .collect::<BTreeMap<_, _>>();
+        let signature = required_field(params.get("sign").map(String::as_str), "sign")?;
+        if params.get("sign_type").map(String::as_str) != Some("RSA2") {
+            return Err(PaymentError::Signature);
+        }
+        if params.get("app_id").map(String::as_str) != Some(self.app_id.as_str()) {
+            return Err(PaymentError::Signature);
+        }
+        let canonical = params
+            .iter()
+            .filter(|(key, value)| {
+                key.as_str() != "sign" && key.as_str() != "sign_type" && !value.is_empty()
+            })
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("&");
+        verify_rsa_sha256(&self.alipay_public_key, canonical.as_bytes(), signature)?;
+
+        let merchant_order_id = params
+            .get("out_trade_no")
+            .filter(|value| !value.is_empty())
+            .cloned();
+        let provider_reference = params
+            .get("trade_no")
+            .filter(|value| !value.is_empty())
+            .cloned()
+            .or_else(|| merchant_order_id.clone());
+        let provider_event_id = params
+            .get("notify_id")
+            .filter(|value| !value.is_empty())
+            .cloned()
+            .or_else(|| {
+                let reference = provider_reference.clone()?;
+                let status = params.get("trade_status")?;
+                Some(format!("{reference}:{status}"))
+            })
+            .ok_or_else(|| {
+                PaymentError::Invalid("Alipay webhook omitted event identity".to_owned())
+            })?;
+
+        if let Some(refund_status) = params
+            .get("refund_status")
+            .filter(|value| !value.is_empty())
+        {
+            let status = match refund_status.as_str() {
+                "REFUND_SUCCESS" => RefundStatus::Succeeded,
+                "REFUND_CLOSED" | "REFUND_FAIL" => RefundStatus::Failed,
+                _ => RefundStatus::Pending,
+            };
+            let amount = params
+                .get("refund_fee")
+                .map(|value| decimal_money(value, "CNY", 2))
+                .transpose()?;
+            return Ok(WebhookEvent::Refund(RefundWebhook {
+                provider_event_id,
+                event_type: format!("alipay.{refund_status}"),
+                merchant_order_id,
+                provider_reference,
+                refund_reference: params
+                    .get("out_biz_no")
+                    .filter(|value| !value.is_empty())
+                    .cloned(),
+                status,
+                provider_status: refund_status.clone(),
+                amount,
+            }));
+        }
+
+        let provider_status = required_field(
+            params.get("trade_status").map(String::as_str),
+            "trade_status",
+        )?;
+        let status = match provider_status {
+            "TRADE_SUCCESS" | "TRADE_FINISHED" => PaymentStatus::Captured,
+            "TRADE_CLOSED" => PaymentStatus::Voided,
+            "WAIT_BUYER_PAY" => PaymentStatus::RequiresAction,
+            _ => PaymentStatus::Pending,
+        };
+        let amount = params
+            .get("total_amount")
+            .map(|value| decimal_money(value, "CNY", 2))
+            .transpose()?;
+        Ok(WebhookEvent::Payment(PaymentWebhook {
+            provider_event_id,
+            event_type: format!("alipay.{provider_status}"),
+            merchant_order_id,
+            provider_reference,
+            status,
+            provider_status: provider_status.to_owned(),
+            amount,
+        }))
     }
 }

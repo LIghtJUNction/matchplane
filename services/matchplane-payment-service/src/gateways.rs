@@ -59,11 +59,12 @@ impl GatewayFactory {
             GatewayKind::Test => Ok(Arc::new(TestGateway::new(descriptor))),
             GatewayKind::Epay => {
                 let secrets = secrets(config)?;
-                Ok(Arc::new(EpayGateway::new(
+                Ok(Arc::new(EpayGateway::with_currency(
                     descriptor,
                     required_setting(config, "base_url")?,
                     required_setting(config, "merchant_id")?,
                     secret_field(&secrets, "merchant_key")?,
+                    setting(config, "currency").unwrap_or("CNY"),
                 )?))
             }
             GatewayKind::WaffoPancake => {
@@ -79,7 +80,7 @@ impl GatewayFactory {
             }
             GatewayKind::WechatPayV3 => {
                 let secrets = secrets(config)?;
-                Ok(Arc::new(WechatPayGateway::new(
+                Ok(Arc::new(WechatPayGateway::with_api_v3_key(
                     descriptor,
                     setting(config, "base_url").unwrap_or("https://api.mch.weixin.qq.com/"),
                     required_setting(config, "app_id")?,
@@ -88,6 +89,7 @@ impl GatewayFactory {
                     secret_field(&secrets, "merchant_private_key")?,
                     required_secret_text(&secrets, "platform_serial")?,
                     required_secret_text(&secrets, "platform_public_key")?,
+                    secret_field(&secrets, "api_v3_key")?,
                 )?))
             }
             GatewayKind::AlipayOpenapi => {
@@ -169,7 +171,7 @@ fn secrets(config: &GatewayConfig) -> Result<Value, PaymentError> {
     })
 }
 
-fn resolve_secret(reference: &str) -> Result<SecretString, PaymentError> {
+pub(crate) fn resolve_secret(reference: &str) -> Result<SecretString, PaymentError> {
     if let Some(path) = reference.strip_prefix("file:") {
         if !path.starts_with('/') {
             return Err(PaymentError::Credential(

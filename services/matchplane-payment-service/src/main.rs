@@ -95,6 +95,10 @@ async fn main() -> anyhow::Result<()> {
             "/v1/payments/authorize",
             axum::routing::post(api::authorize),
         )
+        .route(
+            "/v1/payment-webhooks/{gateway_id}",
+            axum::routing::post(api::payment_webhook),
+        )
         .route("/v1/payments/{payment_id}", get(api::payment))
         .route(
             "/v1/payments/{payment_id}/reconcile",

@@ -2,7 +2,7 @@ use std::{str::FromStr, sync::Arc};
 
 use axum::{
     Json,
-    body::Body,
+    body::{Body, Bytes},
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
@@ -10,9 +10,9 @@ use axum::{
 use matchplane_config::Environment;
 use matchplane_domain::{InvoiceId, MarketplacePartyId, OfflineDealId, PaymentId, RefundId};
 use matchplane_payments::{
-    AuthorizePayment, CapturePayment, InvoiceKind, InvoiceProvider, InvoiceRecipient, IssueInvoice,
-    Money, PaymentError, PaymentMethod, PaymentToken, QueryPayment, RefundPayment,
-    TestInvoiceProvider,
+    AuthorizePayment, CapturePayment, GatewayKind, HttpInvoiceProvider, InvoiceKind,
+    InvoiceProvider, InvoiceRecipient, IssueInvoice, Money, PaymentError, PaymentMethod,
+    PaymentToken, QueryPayment, RefundPayment, TestInvoiceProvider, WebhookRequest,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -348,6 +348,72 @@ pub async fn authorize(
             Err(ApiError::gateway(&error))
         }
     }
+}
+
+/// Receives an authenticated provider callback. This endpoint intentionally has no administrator
+/// bearer requirement; the selected gateway's signature and the durable inbox provide the trust
+/// boundary instead.
+pub async fn payment_webhook(
+    State(state): State<Arc<AppState>>,
+    Path(gateway_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    let gateway_id = parse_id(&gateway_id)?;
+    let config = state.store.webhook_gateway(gateway_id).await?;
+    let gateway = GatewayFactory::build(&config).map_err(|error| {
+        tracing::error!(gateway_id = %gateway_id, error = %error, "webhook gateway construction failed");
+        ApiError::gateway(&error)
+    })?;
+    let request = WebhookRequest {
+        headers: headers
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|value| (name.as_str().to_owned(), value.to_owned()))
+            })
+            .collect(),
+        body: body.to_vec(),
+    };
+    let event = gateway.webhook(&request).map_err(|error| {
+        if matches!(error, PaymentError::Signature) {
+            ApiError {
+                status: StatusCode::UNAUTHORIZED,
+                code: "invalid_webhook_signature",
+                message: "provider webhook signature could not be verified".to_owned(),
+            }
+        } else {
+            ApiError::gateway(&error)
+        }
+    })?;
+    let payload_hash = Sha256::digest(&request.body);
+    let receipt = state
+        .store
+        .process_webhook(gateway_id, &event, payload_hash.as_slice())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(match config.kind {
+        GatewayKind::Epay | GatewayKind::AlipayOpenapi => (
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            "success",
+        )
+            .into_response(),
+        GatewayKind::WechatPayV3 => Json(serde_json::json!({
+            "code": "SUCCESS",
+            "message": "成功",
+            "duplicate": receipt.duplicate,
+        }))
+        .into_response(),
+        GatewayKind::WaffoPancake => Json(serde_json::json!({
+            "code": "0",
+            "message": "success",
+            "duplicate": receipt.duplicate,
+        }))
+        .into_response(),
+        GatewayKind::Test | GatewayKind::Custom => Json(receipt).into_response(),
+    })
 }
 
 pub async fn payment(
@@ -741,7 +807,7 @@ pub async fn issue_invoice(
         .invoices
         .begin_issue(invoice_id, &request.actor)
         .await?;
-    let provider = invoice_provider(&invoice)?;
+    let provider = invoice_provider(&state, &invoice).await?;
     let issue_request = issue_request(&state, &invoice)?;
     match provider.issue(&issue_request).await {
         Ok(outcome) => {
@@ -779,7 +845,7 @@ pub async fn void_invoice(
     validate_actor(&request.actor)?;
     let invoice_id = parse_id(&invoice_id)?;
     let invoice = state.invoices.invoice(invoice_id).await?;
-    let provider = invoice_provider(&invoice)?;
+    let provider = invoice_provider(&state, &invoice).await?;
     provider
         .void(invoice_id)
         .await
@@ -813,7 +879,7 @@ pub async fn red_letter_invoice(
         .provider_reference
         .as_deref()
         .ok_or_else(|| ApiError::bad_request("issued invoice has no provider reference"))?;
-    let provider = invoice_provider(&invoice)?;
+    let provider = invoice_provider(&state, &invoice).await?;
     let issue_request = issue_request(&state, &invoice)?;
     let outcome = provider
         .red_letter(&issue_request, original_reference)
@@ -1127,15 +1193,27 @@ fn validate_actor(actor: &str) -> Result<(), ApiError> {
     }
 }
 
-fn invoice_provider(invoice: &InvoiceRecord) -> Result<TestInvoiceProvider, ApiError> {
+async fn invoice_provider(
+    state: &AppState,
+    invoice: &InvoiceRecord,
+) -> Result<std::sync::Arc<dyn InvoiceProvider>, ApiError> {
     if invoice.provider_key == "local_test" && invoice.provider_mode == "test" {
-        Ok(TestInvoiceProvider)
-    } else {
-        Err(ApiError::gateway(&PaymentError::Unsupported {
+        return Ok(std::sync::Arc::new(TestInvoiceProvider));
+    }
+    if invoice.provider_mode != "production"
+        || !matches!(invoice.provider_key.as_str(), "http_json" | "fapiao_http")
+    {
+        return Err(ApiError::gateway(&PaymentError::Unsupported {
             gateway: "invoice_provider",
             operation: "configured production invoice provider",
-        }))
+        }));
     }
+    let config = state.invoices.provider_config(invoice).await?;
+    let secret = crate::gateways::resolve_secret(&config.credential_secret_ref)
+        .map_err(|error| ApiError::gateway(&error))?;
+    let provider = HttpInvoiceProvider::new(config.provider_key, &config.settings, secret)
+        .map_err(|error| ApiError::gateway(&error))?;
+    Ok(std::sync::Arc::new(provider))
 }
 
 fn issue_request(state: &AppState, invoice: &InvoiceRecord) -> Result<IssueInvoice, ApiError> {

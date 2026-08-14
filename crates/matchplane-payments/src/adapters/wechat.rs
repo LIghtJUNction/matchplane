@@ -3,18 +3,24 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use aes_gcm::{
+    Aes256Gcm,
+    aead::{Aead, KeyInit, Payload},
+};
 use async_trait::async_trait;
-use secrecy::SecretString;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use secrecy::{ExposeSecret, SecretString};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
     AuthorizePayment, CapturePayment, GatewayDescriptor, GatewayKind, GatewayMode, GatewayStatus,
-    PaymentError, PaymentGateway, PaymentMethod, PaymentOutcome, PaymentStatus, QueryPayment,
-    RefundOutcome, RefundPayment, RefundStatus, VoidPayment,
+    PaymentError, PaymentGateway, PaymentMethod, PaymentOutcome, PaymentStatus, PaymentWebhook,
+    QueryPayment, RefundOutcome, RefundPayment, RefundStatus, RefundWebhook, VoidPayment,
+    WebhookEvent, WebhookRequest,
 };
 
-use super::common::{require_https, sign_rsa_sha256, verify_rsa_sha256};
+use super::common::{require_https, required_field, sign_rsa_sha256, verify_rsa_sha256};
 
 /// Direct WeChat Pay API v3 adapter for Native, JSAPI, and H5 checkout.
 pub struct WechatPayGateway {
@@ -27,6 +33,7 @@ pub struct WechatPayGateway {
     merchant_private_key: SecretString,
     platform_serial: String,
     platform_public_key: String,
+    api_v3_key: SecretString,
 }
 
 impl fmt::Debug for WechatPayGateway {
@@ -60,6 +67,32 @@ impl WechatPayGateway {
         platform_serial: impl Into<String>,
         platform_public_key: impl Into<String>,
     ) -> Result<Self, PaymentError> {
+        Self::with_api_v3_key(
+            descriptor,
+            base_url,
+            app_id,
+            merchant_id,
+            merchant_serial,
+            merchant_private_key,
+            platform_serial,
+            platform_public_key,
+            SecretString::new(String::new().into_boxed_str()),
+        )
+    }
+
+    /// Builds a WeChat adapter with the API v3 key required to decrypt callbacks.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_api_v3_key(
+        descriptor: GatewayDescriptor,
+        base_url: &str,
+        app_id: impl Into<String>,
+        merchant_id: impl Into<String>,
+        merchant_serial: impl Into<String>,
+        merchant_private_key: SecretString,
+        platform_serial: impl Into<String>,
+        platform_public_key: impl Into<String>,
+        api_v3_key: SecretString,
+    ) -> Result<Self, PaymentError> {
         if descriptor.kind != GatewayKind::WechatPayV3 || descriptor.mode != GatewayMode::Production
         {
             return Err(PaymentError::Invalid(
@@ -81,6 +114,7 @@ impl WechatPayGateway {
             merchant_private_key,
             platform_serial: platform_serial.into(),
             platform_public_key: platform_public_key.into(),
+            api_v3_key,
         })
     }
 
@@ -177,6 +211,67 @@ impl WechatPayGateway {
         }
         let message = format!("{timestamp}\n{nonce}\n{}\n", String::from_utf8_lossy(body));
         verify_rsa_sha256(&self.platform_public_key, message.as_bytes(), signature)
+    }
+
+    fn verify_webhook_signature(&self, request: &WebhookRequest) -> Result<(), PaymentError> {
+        let timestamp = required_field(request.header("Wechatpay-Timestamp"), "timestamp")?;
+        let nonce = required_field(request.header("Wechatpay-Nonce"), "nonce")?;
+        let signature = required_field(request.header("Wechatpay-Signature"), "signature")?;
+        if request.header("Wechatpay-Serial") != Some(self.platform_serial.as_str()) {
+            return Err(PaymentError::Signature);
+        }
+        let timestamp_value = timestamp
+            .parse::<i64>()
+            .map_err(|_| PaymentError::Signature)?;
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| PaymentError::Signature)?
+            .as_secs() as i64;
+        if (now - timestamp_value).unsigned_abs() > 300 {
+            return Err(PaymentError::Signature);
+        }
+        let message = format!(
+            "{timestamp}\n{nonce}\n{}\n",
+            String::from_utf8_lossy(&request.body)
+        );
+        verify_rsa_sha256(&self.platform_public_key, message.as_bytes(), signature)
+    }
+
+    fn decrypt_resource(&self, resource: &Value) -> Result<Value, PaymentError> {
+        if self.api_v3_key.expose_secret().len() != 32 {
+            return Err(PaymentError::Credential(
+                "WeChat webhook API v3 key must contain 32 bytes".to_owned(),
+            ));
+        }
+        let nonce = required_field(resource.get("nonce").and_then(Value::as_str), "nonce")?;
+        let ciphertext = required_field(
+            resource.get("ciphertext").and_then(Value::as_str),
+            "ciphertext",
+        )?;
+        let associated_data = resource
+            .get("associated_data")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let cipher = Aes256Gcm::new_from_slice(self.api_v3_key.expose_secret().as_bytes())
+            .map_err(|_| PaymentError::Credential("WeChat API v3 key is invalid".to_owned()))?;
+        let nonce_bytes: [u8; 12] = nonce
+            .as_bytes()
+            .try_into()
+            .map_err(|_| PaymentError::Signature)?;
+        let nonce = aes_gcm::aead::Nonce::<Aes256Gcm>::from(nonce_bytes);
+        let ciphertext = STANDARD
+            .decode(ciphertext)
+            .map_err(|_| PaymentError::Signature)?;
+        let plaintext = cipher
+            .decrypt(
+                &nonce,
+                Payload {
+                    msg: &ciphertext,
+                    aad: associated_data.as_bytes(),
+                },
+            )
+            .map_err(|_| PaymentError::Signature)?;
+        serde_json::from_slice(&plaintext).map_err(PaymentError::from)
     }
 
     fn payment_outcome(
@@ -380,5 +475,117 @@ impl PaymentGateway for WechatPayGateway {
             healthy: true,
             message: "WeChat Pay adapter configuration and RSA keys loaded".to_owned(),
         })
+    }
+
+    fn webhook(&self, request: &WebhookRequest) -> Result<WebhookEvent, PaymentError> {
+        self.verify_webhook_signature(request)?;
+        let envelope: Value = serde_json::from_slice(&request.body)?;
+        let provider_event_id =
+            required_field(envelope.get("id").and_then(Value::as_str), "id")?.to_owned();
+        let event_type = envelope
+            .get("event_type")
+            .and_then(Value::as_str)
+            .unwrap_or("TRANSACTION.NOTIFY")
+            .to_owned();
+        let payload = if envelope.get("resource").is_some() {
+            self.decrypt_resource(envelope.get("resource").ok_or(PaymentError::Signature)?)?
+        } else {
+            envelope
+        };
+        if payload.get("mchid").and_then(Value::as_str) != Some(self.merchant_id.as_str()) {
+            return Err(PaymentError::Signature);
+        }
+        if payload.get("out_refund_no").is_some() || payload.get("refund_status").is_some() {
+            let provider_status = payload
+                .get("refund_status")
+                .or_else(|| payload.get("status"))
+                .and_then(Value::as_str)
+                .unwrap_or("PROCESSING");
+            let status = match provider_status {
+                "SUCCESS" | "REFUND_SUCCESS" => RefundStatus::Succeeded,
+                "CLOSED" | "FAILED" | "REFUND_FAIL" => RefundStatus::Failed,
+                _ => RefundStatus::Pending,
+            };
+            let amount = payload
+                .get("amount")
+                .and_then(|value| value.get("refund"))
+                .and_then(Value::as_i64)
+                .or_else(|| payload.get("refund_amount").and_then(Value::as_i64))
+                .map(|value| {
+                    crate::Money::new(
+                        i128::from(value),
+                        payload
+                            .get("amount")
+                            .and_then(|value| value.get("currency"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("CNY"),
+                        2,
+                    )
+                })
+                .transpose()?;
+            return Ok(WebhookEvent::Refund(RefundWebhook {
+                provider_event_id,
+                event_type,
+                merchant_order_id: payload
+                    .get("out_trade_no")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                provider_reference: payload
+                    .get("transaction_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                refund_reference: payload
+                    .get("out_refund_no")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                status,
+                provider_status: provider_status.to_owned(),
+                amount,
+            }));
+        }
+        let provider_status = payload
+            .get("trade_state")
+            .and_then(Value::as_str)
+            .or_else(|| payload.get("status").and_then(Value::as_str))
+            .unwrap_or("UNKNOWN");
+        let status = match provider_status {
+            "SUCCESS" => PaymentStatus::Captured,
+            "CLOSED" | "REVOKED" => PaymentStatus::Voided,
+            "PAYERROR" => PaymentStatus::Failed,
+            "USERPAYING" => PaymentStatus::Pending,
+            "NOTPAY" => PaymentStatus::RequiresAction,
+            _ => PaymentStatus::Unknown,
+        };
+        let amount = payload
+            .get("amount")
+            .and_then(|value| value.get("total"))
+            .and_then(Value::as_i64)
+            .map(|value| {
+                crate::Money::new(
+                    i128::from(value),
+                    payload
+                        .get("amount")
+                        .and_then(|value| value.get("currency"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("CNY"),
+                    2,
+                )
+            })
+            .transpose()?;
+        Ok(WebhookEvent::Payment(PaymentWebhook {
+            provider_event_id,
+            event_type,
+            merchant_order_id: payload
+                .get("out_trade_no")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            provider_reference: payload
+                .get("transaction_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            status,
+            provider_status: provider_status.to_owned(),
+            amount,
+        }))
     }
 }
