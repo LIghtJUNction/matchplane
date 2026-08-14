@@ -586,6 +586,11 @@ async fn validate_invoice_source(
                 ));
             }
             let purpose: String = row.try_get("purpose")?;
+            if matches!(kind, InvoiceKind::VehicleSale) && purpose != "vehicle_purchase" {
+                return Err(StoreError::Invalid(
+                    "vehicle-sale invoices require a vehicle_purchase payment".to_owned(),
+                ));
+            }
             let captured = exact(&row.try_get::<String, _>("captured_amount")?)?;
             let refunded = exact(&row.try_get::<String, _>("refunded_amount")?)?;
             let commission = exact(&row.try_get::<String, _>("commission_amount")?)?;

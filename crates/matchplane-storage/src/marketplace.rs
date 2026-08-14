@@ -241,7 +241,7 @@ pub struct BuyerVehicleRequest {
     pub created_at: OffsetDateTime,
 }
 
-/// Authenticated recommendation query with an exposure-deduplication key.
+/// Authenticated recommendation query.
 #[derive(Debug)]
 pub struct RecommendVehicleListings {
     /// Tenant scope.
@@ -250,7 +250,8 @@ pub struct RecommendVehicleListings {
     pub request_id: BuyerRequestId,
     /// Authenticated buyer.
     pub buyer_party_id: MarketplacePartyId,
-    /// Unique key for one rendered recommendation surface.
+    /// Client surface identifier retained for request validation/observability. It must never
+    /// influence seller-funded billing or exposure deduplication.
     pub exposure_key: String,
     /// Maximum returned results.
     pub limit: usize,
@@ -749,6 +750,22 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         let authorization = asset_authorization_from_row(&row)?;
+        if !command.enabled {
+            // Revocation is an immediate marketplace control, not merely a guard for future
+            // listing creation. Withdraw live inventory atomically so discovery, matching, and
+            // promotion billing cannot continue using a seller's revoked asset grant.
+            sqlx::query(
+                "UPDATE vehicle_listings SET status = 'withdrawn', version = version + 1 \
+                 WHERE tenant_id = $1 AND domain_id = $2 AND asset_id = $3 \
+                   AND seller_party_id = $4 AND status IN ('active', 'reserved')",
+            )
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.domain_id.into_uuid())
+            .bind(command.asset_id.into_uuid())
+            .bind(command.seller_party_id.into_uuid())
+            .execute(&mut *transaction)
+            .await?;
+        }
         transaction.commit().await?;
         Ok(authorization)
     }
@@ -993,6 +1010,9 @@ impl PgStore {
 
         let mut transaction = self.pool().begin().await?;
         for recommendation in &recommendations {
+            // A caller-controlled session key must not manufacture billable impressions. Scope
+            // the server-observed recommendation exposure to one buyer/listing/day instead.
+            let exposure_date = OffsetDateTime::now_utc().date();
             insert_exposure(
                 &mut transaction,
                 &RecordExposure {
@@ -1003,7 +1023,7 @@ impl PgStore {
                     source: "buyer_recommendations".to_owned(),
                     deduplication_key: format!(
                         "recommend:{}:{}:{}",
-                        command.request_id, command.exposure_key, recommendation.listing.listing_id
+                        command.buyer_party_id, recommendation.listing.listing_id, exposure_date
                     ),
                     occurred_at: OffsetDateTime::now_utc(),
                 },
@@ -1069,7 +1089,11 @@ impl PgStore {
              WHERE l.tenant_id = $1 AND l.id = $2 AND r.id = $3 \
                AND l.status = 'active' AND r.status IN ('active', 'matched') \
                AND l.currency = r.currency AND l.currency_scale = r.currency_scale \
-               AND (l.expires_at IS NULL OR l.expires_at > clock_timestamp()) FOR SHARE OF l, r",
+               AND (l.expires_at IS NULL OR l.expires_at > clock_timestamp()) \
+               AND EXISTS (SELECT 1 FROM marketplace_asset_authorizations aa \
+                           WHERE aa.tenant_id = l.tenant_id AND aa.domain_id = l.domain_id \
+                             AND aa.asset_id = l.asset_id AND aa.seller_party_id = l.seller_party_id \
+                             AND aa.status = 'active') FOR SHARE OF l, r",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(command.listing_id.into_uuid())
@@ -1306,6 +1330,18 @@ impl PgStore {
                 next_action: "completed".to_owned(),
             });
         }
+        if deal.expires_at <= OffsetDateTime::now_utc() {
+            return Err(StorageError::Conflict(
+                "offline introduction has expired; renew it before confirming the price".to_owned(),
+            ));
+        }
+        ensure_listing_authorized(
+            &mut transaction,
+            deal.tenant_id,
+            deal.listing_id,
+            deal.seller_party_id,
+        )
+        .await?;
         if deal.contact_released_at.is_none()
             || !matches!(
                 deal.status.as_str(),
@@ -1402,6 +1438,18 @@ impl PgStore {
         )
         .await?;
         if deal.status != "completed" {
+            if deal.expires_at <= OffsetDateTime::now_utc() {
+                return Err(StorageError::Conflict(
+                    "offline introduction has expired; renew it before completion".to_owned(),
+                ));
+            }
+            ensure_listing_authorized(
+                &mut transaction,
+                deal.tenant_id,
+                deal.listing_id,
+                deal.seller_party_id,
+            )
+            .await?;
             if deal.seller_confirmed_at.is_none()
                 || deal.buyer_confirmed_at.is_none()
                 || deal.final_amount.is_none()
@@ -1621,6 +1669,13 @@ impl PgStore {
                 "contact is available only to the matched buyer and seller".to_owned(),
             ));
         };
+        ensure_listing_authorized(
+            &mut transaction,
+            deal.tenant_id,
+            deal.listing_id,
+            deal.seller_party_id,
+        )
+        .await?;
         ensure_party_active(&mut transaction, command.tenant_id, command.actor_party_id).await?;
         if matches!(deal.status.as_str(), "declined" | "expired" | "disputed")
             || deal.expires_at <= OffsetDateTime::now_utc()
@@ -2428,6 +2483,33 @@ fn asset_authorization_from_row(
     })
 }
 
+async fn ensure_listing_authorized(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: TenantId,
+    listing_id: VehicleListingId,
+    seller_party_id: MarketplacePartyId,
+) -> Result<(), StorageError> {
+    let authorized: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM vehicle_listings l \
+         JOIN marketplace_asset_authorizations aa \
+           ON aa.tenant_id = l.tenant_id AND aa.domain_id = l.domain_id \
+          AND aa.asset_id = l.asset_id AND aa.seller_party_id = l.seller_party_id \
+         WHERE l.tenant_id = $1 AND l.id = $2 AND l.seller_party_id = $3 \
+           AND l.status IN ('active', 'reserved') AND aa.status = 'active')",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(listing_id.into_uuid())
+    .bind(seller_party_id.into_uuid())
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !authorized {
+        return Err(StorageError::Conflict(
+            "listing authorization is no longer active".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 async fn ensure_party_role(
     transaction: &mut Transaction<'_, Postgres>,
     tenant_id: TenantId,
@@ -2559,6 +2641,11 @@ async fn complete_offline_deal_in(
     actor_party_id: MarketplacePartyId,
     payment_id: Option<PaymentId>,
 ) -> Result<(), StorageError> {
+    if deal.expires_at <= OffsetDateTime::now_utc() {
+        return Err(StorageError::Conflict(
+            "offline introduction has expired; renew it before completion".to_owned(),
+        ));
+    }
     sqlx::query(
         "UPDATE offline_deals SET status = 'completed', commission_payment_id = $2, \
              completed_at = clock_timestamp(), version = version + 1 WHERE id = $1",

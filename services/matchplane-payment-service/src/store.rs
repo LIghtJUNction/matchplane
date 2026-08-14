@@ -2,8 +2,8 @@ use matchplane_domain::{
     MarketplacePartyId, OfflineDealId, PaymentGatewayId, PaymentId, RefundId, TenantId,
 };
 use matchplane_payments::{
-    PaymentError, PaymentOutcome, PaymentStatus, PaymentWebhook, RefundOutcome, RefundWebhook,
-    WebhookEvent, calculate_commission_reversal,
+    GatewayKind, PaymentError, PaymentOutcome, PaymentStatus, PaymentWebhook, RefundOutcome,
+    RefundWebhook, WebhookEvent, calculate_commission_reversal,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -989,11 +989,15 @@ impl PaymentStore {
             let operation_status: String = row.try_get("status")?;
             let payment = payment_in(&mut transaction, payment_id).await?;
             let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
+            let execute = matches!(operation_status.as_str(), "started" | "unknown")
+                && payment.status == "capture_pending";
             transaction.commit().await?;
             return Ok(PreparedOperation {
                 payment,
                 gateway,
-                execute: matches!(operation_status.as_str(), "started" | "unknown"),
+                // A capture that already reached an unknown/terminal payment state must be
+                // reconciled, not replayed blindly after a transport failure.
+                execute,
             });
         }
         let payment = payment_in_for_update(&mut transaction, payment_id).await?;
@@ -1085,8 +1089,22 @@ impl PaymentStore {
         .bind(provider_status)
         .execute(&mut *transaction)
         .await?;
+        if !reconciliation_transition_allowed(&payment.status, payment_status) {
+            insert_payment_event(
+                &mut transaction,
+                payment.tenant_id,
+                payment_id,
+                "capture_result_stale_ignored",
+                Some(&payment.status),
+                &payment.status,
+                Some(provider_status),
+            )
+            .await?;
+            transaction.commit().await?;
+            return Ok(payment);
+        }
         let captured = if payment_status == "captured" {
-            amount.to_string()
+            exact(&payment.captured_amount)?.max(amount).to_string()
         } else {
             payment.captured_amount.clone()
         };
@@ -1143,12 +1161,17 @@ impl PaymentStore {
             let payment = payment_in(&mut transaction, command.payment_id).await?;
             let refund = refund_in(&mut transaction, refund_id).await?;
             let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
+            let execute =
+                status == "requested" || (status == "unknown" && gateway.kind != GatewayKind::Epay);
             transaction.commit().await?;
             return Ok(PreparedRefund {
                 payment,
                 refund,
                 gateway,
-                execute: matches!(status.as_str(), "requested" | "unknown"),
+                // EPay's legacy refund endpoint has no provider idempotency field. Once a
+                // request has an unknown transport outcome, never replay it blindly; reconcile
+                // from the provider callback/admin workflow instead.
+                execute,
             });
         }
         let payment = payment_in_for_update(&mut transaction, command.payment_id).await?;
