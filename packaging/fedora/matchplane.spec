@@ -32,11 +32,14 @@ Valkey projections, and a federated gRPC control plane.
 %build
 bun install --frozen-lockfile --cwd web
 bun run --cwd web build
-cargo build --release --locked --workspace --bins
+# Fedora's containerized builders can expose a large CPU count with a much
+# smaller memory limit. Serialize the workspace build so concurrent linker
+# processes do not exhaust the package-builder's memory.
+CARGO_BUILD_JOBS=1 cargo build --release --locked --workspace --bins
 
 %check
 bun run --cwd web test
-cargo test --release --locked --workspace
+CARGO_BUILD_JOBS=1 cargo test --release --locked --workspace
 
 %install
 packaging/scripts/stage.sh %{buildroot} target/release
