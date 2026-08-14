@@ -219,10 +219,6 @@ async fn main() -> anyhow::Result<()> {
             "/v1/marketplace/promotions/{campaign_id}",
             get(marketplace::seller_promotion),
         )
-        .route(
-            "/v1/marketplace/promotions/{campaign_id}/events",
-            post(marketplace::record_seller_promotion_event),
-        )
         .with_state(state)
         .layer(CatchPanicLayer::new())
         .layer(CompressionLayer::new())

@@ -14,8 +14,8 @@ use matchplane_storage::{
     CreateMarketplaceParty, CreateOfflineDeal, CreateSellerPromotion, CreateVehicleListing,
     CreateViewingAppointment, EncryptedContact, ExposureMetrics, FinalizeOfflineDeal,
     MarketplaceParty, OfflineDeal, OfflineDealOutcome, OfflineDealProgress,
-    RecommendVehicleListings, RecommendedListing, RecordExposure, RecordSellerPromotionEvent,
-    ReleaseContact, SellerPromotionCampaign, SellerPromotionEventOutcome,
+    RecommendVehicleListings, RecommendedListing, RecordExposure, ReleaseContact,
+    SellerPromotionCampaign,
     TransitionViewingAppointment, VehicleListing, ViewingAppointment,
 };
 use serde::{Deserialize, Serialize};
@@ -170,16 +170,6 @@ pub(super) struct CreatePromotionRequest {
     starts_at: Option<OffsetDateTime>,
     #[serde(default, with = "time::serde::rfc3339::option")]
     ends_at: Option<OffsetDateTime>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct PromotionEventRequest {
-    tenant_id: String,
-    actor_party_id: String,
-    event_type: String,
-    deduplication_key: String,
-    #[serde(default, with = "time::serde::rfc3339::option")]
-    occurred_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Serialize)]
@@ -761,31 +751,6 @@ pub(super) async fn seller_promotion(
     state
         .store
         .seller_promotion(tenant_id, parse_id(&campaign_id)?, party_id)
-        .await
-        .map(Json)
-        .map_err(ApiError::from)
-}
-
-pub(super) async fn record_seller_promotion_event(
-    State(state): State<Arc<AppState>>,
-    Path(campaign_id): Path<String>,
-    headers: HeaderMap,
-    Json(request): Json<PromotionEventRequest>,
-) -> Result<Json<SellerPromotionEventOutcome>, ApiError> {
-    let tenant_id = parse_id(&request.tenant_id)?;
-    let actor_party_id = parse_id(&request.actor_party_id)?;
-    let party = authenticate(&state, &headers, tenant_id, actor_party_id).await?;
-    require_role(&party, "buyer")?;
-    state
-        .store
-        .record_seller_promotion_event(&RecordSellerPromotionEvent {
-            tenant_id,
-            campaign_id: parse_id(&campaign_id)?,
-            actor_party_id: Some(actor_party_id),
-            event_type: request.event_type,
-            deduplication_key: request.deduplication_key,
-            occurred_at: request.occurred_at.unwrap_or_else(OffsetDateTime::now_utc),
-        })
         .await
         .map(Json)
         .map_err(ApiError::from)

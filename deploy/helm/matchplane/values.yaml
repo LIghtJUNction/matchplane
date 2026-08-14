@@ -30,6 +30,7 @@ runtime:
   invoiceDataKeyVersion: 1
   paymentAdminTokenPath: /run/matchplane/application-secrets/payment-admin.token
   gatewayAdminTokenPath: /run/matchplane/application-secrets/gateway-admin.token
+  paymentCallbackOrigin: https://payments.example.com
 
 gateway:
   replicas: 2

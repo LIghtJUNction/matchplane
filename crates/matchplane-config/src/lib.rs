@@ -52,6 +52,8 @@ pub struct AppConfig {
     pub tls_private_key_path: String,
     /// PEM certificate authority used to authenticate federation clients.
     pub tls_client_ca_path: String,
+    /// Platform-owned HTTPS origin used to build and validate payment callbacks.
+    pub payment_callback_origin: String,
 }
 
 /// Parsed values safe for service startup.
@@ -134,6 +136,7 @@ impl AppConfig {
             .set_default("tls_certificate_path", "")?
             .set_default("tls_private_key_path", "")?
             .set_default("tls_client_ca_path", "")?
+            .set_default("payment_callback_origin", "")?
             .add_source(
                 EnvironmentSource::with_prefix("MATCHPLANE")
                     .prefix_separator("_")
@@ -173,6 +176,16 @@ impl AppConfig {
                     "development database password is forbidden",
                 ));
             }
+            if self.node_id == "00000000-0000-7000-8000-00000000000a" {
+                return Err(ConfigError::InsecureProduction(
+                    "MATCHPLANE_NODE_ID must be unique and cannot use the development default",
+                ));
+            }
+            if self.database_url.contains("CHANGE_ME") || self.valkey_url.contains("CHANGE_ME") {
+                return Err(ConfigError::InsecureProduction(
+                    "database and Valkey credentials must be replaced",
+                ));
+            }
             if self.valkey_url.starts_with("redis://") {
                 return Err(ConfigError::InsecureProduction(
                     "Valkey must use a TLS endpoint",
@@ -196,6 +209,17 @@ impl AppConfig {
                     return Err(ConfigError::Empty(field));
                 }
             }
+            if !self.otlp_endpoint.starts_with("https://") {
+                return Err(ConfigError::InsecureProduction(
+                    "MATCHPLANE_OTLP_ENDPOINT must use HTTPS",
+                ));
+            }
+            if self.log_filter.contains("debug") || self.log_filter.contains("trace") {
+                return Err(ConfigError::InsecureProduction(
+                    "production log filter must not enable debug or trace logging",
+                ));
+            }
+            validate_payment_callback_origin(&self.payment_callback_origin)?;
         }
 
         Ok(ValidatedConfig {
@@ -224,8 +248,33 @@ impl AppConfig {
             tls_certificate_path: self.tls_certificate_path,
             tls_private_key_path: self.tls_private_key_path,
             tls_client_ca_path: self.tls_client_ca_path,
+            payment_callback_origin: self.payment_callback_origin,
         })
     }
+}
+
+fn validate_payment_callback_origin(value: &str) -> Result<(), ConfigError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(ConfigError::Empty("MATCHPLANE_PAYMENT_CALLBACK_ORIGIN"));
+    }
+    let Some((scheme, authority)) = value.split_once("://") else {
+        return Err(ConfigError::InsecureProduction(
+            "MATCHPLANE_PAYMENT_CALLBACK_ORIGIN must be an HTTPS origin",
+        ));
+    };
+    if scheme != "https"
+        || authority.is_empty()
+        || authority.contains('/')
+        || authority.contains('?')
+        || authority.contains('#')
+        || authority.contains('@')
+    {
+        return Err(ConfigError::InsecureProduction(
+            "MATCHPLANE_PAYMENT_CALLBACK_ORIGIN must be an HTTPS origin without path or credentials",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -247,6 +296,7 @@ mod tests {
             tls_certificate_path: "/run/matchplane/tls/server.crt".to_owned(),
             tls_private_key_path: "/run/matchplane/tls/server.key".to_owned(),
             tls_client_ca_path: "/run/matchplane/tls/client-ca.crt".to_owned(),
+            payment_callback_origin: "https://payments.example.com".to_owned(),
         }
     }
 
@@ -265,5 +315,29 @@ mod tests {
         let result = production_config().validate();
 
         assert!(result.is_ok(), "secure config failed: {result:?}");
+    }
+
+    #[test]
+    fn validate_should_reject_the_development_node_id_in_production() {
+        let mut config = production_config();
+        config.node_id = "00000000-0000-7000-8000-00000000000a".to_owned();
+
+        let error = config
+            .validate()
+            .expect_err("the development node id must not be reused");
+
+        assert!(matches!(error, ConfigError::InsecureProduction(_)));
+    }
+
+    #[test]
+    fn validate_should_require_a_platform_payment_callback_origin() {
+        let mut config = production_config();
+        config.payment_callback_origin = "https://payments.example.com/callback".to_owned();
+
+        let error = config
+            .validate()
+            .expect_err("callback origins must not contain a path");
+
+        assert!(matches!(error, ConfigError::InsecureProduction(_)));
     }
 }

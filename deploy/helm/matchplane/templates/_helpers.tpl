@@ -67,4 +67,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ .Values.runtime.paymentAdminTokenPath | quote }}
 - name: MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE
   value: {{ .Values.runtime.gatewayAdminTokenPath | quote }}
+- name: MATCHPLANE_PAYMENT_CALLBACK_ORIGIN
+  value: {{ .Values.runtime.paymentCallbackOrigin | quote }}
 {{- end }}

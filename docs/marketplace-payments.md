@@ -86,7 +86,10 @@ Key gateway endpoints are:
 - `GET /v1/marketplace/listings/{id}/exposure-metrics`
 - `POST /v1/marketplace/promotions`
 - `GET /v1/marketplace/promotions/{id}`
-- `POST /v1/marketplace/promotions/{id}/events`
+- Promotion billing events are derived internally from authenticated listing exposure,
+  inquiry, match, and contact-exchange records. There is intentionally no public
+  `POST /v1/marketplace/promotions/{id}/events` endpoint: a buyer must not be able to
+  manufacture a seller's billable campaign activity.
 
 ## Isolated payment service
 
