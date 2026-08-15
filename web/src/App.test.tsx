@@ -41,7 +41,7 @@ describe("MatchPlane workspaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: /把目标说清楚/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /从一句话开始/ })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "卖方供给" }));
     expect(await screen.findByRole("heading", { name: /上传真实资料/ })).toBeInTheDocument();

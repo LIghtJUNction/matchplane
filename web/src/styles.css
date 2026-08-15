@@ -344,6 +344,78 @@ main {
   margin: 0 auto;
 }
 
+.root-flow {
+  min-height: 17rem;
+  padding: clamp(1.4rem, 4vw, 2.8rem);
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(20rem, 0.9fr);
+  align-items: center;
+  gap: clamp(1.5rem, 5vw, 4.5rem);
+  border: 1px solid rgba(20, 20, 19, 0.06);
+  border-radius: var(--radius-hero);
+  background: var(--ivory);
+  box-shadow: inset 0 0 0 1px rgba(20, 20, 19, 0.025);
+}
+
+.root-flow-intro {
+  max-width: 40rem;
+}
+
+.root-flow-intro h2 {
+  max-width: 15ch;
+  margin-top: 1rem;
+  font-size: clamp(2rem, 4vw, 3.8rem);
+  letter-spacing: -0.06em;
+  line-height: 1;
+}
+
+.root-flow-intro p {
+  max-width: 34rem;
+  margin-top: 1rem;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+
+.root-flow-steps {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+  list-style: none;
+}
+
+.root-flow-steps li {
+  min-height: 3.8rem;
+  padding: 0.65rem 0.8rem;
+  display: grid;
+  grid-template-columns: 2.25rem 1fr;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid rgba(20, 20, 19, 0.08);
+  border-radius: 1.1rem;
+  background: rgba(250, 249, 245, 0.62);
+}
+
+.root-flow-steps li > span {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.78rem;
+  background: var(--cactus);
+  color: #31574b;
+  font-size: 0.66rem;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+}
+
+.root-flow-steps li:nth-child(2) > span { background: var(--heather); color: var(--ink-soft); }
+.root-flow-steps li:nth-child(3) > span { background: var(--clay); color: var(--ink-soft); }
+.root-flow-steps li > div { display: grid; gap: 0.15rem; }
+.root-flow-steps strong { font-size: 0.8rem; }
+.root-flow-steps small { color: var(--muted); font-size: 0.68rem; }
+
 .eyebrow {
   color: var(--muted);
   font-size: 0.72rem;
@@ -1608,6 +1680,7 @@ main {
   .role-switcher,
   .role-switcher button,
   .button,
+  .root-flow,
   .buyer-hero,
   .hero-art-wrap img,
   .discovery-panel,
@@ -1638,6 +1711,8 @@ main {
   .app-header { padding-inline: 0.75rem; }
   .header-inner { grid-template-columns: 1fr auto; }
   .role-switcher { display: none; }
+  .root-flow { grid-template-columns: 1fr; gap: 1.35rem; }
+  .root-flow-intro h2 { max-width: 14ch; }
   .header-actions > .icon-button:not(:last-child),
   .profile-button { display: none; }
   .header-actions > .icon-button:last-child { display: grid; }

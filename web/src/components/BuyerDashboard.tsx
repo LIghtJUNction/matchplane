@@ -59,67 +59,67 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
 
   return (
     <div className="dashboard buyer-dashboard">
-      <section className="buyer-hero" aria-labelledby="buyer-hero-title">
-        <div className="hero-copy">
-          <span className="hero-kicker">
-            <Sparkles size={16} aria-hidden="true" />
-            {isRoot ? "根平台 · 需求由你定义" : "需求由你定义"}
-          </span>
-          <h1 id="buyer-hero-title">
-            把目标说清楚，
-            <span>找到合适的供给方。</span>
-          </h1>
-          <p>
-            {isRoot
-              ? "告诉根平台真实用途、预算和不能妥协的条件。系统会先在根平台理解需求，再把它传递给合适的子平台。"
-              : "告诉我们真实用途、预算和不能妥协的条件。MatchPlane 会解释每一次推荐，撮合后你可以直接联系供给方，也可以在线下完成交易。"}
-          </p>
-          <div className="hero-actions">
-            <motion.button
-              className="button button-dark"
-              type="button"
-              onClick={scrollToListings}
-              whileTap={{ scale: 0.97 }}
-              transition={spring}
-            >
-              查看可用供给
-              <ArrowRight size={18} aria-hidden="true" />
-            </motion.button>
-            <motion.button
-              className="button button-quiet"
-              type="button"
-              onClick={() => {
-                document.getElementById("match-chat-input")?.focus();
-                onNotice("已回到需求输入框，可以继续补充预算、时间和不能妥协的条件");
-              }}
-              whileTap={{ scale: 0.97 }}
-              transition={spring}
-            >
-              调整需求
-            </motion.button>
+      {isRoot ? (
+        <RootFlow />
+      ) : (
+        <section className="buyer-hero" aria-labelledby="buyer-hero-title">
+          <div className="hero-copy">
+            <span className="hero-kicker">
+              <Sparkles size={16} aria-hidden="true" />
+              需求由你定义
+            </span>
+            <h1 id="buyer-hero-title">
+              把目标说清楚，
+              <span>找到合适的供给方。</span>
+            </h1>
+            <p>告诉我们真实用途、预算和不能妥协的条件。MatchPlane 会解释每一次推荐，撮合后你可以直接联系供给方，也可以在线下完成交易。</p>
+            <div className="hero-actions">
+              <motion.button
+                className="button button-dark"
+                type="button"
+                onClick={scrollToListings}
+                whileTap={{ scale: 0.97 }}
+                transition={spring}
+              >
+                查看可用供给
+                <ArrowRight size={18} aria-hidden="true" />
+              </motion.button>
+              <motion.button
+                className="button button-quiet"
+                type="button"
+                onClick={() => {
+                  document.getElementById("match-chat-input")?.focus();
+                  onNotice("已回到需求输入框，可以继续补充预算、时间和不能妥协的条件");
+                }}
+                whileTap={{ scale: 0.97 }}
+                transition={spring}
+              >
+                调整需求
+              </motion.button>
+            </div>
+            <div className="hero-proof" aria-label="平台保障">
+              <span><ShieldCheck size={16} aria-hidden="true" /> 联系信息受控解锁</span>
+              <span><BadgeCheck size={16} aria-hidden="true" /> 匹配理由可解释</span>
+            </div>
           </div>
-          <div className="hero-proof" aria-label="平台保障">
-            <span><ShieldCheck size={16} aria-hidden="true" /> 联系信息受控解锁</span>
-            <span><BadgeCheck size={16} aria-hidden="true" /> 匹配理由可解释</span>
-          </div>
-        </div>
-        <motion.div
-          className="hero-art-wrap generic-match-art"
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={spring}
-          aria-hidden="true"
-        >
-          <span className="generic-art-orbit orbit-one" />
-          <span className="generic-art-orbit orbit-two" />
-          <span className="generic-art-core"><Sparkles size={40} strokeWidth={1.3} /></span>
-          <div className="floating-match-card">
-            <span>匹配核心</span>
-            <strong>AI</strong>
-            <small>目标 · 约束 · 可信度</small>
-          </div>
-        </motion.div>
-      </section>
+          <motion.div
+            className="hero-art-wrap generic-match-art"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={spring}
+            aria-hidden="true"
+          >
+            <span className="generic-art-orbit orbit-one" />
+            <span className="generic-art-orbit orbit-two" />
+            <span className="generic-art-core"><Sparkles size={40} strokeWidth={1.3} /></span>
+            <div className="floating-match-card">
+              <span>匹配核心</span>
+              <strong>AI</strong>
+              <small>目标 · 约束 · 可信度</small>
+            </div>
+          </motion.div>
+        </section>
+      )}
 
       <section className="discovery-panel" aria-label="搜索供给">
         <label className="search-field">
@@ -224,6 +224,23 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         </ol>
       </section>
     </div>
+  );
+}
+
+function RootFlow() {
+  return (
+    <section className="root-flow" aria-labelledby="root-flow-title">
+      <div className="root-flow-intro">
+        <span className="hero-kicker"><Sparkles size={16} aria-hidden="true" /> 根平台 · 通用入口</span>
+        <h2 id="root-flow-title">从一句话开始，沿平台树找到答案。</h2>
+        <p>根平台只负责理解目标和路由。具体领域、商家和供给内容由已启用的子平台提供。</p>
+      </div>
+      <ol className="root-flow-steps">
+        <li><span>01</span><div><strong>描述目标</strong><small>预算、时间和不能妥协的条件</small></div></li>
+        <li><span>02</span><div><strong>选择平台</strong><small>AI 只在已激活的子平台中做路由</small></div></li>
+        <li><span>03</span><div><strong>联系供给方</strong><small>双方同意后交换联系方式</small></div></li>
+      </ol>
+    </section>
   );
 }
 
