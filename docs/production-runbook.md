@@ -25,6 +25,8 @@ key, and client CA paths. The checked-in single-host bootstrap
 uses one test role and must not be promoted to production.
 Do not place payment-provider credentials in the common environment file; use the payment-only
 secret directory or an external secret manager.
+The bootstrap's PostgreSQL bootstrap password is root-only and must never be granted to a runtime
+service account.
 
 Kafka must likewise issue a distinct client certificate (or SASL identity) for each Kafka client.
 The relay may publish only outbox topics, the matcher may consume commands and publish match

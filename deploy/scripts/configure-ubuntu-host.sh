@@ -43,7 +43,7 @@ create_hex_secret() {
   chmod 0640 "$path"
 }
 
-create_hex_secret /etc/matchplane/secrets/database.password 24 matchplane
+create_hex_secret /etc/matchplane/secrets/database.password 24 root
 create_hex_secret /etc/matchplane/secrets/gateway/contact-data.key 32 matchplane-gateway
 create_hex_secret /etc/matchplane/secrets/payment/invoice-data.key 32 matchplane-payment
 create_hex_secret /etc/matchplane/secrets/payment/payment-admin.token 32 matchplane-payment
