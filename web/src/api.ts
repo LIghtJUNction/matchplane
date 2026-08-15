@@ -1,9 +1,6 @@
-import type { VehicleListing } from "./types";
+import type { AssetListing } from "./types";
 
 const apiBase = (process.env.NEXT_PUBLIC_MATCHPLANE_API_BASE_URL ?? "/api").replace(/\/$/, "");
-const paymentApiBase = (
-  process.env.NEXT_PUBLIC_MATCHPLANE_PAYMENT_API_BASE_URL ?? "/payments-api"
-).replace(/\/$/, "");
 
 export interface PartySession {
   tenantId: string;
@@ -12,11 +9,7 @@ export interface PartySession {
   accessToken: string;
 }
 
-/** Operator session supplied by the deployment's authenticated admin shell. */
-export interface AdminSession {
-  tenantId: string;
-  accessToken: string;
-}
+export type BetterAuthMarketplaceRole = "buyer" | "seller" | "subplatform_admin" | "platform";
 
 export interface PaymentSetting {
   tenant_id: string;
@@ -26,9 +19,29 @@ export interface PaymentSetting {
   updated_at: string;
 }
 
+export interface SubplatformEmailConfig {
+  tenant_id: string;
+  domain_id: string;
+  provider_key: string;
+  smtp_host: string;
+  smtp_port: number;
+  tls_mode: "starttls" | "tls" | "plain" | string;
+  username: string;
+  credential_configured: boolean;
+  from_address: string;
+  reply_to?: string | null;
+  mode: "test" | "production" | string;
+  enabled: boolean;
+  version: number;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ContactExchange {
   phone?: string;
   wechat?: string;
+  email?: string;
 }
 
 export interface OfflineDeal {
@@ -43,6 +56,26 @@ export interface OfflineDeal {
   contact_released_at: string | null;
   commission_collection: string;
   [key: string]: unknown;
+}
+
+export interface ListingSubmission {
+  submission_id: string;
+  tenant_id: string;
+  domain_id: string;
+  seller_party_id: string;
+  asset_schema_id: string;
+  external_key: string;
+  display_name: string;
+  attributes: Record<string, unknown>;
+  asking_amount: string;
+  currency: string;
+  currency_scale: number;
+  status: "pending_review" | "approved" | "rejected" | "withdrawn" | string;
+  reviewed_by?: string | null;
+  review_reason?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ContactResponse {
@@ -93,13 +126,11 @@ async function request<T>(path: string, init: RequestInit = {}, session?: PartyS
 async function paymentRequest<T>(
   path: string,
   init: RequestInit = {},
-  session?: AdminSession,
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("accept", "application/json");
   if (init.body) headers.set("content-type", "application/json");
-  if (session) headers.set("authorization", `Bearer ${session.accessToken}`);
-  const response = await fetch(`${paymentApiBase}${path}`, { ...init, headers });
+  const response = await fetch(`/api/admin/payment-mode${path.includes("?") ? path.slice(path.indexOf("?")) : ""}`, { ...init, headers, credentials: "include" });
   if (!response.ok) {
     let message = `支付服务请求失败（${response.status}）`;
     try {
@@ -117,60 +148,39 @@ export function isLiveMarketplaceEnabled(): boolean {
   return process.env.NEXT_PUBLIC_MATCHPLANE_LIVE_MODE === "true";
 }
 
-export function readAdminSession(): AdminSession | null {
-  try {
-    const raw = window.sessionStorage.getItem("matchplane.admin");
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as AdminSession;
-    if (
-      typeof parsed.tenantId !== "string" ||
-      !parsed.tenantId ||
-      typeof parsed.accessToken !== "string" ||
-      parsed.accessToken.length < 24
-    ) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export function getPaymentSetting(
-  session: AdminSession,
-): Promise<PaymentSetting> {
+export function getPaymentSetting(tenantId: string): Promise<PaymentSetting> {
   return paymentRequest<PaymentSetting>(
-    `/v1/admin/payment-mode?tenant_id=${encodeURIComponent(session.tenantId)}`,
-    {},
-    session,
+    `?tenant_id=${encodeURIComponent(tenantId)}`,
   );
 }
 
 export function switchPaymentMode(input: {
-  session: AdminSession;
+  tenantId: string;
   mode: "test" | "production";
   expectedVersion: number;
   reason: string;
 }): Promise<PaymentSetting> {
   return paymentRequest<PaymentSetting>(
-    "/v1/admin/payment-mode",
+    "",
     {
       method: "POST",
       body: JSON.stringify({
-        tenant_id: input.session.tenantId,
+        tenant_id: input.tenantId,
         mode: input.mode,
         expected_version: input.expectedVersion,
         actor: "web-admin",
         reason: input.reason,
       }),
     },
-    input.session,
   );
 }
 
-export function readPartySession(role: PartySession["role"]): PartySession | null {
+export function readPartySession(role: PartySession["role"] | "admin", subplatform = "root"): PartySession | null {
   try {
-    const raw = window.localStorage.getItem(`matchplane.party.${role}`);
+    const storageRoles = role === "admin" ? ["admin", "both"] : [role];
+    const raw = storageRoles
+      .map((storageRole) => window.localStorage.getItem(`matchplane.party.${subplatform}.${storageRole}`))
+      .find(Boolean) ?? (role === "admin" ? window.localStorage.getItem(`matchplane.party.${subplatform}.both`) : window.localStorage.getItem(`matchplane.party.${role}`));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PartySession;
     if (
@@ -181,46 +191,175 @@ export function readPartySession(role: PartySession["role"]): PartySession | nul
     ) {
       return null;
     }
+    if (role === "admin" && parsed.role !== "both") return null;
     return parsed;
   } catch {
     return null;
   }
 }
 
-export function savePartySession(session: PartySession): void {
-  window.localStorage.setItem(`matchplane.party.${session.role}`, JSON.stringify(session));
+export function savePartySession(session: PartySession, subplatform = "root", storageRole: string = session.role): void {
+  window.localStorage.setItem(`matchplane.party.${subplatform}.${storageRole}`, JSON.stringify(session));
 }
 
-export async function registerParty(input: {
+/**
+ * Exchanges an already verified Better Auth cookie for the domain capability required by the
+ * Rust marketplace API. The browser never creates or chooses an access token itself.
+ */
+export async function establishMarketplaceSession(input: {
   tenantId: string;
-  externalKey: string;
-  displayName: string;
-  role: PartySession["role"];
-  contact: ContactExchange;
+  domainId?: string;
+  subplatform: string;
+  role: BetterAuthMarketplaceRole;
 }): Promise<PartySession> {
-  const result = await request<{
+  const response = await fetch("/api/marketplace/session", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "x-matchplane-subplatform": input.subplatform,
+    },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    let message = `登录会话连接失败（${response.status}）`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // Preserve the status when the server does not return JSON.
+    }
+    throw new MarketplaceApiError(response.status, message);
+  }
+  const result = (await response.json()) as {
+    tenant_id: string;
     party_id: string;
     role: PartySession["role"];
-    tenant_id: string;
     access_token: string;
-  }>("/v1/marketplace/parties", {
-    method: "POST",
-    body: JSON.stringify({
-      tenant_id: input.tenantId,
-      external_key: input.externalKey,
-      display_name: input.displayName,
-      role: input.role,
-      contact: input.contact,
-    }),
-  });
+  };
   const session: PartySession = {
     tenantId: result.tenant_id,
     partyId: result.party_id,
     role: result.role,
     accessToken: result.access_token,
   };
-  savePartySession(session);
+  savePartySession(session, input.subplatform, input.role === "subplatform_admin" ? "admin" : input.role);
   return session;
+}
+
+export function createBuyerRequest(input: {
+  session: PartySession;
+  domainId: string;
+  narrative: string;
+  requirements: Record<string, unknown>;
+  budgetMin?: string;
+  budgetMax?: string;
+  currency: string;
+  currencyScale: number;
+}): Promise<{ request_id: string; [key: string]: unknown }> {
+  return request<{ request_id: string; [key: string]: unknown }>(
+    "/v1/marketplace/buyer-requests",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        buyer_party_id: input.session.partyId,
+        narrative: input.narrative,
+        requirements: input.requirements,
+        budget_min: input.budgetMin ?? null,
+        budget_max: input.budgetMax ?? null,
+        currency: input.currency,
+        currency_scale: input.currencyScale,
+      }),
+    },
+    input.session,
+  );
+}
+
+export function submitSellerListing(input: {
+  session: PartySession;
+  domainId: string;
+  assetSchemaId: string;
+  externalKey: string;
+  displayName: string;
+  attributes: Record<string, unknown>;
+  askingAmount: string;
+  currency: string;
+  currencyScale: number;
+}): Promise<ListingSubmission> {
+  return request<ListingSubmission>(
+    "/v1/marketplace/listing-submissions",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        seller_party_id: input.session.partyId,
+        asset_schema_id: input.assetSchemaId,
+        external_key: input.externalKey,
+        display_name: input.displayName,
+        attributes: input.attributes,
+        asking_amount: input.askingAmount,
+        currency: input.currency,
+        currency_scale: input.currencyScale,
+      }),
+    },
+    input.session,
+  );
+}
+
+export function getSubplatformEmailConfig(
+  session: PartySession,
+  domainId: string,
+): Promise<SubplatformEmailConfig> {
+  return request<SubplatformEmailConfig>(
+    `/v1/subplatforms/${encodeURIComponent(domainId)}/email-config?tenant_id=${encodeURIComponent(session.tenantId)}&party_id=${encodeURIComponent(session.partyId)}`,
+    {},
+    session,
+  );
+}
+
+export function saveSubplatformEmailConfig(input: {
+  session: PartySession;
+  domainId: string;
+  providerKey: string;
+  smtpHost: string;
+  smtpPort: number;
+  tlsMode: "starttls" | "tls" | "plain";
+  username: string;
+  credentialSecretRef: string;
+  fromAddress: string;
+  replyTo?: string;
+  mode: "test" | "production";
+  enabled: boolean;
+  expectedVersion?: number;
+  updatedBy: string;
+}): Promise<SubplatformEmailConfig> {
+  return request<SubplatformEmailConfig>(
+    `/v1/subplatforms/${encodeURIComponent(input.domainId)}/email-config`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        party_id: input.session.partyId,
+        provider_key: input.providerKey,
+        smtp_host: input.smtpHost,
+        smtp_port: input.smtpPort,
+        tls_mode: input.tlsMode,
+        username: input.username,
+        credential_secret_ref: input.credentialSecretRef,
+        from_address: input.fromAddress,
+        reply_to: input.replyTo || null,
+        mode: input.mode,
+        enabled: input.enabled,
+        expected_version: input.expectedVersion ?? null,
+        updated_by: input.updatedBy,
+      }),
+    },
+    input.session,
+  );
 }
 
 export async function createBuyerIntroduction(input: {
@@ -322,7 +461,7 @@ export function retrieveContact(
   );
 }
 
-export function listingIdFromBackend(listing: VehicleListing): string | null {
+export function listingIdFromBackend(listing: AssetListing): string | null {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{2}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(listing.id)
     ? listing.id
     : null;

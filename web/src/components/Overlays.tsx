@@ -13,14 +13,14 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
-import type { VehicleListing } from "../types";
+import type { AssetListing } from "../types";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { VehicleVisual, momentumSpring, spring } from "./Primitives";
+import { ListingVisual, momentumSpring, spring } from "./Primitives";
 
 interface ListingSheetProps {
-  listing: VehicleListing | null;
+  listing: AssetListing | null;
   onClose: () => void;
-  onContact: (listing: VehicleListing) => void;
+  onContact: (listing: AssetListing) => void;
 }
 
 export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps) {
@@ -36,7 +36,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
           <motion.button
             className="overlay-backdrop"
             type="button"
-            aria-label="关闭车辆详情"
+            aria-label="关闭供给详情"
             onClick={onClose}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -60,11 +60,11 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
           >
             <div className="sheet-handle" aria-hidden="true" />
             <div className="sheet-header">
-              <span className="sheet-label">车辆详情</span>
+              <span className="sheet-label">供给详情</span>
               <motion.button
                 ref={closeRef}
                 type="button"
-                aria-label="关闭车辆详情"
+                aria-label="关闭供给详情"
                 onClick={onClose}
                 whileTap={{ scale: 0.88 }}
                 transition={spring}
@@ -73,43 +73,39 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
               </motion.button>
             </div>
             <div className="sheet-scroll">
-              <VehicleVisual accent={listing.accent} />
-              <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {listing.matchScore}% 需求匹配</div>
+              <ListingVisual accent={listing.accent} />
+              {listing.matchScore !== undefined ? <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {listing.matchScore}% 需求匹配</div> : null}
               <h2 id="listing-sheet-title">{listing.title}</h2>
               <p className="sheet-subtitle">{listing.subtitle}</p>
-              <div className="sheet-price"><strong>{listing.price}</strong><span>{listing.monthly}</span></div>
+              <div className="sheet-price"><strong>{listing.price}</strong>{listing.priceLabel ? <span>{listing.priceLabel}</span> : null}</div>
               <dl className="sheet-facts">
-                <div><dt>里程</dt><dd>{listing.mileage}</dd></div>
-                <div><dt>能源</dt><dd>{listing.energy}</dd></div>
-                <div><dt>年份</dt><dd>{listing.year}</dd></div>
-                <div><dt>位置</dt><dd>{listing.location}</dd></div>
+                {listing.facts.map((fact) => <div key={`${fact.label}-${fact.value}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
+                {listing.location ? <div><dt>位置</dt><dd>{listing.location}</dd></div> : null}
               </dl>
 
-              <section className="sheet-section">
-                <h3>为什么适合你</h3>
+              {listing.reasons?.length ? <section className="sheet-section">
+                <h3>匹配理由</h3>
                 <ul className="reason-list">
                   {listing.reasons.map((reason) => (
                     <li key={reason}><span><Check size={14} aria-hidden="true" /></span>{reason}</li>
                   ))}
                 </ul>
-              </section>
+              </section> : null}
 
-              <section className="sheet-section trust-section">
+              {listing.seller ? <section className="sheet-section trust-section">
                 <div className="seller-line">
                   <span className="seller-avatar">{listing.seller.slice(0, 1)}</span>
-                  <div><strong>{listing.seller}</strong><small>{listing.response}</small></div>
+                  <div><strong>{listing.seller}</strong>{listing.response ? <small>{listing.response}</small> : null}</div>
                   <BadgeCheck size={20} aria-label="卖家身份已核验" />
                 </div>
-                <ul>
-                  {listing.trust.map((item) => <li key={item}><ShieldCheck size={15} aria-hidden="true" />{item}</li>)}
-                </ul>
-              </section>
+                {listing.trust?.length ? <ul>{listing.trust.map((item) => <li key={item}><ShieldCheck size={15} aria-hidden="true" />{item}</li>)}</ul> : null}
+              </section> : null}
 
               <section className="offline-contact-card">
                 <span className="contact-icon"><LockKeyhole aria-hidden="true" /></span>
                 <div>
                   <h3>匹配后直接联系卖家</h3>
-                  <p>平台确认撮合与提成安排后，双方联系方式按权限解锁；整车款可在线下当面结算。</p>
+                  <p>平台确认撮合与服务费安排后，双方联系方式按权限解锁；交易可以在线下完成。</p>
                 </div>
                 <div className="contact-options">
                   <span><MessageCircle size={15} aria-hidden="true" />站内沟通</span>
@@ -120,7 +116,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
               </section>
             </div>
             <div className="sheet-footer">
-              <div><small>平台撮合提成</small><strong>成交价的 1%，成交后收取</strong></div>
+              <div><small>平台服务费</small><strong>按当前子平台披露规则结算</strong></div>
               <motion.button
                 className="button button-dark"
                 type="button"
@@ -128,7 +124,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
                 whileTap={{ scale: 0.97 }}
                 transition={momentumSpring}
               >
-                申请联系并看车
+                申请联系
               </motion.button>
             </div>
           </motion.aside>

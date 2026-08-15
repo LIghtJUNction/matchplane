@@ -1,0 +1,32 @@
+[Unit]
+Description=MatchPlane Next.js web and Better Auth server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=matchplane-web
+Group=matchplane-web
+SupplementaryGroups=matchplane
+EnvironmentFile=/etc/matchplane/matchplane.env
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=4173
+WorkingDirectory=/usr/share/matchplane/web
+ExecStart=/usr/bin/node /usr/share/matchplane/web/server.js
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

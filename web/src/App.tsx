@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Bell,
-  CarFront,
   LayoutDashboard,
   Menu,
   ShieldCheck,
+  Sparkles,
   Store,
   UserRound,
 } from "lucide-react";
@@ -17,27 +17,30 @@ import { ListingSheet, ModeDialog } from "./components/Overlays";
 import { PlatformDashboard } from "./components/PlatformDashboard";
 import { Brand, IconButton, spring } from "./components/Primitives";
 import { SellerDashboard } from "./components/SellerDashboard";
-import { recommendations } from "./data";
+import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
+import { loadSubplatform, resolveSubplatform, type SubplatformConfig } from "./subplatform";
 import {
   createBuyerIntroduction,
   getPaymentSetting,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
-  readAdminSession,
-  readPartySession,
   switchPaymentMode,
 } from "./api";
-import type { VehicleListing, WorkspaceRole } from "./types";
+import { getMarketplaceSession } from "./lib/marketplace-session";
+import type { AssetListing, WorkspaceRole } from "./types";
 
-const roles: Array<{ id: WorkspaceRole; label: string; shortLabel: string; icon: typeof CarFront }> = [
-  { id: "buyer", label: "买家找车", shortLabel: "找车", icon: CarFront },
-  { id: "seller", label: "卖家经营", shortLabel: "卖车", icon: Store },
+const roles: Array<{ id: WorkspaceRole; label: string; shortLabel: string; icon: typeof Sparkles }> = [
+  { id: "buyer", label: "买方需求", shortLabel: "需求", icon: Sparkles },
+  { id: "seller", label: "卖方供给", shortLabel: "供给", icon: Store },
   { id: "platform", label: "平台管理", shortLabel: "平台", icon: LayoutDashboard },
+  { id: "subplatform_admin", label: "子平台管理员", shortLabel: "子管", icon: ShieldCheck },
 ];
 
 export function App() {
   const [role, setRole] = useState<WorkspaceRole>("buyer");
-  const [listing, setListing] = useState<VehicleListing | null>(null);
+  const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform());
+  const [listings] = useState<AssetListing[]>([]);
+  const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
   const [paymentModeVersion, setPaymentModeVersion] = useState(1);
@@ -54,6 +57,9 @@ export function App() {
   }, [notice]);
 
   useEffect(() => {
+    const requestedPath = window.location.pathname;
+    setSubplatform(resolveSubplatform(requestedPath));
+    void loadSubplatform(requestedPath).then(setSubplatform);
     setRole(roleFromLocation());
     setListing(listingFromLocation());
     setHydrated(true);
@@ -68,12 +74,11 @@ export function App() {
 
   useEffect(() => {
     if (!hydrated || role !== "platform" || !isLiveMarketplaceEnabled()) return;
-    const session = readAdminSession();
-    if (!session) {
-      setNotice("管理员会话未连接，当前仅显示本地演示支付模式");
+    if (!subplatform.tenantId) {
+      setNotice("当前根平台尚未配置 tenant，暂时不能读取真实支付模式");
       return;
     }
-    void getPaymentSetting(session)
+    void getPaymentSetting(subplatform.tenantId)
       .then((setting) => {
         setPaymentMode(setting.active_mode);
         setPaymentModeVersion(setting.version);
@@ -81,7 +86,7 @@ export function App() {
       .catch((error) => {
         setNotice(error instanceof Error ? error.message : "支付模式读取失败");
       });
-  }, [hydrated, role]);
+  }, [hydrated, role, subplatform.tenantId]);
 
   const selectRole = (nextRole: WorkspaceRole) => {
     setRole(nextRole);
@@ -91,14 +96,13 @@ export function App() {
   const confirmModeChange = () => {
     const nextMode = paymentMode === "test" ? "production" : "test";
     if (isLiveMarketplaceEnabled()) {
-      const session = readAdminSession();
-      if (!session) {
+      if (!subplatform.tenantId) {
         setModeDialogOpen(false);
-        setNotice("管理员会话未连接，无法修改真实支付模式");
+        setNotice("当前根平台尚未配置 tenant，无法修改真实支付模式");
         return;
       }
       void switchPaymentMode({
-        session,
+        tenantId: subplatform.tenantId,
         mode: nextMode,
         expectedVersion: paymentModeVersion,
         reason: `web-admin switch to ${nextMode}`,
@@ -126,14 +130,17 @@ export function App() {
         <a className="skip-link" href="#main-content">跳到主要内容</a>
         <header className="app-header">
           <div className="header-inner">
-            <Brand />
+            <Brand
+              label={subplatform.brandName}
+              homeHref={subplatform.slug === "root" ? "#top" : `/${subplatform.slug}`}
+            />
             <RoleSwitcher role={role} onChange={selectRole} />
             <div className="header-actions">
               <span className="secure-status"><ShieldCheck size={15} aria-hidden="true" />安全连接</span>
               <IconButton label="通知"><Bell size={19} aria-hidden="true" /></IconButton>
-              <button className="profile-button" type="button" aria-label="打开个人账户">
+              <button className="profile-button" type="button" aria-label="打开个人账户" onClick={() => window.location.assign(`/login?role=${role}&next=${encodeURIComponent(window.location.pathname)}`)}>
                 <span><UserRound size={18} aria-hidden="true" /></span>
-                <span className="profile-copy"><strong>演示账户</strong><small>{role === "buyer" ? "买家" : role === "seller" ? "卖家" : "管理员"}</small></span>
+                <span className="profile-copy"><strong>{subplatform.brandName}</strong><small>{role === "buyer" ? "买家" : role === "seller" ? "卖家" : "管理员"}</small></span>
               </button>
               <IconButton label="打开菜单"><Menu size={20} aria-hidden="true" /></IconButton>
             </div>
@@ -150,9 +157,11 @@ export function App() {
               transition={spring}
             >
               {role === "buyer" ? (
-                <BuyerDashboard onOpenListing={setListing} onNotice={setNotice} />
+                <BuyerDashboard listings={listings} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
               ) : role === "seller" ? (
-                <SellerDashboard onNotice={setNotice} />
+                <SellerDashboard onNotice={setNotice} subplatform={subplatform} />
+              ) : role === "subplatform_admin" ? (
+                <SubplatformAdminDashboard onNotice={setNotice} subplatform={subplatform} />
               ) : (
                 <PlatformDashboard
                   paymentMode={paymentMode}
@@ -188,25 +197,35 @@ export function App() {
               setNotice(`${selected.title} 的联系与看车申请已提交`);
               return;
             }
-            const session = readPartySession("buyer");
             const listingId = listingIdFromBackend(selected);
-            if (!session || !listingId) {
-              setNotice("实时撮合需要先配置买家凭证和已接入的车源 ID；当前未发送申请");
+            if (!listingId) {
+              setNotice("供给必须来自当前子平台的真实 API；当前未发送申请");
+              return;
+            }
+            if (!subplatform.domainId || !subplatform.currency) {
+              setNotice("当前子平台尚未完成 domain 与结算币种注册；当前未发送申请");
               return;
             }
             try {
+              const session = await getMarketplaceSession({
+                subplatform: subplatform.slug,
+                tenantId: subplatform.tenantId,
+                domainId: subplatform.domainId,
+                role: "buyer",
+              });
+              if (!session) {
+                setNotice("请先使用 Better Auth 邮箱登录，再申请联系");
+                return;
+              }
               await createBuyerIntroduction({
                 session,
                 domainId:
-                  process.env.NEXT_PUBLIC_MATCHPLANE_DOMAIN_ID ??
-                  "00000000-0000-7000-8000-000000000101",
+                  subplatform.domainId,
                 listingId,
-                narrative: "希望在线下看车并与卖家直接沟通",
+                narrative: "希望与供给方直接沟通并完成后续协商",
                 requirements: {},
-                budgetMin: "2000000",
-                budgetMax: "3000000",
-                currency: "USD",
-                currencyScale: 2,
+                currency: subplatform.currency,
+                currencyScale: subplatform.currencyScale ?? 0,
                 exposureKey: `web-contact-${Date.now()}`,
               });
               closeListing();
@@ -246,13 +265,13 @@ export function App() {
 function roleFromLocation(): WorkspaceRole {
   if (typeof window === "undefined") return "buyer";
   const requested = new URLSearchParams(window.location.search).get("role");
-  return requested === "seller" || requested === "platform" ? requested : "buyer";
+  return requested === "seller" || requested === "platform" || requested === "subplatform_admin" ? requested : "buyer";
 }
 
-function listingFromLocation(): VehicleListing | null {
-  if (typeof window === "undefined") return null;
-  const requested = new URLSearchParams(window.location.search).get("listing");
-  return recommendations.find((listing) => listing.id === requested) ?? null;
+function listingFromLocation(): AssetListing | null {
+  // Listings are loaded from the root API/subplatform adapter. Never hydrate a fabricated
+  // inventory item from a URL parameter.
+  return null;
 }
 
 function RoleSwitcher({ role, onChange }: { role: WorkspaceRole; onChange: (role: WorkspaceRole) => void }) {

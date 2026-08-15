@@ -4,7 +4,7 @@ Name:           matchplane
 Version:        %{matchplane_version}
 Release:        1%{?dist}
 Summary:        Federated AI matching infrastructure
-License:        LicenseRef-MatchPlane-Pending
+License:        MIT
 URL:            https://github.com/LIghtJUNction/matchplane
 Source0:        %{name}-%{version}.tar.gz
 Source1:        matchplane.conf
@@ -21,6 +21,7 @@ BuildRequires:  protobuf-devel
 BuildRequires:  rust
 BuildRequires:  systemd-rpm-macros
 Requires:       ca-certificates
+Requires:       nodejs
 Requires:       systemd
 
 %description
@@ -52,13 +53,13 @@ packaging/scripts/stage.sh %{buildroot} target/release
 %sysusers_create_package %{name} %{SOURCE1}
 
 %post
-%systemd_post matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service
+%systemd_post matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
 
 %preun
-%systemd_preun matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service
+%systemd_preun matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
 
 %postun
-%systemd_postun_with_restart matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service
+%systemd_postun_with_restart matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
 
 %files
 %config(noreplace) %attr(0640,root,matchplane) /etc/matchplane/matchplane.env
@@ -77,6 +78,7 @@ packaging/scripts/stage.sh %{buildroot} target/release
 %{_docdir}/matchplane/README.md
 %{_docdir}/matchplane/ARCHITECTURE.md
 %{_docdir}/matchplane/marketplace-payments.md
+%license %{_datadir}/licenses/matchplane/LICENSE
 
 %changelog
 * Fri Aug 14 2026 LIghtJUNction <lightjunction.me@gmail.com> - %{version}-1

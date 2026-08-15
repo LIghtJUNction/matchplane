@@ -9,7 +9,7 @@ web-install:
 web-check: web-install
     bun run --cwd web check
 
-check: web-check
+check: web-check subplatform-check
     cargo fmt --check
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo test --workspace --locked
@@ -31,3 +31,9 @@ smoke:
 
 package-check:
     ./packaging/scripts/check.sh
+
+subplatform-check:
+    test -f .gitmodules
+    test -f subplatforms/auto/matchplane.subplatform.json
+    python3 -c 'import json; m=json.load(open("subplatforms/auto/matchplane.subplatform.json")); assert m["apiVersion"] == "matchplane.subplatform/v1"; assert m["rootApiVersion"] == "v1"; assert m["slug"] == "auto"'
+    test -n "$$(git -C subplatforms/auto rev-parse HEAD)"

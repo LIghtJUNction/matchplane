@@ -6,6 +6,7 @@ mod marketplace;
 mod matching;
 mod orders;
 mod outbox;
+mod subplatform;
 mod types;
 mod vectors;
 
@@ -13,15 +14,18 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use thiserror::Error;
 
 pub use marketplace::{
-    AcceptContactExchange, AuthenticatedParty, BuyerVehicleRequest, ConfirmOfflineDeal,
-    ContactEnvelope, CreateBuyerVehicleRequest, CreateMarketplaceParty, CreateOfflineDeal,
+    AcceptContactExchange, ApproveMarketplaceListingSubmission, AuthenticatedParty,
+    BuyerVehicleRequest, ConfirmOfflineDeal, ContactEnvelope, CreateBuyerVehicleRequest,
+    CreateMarketplaceListingSubmission, CreateMarketplaceParty, CreateOfflineDeal,
     CreateSellerPromotion, CreateVehicleListing, CreateViewingAppointment, EncryptedContact,
-    ExposureMetrics, FinalizeOfflineDeal, MarketplaceAssetAuthorization, MarketplaceParty,
-    OfflineDeal, OfflineDealOutcome, OfflineDealProgress, RecommendVehicleListings,
-    RecommendedListing, RecordExposure, RecordSellerPromotionEvent, ReleaseContact,
-    SellerPromotionCampaign, SellerPromotionEventOutcome, SetMarketplaceAssetAuthorization,
-    TransitionViewingAppointment, VehicleListing, ViewingAppointment,
+    EnsureMarketplaceParty, ExposureMetrics, FinalizeOfflineDeal, MarketplaceAssetAuthorization,
+    MarketplaceListingSubmission, MarketplaceParty, OfflineDeal, OfflineDealOutcome,
+    OfflineDealProgress, RecommendVehicleListings, RecommendedListing, RecordExposure,
+    RecordSellerPromotionEvent, ReleaseContact, SellerPromotionCampaign,
+    SellerPromotionEventOutcome, SetMarketplaceAssetAuthorization, TransitionViewingAppointment,
+    VehicleListing, ViewingAppointment,
 };
+pub use subplatform::{SubplatformEmailConfig, UpsertSubplatformEmailConfig};
 pub use types::{
     BookSnapshot, CandidateMatch, DemoBootstrap, FederationReservation, FederationTransition,
     MatchCommitOutcome, OutboxMessage, ReserveFederated, StoredAccount, StoredOrder, StoredTrade,

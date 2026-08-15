@@ -5,6 +5,10 @@ trades, ledger entries, events, and audit history; Kafka transports durable fact
 only rebuildable low-latency projections. AI retrieval proposes candidates and never commits a
 trade.
 
+Every deployment uses the same recursive platform model: the current root is simply the platform
+node without a parent, and a mounted platform can own its own children. Human accounts use Better
+Auth; platform-to-platform credentials use Better Auth organization API keys with explicit scopes.
+
 The repository is a Rust 2024 modular monorepo with independently deployable services. The same
 domain and deterministic matching engine power the initial `automotive` and `electronics`
 verticals.
@@ -36,8 +40,9 @@ The marketplace HTTP API listens on `http://127.0.0.1:8080`; the isolated paymen
 
 The responsive buyer, seller, and platform workspaces live in `web/`. Run `bun install --cwd web`
 followed by `bun run --cwd web dev`; the Next.js development server listens on
-`http://127.0.0.1:4173`. Static production builds are exported to `web/out` and staged under
-`/usr/share/matchplane/web` in every Linux package.
+`http://127.0.0.1:4173`. Production builds use the Next standalone server and are staged under
+`/usr/share/matchplane/web` in every Linux package; the packaged `matchplane-web.service` serves
+the UI and Better Auth routes.
 
 Vehicle discovery supports seller exposure analytics and explainable buyer recommendations. Offline
 introductions release encrypted buyer/seller contact details only to the matched parties, support
@@ -52,8 +57,8 @@ just check
 ```
 
 Packaging definitions live under `packaging/` for AUR (`matchplane-git` and
-`matchplane-bin`), Ubuntu `.deb`, and Fedora `.rpm`. No project license has been selected; see
-`docs/adr/0010-project-license.md`. Package CI builds both AUR variants, an Ubuntu `.deb`, and Fedora
+`matchplane-bin`), Ubuntu `.deb`, and Fedora `.rpm`. The project is released under the MIT License;
+see `docs/adr/0010-project-license.md`. Package CI builds both AUR variants, an Ubuntu `.deb`, and Fedora
 RPM/SRPM artifacts; tagged releases publish artifacts and, when both `AUR_SSH_PRIVATE_KEY` and the
 reviewed `AUR_SSH_KNOWN_HOSTS` entry are configured, push `matchplane-git` and `matchplane-bin` to
 the maintainer's AUR account.

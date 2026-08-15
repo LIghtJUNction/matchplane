@@ -170,12 +170,29 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/candidates/search", post(search_candidates))
         .route("/v1/marketplace/parties", post(marketplace::create_party))
         .route(
+            "/v1/admin/marketplace/parties/session",
+            post(marketplace::ensure_party_session),
+        )
+        .route(
+            "/v1/subplatforms/{domain_id}/email-config",
+            get(marketplace::get_subplatform_email_config)
+                .put(marketplace::upsert_subplatform_email_config),
+        )
+        .route(
             "/v1/admin/marketplace/asset-authorizations",
             post(marketplace::set_asset_authorization),
         )
         .route(
             "/v1/marketplace/listings",
             post(marketplace::create_listing),
+        )
+        .route(
+            "/v1/marketplace/listing-submissions",
+            post(marketplace::create_listing_submission),
+        )
+        .route(
+            "/v1/admin/marketplace/listing-submissions/{submission_id}/approve",
+            post(marketplace::approve_listing_submission),
         )
         .route(
             "/v1/marketplace/buyer-requests",

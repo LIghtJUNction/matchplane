@@ -1,23 +1,22 @@
-export type WorkspaceRole = "buyer" | "seller" | "platform";
+export type WorkspaceRole = "buyer" | "seller" | "platform" | "subplatform_admin";
 
 export type Accent = "cactus" | "clay" | "heather" | "oat";
 
-export interface VehicleListing {
+/** Root-facing listing shape. Subplatforms map their domain fields into this view model. */
+export interface AssetListing {
   id: string;
   title: string;
   subtitle: string;
   price: string;
-  monthly: string;
-  mileage: string;
-  location: string;
-  energy: string;
-  year: string;
-  matchScore: number;
+  priceLabel?: string;
+  location?: string;
+  matchScore?: number;
   accent: Accent;
-  reasons: string[];
-  trust: string[];
-  seller: string;
-  response: string;
+  facts: Array<{ label: string; value: string }>;
+  reasons?: string[];
+  trust?: string[];
+  seller?: string;
+  response?: string;
 }
 
 export interface GatewaySummary {

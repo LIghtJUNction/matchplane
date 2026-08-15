@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "../src/styles.css";
 
 export const metadata: Metadata = {
-  title: "MatchPlane · 找到真正适合你的车",
+  title: "MatchPlane · 找到真正适合你的匹配",
   description:
-    "MatchPlane 二手车智能撮合平台：更高效的卖车曝光、更适合需求的车辆推荐，以及透明的平台服务保障。",
+    "MatchPlane AI 撮合平台：把真实需求交给合适的供给方，解释匹配理由，并在双方同意后交换联系。",
   icons: {
     icon: "/favicon.svg",
   },

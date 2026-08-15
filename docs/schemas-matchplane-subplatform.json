@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matchplane.dev/schemas/subplatform/v1.json",
+  "title": "MatchPlane subplatform manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "id", "slug", "displayName", "rootApiVersion", "entry", "routes", "capabilities", "requiredScopes", "assets"],
+  "properties": {
+    "apiVersion": { "const": "matchplane.subplatform/v1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,127}$" },
+    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "description": { "type": "string", "maxLength": 2000 },
+    "email": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "providerKey": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,99}$" },
+        "fromAddress": { "type": "string", "format": "email", "maxLength": 320 }
+      }
+    },
+    "rootApiVersion": { "const": "v1" },
+    "entry": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.).+$" },
+    "routes": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^/[a-z0-9][a-z0-9-]*(?:/.*)?$" } },
+    "capabilities": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9_:-]+$" }, "uniqueItems": true },
+    "requiredScopes": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9_:-]+$" }, "uniqueItems": true },
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "owner"],
+      "properties": {
+        "protocol": { "const": "matchplane.retrieval/v1" },
+        "owner": { "const": "subplatform" }
+      }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staticDirectory", "buildCommand"],
+      "properties": {
+        "staticDirectory": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.).+$" },
+        "buildCommand": { "type": "string", "maxLength": 500 }
+      }
+    }
+  }
+}

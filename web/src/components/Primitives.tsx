@@ -1,5 +1,5 @@
 import type { ComponentType, ReactNode } from "react";
-import { ArrowUpRight, CarFront, ChevronRight } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 
 import type { Accent, ActivityItem } from "../types";
@@ -7,14 +7,14 @@ import type { Accent, ActivityItem } from "../types";
 export const spring = { type: "spring" as const, bounce: 0, duration: 0.38 };
 export const momentumSpring = { type: "spring" as const, bounce: 0.18, duration: 0.4 };
 
-export function Brand() {
+export function Brand({ label = "MatchPlane", homeHref = "#top" }: { label?: string; homeHref?: string }) {
   return (
-    <a className="brand" href="#top" aria-label="MatchPlane 首页">
+    <a className="brand" href={homeHref} aria-label={`${label} 首页`}>
       <span className="brand-mark" aria-hidden="true">
         <span />
         <span />
       </span>
-      <span>MatchPlane</span>
+      <span>{label}</span>
     </a>
   );
 }
@@ -92,13 +92,13 @@ export function MetricCard({
   );
 }
 
-export function VehicleVisual({ accent, compact = false }: { accent: Accent; compact?: boolean }) {
+export function ListingVisual({ accent, compact = false }: { accent: Accent; compact?: boolean }) {
   return (
-    <div className={`vehicle-visual accent-${accent}${compact ? " vehicle-compact" : ""}`}>
+    <div className={`listing-visual accent-${accent}${compact ? " listing-compact" : ""}`}>
       <span className="organic-shape organic-one" />
       <span className="organic-shape organic-two" />
-      <CarFront aria-hidden="true" strokeWidth={1.45} />
-      <span className="visual-label">已核验车源</span>
+      <Sparkles aria-hidden="true" strokeWidth={1.45} />
+      <span className="visual-label">已核验供给</span>
     </div>
   );
 }

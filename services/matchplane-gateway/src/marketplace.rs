@@ -6,17 +6,19 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
 };
 use matchplane_domain::{
-    AssetId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId, PromotionCampaignId,
-    TenantId, VehicleListingId, ViewingAppointmentId,
+    AssetId, AssetSchemaId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId,
+    PromotionCampaignId, TenantId, VehicleListingId, ViewingAppointmentId,
 };
 use matchplane_storage::{
-    AcceptContactExchange, AuthenticatedParty, ConfirmOfflineDeal, CreateBuyerVehicleRequest,
+    AcceptContactExchange, ApproveMarketplaceListingSubmission, AuthenticatedParty,
+    ConfirmOfflineDeal, CreateBuyerVehicleRequest, CreateMarketplaceListingSubmission,
     CreateMarketplaceParty, CreateOfflineDeal, CreateSellerPromotion, CreateVehicleListing,
-    CreateViewingAppointment, EncryptedContact, ExposureMetrics, FinalizeOfflineDeal,
-    MarketplaceAssetAuthorization, MarketplaceParty, OfflineDeal, OfflineDealOutcome,
-    OfflineDealProgress, RecommendVehicleListings, RecommendedListing, RecordExposure,
-    ReleaseContact, SellerPromotionCampaign, SetMarketplaceAssetAuthorization,
-    TransitionViewingAppointment, VehicleListing, ViewingAppointment,
+    CreateViewingAppointment, EncryptedContact, EnsureMarketplaceParty, ExposureMetrics,
+    FinalizeOfflineDeal, MarketplaceAssetAuthorization, MarketplaceListingSubmission,
+    MarketplaceParty, OfflineDeal, OfflineDealOutcome, OfflineDealProgress,
+    RecommendVehicleListings, RecommendedListing, RecordExposure, ReleaseContact,
+    SellerPromotionCampaign, SetMarketplaceAssetAuthorization, SubplatformEmailConfig,
+    TransitionViewingAppointment, UpsertSubplatformEmailConfig, VehicleListing, ViewingAppointment,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -32,6 +34,17 @@ const PARTY_REGISTRATION_WINDOW_SECS: u32 = 60 * 60;
 
 #[derive(Deserialize)]
 pub(super) struct CreatePartyRequest {
+    party_id: Option<String>,
+    tenant_id: String,
+    external_key: String,
+    display_name: String,
+    role: String,
+    contact: Value,
+}
+
+#[derive(Deserialize)]
+pub(super) struct EnsurePartySessionRequest {
+    auth_user_id: String,
     party_id: Option<String>,
     tenant_id: String,
     external_key: String,
@@ -60,6 +73,52 @@ pub(super) struct CreateListingRequest {
     currency_scale: i16,
     #[serde(default, with = "time::serde::rfc3339::option")]
     expires_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct CreateListingSubmissionRequest {
+    submission_id: Option<String>,
+    tenant_id: String,
+    domain_id: String,
+    seller_party_id: String,
+    asset_schema_id: String,
+    external_key: String,
+    display_name: String,
+    attributes: Value,
+    asking_amount: String,
+    currency: String,
+    currency_scale: i16,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ApproveListingSubmissionRequest {
+    tenant_id: String,
+    authorized_by: String,
+    reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct SubplatformEmailConfigRequest {
+    tenant_id: String,
+    party_id: String,
+    provider_key: String,
+    smtp_host: String,
+    smtp_port: i32,
+    tls_mode: String,
+    username: String,
+    credential_secret_ref: String,
+    from_address: String,
+    reply_to: Option<String>,
+    mode: String,
+    enabled: bool,
+    expected_version: Option<i64>,
+    updated_by: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct SubplatformEmailConfigQuery {
+    tenant_id: String,
+    party_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -306,6 +365,126 @@ pub(super) async fn create_party(
     ))
 }
 
+/// Bridges an authenticated Better Auth session to a tenant-scoped marketplace capability.
+/// Only the Next server, holding the gateway operator secret, may call this endpoint.
+pub(super) async fn ensure_party_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<EnsurePartySessionRequest>,
+) -> Result<(StatusCode, Json<CreatedPartyResponse>), ApiError> {
+    require_operator(&state, &headers)?;
+    validate_text(&request.auth_user_id, "auth_user_id", 100)?;
+    validate_text(&request.external_key, "external_key", 256)?;
+    validate_text(&request.display_name, "display_name", 200)?;
+    let auth_user_id: Uuid = parse_id(&request.auth_user_id)?;
+    if !matches!(request.role.as_str(), "buyer" | "seller" | "both") {
+        return Err(ApiError::bad_request(
+            "role must be buyer, seller, or both".to_owned(),
+        ));
+    }
+    let tenant_id = parse_id(&request.tenant_id)?;
+    let party_id = request
+        .party_id
+        .as_deref()
+        .map(parse_id::<MarketplacePartyId>)
+        .transpose()?
+        .unwrap_or_else(|| MarketplacePartyId::from_uuid(auth_user_id));
+    let contact = normalize_contact(&request.contact)?;
+    let contact_bytes = serde_json::to_vec(&contact)
+        .map_err(|error| ApiError::bad_request(format!("contact is invalid: {error}")))?;
+    let access_token = format!("mp_{}_{}", Uuid::now_v7().simple(), Uuid::now_v7().simple());
+    let protected = state
+        .contact_cipher
+        .encrypt(&contact_bytes, &contact_aad(tenant_id, party_id))
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let party = state
+        .store
+        .ensure_marketplace_party(&EnsureMarketplaceParty {
+            auth_user_id,
+            party_id,
+            tenant_id,
+            external_key: request.external_key,
+            display_name: request.display_name,
+            role: request.role,
+            access_token_hash: Sha256::digest(access_token.as_bytes()).to_vec(),
+            contact: EncryptedContact {
+                ciphertext: protected.ciphertext,
+                nonce: protected.nonce.to_vec(),
+                key_version: protected.key_version,
+            },
+        })
+        .await?;
+    Ok((
+        StatusCode::OK,
+        Json(CreatedPartyResponse {
+            party,
+            access_token,
+        }),
+    ))
+}
+
+/// Returns a subplatform admin's email routing metadata without secret material.
+pub(super) async fn get_subplatform_email_config(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(domain_id): Path<String>,
+    Query(query): Query<SubplatformEmailConfigQuery>,
+) -> Result<Json<SubplatformEmailConfig>, ApiError> {
+    let tenant_id = parse_id(&query.tenant_id)?;
+    let party_id = parse_id(&query.party_id)?;
+    authenticate(&state, &headers, tenant_id, party_id).await?;
+    state
+        .store
+        .subplatform_email_config(tenant_id, parse_id(&domain_id)?, party_id)
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+/// Updates one subplatform's SMTP route. Only an active `admin` membership can mutate it.
+pub(super) async fn upsert_subplatform_email_config(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(domain_id): Path<String>,
+    Json(request): Json<SubplatformEmailConfigRequest>,
+) -> Result<Json<SubplatformEmailConfig>, ApiError> {
+    validate_text(&request.provider_key, "provider_key", 100)?;
+    validate_text(&request.smtp_host, "smtp_host", 255)?;
+    validate_text(&request.username, "username", 320)?;
+    validate_text(
+        &request.credential_secret_ref,
+        "credential_secret_ref",
+        2048,
+    )?;
+    validate_text(&request.from_address, "from_address", 320)?;
+    validate_text(&request.updated_by, "updated_by", 256)?;
+    let tenant_id = parse_id(&request.tenant_id)?;
+    let party_id = parse_id(&request.party_id)?;
+    authenticate(&state, &headers, tenant_id, party_id).await?;
+    state
+        .store
+        .upsert_subplatform_email_config(&UpsertSubplatformEmailConfig {
+            tenant_id,
+            domain_id: parse_id(&domain_id)?,
+            actor_party_id: party_id,
+            provider_key: request.provider_key,
+            smtp_host: request.smtp_host,
+            smtp_port: request.smtp_port,
+            tls_mode: request.tls_mode,
+            username: request.username,
+            credential_secret_ref: request.credential_secret_ref,
+            from_address: request.from_address,
+            reply_to: request.reply_to,
+            mode: request.mode,
+            enabled: request.enabled,
+            expected_version: request.expected_version,
+            updated_by: request.updated_by,
+        })
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
 fn party_registration_tenant_key(tenant_id: TenantId) -> String {
     format!("mp:rate:party-registration:tenant:{tenant_id}")
 }
@@ -336,6 +515,76 @@ pub(super) async fn create_listing(
             currency: request.currency,
             currency_scale: request.currency_scale,
             expires_at: request.expires_at,
+        })
+        .await?;
+    Ok((StatusCode::CREATED, Json(listing)))
+}
+
+/// Receives seller-owned supply without publishing it before root review.
+pub(super) async fn create_listing_submission(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<CreateListingSubmissionRequest>,
+) -> Result<(StatusCode, Json<MarketplaceListingSubmission>), ApiError> {
+    validate_text(&request.external_key, "external_key", 256)?;
+    validate_text(&request.display_name, "display_name", 500)?;
+    if !request.attributes.is_object() {
+        return Err(ApiError::bad_request(
+            "attributes must be a JSON object".to_owned(),
+        ));
+    }
+    validate_currency(&request.currency)?;
+    let tenant_id = parse_id(&request.tenant_id)?;
+    let seller_party_id = parse_id(&request.seller_party_id)?;
+    let party = authenticate(&state, &headers, tenant_id, seller_party_id).await?;
+    require_role(&party, "seller")?;
+    let submission = state
+        .store
+        .create_marketplace_listing_submission(&CreateMarketplaceListingSubmission {
+            submission_id: request
+                .submission_id
+                .as_deref()
+                .map(|value| {
+                    value
+                        .parse::<Uuid>()
+                        .map_err(|error| ApiError::bad_request(format!("invalid UUID: {error}")))
+                })
+                .transpose()?
+                .unwrap_or_else(Uuid::new_v4),
+            tenant_id,
+            domain_id: parse_id::<DomainId>(&request.domain_id)?,
+            seller_party_id,
+            asset_schema_id: parse_id::<AssetSchemaId>(&request.asset_schema_id)?,
+            external_key: request.external_key,
+            display_name: request.display_name,
+            attributes: request.attributes,
+            asking_amount: positive_exact(&request.asking_amount, "asking_amount")?,
+            currency: request.currency,
+            currency_scale: request.currency_scale,
+        })
+        .await?;
+    Ok((StatusCode::CREATED, Json(submission)))
+}
+
+/// Publishes a seller submission after operator review.
+pub(super) async fn approve_listing_submission(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(submission_id): Path<String>,
+    Json(request): Json<ApproveListingSubmissionRequest>,
+) -> Result<(StatusCode, Json<VehicleListing>), ApiError> {
+    require_operator(&state, &headers)?;
+    validate_text(&request.authorized_by, "authorized_by", 256)?;
+    validate_text(&request.reason, "reason", 2_000)?;
+    let listing = state
+        .store
+        .approve_marketplace_listing_submission(&ApproveMarketplaceListingSubmission {
+            tenant_id: parse_id(&request.tenant_id)?,
+            submission_id: submission_id
+                .parse::<Uuid>()
+                .map_err(|error| ApiError::bad_request(format!("invalid UUID: {error}")))?,
+            authorized_by: request.authorized_by,
+            reason: request.reason,
         })
         .await?;
     Ok((StatusCode::CREATED, Json(listing)))
@@ -958,7 +1207,7 @@ fn normalize_contact(contact: &Value) -> Result<Value, ApiError> {
         ApiError::bad_request("contact must contain phone and/or wechat".to_owned())
     })?;
     let mut normalized = serde_json::Map::new();
-    for field in ["phone", "wechat"] {
+    for field in ["phone", "wechat", "email"] {
         let Some(value) = object.get(field) else {
             continue;
         };
@@ -983,12 +1232,25 @@ fn normalize_contact(contact: &Value) -> Result<Value, ApiError> {
                     "contact.phone must be a valid phone number".to_owned(),
                 ));
             }
+        } else if field == "email"
+            && (value.len() > 320
+                || !value.contains('@')
+                || value.matches('@').count() != 1
+                || value.starts_with('@')
+                || value.ends_with('@')
+                || !value
+                    .rsplit_once('@')
+                    .is_some_and(|(_, domain)| domain.contains('.')))
+        {
+            return Err(ApiError::bad_request(
+                "contact.email must be a valid email address".to_owned(),
+            ));
         }
         normalized.insert(field.to_owned(), Value::String(value.to_owned()));
     }
     if normalized.is_empty() {
         return Err(ApiError::bad_request(
-            "contact must include at least one of phone or wechat".to_owned(),
+            "contact must include at least one of phone, wechat, or email".to_owned(),
         ));
     }
     Ok(Value::Object(normalized))
@@ -1028,10 +1290,11 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn contact_exchange_keeps_only_phone_and_wechat() {
+    fn contact_exchange_keeps_supported_channels() {
         let normalized = normalize_contact(&json!({
             "phone": " +86 138 0000 0000 ",
             "wechat": "seller_mp",
+            "email": " Seller@Example.com ",
             "private_note": "must not be shared",
         }))
         .expect("contact should be valid");
@@ -1041,15 +1304,20 @@ mod tests {
             json!({
                 "phone": "+86 138 0000 0000",
                 "wechat": "seller_mp",
+                "email": "Seller@Example.com",
             })
         );
     }
 
     #[test]
-    fn contact_exchange_requires_a_supported_channel() {
-        let error = normalize_contact(&json!({"email": "seller@example.invalid"}))
-            .expect_err("email-only contact must be rejected");
-        assert!(error.message.contains("phone or wechat"));
+    fn contact_exchange_validates_email() {
+        let normalized = normalize_contact(&json!({"email": "seller@example.invalid"}))
+            .expect("email-only contact should be accepted");
+        assert_eq!(normalized, json!({"email": "seller@example.invalid"}));
+
+        let error = normalize_contact(&json!({"email": "not-an-email"}))
+            .expect_err("malformed email must be rejected");
+        assert!(error.message.contains("contact.email"));
     }
 
     #[test]

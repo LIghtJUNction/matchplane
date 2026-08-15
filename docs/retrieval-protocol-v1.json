@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matchplane.dev/schemas/retrieval/v1.json",
+  "title": "MatchPlane subplatform retrieval protocol v1",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/query" },
+    { "$ref": "#/$defs/result" }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "domain_id"],
+      "properties": {
+        "tenant_id": { "$ref": "#/$defs/uuid" },
+        "domain_id": { "$ref": "#/$defs/uuid" }
+      }
+    },
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "scope", "input", "limit"],
+      "properties": {
+        "protocol": { "const": "matchplane.retrieval/v1" },
+        "request_id": { "$ref": "#/$defs/uuid" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["narrative", "requirements"],
+          "properties": {
+            "narrative": { "type": "string", "minLength": 1, "maxLength": 10000 },
+            "requirements": { "type": "object" },
+            "budget_min": { "type": ["string", "null"] },
+            "budget_max": { "type": ["string", "null"] },
+            "currency": { "type": ["string", "null"], "pattern": "^[A-Z]{3}$" },
+            "currency_scale": { "type": ["integer", "null"], "minimum": 0, "maximum": 18 }
+          }
+        },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "trace_id": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "score", "reasons"],
+      "properties": {
+        "asset_id": { "$ref": "#/$defs/uuid" },
+        "score": { "type": "number", "minimum": -1, "maximum": 1 },
+        "reasons": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        },
+        "metadata": { "type": "object" }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "provider", "candidates", "degraded"],
+      "properties": {
+        "protocol": { "const": "matchplane.retrieval/v1" },
+        "request_id": { "$ref": "#/$defs/uuid" },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "version"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{1,127}$" },
+            "version": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "model": { "type": ["string", "null"], "maxLength": 200 }
+          }
+        },
+        "candidates": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/candidate" }
+        },
+        "degraded": { "type": "boolean" },
+        "generated_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    }
+  }
+}

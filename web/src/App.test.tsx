@@ -1,12 +1,39 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("./lib/auth-client", () => ({
+  authClient: {
+    getSession: vi.fn(async () => {
+      if (window.sessionStorage.getItem("matchplane.test-auth") !== "true") {
+        return { data: null, error: null };
+      }
+      return {
+        data: {
+          user: {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "Test User",
+            email: "test@example.com",
+          },
+          session: { id: "22222222-2222-4222-8222-222222222222" },
+        },
+        error: null,
+      };
+    }),
+  },
+  authFetchOptions: (subplatform: string) => ({
+    headers: { "x-matchplane-subplatform": subplatform },
+    credentials: "include",
+  }),
+}));
 
 import { App } from "./App";
 
 beforeEach(() => {
   window.scrollTo = vi.fn();
   window.history.replaceState(null, "", "/");
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe("MatchPlane workspaces", () => {
@@ -14,27 +41,53 @@ describe("MatchPlane workspaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: /适合你的车/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /把目标说清楚/ })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "卖家经营" }));
-    expect(await screen.findByRole("heading", { name: /真正需要这台车的人/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "卖方供给" }));
+    expect(await screen.findByRole("heading", { name: /上传真实资料/ })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "平台管理" }));
-    expect(await screen.findByRole("heading", { name: /解释收益从哪里来/ })).toBeInTheDocument();
-    expect(screen.getByText("线下成交撮合费")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /解释价值从哪里来/ })).toBeInTheDocument();
+    expect(screen.getByText("等待管理员接入支付网关")).toBeInTheDocument();
   });
 
-  it("opens a vehicle sheet and creates an offline viewing request", async () => {
+  it("requires a seller session before accepting supply uploads", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByLabelText("查看 2023 极氪 001 WE"));
-    const dialog = screen.getByRole("dialog", { name: "2023 极氪 001 WE" });
-    expect(within(dialog).getByText("匹配后直接联系卖家")).toBeInTheDocument();
-    expect(within(dialog).getByText("成交价的 1%，成交后收取")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "卖方供给" }));
+    await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
+    await user.type(screen.getByLabelText("内部编号"), "seller-item");
+    await user.type(screen.getByLabelText("报价（最小货币单位）"), "100");
+    await user.type(screen.getByLabelText("币种"), "CNY");
+    await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
 
-    await user.click(within(dialog).getByRole("button", { name: "申请联系并看车" }));
-    expect(screen.getByRole("status")).toHaveTextContent("联系与看车申请已提交");
+    expect(window.location.assign).toBeDefined();
+  });
+
+  it("accepts a structured upload in demo mode when the seller is signed in", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    window.localStorage.setItem(
+      "matchplane.party.root.seller",
+      JSON.stringify({
+        tenantId: crypto.randomUUID(),
+        partyId: crypto.randomUUID(),
+        role: "seller",
+        accessToken: "demo-session-token",
+      }),
+    );
+    render(<App />);
+
+    await user.click(screen.getByRole("tab", { name: "卖方供给" }));
+    await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
+    await user.type(screen.getByLabelText("内部编号"), "seller-item");
+    await user.type(screen.getByLabelText("报价（最小货币单位）"), "100");
+    await user.type(screen.getByLabelText("币种"), "CNY");
+    await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
+
+    expect(await screen.findByText("由卖家提交的资料")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("供给资料已记录");
   });
 
   it("requires an explicit administrator confirmation before changing payment mode", async () => {
@@ -42,23 +95,35 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     await user.click(screen.getByRole("tab", { name: "平台管理" }));
-    await screen.findByRole("heading", { name: /解释收益从哪里来/ });
+    await screen.findByRole("heading", { name: /解释价值从哪里来/ });
     await user.click(screen.getByRole("button", { name: "切换" }));
 
     const dialog = screen.getByRole("dialog", { name: "切换到生产模式？" });
-    expect(within(dialog).getByText("未决订单检查")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "确认切换" }));
+    expect(dialog).toHaveTextContent("未决订单检查");
+    await user.click(screen.getByRole("button", { name: "确认切换" }));
 
     expect(screen.getByText("生产模式")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("支付系统已切换为生产模式");
   });
 
-  it("filters recommendations without hiding the buyer's hard constraints", async () => {
+  it("sends the conversation directly when the buyer is already signed in", async () => {
     const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    window.localStorage.setItem(
+      "matchplane.party.root.buyer",
+      JSON.stringify({
+        tenantId: crypto.randomUUID(),
+        partyId: crypto.randomUUID(),
+        role: "buyer",
+        accessToken: "demo-session-token",
+      }),
+    );
     render(<App />);
 
-    await user.type(screen.getByRole("searchbox", { name: "搜索推荐车辆" }), "不存在的品牌");
-    expect(screen.getByRole("heading", { name: "没有命中这次搜索" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /预算 20–30 万/ })).toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
+    await user.type(input, "我有一个需要被认真匹配的问题");
+    await user.click(screen.getByRole("button", { name: "发送需求" }));
+
+    expect(await screen.findByText(/需求已记录（演示模式）/)).toBeInTheDocument();
   });
 });

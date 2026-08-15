@@ -1,7 +1,7 @@
 //! Privacy-aware vehicle discovery and offline introduction persistence.
 
 use matchplane_domain::{
-    AssetId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId, PaymentId,
+    AssetId, AssetSchemaId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId, PaymentId,
     PromotionCampaignId, TenantId, VehicleListingId, ViewingAppointmentId,
 };
 use matchplane_payments::calculate_commission;
@@ -40,6 +40,27 @@ pub struct CreateMarketplaceParty {
     /// `buyer`, `seller`, or `both`.
     pub role: String,
     /// SHA-256 hash of the high-entropy capability token returned at registration.
+    pub access_token_hash: Vec<u8>,
+    /// Protected contact record.
+    pub contact: EncryptedContact,
+}
+
+/// Better Auth-backed identity projection that rotates the marketplace capability on login.
+#[derive(Debug)]
+pub struct EnsureMarketplaceParty {
+    /// Stable Better Auth user UUID.
+    pub auth_user_id: Uuid,
+    /// Stable tenant-scoped party UUID.
+    pub party_id: MarketplacePartyId,
+    /// Tenant authority scope.
+    pub tenant_id: TenantId,
+    /// Stable tenant-local identity key.
+    pub external_key: String,
+    /// Public display name.
+    pub display_name: String,
+    /// `buyer`, `seller`, or `both`.
+    pub role: String,
+    /// SHA-256 hash of the newly issued capability token.
     pub access_token_hash: Vec<u8>,
     /// Protected contact record.
     pub contact: EncryptedContact,
@@ -99,6 +120,91 @@ pub struct CreateVehicleListing {
     pub currency_scale: i16,
     /// Optional publication expiry.
     pub expires_at: Option<OffsetDateTime>,
+}
+
+/// Command accepted from a seller's subplatform upload form.
+///
+/// A submission is intentionally separate from a published listing.  The seller owns the
+/// content, while the root operator (or a future moderation workflow) decides when it becomes
+/// discoverable and receives an explicit asset authorization.
+#[derive(Debug)]
+pub struct CreateMarketplaceListingSubmission {
+    /// Stable submission identifier.
+    pub submission_id: Uuid,
+    /// Tenant authority scope.
+    pub tenant_id: TenantId,
+    /// Subplatform/domain scope.
+    pub domain_id: DomainId,
+    /// Authenticated seller.
+    pub seller_party_id: MarketplacePartyId,
+    /// Versioned schema selected by the subplatform.
+    pub asset_schema_id: AssetSchemaId,
+    /// Seller's idempotent key for this supply item.
+    pub external_key: String,
+    /// Public display name supplied by the seller.
+    pub display_name: String,
+    /// Subplatform-defined structured attributes.
+    pub attributes: Value,
+    /// Exact asking amount in minor units.
+    pub asking_amount: i128,
+    /// ISO 4217 currency.
+    pub currency: String,
+    /// Currency decimal scale.
+    pub currency_scale: i16,
+}
+
+/// Seller supply waiting for publication review.
+#[derive(Debug, Clone, Serialize)]
+pub struct MarketplaceListingSubmission {
+    /// Submission identifier.
+    pub submission_id: Uuid,
+    /// Tenant authority scope.
+    pub tenant_id: TenantId,
+    /// Subplatform/domain scope.
+    pub domain_id: DomainId,
+    /// Seller identity.
+    pub seller_party_id: MarketplacePartyId,
+    /// Versioned schema selected by the subplatform.
+    pub asset_schema_id: AssetSchemaId,
+    /// Seller's idempotent key.
+    pub external_key: String,
+    /// Public display name.
+    pub display_name: String,
+    /// Subplatform-defined structured attributes.
+    pub attributes: Value,
+    /// Exact asking amount in minor units.
+    pub asking_amount: String,
+    /// ISO 4217 currency.
+    pub currency: String,
+    /// Currency decimal scale.
+    pub currency_scale: i16,
+    /// `pending_review`, `approved`, `rejected`, or `withdrawn`.
+    pub status: String,
+    /// Optional reviewer identity.
+    pub reviewed_by: Option<String>,
+    /// Optional review note.
+    pub review_reason: Option<String>,
+    /// Optimistic version.
+    pub version: i64,
+    /// Creation time.
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    /// Last update time.
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+}
+
+/// Operator decision that turns one seller submission into a published listing.
+#[derive(Debug)]
+pub struct ApproveMarketplaceListingSubmission {
+    /// Tenant authority scope.
+    pub tenant_id: TenantId,
+    /// Submission being approved.
+    pub submission_id: Uuid,
+    /// Operator or moderation workflow actor.
+    pub authorized_by: String,
+    /// Human-readable audit reason.
+    pub reason: String,
 }
 
 /// Operator-approved authorization allowing one seller to publish one catalog asset.
@@ -695,6 +801,72 @@ impl PgStore {
         party_from_row(&row)
     }
 
+    /// Creates or updates the tenant-scoped marketplace projection for a Better Auth user.
+    ///
+    /// The capability hash is rotated on every authenticated bridge request, so the raw token
+    /// never needs to be persisted and an old browser capability is invalidated on re-login.
+    pub async fn ensure_marketplace_party(
+        &self,
+        command: &EnsureMarketplaceParty,
+    ) -> Result<MarketplaceParty, StorageError> {
+        validate_role(&command.role)?;
+        if command.auth_user_id.is_nil()
+            || command.access_token_hash.len() != 32
+            || command.contact.nonce.len() != 12
+            || command.contact.key_version <= 0
+        {
+            return Err(StorageError::InvalidData(
+                "Better Auth party bridge credential or identity is malformed".to_owned(),
+            ));
+        }
+        let mut transaction = self.pool().begin().await?;
+        let existing: Option<Uuid> = sqlx::query_scalar(
+            "SELECT party_id FROM marketplace_party_auth_links \
+             WHERE tenant_id = $1 AND auth_user_id = $2 FOR UPDATE",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.auth_user_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let party_id = existing.unwrap_or_else(|| command.party_id.into_uuid());
+        let row = sqlx::query(
+            "INSERT INTO marketplace_parties \
+             (id, tenant_id, external_key, display_name, role, access_token_hash, \
+              contact_ciphertext, contact_nonce, contact_key_version) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+             ON CONFLICT (tenant_id, id) DO UPDATE SET \
+               external_key = EXCLUDED.external_key, display_name = EXCLUDED.display_name, \
+               role = EXCLUDED.role, access_token_hash = EXCLUDED.access_token_hash, \
+               contact_ciphertext = EXCLUDED.contact_ciphertext, contact_nonce = EXCLUDED.contact_nonce, \
+               contact_key_version = EXCLUDED.contact_key_version, version = marketplace_parties.version + 1 \
+             RETURNING id, tenant_id, external_key, display_name, role, status, version, created_at",
+        )
+        .bind(party_id)
+        .bind(command.tenant_id.into_uuid())
+        .bind(&command.external_key)
+        .bind(&command.display_name)
+        .bind(&command.role)
+        .bind(&command.access_token_hash)
+        .bind(&command.contact.ciphertext)
+        .bind(&command.contact.nonce)
+        .bind(command.contact.key_version)
+        .fetch_one(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO marketplace_party_auth_links (tenant_id, auth_user_id, party_id) \
+             VALUES ($1, $2, $3) \
+             ON CONFLICT (tenant_id, auth_user_id) DO UPDATE SET \
+               party_id = EXCLUDED.party_id, updated_at = clock_timestamp()",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.auth_user_id)
+        .bind(party_id)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        party_from_row(&row)
+    }
+
     /// Grants or revokes a seller's explicit right to publish one catalog asset.
     pub async fn set_marketplace_asset_authorization(
         &self,
@@ -799,6 +971,208 @@ impl PgStore {
             tenant_id: TenantId::from_uuid(row.try_get("tenant_id")?),
             role: row.try_get("role")?,
         })
+    }
+
+    /// Stores seller-supplied structured content as a moderation-ready submission.
+    ///
+    /// The operation does not publish a listing or grant seller authorization. This keeps the
+    /// upload path safe for arbitrary subplatforms while preserving an idempotent seller draft
+    /// that an operator can review and publish through the root workflow.
+    pub async fn create_marketplace_listing_submission(
+        &self,
+        command: &CreateMarketplaceListingSubmission,
+    ) -> Result<MarketplaceListingSubmission, StorageError> {
+        if command.external_key.trim().is_empty() || command.external_key.len() > 256 {
+            return Err(StorageError::InvalidData(
+                "external_key must contain 1..=256 bytes".to_owned(),
+            ));
+        }
+        if command.display_name.trim().is_empty() || command.display_name.len() > 500 {
+            return Err(StorageError::InvalidData(
+                "display_name must contain 1..=500 bytes".to_owned(),
+            ));
+        }
+        if !command.attributes.is_object() {
+            return Err(StorageError::InvalidData(
+                "attributes must be a JSON object".to_owned(),
+            ));
+        }
+        if command.asking_amount <= 0 {
+            return Err(StorageError::InvalidData(
+                "asking_amount must be positive".to_owned(),
+            ));
+        }
+        validate_currency_code(&command.currency)?;
+        if !(0..=18).contains(&command.currency_scale) {
+            return Err(StorageError::InvalidData(
+                "currency_scale must be between 0 and 18".to_owned(),
+            ));
+        }
+
+        let mut transaction = self.pool().begin().await?;
+        ensure_party_role(
+            &mut transaction,
+            command.tenant_id,
+            command.seller_party_id,
+            "seller",
+        )
+        .await?;
+        let schema_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM asset_schemas \
+             WHERE tenant_id = $1 AND domain_id = $2 AND id = $3 AND active = true)",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.asset_schema_id.into_uuid())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !schema_exists {
+            return Err(StorageError::NotFound("active asset schema"));
+        }
+
+        let row = sqlx::query(
+            "INSERT INTO marketplace_listing_submissions \
+             (id, tenant_id, domain_id, seller_party_id, asset_schema_id, external_key, \
+              display_name, attributes, asking_amount, currency, currency_scale) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11) \
+             RETURNING id, tenant_id, domain_id, seller_party_id, asset_schema_id, external_key, \
+                       display_name, attributes, asking_amount::text AS asking_amount, currency, \
+                       currency_scale, status, reviewed_by, review_reason, version, created_at, updated_at",
+        )
+        .bind(command.submission_id)
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.seller_party_id.into_uuid())
+        .bind(command.asset_schema_id.into_uuid())
+        .bind(&command.external_key)
+        .bind(&command.display_name)
+        .bind(&command.attributes)
+        .bind(command.asking_amount.to_string())
+        .bind(&command.currency)
+        .bind(command.currency_scale)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let submission = listing_submission_from_row(&row)?;
+        transaction.commit().await?;
+        Ok(submission)
+    }
+
+    /// Publishes one reviewed submission, creates its asset, and grants the seller authorization
+    /// in one serializable transaction.
+    pub async fn approve_marketplace_listing_submission(
+        &self,
+        command: &ApproveMarketplaceListingSubmission,
+    ) -> Result<VehicleListing, StorageError> {
+        if command.authorized_by.trim().is_empty() || command.authorized_by.len() > 256 {
+            return Err(StorageError::InvalidData(
+                "authorized_by must contain 1..=256 bytes".to_owned(),
+            ));
+        }
+        if command.reason.trim().is_empty() || command.reason.len() > 2_000 {
+            return Err(StorageError::InvalidData(
+                "approval reason must contain 1..=2000 bytes".to_owned(),
+            ));
+        }
+        let mut transaction = self.pool().begin().await?;
+        serializable(&mut transaction).await?;
+        let submission = sqlx::query(
+            "SELECT id, tenant_id, domain_id, seller_party_id, asset_schema_id, external_key, \
+                    display_name, attributes, asking_amount::text AS asking_amount, currency, \
+                    currency_scale, status, reviewed_by, review_reason, version, created_at, updated_at \
+             FROM marketplace_listing_submissions WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.submission_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(StorageError::NotFound("listing submission"))?;
+        let submission = listing_submission_from_row(&submission)?;
+        if submission.status != "pending_review" {
+            return Err(StorageError::Conflict(
+                "listing submission is no longer pending review".to_owned(),
+            ));
+        }
+        let asset_id = AssetId::new();
+        let listing_id = VehicleListingId::new();
+        sqlx::query(
+            "INSERT INTO assets (id, tenant_id, domain_id, asset_schema_id, external_key, display_name, attributes) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(asset_id.into_uuid())
+        .bind(submission.tenant_id.into_uuid())
+        .bind(submission.domain_id.into_uuid())
+        .bind(submission.asset_schema_id.into_uuid())
+        .bind(&submission.external_key)
+        .bind(&submission.display_name)
+        .bind(&submission.attributes)
+        .execute(&mut *transaction)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO marketplace_asset_authorizations \
+             (tenant_id, domain_id, asset_id, seller_party_id, status, authorized_by, reason) \
+             VALUES ($1, $2, $3, $4, 'active', $5, $6)",
+        )
+        .bind(submission.tenant_id.into_uuid())
+        .bind(submission.domain_id.into_uuid())
+        .bind(asset_id.into_uuid())
+        .bind(submission.seller_party_id.into_uuid())
+        .bind(&command.authorized_by)
+        .bind(&command.reason)
+        .execute(&mut *transaction)
+        .await?;
+
+        let policy = sqlx::query(
+            "SELECT commission_bps, offline_commission_collection, price_scale \
+             FROM markets WHERE tenant_id = $1 AND domain_id = $2 AND quote_asset_key = $3 \
+               AND status = 'active' ORDER BY id LIMIT 1 FOR SHARE",
+        )
+        .bind(submission.tenant_id.into_uuid())
+        .bind(submission.domain_id.into_uuid())
+        .bind(&submission.currency)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(StorageError::NotFound(
+            "active marketplace commission policy",
+        ))?;
+        let market_scale: i16 = policy.try_get("price_scale")?;
+        if market_scale != submission.currency_scale {
+            return Err(StorageError::InvalidData(format!(
+                "currency_scale must equal market price_scale {market_scale}"
+            )));
+        }
+        sqlx::query(
+            "INSERT INTO vehicle_listings \
+             (id, tenant_id, domain_id, asset_id, seller_party_id, asking_amount, currency, \
+              currency_scale, commission_bps, commission_collection, status, published_at) \
+             VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10, 'active', clock_timestamp())",
+        )
+        .bind(listing_id.into_uuid())
+        .bind(submission.tenant_id.into_uuid())
+        .bind(submission.domain_id.into_uuid())
+        .bind(asset_id.into_uuid())
+        .bind(submission.seller_party_id.into_uuid())
+        .bind(&submission.asking_amount)
+        .bind(&submission.currency)
+        .bind(submission.currency_scale)
+        .bind(policy.try_get::<i32, _>("commission_bps")?)
+        .bind(policy.try_get::<String, _>("offline_commission_collection")?)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE marketplace_listing_submissions SET status = 'approved', reviewed_by = $3, \
+                    review_reason = $4, version = version + 1 \
+             WHERE tenant_id = $1 AND id = $2",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.submission_id)
+        .bind(&command.authorized_by)
+        .bind(&command.reason)
+        .execute(&mut *transaction)
+        .await?;
+        let listing = listing_in(&mut transaction, listing_id).await?;
+        transaction.commit().await?;
+        Ok(listing)
     }
 
     /// Publishes a vehicle using the platform-owned commission policy for its market.
@@ -2400,6 +2774,30 @@ fn listing_from_row(row: &sqlx::postgres::PgRow) -> Result<VehicleListing, Stora
         published_at: row.try_get("published_at")?,
         expires_at: row.try_get("expires_at")?,
         version: row.try_get("version")?,
+    })
+}
+
+fn listing_submission_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<MarketplaceListingSubmission, StorageError> {
+    Ok(MarketplaceListingSubmission {
+        submission_id: row.try_get("id")?,
+        tenant_id: TenantId::from_uuid(row.try_get("tenant_id")?),
+        domain_id: DomainId::from_uuid(row.try_get("domain_id")?),
+        seller_party_id: MarketplacePartyId::from_uuid(row.try_get("seller_party_id")?),
+        asset_schema_id: AssetSchemaId::from_uuid(row.try_get("asset_schema_id")?),
+        external_key: row.try_get("external_key")?,
+        display_name: row.try_get("display_name")?,
+        attributes: row.try_get("attributes")?,
+        asking_amount: row.try_get("asking_amount")?,
+        currency: row.try_get("currency")?,
+        currency_scale: row.try_get("currency_scale")?,
+        status: row.try_get("status")?,
+        reviewed_by: row.try_get("reviewed_by")?,
+        review_reason: row.try_get("review_reason")?,
+        version: row.try_get("version")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
     })
 }
 

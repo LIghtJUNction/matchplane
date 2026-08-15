@@ -44,6 +44,12 @@ impression to inquiry and contact consent. Contacts and viewing locations are en
 boundary, and every contact decision is audited. The seller must accept a contact request before
 either party can retrieve the other party's allow-listed phone/WeChat details.
 
+Retrieval is a subplatform adapter behind the versioned `matchplane.retrieval/v1` boundary. The
+root receives canonical asset IDs, bounded scores, provider/model versions, and reasons; it does
+not require a vector database or exchange raw vectors. The current pgvector worker is only a
+compatibility provider for existing deployments. Root policy still validates scope, current asset
+state, exposure billing, introductions, contact consent, and settlement.
+
 For `offline_direct`, buyer and seller settle the vehicle price with each other. The isolated payment
 service is optional. The primary off-platform revenue policy is seller-funded promotion: fixed,
 impression, click, or qualified-lead campaigns are charged while the offer is being promoted, so
