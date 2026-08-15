@@ -8,6 +8,10 @@ import { authDatabase } from "./lib/auth";
  */
 export async function isMountedPlatformPath(platformPath: string): Promise<boolean> {
   if (process.env.MATCHPLANE_ENVIRONMENT !== "production") return true;
+  // The deployment root exists independently of a child registration. A
+  // missing root tenant only disables recursive delegation; it must not make
+  // the root chat itself unreachable.
+  if (platformPath === "/") return true;
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath)) return false;
 

@@ -10,6 +10,7 @@ import {
   type PlatformRouteDecision,
 } from "../../../../src/platform-router";
 import { expandPlatformRouteTree, type PlatformRouteTrace } from "../../../../src/platform-orchestrator";
+import { isMountedPlatformPath } from "../../../../src/platform-mount";
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,9 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (!platformPath) {
     return NextResponse.json({ error: "platformPath is invalid" }, { status: 400 });
+  }
+  if (!(await isMountedPlatformPath(platformPath))) {
+    return NextResponse.json({ error: "平台路径尚未激活" }, { status: 404 });
   }
 
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
