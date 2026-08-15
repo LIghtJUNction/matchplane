@@ -138,10 +138,14 @@ selected canonical references, provider metadata and degraded state. AI ranking 
 cannot grant contact, release phone/WeChat details, authorize payment, mark a transaction
 complete, or bypass seller exposure/commission policy.
 
-The deployment platform is the token-cost bearer for its Agent calls. Provider credentials stay on
-the server, requests carry a bounded token budget, and the routing audit records the selected model
-and provider-reported usage when available. A subplatform may still control its own MCP service
-costs, but it cannot shift an unbounded model call to a browser or silently use a root credential.
+The deployment platform is the token-cost bearer for every model call initiated by this protocol;
+buyers, sellers, and subplatform tenants are never charged a hidden token fee. Provider
+credentials stay on the server, requests carry bounded input/step/output budgets, and the routing
+audit records `cost_bearer: "platform"`, the selected model, and provider-reported usage when
+available. A subplatform may still operate its own MCP infrastructure, but it cannot shift an
+unbounded model call to a browser, charge a party for tokens, or silently reuse a root credential.
+The normative Agent/Skill/MCP envelope is
+[`docs/agent-mcp-skill-protocol-v1.json`](agent-mcp-skill-protocol-v1.json).
 
 The stable envelope for stages two and three is
 [`docs/platform-routing-protocol-v1.json`](platform-routing-protocol-v1.json). It carries a

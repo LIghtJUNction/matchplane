@@ -54,6 +54,16 @@ secret at runtime, and only the explicitly configured `BETTER_AUTH_URL` plus
 web unit loads that file after the shared environment file so gateway/payment workers cannot read
 the signing secret.
 
+If AI routing is enabled, configure `MATCHPLANE_ROUTER_AI_URL`,
+`MATCHPLANE_ROUTER_AI_MODEL`, and `MATCHPLANE_ROUTER_AI_KEY` only in the web service's restricted
+environment/secret file. The browser must never receive the provider key. The platform is the
+token-cost bearer: every Agent call is bounded to at most 24,000 input characters and 2,048 output
+tokens, and `MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR` (default 120 per verified account) limits
+abuse. The `platform_ai_usage` ledger records the platform bearer, model, bounded budget, and
+provider-reported token counts without storing raw prompts or provider credentials. Set a lower
+quota for a public launch after observing provider limits; a missing provider deliberately produces
+an auditable policy fallback rather than billing a user.
+
 ## 2. Install the event broker
 
 For a single host, install the pinned KRaft profile as root from the repository checkout:

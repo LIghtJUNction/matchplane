@@ -101,4 +101,46 @@ describe("platform Agent router", () => {
     expect(decision.source).toBe("policy_fallback");
     expect(decision.degraded).toBe(true);
   });
+
+  it("bounds provider input while keeping the platform cost budget explicit", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    process.env.MATCHPLANE_ROUTER_AI_MAX_TOKENS = "4096";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ content?: unknown }>;
+        max_tokens: number;
+      };
+      const userContent = body.messages[1]?.content;
+      expect(typeof userContent).toBe("string");
+      expect(String(userContent).length).toBeLessThanOrEqual(24_000);
+      expect(() => JSON.parse(String(userContent))).not.toThrow();
+      expect(body.max_tokens).toBe(2_048);
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({
+          selectedSlugs: ["used-car"],
+          rationale: "受控候选",
+          confidence: 0.5,
+        }) } }],
+        usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "x".repeat(10_000),
+      candidates: candidates.map((candidate) => ({
+        ...candidate,
+        description: "很长的候选描述".repeat(10_000),
+        capabilities: ["capability".repeat(100)],
+      })),
+    });
+
+    expect(decision.costBearer).toBe("platform");
+    expect(decision.budget.maxInputCharacters).toBe(24_000);
+    expect(decision.budget.maxOutputTokens).toBe(2_048);
+    expect(decision.usage?.totalTokens).toBe(120);
+  });
 });

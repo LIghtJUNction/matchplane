@@ -110,6 +110,10 @@ export interface PlatformRouteDecision {
   confidence: number | null;
   degraded: boolean;
   costBearer: "platform";
+  budget: {
+    maxInputCharacters: number;
+    maxOutputTokens: number;
+  };
   usage: {
     promptTokens: number;
     completionTokens: number;

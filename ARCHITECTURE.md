@@ -50,6 +50,13 @@ not require a vector database or exchange raw vectors. The current pgvector work
 compatibility provider for existing deployments. Root policy still validates scope, current asset
 state, exposure billing, introductions, contact consent, and settlement.
 
+Agent routing is likewise a platform-owned control-plane operation. The root chooses only from
+authorized direct children, invokes the configured provider with a bounded multi-step budget, and
+records `cost_bearer = platform` plus provider usage in `platform_ai_usage`. Provider keys remain
+server-side; buyers, sellers, and mounted subplatforms never receive a token bill or a browser
+credential. Skills and MCP tools are subplatform-owned extension points behind the stable
+`matchplane.agent/v1` envelope, not an excuse to bypass authorization or spend without a budget.
+
 For `offline_direct`, buyer and seller settle the vehicle price with each other. The isolated payment
 service is optional. The primary off-platform revenue policy is seller-funded promotion: fixed,
 impression, click, or qualified-lead campaigns are charged while the offer is being promoted, so

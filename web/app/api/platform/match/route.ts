@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
+import type { PoolClient } from "pg";
 
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
-import { decidePlatformRoutes } from "../../../../src/platform-router";
+import { decidePlatformRoutes, isPlatformRouterConfigured } from "../../../../src/platform-router";
 
 export const runtime = "nodejs";
 
 const MAX_NARRATIVE_LENGTH = 10_000;
 const MAX_PATH_LENGTH = 512;
+const DEFAULT_AI_REQUESTS_PER_HOUR = 120;
 
 /**
  * Accepts a domain-neutral intent at the current platform node and returns the
@@ -33,6 +35,27 @@ export async function POST(request: Request): Promise<Response> {
   const candidates = rootTenantId && isUuid(rootTenantId)
     ? await readChildRoutePlan(platformPath, rootTenantId)
     : [];
+  // The platform pays for model calls.  Before making one, apply a bounded
+  // per-account admission limit so a leaked session cannot create an
+  // unbounded provider bill.  Policy-only fallback requests do not consume
+  // this AI budget.
+  if (candidates.length > 0 && isPlatformRouterConfigured()) {
+    const recent = await authDatabase.query(
+      `SELECT count(*)::int AS count
+         FROM platform_ai_usage
+        WHERE auth_user_id = $1
+          AND source = 'ai'
+          AND created_at >= clock_timestamp() - interval '1 hour'`,
+      [session.user.id],
+    );
+    const count = Number((recent.rows[0] as { count?: number } | undefined)?.count ?? 0);
+    if (count >= configuredAiRequestsPerHour()) {
+      return NextResponse.json(
+        { error: "平台 AI 撮合额度暂时用尽，请稍后再试。" },
+        { status: 429, headers: { "retry-after": "3600", "cache-control": "no-store" } },
+      );
+    }
+  }
   const routing = await decidePlatformRoutes({
     platformPath,
     narrative,
@@ -48,12 +71,46 @@ export async function POST(request: Request): Promise<Response> {
       ? "degraded"
       : "delegated";
   const requestId = randomUUID();
-  await authDatabase.query(
-    `INSERT INTO platform_match_requests
-      (id, auth_user_id, platform_path, narrative, route_plan, routing_decision, status)
-     VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
-    [requestId, session.user.id, platformPath, narrative, JSON.stringify(routePlan), JSON.stringify(routing), status],
-  );
+  let client: PoolClient | undefined;
+  try {
+    client = await authDatabase.connect();
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO platform_match_requests
+        (id, auth_user_id, platform_path, narrative, route_plan, routing_decision, status)
+       VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
+      [requestId, session.user.id, platformPath, narrative, JSON.stringify(routePlan), JSON.stringify(routing), status],
+    );
+    await client.query(
+      `INSERT INTO platform_ai_usage
+        (id, match_request_id, auth_user_id, platform_path, source, cost_bearer,
+         model, max_input_characters, max_output_tokens, prompt_tokens,
+         completion_tokens, total_tokens, degraded)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [
+        randomUUID(),
+        requestId,
+        session.user.id,
+        platformPath,
+        routing.source,
+        routing.costBearer,
+        routing.model,
+        routing.budget.maxInputCharacters,
+        routing.budget.maxOutputTokens,
+        routing.usage?.promptTokens ?? null,
+        routing.usage?.completionTokens ?? null,
+        routing.usage?.totalTokens ?? null,
+        routing.degraded,
+      ],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client?.query("ROLLBACK").catch(() => undefined);
+    console.error("platform match request persistence failed", error);
+    return NextResponse.json({ error: "平台撮合记录保存失败，请稍后再试。" }, { status: 503 });
+  } finally {
+    client?.release();
+  }
 
   return NextResponse.json(
     {
@@ -65,6 +122,11 @@ export async function POST(request: Request): Promise<Response> {
     },
     { status: 202, headers: { "cache-control": "no-store" } },
   );
+}
+
+function configuredAiRequestsPerHour(): number {
+  const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR ?? String(DEFAULT_AI_REQUESTS_PER_HOUR), 10);
+  return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(10_000, parsed)) : DEFAULT_AI_REQUESTS_PER_HOUR;
 }
 
 interface MatchRequest {

@@ -26,7 +26,18 @@ export interface PlatformRouteDecision {
   confidence: number | null;
   degraded: boolean;
   costBearer: "platform";
+  budget: PlatformRouteBudget;
   usage: PlatformRouteUsage | null;
+}
+
+/**
+ * The platform owns the model call.  Keeping the budget in the decision makes
+ * the cost boundary observable without exposing the provider credential or a
+ * provider-specific price to a tenant.
+ */
+export interface PlatformRouteBudget {
+  maxInputCharacters: number;
+  maxOutputTokens: number;
 }
 
 export interface PlatformRouteUsage {
@@ -38,6 +49,7 @@ export interface PlatformRouteUsage {
 const MAX_CANDIDATES = 32;
 const MAX_RATIONALE_LENGTH = 1_000;
 const DEFAULT_TIMEOUT_MS = 4_000;
+const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
 
 export async function decidePlatformRoutes(input: {
   platformPath: string;
@@ -54,6 +66,7 @@ export async function decidePlatformRoutes(input: {
       confidence: null,
       degraded: false,
       costBearer: "platform",
+      budget: currentBudget(),
       usage: null,
     };
   }
@@ -86,19 +99,10 @@ export async function decidePlatformRoutes(input: {
           },
           {
             role: "user",
-            content: JSON.stringify({
-              currentPlatformPath: input.platformPath,
-              userIntent: input.narrative.slice(0, 10_000),
-              candidates: candidates.map((candidate) => ({
-                slug: candidate.slug,
-                path: candidate.path,
-                displayName: candidate.displayName,
-                description: candidate.description,
-                capabilities: candidate.capabilities,
-                agentStages: candidate.agentStages,
-                agentSkills: candidate.agentSkills,
-              })),
-            }),
+            // Candidate metadata is public routing context, but it is still
+            // bounded before it reaches the provider so a tenant cannot make
+            // the platform pay for an unbounded prompt.
+            content: boundedProviderIntent(input, candidates),
           },
         ],
       }),
@@ -115,12 +119,21 @@ export async function decidePlatformRoutes(input: {
       model,
       degraded: false,
       costBearer: "platform",
+      budget: currentBudget(),
       usage: readUsage(payload),
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "AI 路由服务不可用";
     return policyFallback(candidates, `AI 路由降级：${reason.slice(0, 240)}`, model);
   }
+}
+
+/** True when a server-side provider credential is present and the endpoint is allowed. */
+export function isPlatformRouterConfigured(): boolean {
+  const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
+  const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
+  const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim();
+  return Boolean(endpoint && apiKey && model && isAllowedEndpoint(endpoint));
 }
 
 function policyFallback(
@@ -136,8 +149,50 @@ function policyFallback(
     confidence: null,
     degraded: true,
     costBearer: "platform",
+    budget: currentBudget(),
     usage: null,
   };
+}
+
+function currentBudget(): PlatformRouteBudget {
+  return {
+    maxInputCharacters: MAX_ROUTER_INPUT_CHARACTERS,
+    maxOutputTokens: configuredMaxTokens(),
+  };
+}
+
+function boundedProviderIntent(
+  input: { platformPath: string; narrative: string },
+  candidates: PlatformRouteCandidate[],
+): string {
+  const detailed = {
+    currentPlatformPath: input.platformPath,
+    userIntent: input.narrative.slice(0, 8_000),
+    candidates: candidates.map((candidate) => ({
+      slug: candidate.slug,
+      path: candidate.path,
+      displayName: candidate.displayName.slice(0, 160),
+      description: candidate.description.slice(0, 400),
+      capabilities: candidate.capabilities.slice(0, 16).map((value) => value.slice(0, 96)),
+      agentStages: candidate.agentStages.slice(0, 8),
+      agentSkills: candidate.agentSkills.slice(0, 16).map((value) => value.slice(0, 128)),
+    })),
+  };
+  const detailedJson = JSON.stringify(detailed);
+  if (detailedJson.length <= MAX_ROUTER_INPUT_CHARACTERS) return detailedJson;
+
+  // If a very large manifest still exceeds the cap, retain only the fields
+  // needed to make an allowlisted slug decision.  This keeps the request valid
+  // JSON instead of truncating a string in the middle of a serialized object.
+  return JSON.stringify({
+    currentPlatformPath: input.platformPath,
+    userIntent: input.narrative.slice(0, 4_000),
+    candidates: candidates.map((candidate) => ({
+      slug: candidate.slug,
+      path: candidate.path,
+      displayName: candidate.displayName.slice(0, 120),
+    })),
+  });
 }
 
 function readUsage(value: unknown): PlatformRouteUsage | null {
@@ -164,7 +219,7 @@ function configuredMaxTokens(): number {
 function normalizeDecision(
   value: unknown,
   candidates: PlatformRouteCandidate[],
-): Omit<PlatformRouteDecision, "source" | "model" | "degraded" | "costBearer" | "usage"> {
+): Omit<PlatformRouteDecision, "source" | "model" | "degraded" | "costBearer" | "budget" | "usage"> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("AI 路由响应不是对象");
   }
