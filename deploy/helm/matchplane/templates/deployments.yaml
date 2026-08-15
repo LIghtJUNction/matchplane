@@ -187,6 +187,8 @@ spec:
               value: {{ $root.Values.web.routerAiModel | quote }}
             - name: MATCHPLANE_ROUTER_AI_MAX_TOKENS
               value: {{ $root.Values.web.routerAiMaxTokens | quote }}
+            - name: MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR
+              value: {{ $root.Values.web.routerAiRequestsPerHour | quote }}
             - name: MATCHPLANE_ROUTER_AI_KEY
               valueFrom:
                 secretKeyRef:
