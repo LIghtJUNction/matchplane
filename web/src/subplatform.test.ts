@@ -18,4 +18,11 @@ describe("nested subplatform paths", () => {
     expect(config.slug).toBe("root");
     expect(config.manifestUrl).toBeUndefined();
   });
+
+  it("uses the registry-backed manifest endpoint for a direct child", () => {
+    const config = resolveSubplatform("/used-car");
+
+    expect(config.path).toBe("/used-car");
+    expect(config.manifestUrl).toBe("/api/platform/manifest?path=%2Fused-car");
+  });
 });

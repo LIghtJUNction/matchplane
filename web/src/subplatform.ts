@@ -32,9 +32,7 @@ export function resolveSubplatform(pathname = "/"): SubplatformConfig {
         brandName: slug,
         label: "",
         description: "",
-        manifestUrl: segments.length === 1
-          ? `${path}/matchplane.subplatform.json`
-          : `/api/platform/manifest?path=${encodeURIComponent(path)}`,
+        manifestUrl: `/api/platform/manifest?path=${encodeURIComponent(path)}`,
       };
 }
 

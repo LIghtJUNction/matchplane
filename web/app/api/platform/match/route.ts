@@ -59,10 +59,10 @@ export async function POST(request: Request): Promise<Response> {
   // could be retried forever while every row was labeled policy_fallback.
   if (candidates.length > 0 && isPlatformRouterConfigured()) {
     const recent = await authDatabase.query(
-      `SELECT count(*)::int AS count
+      `SELECT coalesce(sum(model_calls), 0)::int AS count
         FROM platform_ai_usage
         WHERE auth_user_id = $1
-          AND (source = 'ai' OR model IS NOT NULL)
+          AND model_calls > 0
           AND created_at >= clock_timestamp() - interval '1 hour'`,
       [actor.subject],
     );
@@ -90,6 +90,7 @@ export async function POST(request: Request): Promise<Response> {
   });
   const routing = summarizeRouting(recursive.trace, recursive.truncated);
   const routePlan = recursive.routePlan;
+  const modelCalls = recursive.trace.filter(({ decision }) => decision.source === "ai").length;
   const status = routePlan.length === 0
     ? "accepted"
     : routing.degraded
@@ -118,8 +119,8 @@ export async function POST(request: Request): Promise<Response> {
       `INSERT INTO platform_ai_usage
         (id, match_request_id, auth_user_id, platform_path, source, cost_bearer,
          model, max_input_characters, max_output_tokens, prompt_tokens,
-         completion_tokens, total_tokens, degraded)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+         completion_tokens, total_tokens, model_calls, degraded)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
         randomUUID(),
         requestId,
@@ -133,6 +134,7 @@ export async function POST(request: Request): Promise<Response> {
         routing.usage?.promptTokens ?? null,
         routing.usage?.completionTokens ?? null,
         routing.usage?.totalTokens ?? null,
+        modelCalls,
         routing.degraded,
       ],
     );

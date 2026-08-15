@@ -40,6 +40,7 @@ subplatform-check:
     test -f subplatforms/auto/matchplane.subplatform.json
     test -f web/public/used-car/matchplane.subplatform.json
     cmp subplatforms/auto/matchplane.subplatform.json web/public/used-car/matchplane.subplatform.json
+    python3 -c 'import json; p=json.load(open("subplatforms/auto/package.json")); assert p["scripts"].get("build"), "subplatform package must expose the manifest build command"'
     python3 -c 'import json; m=json.load(open("subplatforms/auto/matchplane.subplatform.json")); a=m["agent"]; assert m["apiVersion"] == "matchplane.subplatform/v1"; assert m["rootApiVersion"] == "v1"; assert m["slug"] == "used-car"; assert a["protocol"] == "matchplane.agent/v1"; assert set(a["stages"]) == {"merchant", "inventory"}; assert a["skills"] and a["mcpTools"]'
     python3 -c 'import json; json.load(open("docs/agent-mcp-skill-protocol-v1.json")); json.load(open("docs/platform-routing-protocol-v1.json")); json.load(open("docs/retrieval-protocol-v1.json")); json.load(open("docs/schemas-matchplane-subplatform.json"))'
     test -n "$$(git -C subplatforms/auto rev-parse HEAD)"

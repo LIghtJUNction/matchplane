@@ -4,6 +4,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { isMountedPlatformPath } from "../../../src/platform-mount";
+import { readActivePlatformManifest } from "../../../src/platform-manifest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +21,19 @@ export async function GET(
   const mountedPath = `/${platformPath}`;
   if (!(await isMountedPlatformPath(mountedPath))) {
     return NextResponse.json({ error: "platform is not active" }, { status: 404 });
+  }
+  const registeredManifest = await readActivePlatformManifest(mountedPath);
+  if (registeredManifest) {
+    return new Response(registeredManifest, {
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "application/json; charset=utf-8",
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }
+  if (process.env.MATCHPLANE_ENVIRONMENT === "production") {
+    return NextResponse.json({ error: "platform manifest is not available" }, { status: 404 });
   }
   try {
     const manifest = await readFile(
