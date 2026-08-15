@@ -24,6 +24,21 @@ export interface PaymentSetting {
   updated_at: string;
 }
 
+export interface PlatformSetupStatus {
+  status: "ok" | "degraded";
+  root: {
+    tenantConfigured: boolean;
+    tenantExists: boolean;
+    tenant: { slug: string; name: string } | null;
+    rootAdminConfigured: boolean;
+    identityAccounts: number;
+  };
+  domains: Array<{ id: string; slug: string; name: string }>;
+  registrations: Record<string, number>;
+  routing: { activeChildren: number; ready: boolean };
+  firstRun: { needsRootAccount: boolean; readyForAdmin: boolean };
+}
+
 export interface SubplatformEmailConfig {
   tenant_id: string;
   domain_id: string;
@@ -228,6 +243,18 @@ export function isLiveMarketplaceEnabled(): boolean {
   // A production build must never silently fall back to the demo-only branch.
   // Operators can still opt out explicitly for a local/demo deployment.
   return process.env.NODE_ENV === "production";
+}
+
+export async function getPlatformSetupStatus(): Promise<PlatformSetupStatus> {
+  const response = await fetch("/api/platform/setup", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as Partial<PlatformSetupStatus> | null;
+  if (!response.ok || !body || body.status !== "ok") {
+    throw new MarketplaceApiError(response.status, "平台初始化状态暂时不可用");
+  }
+  return body as PlatformSetupStatus;
 }
 
 export async function routePlatformIntent(input: {

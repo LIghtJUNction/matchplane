@@ -1104,6 +1104,44 @@ main {
   gap: 1rem;
 }
 
+.platform-readiness {
+  grid-column: 1 / -1;
+  padding-block: 1.1rem;
+}
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.readiness-item {
+  min-width: 0;
+  padding: 0.75rem 0.85rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(188, 209, 202, 0.22);
+}
+
+.readiness-item > span {
+  width: 0.55rem;
+  height: 0.55rem;
+  grid-row: span 2;
+  border-radius: 50%;
+  background: var(--cactus-deep);
+  box-shadow: 0 0 0 0.24rem rgba(188, 209, 202, 0.5);
+}
+
+.readiness-item strong { font-size: 0.77rem; }
+.readiness-item small { margin-top: 0.12rem; color: var(--muted); font-size: 0.67rem; line-height: 1.4; }
+.readiness-attention { background: rgba(217, 119, 87, 0.12); }
+.readiness-attention > span { background: var(--clay); box-shadow: 0 0 0 0.24rem rgba(217, 119, 87, 0.18); }
+.readiness-action { width: fit-content; margin-top: 0.8rem; }
+
 .surface {
   min-width: 0;
   padding: clamp(1.15rem, 2.6vw, 2rem);
@@ -1671,6 +1709,7 @@ main {
 @media (max-width: 56rem) {
   .app-header { padding-inline: 0.75rem; }
   .header-inner { grid-template-columns: 1fr auto; }
+  .readiness-grid { grid-template-columns: 1fr; }
   .root-routing-strip { grid-template-columns: 1fr; gap: 0.8rem; }
   .root-routing-copy h2 { max-width: none; }
   .root-routing-steps { grid-template-columns: 1fr; gap: 0; }

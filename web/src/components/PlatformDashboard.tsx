@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   BadgeCheck,
   BanknoteArrowDown,
@@ -14,6 +15,7 @@ import {
 import { motion } from "motion/react";
 
 import { MetricCard, SectionHeading, spring } from "./Primitives";
+import { getPlatformSetupStatus, isLiveMarketplaceEnabled, type PlatformSetupStatus } from "../api";
 
 interface PlatformDashboardProps {
   paymentMode: "test" | "production";
@@ -26,6 +28,37 @@ export function PlatformDashboard({
   onRequestModeChange,
   onNotice,
 }: PlatformDashboardProps) {
+  const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
+  const [setupError, setSetupError] = useState(false);
+
+  useEffect(() => {
+    if (!isLiveMarketplaceEnabled()) return;
+    let mounted = true;
+    void getPlatformSetupStatus()
+      .then((status) => {
+        if (mounted) setSetup(status);
+      })
+      .catch(() => {
+        if (mounted) setSetupError(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const identityStatus = setupError
+    ? "状态接口不可用"
+    : setup?.firstRun.needsRootAccount
+      ? "等待根管理员账号"
+      : setup
+        ? "身份已初始化"
+        : "读取部署状态";
+  const routingStatus = setupError
+    ? "状态接口不可用"
+    : setup
+      ? setup.routing.ready ? `${setup.routing.activeChildren} 个子平台已激活` : "等待子平台激活"
+      : "读取部署状态";
+
   return (
     <div className="dashboard platform-dashboard">
       <section className="workspace-heading platform-heading">
@@ -56,6 +89,25 @@ export function PlatformDashboard({
       </section>
 
       <div className="platform-layout">
+        <section className="surface platform-readiness" aria-label="首启与平台树">
+          <SectionHeading eyebrow="首启与平台树" title="先确认平台已经准备好" />
+          <div className="readiness-grid">
+            <div className={setup?.firstRun.needsRootAccount ? "readiness-item readiness-attention" : "readiness-item"}>
+              <span aria-hidden="true" />
+              <strong>{identityStatus}</strong>
+              <small>根管理员验证后才可注册和激活子平台</small>
+            </div>
+            <div className={setup?.routing.ready ? "readiness-item" : "readiness-item readiness-attention"}>
+              <span aria-hidden="true" />
+              <strong>{routingStatus}</strong>
+              <small>{setup ? `${setup.domains.length} 个可用 domain` : "domain 与注册状态由 API 返回"}</small>
+            </div>
+          </div>
+          {setup?.firstRun.needsRootAccount ? (
+            <a className="button button-dark readiness-action" href="/login?role=platform&next=%2F%3Frole%3Dplatform">去创建或登录根管理员</a>
+          ) : null}
+        </section>
+
         <section className="surface gateway-panel" aria-labelledby="gateway-title">
           <SectionHeading eyebrow="标准化支付接口" title="支付网关" action="配置网关" onAction={() => onNotice("网关配置需要管理员会话")} />
           <div className="gateway-empty">
@@ -85,10 +137,10 @@ export function PlatformDashboard({
           <div className="finance-empty"><ReceiptText size={22} aria-hidden="true" /><p>暂无财务动态。接入支付服务后，这里显示真实事件。</p></div>
           <div className="finance-actions">
             <button type="button" onClick={() => onNotice("已进入发票管理")}>
-              <ReceiptText size={18} aria-hidden="true" /><span><strong>发票管理</strong><small>12 个待处理</small></span>
+              <ReceiptText size={18} aria-hidden="true" /><span><strong>发票管理</strong><small>由支付服务返回真实状态</small></span>
             </button>
             <button type="button" onClick={() => onNotice("已进入退款管理")}>
-              <BanknoteArrowDown size={18} aria-hidden="true" /><span><strong>退款管理</strong><small>3 个需复核</small></span>
+              <BanknoteArrowDown size={18} aria-hidden="true" /><span><strong>退款管理</strong><small>由支付服务返回真实状态</small></span>
             </button>
           </div>
         </section>

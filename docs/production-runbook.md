@@ -133,6 +133,15 @@ enabling workloads, apply migrations with `matchplane migrate`, and let systemd/
 `matchplane serve <service>` for each workload. `matchplane mcp serve` is the read-only stdio
 operations surface for an on-call Agent.
 
+After the web unit is reachable, open `GET /api/platform/setup` to inspect the bounded first-run
+state. It reports only whether the configured root tenant exists, whether active domains and child
+registrations are present, and whether any Better Auth identity exists; it never returns credentials
+or account addresses. The first production account must be created from `/login?role=platform` with
+the operator-owned `MATCHPLANE_ROOT_ADMIN_EMAIL`; email verification is required before the account
+is promoted to `rootSuperAdmin`. Register a child through the authenticated subplatform API, let the
+isolated builder attach its immutable build digest, then activate it explicitly. Do not insert
+Better Auth users, organizations, or active registrations directly with SQL.
+
 Run the one-shot initializer once for the release, then enable all runtime units together:
 
 ```sh
