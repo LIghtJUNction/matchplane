@@ -10,6 +10,9 @@
 export interface PlatformRouteCandidate {
   slug: string;
   path: string;
+  /** Internal authority metadata; never sent to the provider prompt. */
+  tenantId?: string;
+  domainId?: string;
   displayName: string;
   description: string;
   capabilities: string[];

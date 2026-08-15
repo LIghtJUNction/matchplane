@@ -127,6 +127,10 @@ export interface PlatformIntentRoute {
   status: "accepted" | "delegated" | "degraded";
   routePlan: PlatformRouteHop[];
   routing: PlatformRouteDecision;
+  routingTrace?: Array<{
+    platformPath: string;
+    decision: PlatformRouteDecision;
+  }>;
 }
 
 export class MarketplaceApiError extends Error {

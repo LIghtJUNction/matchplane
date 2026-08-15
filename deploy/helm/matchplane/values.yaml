@@ -29,6 +29,7 @@ web:
   routerAiUrl: ''
   routerAiModel: ''
   routerAiMaxTokens: 512
+  routerAiMaxSteps: 8
   routerAiRequestsPerHour: 120
   resources:
     requests:

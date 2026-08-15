@@ -59,7 +59,9 @@ If AI routing is enabled, configure `MATCHPLANE_ROUTER_AI_URL`,
 environment/secret file. The browser must never receive the provider key. The platform is the
 token-cost bearer: every Agent call is bounded to at most 24,000 input characters and 2,048 output
 tokens, and `MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR` (default 120 per verified account) limits
-abuse. The `platform_ai_usage` ledger records the platform bearer, model, bounded budget, and
+abuse. `MATCHPLANE_ROUTER_AI_MAX_STEPS` (default 8, hard maximum 16) bounds how many platform
+nodes one chat request can traverse; each selected child is routed again only after its active
+registration is re-read. The `platform_ai_usage` ledger records the platform bearer, model, bounded budget, and
 provider-reported token counts without storing raw prompts or provider credentials. Set a lower
 quota for a public launch after observing provider limits; a missing provider deliberately produces
 an auditable policy fallback rather than billing a user.

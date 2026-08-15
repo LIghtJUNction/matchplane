@@ -4,13 +4,19 @@ import type { PoolClient } from "pg";
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
-import { decidePlatformRoutes, isPlatformRouterConfigured } from "../../../../src/platform-router";
+import {
+  decidePlatformRoutes,
+  isPlatformRouterConfigured,
+  type PlatformRouteDecision,
+} from "../../../../src/platform-router";
+import { expandPlatformRouteTree, type PlatformRouteTrace } from "../../../../src/platform-orchestrator";
 
 export const runtime = "nodejs";
 
 const MAX_NARRATIVE_LENGTH = 10_000;
 const MAX_PATH_LENGTH = 512;
 const DEFAULT_AI_REQUESTS_PER_HOUR = 120;
+const DEFAULT_AI_MAX_STEPS = 8;
 
 /**
  * Accepts a domain-neutral intent at the current platform node and returns the
@@ -37,14 +43,15 @@ export async function POST(request: Request): Promise<Response> {
     : [];
   // The platform pays for model calls.  Before making one, apply a bounded
   // per-account admission limit so a leaked session cannot create an
-  // unbounded provider bill.  Policy-only fallback requests do not consume
-  // this AI budget.
+  // unbounded provider bill. When a provider is configured, even a degraded
+  // attempt counts against the admission budget; otherwise a failing provider
+  // could be retried forever while every row was labeled policy_fallback.
   if (candidates.length > 0 && isPlatformRouterConfigured()) {
     const recent = await authDatabase.query(
       `SELECT count(*)::int AS count
-         FROM platform_ai_usage
+        FROM platform_ai_usage
         WHERE auth_user_id = $1
-          AND source = 'ai'
+          AND (source = 'ai' OR model IS NOT NULL)
           AND created_at >= clock_timestamp() - interval '1 hour'`,
       [session.user.id],
     );
@@ -56,15 +63,22 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
   }
-  const routing = await decidePlatformRoutes({
+  const recursive = await expandPlatformRouteTree({
     platformPath,
     narrative,
-    candidates: candidates.map(({ tenantId: _tenantId, domainId: _domainId, ...candidate }) => candidate),
+    candidates,
+    loadChildren: async (childPath) => readChildRoutePlan(childPath, rootTenantId ?? ""),
+    decide: ({ platformPath: currentPath, narrative: currentNarrative, candidates: currentCandidates }) =>
+      decidePlatformRoutes({
+        platformPath: currentPath,
+        narrative: currentNarrative,
+        candidates: currentCandidates.map(({ tenantId: _tenantId, domainId: _domainId, ...candidate }) => candidate),
+      }),
+    maxSteps: configuredAiMaxSteps(),
+    maxDepth: configuredAiMaxSteps(),
   });
-  const candidateBySlug = new Map(candidates.map((candidate) => [candidate.slug, candidate]));
-  const routePlan = routing.selectedSlugs
-    .map((slug) => candidateBySlug.get(slug))
-    .filter((candidate): candidate is RouteHop => Boolean(candidate));
+  const routing = summarizeRouting(recursive.trace, recursive.truncated);
+  const routePlan = recursive.routePlan;
   const status = routePlan.length === 0
     ? "accepted"
     : routing.degraded
@@ -79,7 +93,15 @@ export async function POST(request: Request): Promise<Response> {
       `INSERT INTO platform_match_requests
         (id, auth_user_id, platform_path, narrative, route_plan, routing_decision, status)
        VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
-      [requestId, session.user.id, platformPath, narrative, JSON.stringify(routePlan), JSON.stringify(routing), status],
+      [
+        requestId,
+        session.user.id,
+        platformPath,
+        narrative,
+        JSON.stringify(routePlan),
+        JSON.stringify({ ...routing, trace: recursive.trace }),
+        status,
+      ],
     );
     await client.query(
       `INSERT INTO platform_ai_usage
@@ -119,6 +141,7 @@ export async function POST(request: Request): Promise<Response> {
       status,
       routePlan,
       routing,
+      routingTrace: recursive.trace,
     },
     { status: 202, headers: { "cache-control": "no-store" } },
   );
@@ -127,6 +150,50 @@ export async function POST(request: Request): Promise<Response> {
 function configuredAiRequestsPerHour(): number {
   const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR ?? String(DEFAULT_AI_REQUESTS_PER_HOUR), 10);
   return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(10_000, parsed)) : DEFAULT_AI_REQUESTS_PER_HOUR;
+}
+
+function configuredAiMaxSteps(): number {
+  const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_MAX_STEPS ?? String(DEFAULT_AI_MAX_STEPS), 10);
+  return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(16, parsed)) : DEFAULT_AI_MAX_STEPS;
+}
+
+function summarizeRouting(trace: PlatformRouteTrace[], truncated: boolean): PlatformRouteDecision {
+  const first = trace[0]?.decision ?? {
+    selectedSlugs: [],
+    source: "policy_fallback" as const,
+    model: null,
+    rationale: "当前节点没有可用的已激活子平台。",
+    confidence: null,
+    degraded: false,
+    costBearer: "platform" as const,
+    budget: { maxInputCharacters: 24_000, maxOutputTokens: 512 },
+    usage: null,
+  };
+  const hasFallback = trace.some(({ decision }) => decision.source === "policy_fallback");
+  const aiDecisions = trace.filter(({ decision }) => decision.source === "ai");
+  const allUsageReported = aiDecisions.length > 0 && aiDecisions.every(({ decision }) => decision.usage !== null);
+  const usage = allUsageReported
+    ? aiDecisions.reduce(
+      (total, { decision }) => ({
+        promptTokens: total.promptTokens + (decision.usage?.promptTokens ?? 0),
+        completionTokens: total.completionTokens + (decision.usage?.completionTokens ?? 0),
+        totalTokens: total.totalTokens + (decision.usage?.totalTokens ?? 0),
+      }),
+      { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    )
+    : null;
+  const suffix = [
+    trace.length > 1 ? `已递归处理 ${trace.length} 个平台节点。` : "",
+    truncated ? "达到递归安全上限，剩余分支未继续调用。" : "",
+  ].filter(Boolean).join(" ");
+  return {
+    ...first,
+    source: hasFallback ? "policy_fallback" : first.source,
+    model: first.model ?? aiDecisions.find(({ decision }) => decision.model)?.decision.model ?? null,
+    rationale: `${first.rationale}${suffix ? ` ${suffix}` : ""}`.slice(0, 1_000),
+    degraded: first.degraded || hasFallback || trace.some(({ decision }) => decision.degraded) || truncated,
+    usage,
+  };
 }
 
 interface MatchRequest {
