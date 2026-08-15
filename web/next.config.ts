@@ -10,7 +10,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
-  trailingSlash: true,
+  // Keep API URLs canonical. Better Auth's router intentionally owns the
+  // `/api/auth/*` path and treats a trailing slash as a distinct endpoint;
+  // Next's global trailing-slash redirect would turn valid auth calls into
+  // 404 responses. UI routes do not need a trailing slash to render.
   images: {
     unoptimized: true,
   },

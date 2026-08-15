@@ -11,6 +11,7 @@ SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
 # Keep Better Auth's signing secret readable only by the web service account.
 EnvironmentFile=-/etc/matchplane/secrets/web/better-auth.env
+Environment=MATCHPLANE_ENVIRONMENT=production
 Environment=NODE_ENV=production
 Environment=HOSTNAME=127.0.0.1
 Environment=PORT=4173

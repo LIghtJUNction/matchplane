@@ -130,14 +130,15 @@ API; keep credentials in restricted files or an approved secret manager. Use tes
 merchant onboarding, callback signature verification, invoice provider configuration, and a
 successful sandbox refund are complete.
 
-Do not request the `matx.tech` certificate until DNS has an `A` record for the host and (if used) a
-`www` CNAME. After propagation, install the renewal hook and timer, run a dry run, request the
-certificate, and switch the Nginx `server_name` from the temporary IP certificate to `matx.tech`:
+The checked-in Nginx profile serves `matx.tech` and expects the certificate at
+`/etc/letsencrypt/live/matx.tech/`. Confirm that DNS still points at this host and that the
+certificate covers `matx.tech` (the current profile intentionally does not claim `www`). On a new
+host, install the renewal hook and certificate before switching traffic:
 
 ```sh
 sudo bash deploy/scripts/install-nginx-certbot-hook.sh
 sudo certbot renew --dry-run
 sudo certbot certonly --webroot -w /var/www/matchplane/acme \
-  -d matx.tech -d www.matx.tech
+  -d matx.tech
 sudo nginx -t && sudo systemctl reload nginx
 ```

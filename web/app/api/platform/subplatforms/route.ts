@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { PoolClient } from "pg";
 
 import { NextResponse } from "next/server";
 
@@ -80,8 +81,9 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "子平台组织创建失败；slug 可能已被占用" }, { status: 409 });
   }
 
-  const client = await authDatabase.connect();
+  let client: PoolClient | undefined;
   try {
+    client = await authDatabase.connect();
     await client.query("BEGIN");
     await client.query(
       `UPDATE "organization"
@@ -123,12 +125,12 @@ export async function POST(request: Request): Promise<Response> {
     );
     await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK");
+    await client?.query("ROLLBACK").catch(() => undefined);
     await authDatabase.query('DELETE FROM "organization" WHERE id = $1::uuid', [organization.id]).catch(() => undefined);
     console.error("subplatform registration persistence failed", error);
     return NextResponse.json({ error: "子平台注册记录保存失败" }, { status: 500 });
   } finally {
-    client.release();
+    client?.release();
   }
 
   return NextResponse.json({
@@ -258,6 +260,8 @@ function validateManifest(value: unknown, slug: string | undefined, packageId: s
   const manifest = value as Partial<Manifest>;
   const serialized = JSON.stringify(value);
   if (!serialized || Buffer.byteLength(serialized, "utf8") > MAX_MANIFEST_BYTES) return { ok: false, error: "manifest 过大" };
+  const unknownKey = Object.keys(manifest).find((key) => !manifestKeys.has(key));
+  if (unknownKey) return { ok: false, error: `manifest 包含未声明字段: ${unknownKey}` };
   if (manifest.apiVersion !== "matchplane.subplatform/v1" || manifest.rootApiVersion !== "v1") return { ok: false, error: "manifest API 版本不受支持" };
   if (!stringMatches(manifest.id, /^[a-z0-9][a-z0-9._-]{1,127}$/) || manifest.id !== packageId) return { ok: false, error: "manifest.id 与 packageId 不一致" };
   if (!stringMatches(manifest.slug, /^[a-z0-9][a-z0-9-]{1,62}$/) || manifest.slug !== slug) return { ok: false, error: "manifest.slug 与 slug 不一致" };
@@ -270,9 +274,9 @@ function validateManifest(value: unknown, slug: string | undefined, packageId: s
   return { ok: true, value: manifest as Manifest };
 }
 
-function normalizeScopes(scopes: string[]): string[] | null {
-  if (!Array.isArray(scopes) || scopes.length > 32 || scopes.some((scope) => !allowedScopes.has(scope))) return null;
-  return [...new Set(scopes)];
+function normalizeScopes(scopes: unknown): string[] | null {
+  if (!Array.isArray(scopes) || scopes.length > 32 || scopes.some((scope) => typeof scope !== "string" || !allowedScopes.has(scope))) return null;
+  return [...new Set(scopes.filter((scope): scope is string => typeof scope === "string"))];
 }
 
 function isSourceKind(value: RegistrationRequest["sourceKind"]): value is "git" | "archive" {
@@ -313,3 +317,17 @@ interface Manifest {
   retrieval?: { protocol: "matchplane.retrieval/v1"; owner: "subplatform" };
   [key: string]: unknown;
 }
+
+const manifestKeys = new Set([
+  "apiVersion",
+  "id",
+  "slug",
+  "displayName",
+  "rootApiVersion",
+  "entry",
+  "routes",
+  "capabilities",
+  "requiredScopes",
+  "assets",
+  "retrieval",
+]);
