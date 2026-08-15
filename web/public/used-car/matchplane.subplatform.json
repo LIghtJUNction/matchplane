@@ -27,7 +27,7 @@
     "owner": "subplatform"
   },
   "assets": {
-    "staticDirectory": "src",
+    "staticDirectory": "dist",
     "buildCommand": "bun run build"
   }
 }

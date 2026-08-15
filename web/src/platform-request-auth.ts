@@ -12,7 +12,10 @@ export interface PlatformRequestActor {
  * Authenticate a human platform chat or a server-side Agent. Better Auth remains the only
  * credential authority; API keys never create an impersonated browser session.
  */
-export async function authenticatePlatformRequest(request: Request): Promise<PlatformRequestActor | null> {
+export async function authenticatePlatformRequest(
+  request: Request,
+  requiredPermissions: Record<string, string[]> = { platform: ["read"] },
+): Promise<PlatformRequestActor | null> {
   try {
     const session = await auth.api.getSession({ headers: request.headers });
     if (session) {
@@ -26,7 +29,7 @@ export async function authenticatePlatformRequest(request: Request): Promise<Pla
     // A malformed/expired session may still be accompanied by a valid machine key.
   }
 
-  const key = await verifyPlatformApiKey(request, { platform: ["read"] });
+  const key = await verifyPlatformApiKey(request, requiredPermissions);
   if (!key || !isUuid(key.referenceId)) return null;
   return {
     subject: `api-key:${key.id}`,

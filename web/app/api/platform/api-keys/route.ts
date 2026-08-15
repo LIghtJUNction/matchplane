@@ -9,6 +9,7 @@ const allowedPermissions: Record<string, readonly string[]> = {
   platform: ["read", "configure", "manage_children", "manage_api_keys"],
   retrieval: ["query", "write"],
   marketplace: ["read", "write", "moderate", "publish"],
+  agent: ["handoff"],
 };
 
 /**

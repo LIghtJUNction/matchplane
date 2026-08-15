@@ -175,6 +175,7 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-matchplane_dev_only_auth_secret_change_in_production}
       MATCHPLANE_ROOT_ADMIN_EMAIL: ${MATCHPLANE_ROOT_ADMIN_EMAIL:-admin@example.com}
       MATCHPLANE_ROOT_TENANT_ID: ${MATCHPLANE_ROOT_TENANT_ID:-00000000-0000-7000-8000-000000000100}
+      MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT: ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-/var/lib/matchplane/subplatform-artifacts}
       MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID: ${MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID:-}
       MATCHPLANE_ROUTER_AI_URL: ${MATCHPLANE_ROUTER_AI_URL:-}
       MATCHPLANE_ROUTER_AI_KEY: ${MATCHPLANE_ROUTER_AI_KEY:-}
@@ -194,6 +195,8 @@ services:
         condition: service_started
     ports:
       - "127.0.0.1:${MATCHPLANE_WEB_HOST_PORT:-4173}:4173"
+    volumes:
+      - ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-./var/subplatform-artifacts}:/var/lib/matchplane/subplatform-artifacts:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health/web').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s

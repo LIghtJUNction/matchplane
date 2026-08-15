@@ -10,6 +10,7 @@ import {
   type PlatformRouteDecision,
 } from "../../../../src/platform-router";
 import { expandPlatformRouteTree, type PlatformRouteTrace } from "../../../../src/platform-orchestrator";
+import { readActiveDirectChildRoutes } from "../../../../src/platform-child-routes";
 import {
   isMountedPlatformPath,
   isPlatformPathAccessibleByOrganization,
@@ -50,7 +51,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   const candidates = rootTenantId && isUuid(rootTenantId)
-    ? await readChildRoutePlan(platformPath, rootTenantId)
+    ? await readActiveDirectChildRoutes(platformPath, rootTenantId)
     : [];
   // The platform pays for model calls.  Before making one, apply a bounded
   // per-account admission limit so a leaked session cannot create an
@@ -78,7 +79,7 @@ export async function POST(request: Request): Promise<Response> {
     platformPath,
     narrative,
     candidates,
-    loadChildren: async (childPath) => readChildRoutePlan(childPath, rootTenantId ?? ""),
+    loadChildren: async (childPath) => readActiveDirectChildRoutes(childPath, rootTenantId ?? ""),
     decide: ({ platformPath: currentPath, narrative: currentNarrative, candidates: currentCandidates }) =>
       decidePlatformRoutes({
         platformPath: currentPath,
@@ -215,19 +216,6 @@ interface MatchRequest {
   platformPath?: string;
 }
 
-interface RouteHop {
-  slug: string;
-  path: string;
-  displayName: string;
-  description: string;
-  tenantId: string;
-  domainId: string;
-  capabilities: string[];
-  agentStages: string[];
-  agentSkills: string[];
-  depth: number;
-}
-
 async function parseBody(request: Request): Promise<MatchRequest> {
   try {
     const body = (await request.json()) as MatchRequest;
@@ -237,67 +225,11 @@ async function parseBody(request: Request): Promise<MatchRequest> {
   }
 }
 
-async function readChildRoutePlan(platformPath: string, rootTenantId: string): Promise<RouteHop[]> {
-  const currentSlug = platformPath === "/" ? null : platformPath.split("/").filter(Boolean).at(-1) ?? null;
-  const result = await authDatabase.query(
-    `WITH current_node AS (
-       SELECT o.id
-         FROM "organization" o
-        WHERE $1::text IS NOT NULL
-          AND o.slug = $1::text
-          AND o."tenantId" = $2::text
-     )
-     SELECT r.slug,
-            COALESCE(r.manifest ->> 'displayName', r.slug) AS "displayName",
-            COALESCE(r.manifest ->> 'description', '') AS description,
-            r.tenant_id AS "tenantId",
-            r.domain_id AS "domainId",
-            CASE WHEN $3::text = '/' THEN '/' || r.slug
-                 ELSE $3::text || '/' || r.slug
-            END AS path,
-            COALESCE(r.manifest -> 'capabilities', '[]'::jsonb) AS capabilities,
-            COALESCE(r.manifest -> 'agent' -> 'stages', '[]'::jsonb) AS "agentStages",
-            COALESCE(r.manifest -> 'agent' -> 'skills', '[]'::jsonb) AS "agentSkills"
-      FROM subplatform_registrations r
-      JOIN "organization" o ON o.slug = r.slug AND o."tenantId" = r.tenant_id::text
-      LEFT JOIN current_node ON true
-      WHERE r.tenant_id = $2::uuid
-        AND r.state = 'active'
-        AND (($1::text IS NULL AND o."parentOrganizationId" IS NULL)
-          OR ($1::text IS NOT NULL AND current_node.id IS NOT NULL
-              AND o."parentOrganizationId" = current_node.id))
-      ORDER BY r.slug ASC`,
-    [currentSlug, rootTenantId, platformPath],
-  );
-  return result.rows.map((row) => ({
-    slug: String(row.slug),
-    path: safeRoutePath(String(row.path), String(row.slug)),
-    displayName: String(row.displayName),
-    description: String(row.description),
-    tenantId: String(row.tenantId),
-    domainId: String(row.domainId),
-    capabilities: Array.isArray(row.capabilities)
-      ? row.capabilities.filter((item: unknown): item is string => typeof item === "string").slice(0, 64)
-      : [],
-    agentStages: Array.isArray(row.agentStages)
-      ? row.agentStages.filter((item: unknown): item is string => typeof item === "string").slice(0, 8)
-      : [],
-    agentSkills: Array.isArray(row.agentSkills)
-      ? row.agentSkills.filter((item: unknown): item is string => typeof item === "string").slice(0, 32)
-      : [],
-    depth: 1,
-  }));
-}
-
 function normalizePlatformPath(value: string | undefined): string | null {
   if (typeof value !== "string" || value.length > MAX_PATH_LENGTH) return null;
   const normalized = `/${value.split("/").filter(Boolean).join("/")}`;
   if (normalized === "/") return normalized;
   return /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(normalized) ? normalized : null;
-}
-
-function safeRoutePath(value: string, fallbackSlug: string): string {
-  return /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(value) ? value : `/${fallbackSlug}`;
 }
 
 function isUuid(value: string): boolean {

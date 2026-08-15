@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matchplane.dev/schemas/agent-handoff-protocol-v1.json",
+  "title": "MatchPlane caller-funded Agent handoff v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "request_id", "stage", "scope", "intent", "agent", "budget"],
+  "properties": {
+    "protocol": { "const": "matchplane.agent/v1" },
+    "request_id": { "type": "string", "format": "uuid" },
+    "stage": { "type": "string", "enum": ["platform", "merchant", "inventory"] },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform_path"],
+      "properties": {
+        "platform_path": {
+          "type": "string",
+          "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$",
+          "maxLength": 512
+        }
+      }
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["narrative", "requirements"],
+      "properties": {
+        "narrative": { "type": "string", "minLength": 1, "maxLength": 10000 },
+        "requirements": { "type": "object", "maxProperties": 256 }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "capabilities"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$" },
+        "version": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:+-]{0,127}$" },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{1,127}$" }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_steps", "max_input_characters", "max_output_tokens", "cost_bearer"],
+      "properties": {
+        "max_steps": { "type": "integer", "minimum": 1, "maximum": 16 },
+        "max_input_characters": { "type": "integer", "minimum": 1, "maximum": 24000 },
+        "max_output_tokens": { "type": "integer", "minimum": 64, "maximum": 2048 },
+        "cost_bearer": { "const": "caller" }
+      }
+    },
+    "selected_refs": {
+      "type": "array",
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+    }
+  }
+}

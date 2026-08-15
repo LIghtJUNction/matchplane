@@ -26,6 +26,10 @@ web:
   trustedOrigins: ''
   rootTenantId: ''
   rootOrganizationId: ''
+  artifactRoot: /var/lib/matchplane/subplatform-artifacts
+  # Optional read-only PVC containing artifacts produced by the isolated plugin builder.
+  # Leave empty when artifacts are supplied by the host-mounted systemd/Compose path.
+  artifactPvc: ''
   # The router provider is optional. Keep its API key in existingWebSecret under router-ai-key.
   routerAiUrl: ''
   routerAiModel: ''

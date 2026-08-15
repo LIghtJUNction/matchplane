@@ -73,6 +73,12 @@ accepts a self-reported build digest. The isolated builder calls
 `POST /api/platform/subplatforms/build` with that token and the SHA-256 digest of the immutable
 static artifact; a root/subplatform administrator must still call the activation endpoint. A
 digest callback is idempotent and cannot replace a different digest on an existing registration.
+When a package includes a browser UI, stage its `dist/` directory below the absolute
+`MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT` and include the relative `artifactPath` plus HTML
+`artifactEntry` in the builder callback. The root records both paths with the build digest and
+serves them only after activation through the sandboxed `/api/platform/plugin-assets/<mount>/...`
+route. The builder must never place secrets or server code in that directory; use a unique,
+digest-addressed subdirectory for every release.
 
 The production Next.js route is fail-closed against unregistered package assets. A path is rendered
 only when its complete recursive path resolves through the Better Auth organization tree and has an

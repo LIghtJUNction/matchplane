@@ -57,6 +57,8 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
                 registration.domain_id AS "domainId",
                 encode(registration.manifest_digest, 'hex') AS "manifestDigest",
                 encode(registration.build_digest, 'hex') AS "buildDigest",
+                registration.artifact_locator AS "artifactLocator",
+                registration.artifact_entry AS "artifactEntry",
                 registration.version
            FROM platform_tree tree
            JOIN LATERAL (
@@ -65,6 +67,8 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
                     r.domain_id,
                     r.manifest_digest,
                     r.build_digest,
+                    r.artifact_locator,
+                    r.artifact_entry,
                     r.version
                FROM subplatform_registrations r
               WHERE r.tenant_id = $1::uuid
@@ -74,7 +78,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
               LIMIT 1
            ) registration ON true
        )
-       SELECT manifest, "tenantId", "domainId", "manifestDigest", "buildDigest", version
+       SELECT manifest, "tenantId", "domainId", "manifestDigest", "buildDigest", "artifactLocator", "artifactEntry", version
          FROM active_release
         WHERE platform_path = $2
           AND path_active
@@ -87,11 +91,27 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
       domainId?: unknown;
       manifestDigest?: unknown;
       buildDigest?: unknown;
+      artifactLocator?: unknown;
+      artifactEntry?: unknown;
       version?: unknown;
     } | undefined;
     if (!row || !row.manifest || typeof row.manifest !== "object" || Array.isArray(row.manifest)) return null;
+    const sourceAssets = (row.manifest as Record<string, unknown>).assets;
+    const assets = sourceAssets && typeof sourceAssets === "object" && !Array.isArray(sourceAssets)
+      ? { ...(sourceAssets as Record<string, unknown>) }
+      : null;
+    const artifactLocator = typeof row.artifactLocator === "string" ? row.artifactLocator : null;
+    const artifactEntry = typeof row.artifactEntry === "string" ? row.artifactEntry : "index.html";
+    if (artifactLocator && typeof row.buildDigest === "string" && assets) {
+      assets.hosted = {
+        entry: artifactEntry,
+        digest: row.buildDigest,
+        url: `/api/platform/plugin-assets${platformPath}/${artifactEntry.split("/").map(encodeURIComponent).join("/")}?path=${encodeURIComponent(platformPath)}&build=${encodeURIComponent(row.buildDigest)}`,
+      };
+    }
     const manifest = {
       ...(row.manifest as Record<string, unknown>),
+      ...(assets ? { assets } : {}),
       tenantId: typeof row.tenantId === "string" ? row.tenantId : undefined,
       domainId: typeof row.domainId === "string" ? row.domainId : undefined,
       manifestDigest: typeof row.manifestDigest === "string" ? row.manifestDigest : undefined,

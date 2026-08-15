@@ -11,6 +11,7 @@ export interface SubplatformConfig {
   currencyScale?: number;
   currency?: string;
   email?: { providerKey?: string; fromAddress?: string };
+  pluginArtifact?: { entry: string; url: string; digest: string };
   manifestUrl?: string;
 }
 
@@ -53,6 +54,9 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       currencyScale?: number;
       currency?: string;
       email?: { providerKey?: string; fromAddress?: string };
+      assets?: {
+        hosted?: { entry?: string; url?: string; digest?: string };
+      };
       routes?: string[];
     };
     const declaredRoute = validRoute(manifest.routes?.[0]);
@@ -71,10 +75,21 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       currencyScale: Number.isInteger(manifest.currencyScale) ? manifest.currencyScale : undefined,
       currency: manifest.currency?.trim() || undefined,
       email: manifest.email,
+      pluginArtifact: validHostedArtifact(manifest.assets?.hosted),
     };
   } catch {
     return base;
   }
+}
+
+function validHostedArtifact(
+  value: { entry?: string; url?: string; digest?: string } | undefined,
+): SubplatformConfig["pluginArtifact"] {
+  if (!value || !value.entry || !value.url || !value.digest) return undefined;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,255}$/.test(value.entry)) return undefined;
+  if (!/^\/api\/platform\/plugin-assets\//.test(value.url)) return undefined;
+  if (!/^[0-9a-f]{64}$/i.test(value.digest)) return undefined;
+  return { entry: value.entry, url: value.url, digest: value.digest };
 }
 
 function validRoute(value: string | undefined): string | undefined {

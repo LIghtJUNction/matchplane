@@ -84,7 +84,7 @@ Every package must contain `matchplane.subplatform.json` at its repository or ar
     "skills": ["matchplane.matching.v1"],
     "mcpTools": ["catalog.search", "merchant.search"]
   },
-  "assets": { "staticDirectory": "src", "buildCommand": "bun run build" }
+  "assets": { "staticDirectory": "dist", "buildCommand": "bun run build" }
 }
 ```
 
@@ -104,7 +104,10 @@ The registration request cannot self-report `buildDigest`. The builder callback 
 `POST /api/platform/subplatforms/build`, authenticated by a deployment-only
 `MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN`, and is idempotent for the same immutable digest. A root or
 parent administrator still performs the final activation; a builder cannot publish a package by
-itself.
+itself. A browser package may additionally send `artifactPath` (a relative, digest-addressed
+directory under `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT`) and `artifactEntry` (a relative HTML file,
+defaulting to `index.html`). These values are immutable alongside the build digest and are never
+accepted from the public registration request.
 
 ## Retrieval boundary
 
@@ -157,6 +160,23 @@ but it cannot shift an unbounded model call to a browser, charge a party for roo
 reuse a root credential.
 The normative Agent/Skill/MCP envelope is
 [`docs/agent-mcp-skill-protocol-v1.json`](agent-mcp-skill-protocol-v1.json).
+
+### External Agent handoff
+
+An external buyer or seller Agent can continue the funnel without making the deployment pay for
+its model by calling `POST /api/platform/agent/handoff` (or the HTTP MCP tool
+`platform.agent.handoff`). The request must use the strict
+[`docs/agent-handoff-protocol-v1.json`](agent-handoff-protocol-v1.json) envelope, including a
+unique `request_id`, an active `scope.platform_path`, a bounded intent, Agent capabilities and
+`budget.cost_bearer: "caller"`. The caller's Better Auth organization API key must carry the
+`agent:handoff` permission; sessions are accepted for interactive clients.
+
+The endpoint is deliberately not a proxy to an LLM. It records the handoff for audit and
+idempotency, returns the current node's active direct children and their advertised Skills/MCP
+tools, and gives the caller the stable `/api/mcp` and manifest paths. It never grants contact,
+payment, invoice, refund or administrator authority. `GET /api/platform/agent/handoff` can read
+the status only for the same session or API key subject. Handoffs expire after a bounded interval;
+the caller remains responsible for its own Agent credentials, model calls and token costs.
 
 The stable envelope for stages two and three is
 [`docs/platform-routing-protocol-v1.json`](platform-routing-protocol-v1.json). It carries a
@@ -235,7 +255,14 @@ release; it creates a new immutable version and requires an explicit activation.
   gateway checks an active membership for role-sensitive actions.
 - Plugins are static frontend adapters. They cannot ship a second database, issue tokens, bypass
   contact consent, or call payment providers directly. Provider credentials remain root/payment
-  service secrets.
+  service secrets. After the isolated builder attaches an artifact locator, the active manifest
+  gets a derived `assets.hosted` URL under `/api/platform/plugin-assets/<mount>/...`; the browser
+  hosts that release in a `sandbox="allow-scripts"` iframe. The host sends only a versioned
+  `matchplane.plugin/v1` context message and accepts bounded `chat.open`, `listing.select`,
+  `listing.submit` and `navigation` requests. The artifact endpoint resolves host-local files under
+  `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT`, checks the active build digest, rejects traversal and
+  symlink escapes, and applies a restrictive CSP. It never fetches a plugin-supplied URL or runs
+  plugin server code.
 - A path is activated only after manifest validation, API compatibility, CSP/resource checks,
   package scan, and an operator audit entry. Disable/revoke removes the path while preserving the
   root account and history.

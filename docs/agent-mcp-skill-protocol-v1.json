@@ -47,7 +47,7 @@
         "max_steps": { "type": "integer", "minimum": 1, "maximum": 16 },
         "max_input_characters": { "type": "integer", "minimum": 1, "maximum": 24000 },
         "max_output_tokens": { "type": "integer", "minimum": 64, "maximum": 2048 },
-        "cost_bearer": { "const": "platform" }
+        "cost_bearer": { "enum": ["platform", "caller"] }
       }
     },
     "request": {

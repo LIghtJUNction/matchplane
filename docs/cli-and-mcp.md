@@ -33,7 +33,11 @@ not expose shell execution, arbitrary HTTP forwarding, database writes, payment 
 data. Platform matching and subplatform retrieval remain behind their authenticated HTTP/MCP
 contracts and are not granted by this operations server. The web service exposes the authenticated
 HTTP MCP facade at `/api/mcp`; its `platform.match` tool forwards the same bounded route request as
-the chat API and accepts either a Better Auth session or a scoped organization API key.
+the chat API and accepts either a Better Auth session or a scoped organization API key. The
+`platform.agent.handoff` tool accepts the caller-funded `matchplane.agent/v1` envelope, persists an
+idempotent handoff, and returns only the active direct-child capabilities. It never invokes the
+root model: an external buyer/seller Agent keeps its own provider credentials and token bill. Use
+an organization API key with the explicit `agent:handoff` permission for machine calls.
 
 Exit code is non-zero when a doctor check or any readiness probe fails. This makes the CLI suitable
 for CI, systemd preflight, and an Agent's bounded tool loop.

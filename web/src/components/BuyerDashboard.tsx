@@ -16,7 +16,6 @@ import { motion } from "motion/react";
 
 import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
-import { MatchChat } from "./MatchChat";
 import { ListingVisual, SectionHeading, spring } from "./Primitives";
 
 interface BuyerDashboardProps {
@@ -60,7 +59,6 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
 
   return (
     <div className="dashboard buyer-dashboard">
-      <MatchChat onNotice={onNotice} subplatform={subplatform} />
       <section className="buyer-hero" aria-labelledby="buyer-hero-title">
         <div className="hero-copy">
           <span className="hero-kicker">

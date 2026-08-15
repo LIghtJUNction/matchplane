@@ -153,7 +153,7 @@ spec:
         - name: web
           image: {{ include "matchplane.webImage" $root }}
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["node", "server.js"]
+          command: ["/usr/local/bin/matchplane", "serve", "web"]
           env:
             - name: MATCHPLANE_ENVIRONMENT
               value: {{ $root.Values.runtime.environment | quote }}
@@ -165,6 +165,10 @@ spec:
               value: 0.0.0.0
             - name: PORT
               value: "4173"
+            - name: MATCHPLANE_WEB_NODE
+              value: /usr/local/bin/node
+            - name: MATCHPLANE_WEB_SERVER
+              value: /app/server.js
             - name: BETTER_AUTH_URL
               value: {{ required "web.betterAuthUrl is required" $root.Values.web.betterAuthUrl | quote }}
             - name: BETTER_AUTH_TRUSTED_ORIGINS
@@ -181,6 +185,8 @@ spec:
                   key: root-admin-email
             - name: MATCHPLANE_ROOT_TENANT_ID
               value: {{ $root.Values.web.rootTenantId | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT
+              value: {{ $root.Values.web.artifactRoot | quote }}
             - name: MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID
               value: {{ $root.Values.web.rootOrganizationId | quote }}
             - name: MATCHPLANE_ROUTER_AI_URL
@@ -236,5 +242,17 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          {{- if $root.Values.web.artifactPvc }}
+          volumeMounts:
+            - name: subplatform-artifacts
+              mountPath: {{ $root.Values.web.artifactRoot | quote }}
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml (default $root.Values.resources $root.Values.web.resources) | nindent 12 }}
+      {{- if $root.Values.web.artifactPvc }}
+      volumes:
+        - name: subplatform-artifacts
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.web.artifactPvc | quote }}
+      {{- end }}

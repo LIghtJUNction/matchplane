@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import {
   Bell,
   LayoutDashboard,
@@ -18,6 +19,8 @@ import { PlatformDashboard } from "./components/PlatformDashboard";
 import { Brand, IconButton, spring } from "./components/Primitives";
 import { SellerDashboard } from "./components/SellerDashboard";
 import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
+import { PluginHost } from "./components/PluginHost";
+import { MatchChat } from "./components/MatchChat";
 import { loadSubplatform, resolveSubplatform, type SubplatformConfig } from "./subplatform";
 import {
   createBuyerIntroduction,
@@ -124,6 +127,20 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     setNotice(`支付系统已切换为${nextMode === "test" ? "测试" : "生产"}模式`);
   };
 
+  const genericWorkspace: ReactNode = role === "buyer" ? (
+    <BuyerDashboard listings={listings} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
+  ) : role === "seller" ? (
+    <SellerDashboard onNotice={setNotice} subplatform={subplatform} />
+  ) : role === "subplatform_admin" ? (
+    <SubplatformAdminDashboard onNotice={setNotice} subplatform={subplatform} />
+  ) : (
+    <PlatformDashboard
+      paymentMode={paymentMode}
+      onRequestModeChange={() => setModeDialogOpen(true)}
+      onNotice={setNotice}
+    />
+  );
+
   return (
     <MotionConfig reducedMotion="user" transition={spring}>
       <div id="top" className="app-shell">
@@ -159,19 +176,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               exit={{ opacity: 0, y: -8 }}
               transition={spring}
             >
-              {role === "buyer" ? (
-                <BuyerDashboard listings={listings} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
-              ) : role === "seller" ? (
-                <SellerDashboard onNotice={setNotice} subplatform={subplatform} />
-              ) : role === "subplatform_admin" ? (
-                <SubplatformAdminDashboard onNotice={setNotice} subplatform={subplatform} />
-              ) : (
-                <PlatformDashboard
-                  paymentMode={paymentMode}
-                  onRequestModeChange={() => setModeDialogOpen(true)}
-                  onNotice={setNotice}
-                />
-              )}
+              <MatchChat onNotice={setNotice} subplatform={subplatform} />
+              {subplatform.pluginArtifact ? (
+                <PluginHost role={role} onNotice={setNotice} subplatform={subplatform} fallback={genericWorkspace} />
+              ) : genericWorkspace}
             </motion.div>
           </AnimatePresence>
         </main>
