@@ -2,7 +2,7 @@ use anyhow::Context;
 use matchplane_cache::{CachedBook, CachedLevel, ProjectionOutcome, ValkeyCache};
 use matchplane_config::AppConfig;
 use matchplane_domain::StreamKind;
-use matchplane_events::{consumer, topics};
+use matchplane_events::{KafkaSecurityConfig, consumer, topics};
 use matchplane_observability::init;
 use matchplane_protocol::{decode_event_envelope, v1};
 use prost::Message;
@@ -25,11 +25,19 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("projector could not connect to Valkey")?;
     cache.ping().await.context("projector readiness failed")?;
+    let kafka_security = KafkaSecurityConfig {
+        protocol: config.kafka_security_protocol.clone(),
+        ca_location: Some(config.kafka_ssl_ca_location.clone()).filter(|path| !path.is_empty()),
+        certificate_location: Some(config.kafka_ssl_certificate_location.clone())
+            .filter(|path| !path.is_empty()),
+        key_location: Some(config.kafka_ssl_key_location.clone()).filter(|path| !path.is_empty()),
+    };
     let consumer = consumer(
         &config.kafka_brokers,
         "matchplane-projector-v1",
         "matchplane-projector",
         &[topics::ORDER_BOOK_DELTAS],
+        &kafka_security,
     )
     .context("projector could not subscribe to Kafka")?;
     info!(node_id = %config.node_id, "projector ready");

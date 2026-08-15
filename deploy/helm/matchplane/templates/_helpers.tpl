@@ -42,6 +42,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
       key: database-url
 - name: MATCHPLANE_KAFKA_BROKERS
   value: {{ .Values.runtime.kafkaBrokers | quote }}
+- name: MATCHPLANE_KAFKA_SECURITY_PROTOCOL
+  value: {{ .Values.runtime.kafkaSecurityProtocol | quote }}
+- name: MATCHPLANE_KAFKA_SSL_CA_LOCATION
+  value: {{ .Values.runtime.kafkaSslCaLocation | quote }}
+- name: MATCHPLANE_KAFKA_SSL_CERTIFICATE_LOCATION
+  value: {{ .Values.runtime.kafkaSslCertificateLocation | quote }}
+- name: MATCHPLANE_KAFKA_SSL_KEY_LOCATION
+  value: {{ .Values.runtime.kafkaSslKeyLocation | quote }}
 - name: MATCHPLANE_VALKEY_URL
   valueFrom:
     secretKeyRef:

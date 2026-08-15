@@ -9,8 +9,9 @@ tenant.
 
 Install PostgreSQL with TimescaleDB and pgvector, Valkey with TLS enabled, Nginx, `curl`, `openssl`,
 and the release package. Create the `matchplane` system user/group and install the systemd units
-from `packaging/systemd/`. Keep `/etc/matchplane/matchplane.env` and `/etc/matchplane/secrets/`
-owned by `root:matchplane`; secret files should be mode `0640`.
+from `packaging/systemd/`. Require `sslmode=verify-full` in the PostgreSQL URL. Keep
+`/etc/matchplane/matchplane.env` owned by `root:matchplane`; gateway-only and payment-only secret
+subdirectories should be owned by their matching service groups, with secret files mode `0640`.
 
 The packaged production template is [packaging/config/matchplane.env](../packaging/config/matchplane.env).
 Replace every placeholder before enabling a service. In particular, use a unique node UUID,
@@ -28,9 +29,10 @@ systemctl is-active kafka
 
 The script verifies the Apache Kafka archive checksum, creates a dedicated `kafka` user, binds the
 broker and controller to loopback, disables automatic topic creation, and creates the five
-MatchPlane topics with twelve partitions. It is intentionally a single-node profile; use a
-multi-broker Kafka deployment before adding a second production node or accepting a loss of broker
-redundancy.
+MatchPlane topics with twelve partitions. It is intentionally a single-node **test/loopback**
+profile; use a multi-broker Kafka deployment with TLS, mTLS, and ACLs before accepting production
+traffic or a loss of broker redundancy. Production MatchPlane clients fail closed unless
+`MATCHPLANE_KAFKA_SECURITY_PROTOCOL=SSL` and the CA/client certificate/key paths are configured.
 
 ## 3. Register the production federation node
 
@@ -114,5 +116,13 @@ merchant onboarding, callback signature verification, invoice provider configura
 successful sandbox refund are complete.
 
 Do not request the `matx.tech` certificate until DNS has an `A` record for the host and (if used) a
-`www` CNAME. After propagation, run `nginx -t`, request the certificate with Certbot, and switch
-the Nginx `server_name` from the temporary IP certificate to `matx.tech`.
+`www` CNAME. After propagation, install the renewal hook and timer, run a dry run, request the
+certificate, and switch the Nginx `server_name` from the temporary IP certificate to `matx.tech`:
+
+```sh
+sudo bash deploy/scripts/install-nginx-certbot-hook.sh
+sudo certbot renew --dry-run
+sudo certbot certonly --webroot -w /var/www/matchplane/acme \
+  -d matx.tech -d www.matx.tech
+sudo nginx -t && sudo systemctl reload nginx
+```

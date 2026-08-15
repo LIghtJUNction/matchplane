@@ -6,6 +6,7 @@ use config::{Config, Environment as EnvironmentSource};
 use matchplane_domain::FederationNodeId;
 use serde::Deserialize;
 use thiserror::Error;
+use url::Url;
 
 pub mod auth;
 
@@ -38,6 +39,14 @@ pub struct AppConfig {
     pub database_url: String,
     /// Comma-separated Kafka bootstrap servers.
     pub kafka_brokers: String,
+    /// Kafka librdkafka security protocol.
+    pub kafka_security_protocol: String,
+    /// Kafka broker CA bundle path for TLS verification.
+    pub kafka_ssl_ca_location: String,
+    /// Kafka client certificate path for mTLS.
+    pub kafka_ssl_certificate_location: String,
+    /// Kafka client private key path for mTLS.
+    pub kafka_ssl_key_location: String,
     /// Valkey connection URL.
     pub valkey_url: String,
     /// `tracing_subscriber` filter expression.
@@ -71,6 +80,14 @@ pub struct ValidatedConfig {
     pub database_url: String,
     /// Kafka bootstrap servers.
     pub kafka_brokers: String,
+    /// Kafka librdkafka security protocol.
+    pub kafka_security_protocol: String,
+    /// Kafka broker CA bundle path for TLS verification.
+    pub kafka_ssl_ca_location: String,
+    /// Kafka client certificate path for mTLS.
+    pub kafka_ssl_certificate_location: String,
+    /// Kafka client private key path for mTLS.
+    pub kafka_ssl_key_location: String,
     /// Valkey connection URL.
     pub valkey_url: String,
     /// Log filter expression.
@@ -131,6 +148,10 @@ impl AppConfig {
                 "postgres://matchplane:matchplane_dev_only@localhost:5432/matchplane",
             )?
             .set_default("kafka_brokers", "localhost:9092")?
+            .set_default("kafka_security_protocol", "PLAINTEXT")?
+            .set_default("kafka_ssl_ca_location", "")?
+            .set_default("kafka_ssl_certificate_location", "")?
+            .set_default("kafka_ssl_key_location", "")?
             .set_default("valkey_url", "redis://localhost:6379/")?
             .set_default("log_filter", "info,matchplane=debug")?
             .set_default("otlp_endpoint", "http://localhost:4317")?
@@ -188,9 +209,33 @@ impl AppConfig {
                     "database and Valkey credentials must be replaced",
                 ));
             }
-            if self.valkey_url.starts_with("redis://") {
+            let valkey_url = Url::parse(&self.valkey_url).map_err(|_| {
+                ConfigError::InsecureProduction("MATCHPLANE_VALKEY_URL must be a valid URL")
+            })?;
+            if valkey_url.scheme() != "rediss" || valkey_url.fragment().is_some() {
                 return Err(ConfigError::InsecureProduction(
-                    "Valkey must use a TLS endpoint",
+                    "Valkey must use rediss:// with certificate verification enabled",
+                ));
+            }
+            let database_url = Url::parse(&self.database_url).map_err(|_| {
+                ConfigError::InsecureProduction("MATCHPLANE_DATABASE_URL must be a valid URL")
+            })?;
+            let sslmode = database_url
+                .query_pairs()
+                .find(|(key, _)| key == "sslmode")
+                .map(|(_, value)| value);
+            if sslmode.as_deref() != Some("verify-full") {
+                return Err(ConfigError::InsecureProduction(
+                    "PostgreSQL must use sslmode=verify-full in production",
+                ));
+            }
+            if self.kafka_security_protocol != "SSL"
+                || self.kafka_ssl_ca_location.trim().is_empty()
+                || self.kafka_ssl_certificate_location.trim().is_empty()
+                || self.kafka_ssl_key_location.trim().is_empty()
+            {
+                return Err(ConfigError::InsecureProduction(
+                    "production Kafka must use mTLS with security.protocol=SSL and CA, certificate, and key paths",
                 ));
             }
             for (field, value) in [
@@ -243,6 +288,10 @@ impl AppConfig {
                 })?,
             database_url: self.database_url,
             kafka_brokers: self.kafka_brokers,
+            kafka_security_protocol: self.kafka_security_protocol,
+            kafka_ssl_ca_location: self.kafka_ssl_ca_location,
+            kafka_ssl_certificate_location: self.kafka_ssl_certificate_location,
+            kafka_ssl_key_location: self.kafka_ssl_key_location,
             valkey_url: self.valkey_url,
             log_filter: self.log_filter,
             otlp_endpoint: self.otlp_endpoint,
@@ -289,8 +338,13 @@ mod tests {
             node_id: FederationNodeId::new().to_string(),
             http_addr: "127.0.0.1:8080".to_owned(),
             grpc_addr: "127.0.0.1:50051".to_owned(),
-            database_url: "postgres://matchplane:secret@db/matchplane".to_owned(),
+            database_url: "postgres://matchplane:secret@db/matchplane?sslmode=verify-full"
+                .to_owned(),
             kafka_brokers: "kafka:9093".to_owned(),
+            kafka_security_protocol: "SSL".to_owned(),
+            kafka_ssl_ca_location: "/run/matchplane/kafka/ca.crt".to_owned(),
+            kafka_ssl_certificate_location: "/run/matchplane/kafka/client.crt".to_owned(),
+            kafka_ssl_key_location: "/run/matchplane/kafka/client.key".to_owned(),
             valkey_url: "rediss://valkey:6380/".to_owned(),
             log_filter: "info".to_owned(),
             otlp_endpoint: "https://otel:4317".to_owned(),

@@ -254,7 +254,10 @@ pub(crate) fn resolve_secret(reference: &str) -> Result<SecretString, PaymentErr
             Path::new("/etc/matchplane/secrets"),
             Path::new("/run/secrets"),
         ];
-        if !allowed.iter().any(|root| canonical.starts_with(root)) {
+        if !allowed
+            .iter()
+            .any(|root| canonical.strip_prefix(root).is_ok())
+        {
             return Err(PaymentError::Credential(
                 "secret file must be inside an approved secret directory".to_owned(),
             ));

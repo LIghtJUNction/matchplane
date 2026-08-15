@@ -27,23 +27,26 @@ if [[ $node_id == 00000000-0000-7000-8000-00000000000a ]]; then
 fi
 
 install -d -m 0750 -o root -g matchplane /etc/matchplane/secrets
+install -d -m 0750 -o root -g matchplane-gateway /etc/matchplane/secrets/gateway
+install -d -m 0750 -o root -g matchplane-payment /etc/matchplane/secrets/payment
 
 create_hex_secret() {
   local path=$1
   local byte_count=$2
+  local group=$3
   if [[ ! -s $path ]]; then
     umask 0027
     openssl rand -hex "$byte_count" >"$path"
   fi
-  chown root:matchplane "$path"
+  chown "root:$group" "$path"
   chmod 0640 "$path"
 }
 
-create_hex_secret /etc/matchplane/secrets/database.password 24
-create_hex_secret /etc/matchplane/secrets/contact-data.key 32
-create_hex_secret /etc/matchplane/secrets/invoice-data.key 32
-create_hex_secret /etc/matchplane/secrets/payment-admin.token 32
-create_hex_secret /etc/matchplane/secrets/gateway-admin.token 32
+create_hex_secret /etc/matchplane/secrets/database.password 24 matchplane
+create_hex_secret /etc/matchplane/secrets/gateway/contact-data.key 32 matchplane-gateway
+create_hex_secret /etc/matchplane/secrets/payment/invoice-data.key 32 matchplane-payment
+create_hex_secret /etc/matchplane/secrets/payment/payment-admin.token 32 matchplane-payment
+create_hex_secret /etc/matchplane/secrets/gateway/gateway-admin.token 32 matchplane-gateway
 
 database_password=$(tr -d '\r\n' </etc/matchplane/secrets/database.password)
 if [[ ! $database_password =~ ^[0-9a-f]{48}$ ]]; then
@@ -109,6 +112,10 @@ trap 'rm -f "$environment_file"' EXIT
   printf 'MATCHPLANE_DATABASE_URL=postgres://matchplane:%s@127.0.0.1:5432/matchplane\n' \
     "$database_password"
   printf '%s\n' 'MATCHPLANE_KAFKA_BROKERS=127.0.0.1:9092'
+  printf '%s\n' 'MATCHPLANE_KAFKA_SECURITY_PROTOCOL=PLAINTEXT'
+  printf '%s\n' 'MATCHPLANE_KAFKA_SSL_CA_LOCATION='
+  printf '%s\n' 'MATCHPLANE_KAFKA_SSL_CERTIFICATE_LOCATION='
+  printf '%s\n' 'MATCHPLANE_KAFKA_SSL_KEY_LOCATION='
   printf '%s\n' 'MATCHPLANE_VALKEY_URL=redis://127.0.0.1:6379/'
   printf '%s\n' 'MATCHPLANE_LOG_FILTER=info,matchplane=info'
   printf '%s\n' 'MATCHPLANE_OTLP_ENDPOINT=http://127.0.0.1:4317'
@@ -117,15 +124,15 @@ trap 'rm -f "$environment_file"' EXIT
   printf '%s\n' 'MATCHPLANE_TLS_PRIVATE_KEY_PATH='
   printf '%s\n' 'MATCHPLANE_TLS_CLIENT_CA_PATH='
   printf '%s\n' \
-    'MATCHPLANE_CONTACT_DATA_KEY_FILE=/etc/matchplane/secrets/contact-data.key'
+    'MATCHPLANE_CONTACT_DATA_KEY_FILE=/etc/matchplane/secrets/gateway/contact-data.key'
   printf '%s\n' 'MATCHPLANE_CONTACT_DATA_KEY_VERSION=1'
   printf '%s\n' \
-    'MATCHPLANE_INVOICE_DATA_KEY_FILE=/etc/matchplane/secrets/invoice-data.key'
+    'MATCHPLANE_INVOICE_DATA_KEY_FILE=/etc/matchplane/secrets/payment/invoice-data.key'
   printf '%s\n' 'MATCHPLANE_INVOICE_DATA_KEY_VERSION=1'
   printf '%s\n' \
-    'MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/payment-admin.token'
+    'MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/payment/payment-admin.token'
   printf '%s\n' \
-    'MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/gateway-admin.token'
+    'MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/gateway/gateway-admin.token'
 } >"$environment_file"
 install -m 0640 -o root -g matchplane "$environment_file" \
   /etc/matchplane/matchplane.env

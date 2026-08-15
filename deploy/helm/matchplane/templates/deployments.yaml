@@ -80,18 +80,33 @@ spec:
             - name: federation-tls
               mountPath: /run/matchplane/tls
               readOnly: true
+          {{- else if or (eq $service.name "event-relay") (eq $service.name "matcher") (eq $service.name "projector") }}
+          volumeMounts:
+            - name: kafka-tls
+              mountPath: /run/matchplane/kafka
+              readOnly: true
           {{- end }}
       {{- if or (eq $service.name "gateway") (eq $service.name "payment-service") }}
       volumes:
         - name: application-secrets
           secret:
-            secretName: {{ required "runtime.existingApplicationSecret is required" $root.Values.runtime.existingApplicationSecret }}
+            secretName: {{ if eq $service.name "gateway" }}{{ required "runtime.existingGatewaySecret is required" $root.Values.runtime.existingGatewaySecret }}{{ else }}{{ required "runtime.existingPaymentSecret is required" $root.Values.runtime.existingPaymentSecret }}{{ end }}
+            defaultMode: 0440
+        - name: kafka-tls
+          secret:
+            secretName: {{ required "runtime.existingKafkaTlsSecret is required" $root.Values.runtime.existingKafkaTlsSecret }}
             defaultMode: 0440
       {{- else if eq $service.name "federation-hub" }}
       volumes:
         - name: federation-tls
           secret:
             secretName: {{ required "runtime.existingTlsSecret is required" $root.Values.runtime.existingTlsSecret }}
+            defaultMode: 0440
+      {{- else if or (eq $service.name "event-relay") (eq $service.name "matcher") (eq $service.name "projector") }}
+      volumes:
+        - name: kafka-tls
+          secret:
+            secretName: {{ required "runtime.existingKafkaTlsSecret is required" $root.Values.runtime.existingKafkaTlsSecret }}
             defaultMode: 0440
       {{- end }}
       {{- with $root.Values.imagePullSecrets }}

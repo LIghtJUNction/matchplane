@@ -1,6 +1,6 @@
 use anyhow::Context;
 use matchplane_config::{AppConfig, Environment};
-use matchplane_events::KafkaPublisher;
+use matchplane_events::{KafkaPublisher, KafkaSecurityConfig};
 use matchplane_observability::init;
 use matchplane_storage::PgStore;
 use tokio::time::{Duration, sleep};
@@ -27,8 +27,19 @@ async fn main() -> anyhow::Result<()> {
         )
         .await
         .context("relay local federation node registration failed")?;
-    let publisher = KafkaPublisher::new(&config.kafka_brokers, "matchplane-event-relay")
-        .context("relay could not configure Kafka")?;
+    let kafka_security = KafkaSecurityConfig {
+        protocol: config.kafka_security_protocol.clone(),
+        ca_location: Some(config.kafka_ssl_ca_location.clone()).filter(|path| !path.is_empty()),
+        certificate_location: Some(config.kafka_ssl_certificate_location.clone())
+            .filter(|path| !path.is_empty()),
+        key_location: Some(config.kafka_ssl_key_location.clone()).filter(|path| !path.is_empty()),
+    };
+    let publisher = KafkaPublisher::new(
+        &config.kafka_brokers,
+        "matchplane-event-relay",
+        &kafka_security,
+    )
+    .context("relay could not configure Kafka")?;
     info!(node_id = %config.node_id, "outbox relay ready");
     loop {
         tokio::select! {

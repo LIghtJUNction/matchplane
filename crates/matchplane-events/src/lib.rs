@@ -36,6 +36,39 @@ pub enum EventTransportError {
     Delivery(String),
 }
 
+/// TLS settings shared by MatchPlane's Kafka producers and consumers.
+///
+/// Development and the explicitly loopback-only test profile may use `PLAINTEXT`. Production
+/// callers must provide a verified mTLS profile through `matchplane-config`.
+#[derive(Debug, Clone, Default)]
+pub struct KafkaSecurityConfig {
+    /// librdkafka security protocol, normally `PLAINTEXT` or `SSL`.
+    pub protocol: String,
+    /// CA bundle used to verify the broker certificate.
+    pub ca_location: Option<String>,
+    /// Client certificate used for broker mTLS authentication.
+    pub certificate_location: Option<String>,
+    /// Client private key used for broker mTLS authentication.
+    pub key_location: Option<String>,
+}
+
+impl KafkaSecurityConfig {
+    fn apply(&self, config: &mut ClientConfig) {
+        if !self.protocol.is_empty() {
+            config.set("security.protocol", &self.protocol);
+        }
+        if let Some(value) = self.ca_location.as_deref() {
+            config.set("ssl.ca.location", value);
+        }
+        if let Some(value) = self.certificate_location.as_deref() {
+            config.set("ssl.certificate.location", value);
+        }
+        if let Some(value) = self.key_location.as_deref() {
+            config.set("ssl.key.location", value);
+        }
+    }
+}
+
 /// Idempotency-friendly producer used by the outbox relay.
 #[derive(Clone)]
 pub struct KafkaPublisher {
@@ -61,14 +94,20 @@ impl KafkaPublisher {
     /// # Errors
     ///
     /// Returns [`EventTransportError`] when librdkafka rejects the configuration.
-    pub fn new(brokers: &str, client_id: &str) -> Result<Self, EventTransportError> {
-        let producer = ClientConfig::new()
+    pub fn new(
+        brokers: &str,
+        client_id: &str,
+        security: &KafkaSecurityConfig,
+    ) -> Result<Self, EventTransportError> {
+        let mut config = ClientConfig::new();
+        config
             .set("bootstrap.servers", brokers)
             .set("client.id", client_id)
             .set("enable.idempotence", "true")
             .set("acks", "all")
-            .set("message.timeout.ms", "30000")
-            .create()?;
+            .set("message.timeout.ms", "30000");
+        security.apply(&mut config);
+        let producer = config.create()?;
         Ok(Self {
             producer,
             delivery_timeout: Duration::from_secs(30),
@@ -107,15 +146,18 @@ pub fn consumer(
     group_id: &str,
     client_id: &str,
     subscriptions: &[&str],
+    security: &KafkaSecurityConfig,
 ) -> Result<StreamConsumer, EventTransportError> {
-    let consumer: StreamConsumer = ClientConfig::new()
+    let mut config = ClientConfig::new();
+    config
         .set("bootstrap.servers", brokers)
         .set("group.id", group_id)
         .set("client.id", client_id)
         .set("enable.auto.commit", "false")
         .set("enable.auto.offset.store", "false")
-        .set("auto.offset.reset", "earliest")
-        .create()?;
+        .set("auto.offset.reset", "earliest");
+    security.apply(&mut config);
+    let consumer: StreamConsumer = config.create()?;
     consumer.subscribe(subscriptions)?;
     Ok(consumer)
 }

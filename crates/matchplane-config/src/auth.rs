@@ -46,11 +46,17 @@ impl BearerToken {
             fs::read_to_string(path).map_err(|error| {
                 AuthError::Configuration(format!("token file cannot be read: {error}"))
             })?
-        } else if environment != Environment::Production {
+        } else if environment == Environment::Development {
             env::var(inline_variable).unwrap_or_else(|_| development_default.to_owned())
+        } else if environment == Environment::Test {
+            env::var(inline_variable).map_err(|_| {
+                AuthError::Configuration(format!(
+                    "{environment:?} requires {file_variable} or {inline_variable}"
+                ))
+            })?
         } else {
             return Err(AuthError::Configuration(format!(
-                "production requires {file_variable}"
+                "{environment:?} requires {file_variable}"
             )));
         };
 

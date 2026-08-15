@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Context;
 use matchplane_config::{AppConfig, Environment};
 use matchplane_engine::OrderBook;
-use matchplane_events::{consumer, topics};
+use matchplane_events::{KafkaSecurityConfig, consumer, topics};
 use matchplane_observability::init;
 use matchplane_protocol::decode_command_envelope;
 use matchplane_storage::{MatchCommitOutcome, PgStore};
@@ -34,11 +34,19 @@ async fn main() -> anyhow::Result<()> {
         )
         .await
         .context("matcher local federation node registration failed")?;
+    let kafka_security = KafkaSecurityConfig {
+        protocol: config.kafka_security_protocol.clone(),
+        ca_location: Some(config.kafka_ssl_ca_location.clone()).filter(|path| !path.is_empty()),
+        certificate_location: Some(config.kafka_ssl_certificate_location.clone())
+            .filter(|path| !path.is_empty()),
+        key_location: Some(config.kafka_ssl_key_location.clone()).filter(|path| !path.is_empty()),
+    };
     let consumer = consumer(
         &config.kafka_brokers,
         "matchplane-matcher-v1",
         "matchplane-matcher",
         &[topics::COMMANDS],
+        &kafka_security,
     )
     .context("matcher could not subscribe to Kafka")?;
     let owner_instance_id = format!("{}-{}", config.node_id, std::process::id());

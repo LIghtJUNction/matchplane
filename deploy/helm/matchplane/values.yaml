@@ -1,7 +1,7 @@
 image:
   repository: ghcr.io/lightjunction/matchplane
   # Retained for release metadata; deployments use the immutable digest below.
-  tag: 0.1.8
+  tag: 0.1.9
   # Intentionally empty: production renders must provide the published image digest.
   digest: ''
   pullPolicy: IfNotPresent
@@ -21,15 +21,21 @@ networkPolicy:
 runtime:
   # This secret must provide database-url and valkey-url keys.
   existingSecret: matchplane-runtime
-  # This secret must provide contact-data.key, invoice-data.key, payment-admin.token, and
-  # gateway-admin.token.
-  existingApplicationSecret: matchplane-application-secrets
+  # These secrets are split so the public gateway cannot read payment credentials or invoice keys.
+  existingGatewaySecret: matchplane-gateway-secrets
+  existingPaymentSecret: matchplane-payment-secrets
   # This secret must provide server.crt, server.key, and client-ca.crt keys.
   existingTlsSecret: matchplane-federation-tls
+  # This secret must provide ca.crt, client.crt, and client.key for Kafka mTLS.
+  existingKafkaTlsSecret: matchplane-kafka-tls
   environment: production
   # Override with a unique UUID per federation node before a production install.
   nodeId: ''
   kafkaBrokers: matchplane-kafka-bootstrap:9093
+  kafkaSecurityProtocol: SSL
+  kafkaSslCaLocation: /run/matchplane/kafka/ca.crt
+  kafkaSslCertificateLocation: /run/matchplane/kafka/client.crt
+  kafkaSslKeyLocation: /run/matchplane/kafka/client.key
   logFilter: info,matchplane=info
   otlpEndpoint: https://otel-collector:4317
   requireTls: true
