@@ -10,13 +10,19 @@ repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 hook_path=/etc/letsencrypt/renewal-hooks/deploy/matchplane-nginx
 install -D -m 0755 "$repository_root/deploy/nginx/reload-after-renewal" "$hook_path"
 
-if systemctl cat certbot.timer >/dev/null 2>&1; then
-  systemctl enable --now certbot.timer
-else
-  echo 'certbot.timer is not installed; install certbot before enabling certificate renewal' >&2
+renewal_timer=
+for candidate in certbot.timer snap.certbot.renew.timer; do
+  if systemctl cat "$candidate" >/dev/null 2>&1; then
+    renewal_timer=$candidate
+    break
+  fi
+done
+if [[ -z $renewal_timer ]]; then
+  echo 'no Certbot renewal timer is installed; install Certbot before enabling certificate renewal' >&2
   exit 1
 fi
 
-systemctl is-enabled --quiet certbot.timer
-systemctl is-active --quiet certbot.timer
-printf 'installed %s and enabled certbot.timer\n' "$hook_path"
+systemctl enable --now "$renewal_timer"
+systemctl is-enabled --quiet "$renewal_timer"
+systemctl is-active --quiet "$renewal_timer"
+printf 'installed %s and enabled %s\n' "$hook_path" "$renewal_timer"
