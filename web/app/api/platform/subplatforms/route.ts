@@ -48,7 +48,8 @@ export async function POST(request: Request): Promise<Response> {
   if (!requestedScopes) return NextResponse.json({ error: "requestedScopes contains an unsupported scope" }, { status: 400 });
 
   const parentId = input.parentOrganizationId ?? null;
-  const canManage = await canManageParent(session.user.id, session.user.role, parentId);
+  const userRole = (session.user as { role?: string }).role;
+  const canManage = await canManageParent(session.user.id, userRole, parentId);
   if (!canManage) return NextResponse.json({ error: "当前账号没有注册该平台节点的权限" }, { status: 403 });
 
   const parentError = await validateParent(parentId);
@@ -152,7 +153,8 @@ export async function GET(request: Request): Promise<Response> {
   if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
   const parentId = new URL(request.url).searchParams.get("parentOrganizationId");
   if (parentId && !isUuid(parentId)) return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
-  if (!(await canManageParent(session.user.id, session.user.role, parentId || null))) {
+  const userRole = (session.user as { role?: string }).role;
+  if (!(await canManageParent(session.user.id, userRole, parentId || null))) {
     return NextResponse.json({ error: "平台管理员权限不足" }, { status: 403 });
   }
   const rows = await authDatabase.query(

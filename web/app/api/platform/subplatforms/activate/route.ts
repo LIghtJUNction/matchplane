@@ -43,7 +43,8 @@ export async function POST(request: Request): Promise<Response> {
   const row = registration.rows[0] as RegistrationRow | undefined;
   if (!row) return NextResponse.json({ error: "子平台注册记录不存在" }, { status: 404 });
 
-  if (!(await canManageParent(session.user.id, session.user.role, row.parentOrganizationId))) {
+  const userRole = (session.user as { role?: string }).role;
+  if (!(await canManageParent(session.user.id, userRole, row.parentOrganizationId))) {
     return NextResponse.json({ error: "当前账号没有激活该平台节点的权限" }, { status: 403 });
   }
   if (row.state === "active") {

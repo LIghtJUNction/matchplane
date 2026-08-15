@@ -32,7 +32,8 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "expiresIn must be between one day and one year" }, { status: 400 });
   }
 
-  const globalManager = session.user.role === "rootSuperAdmin" || session.user.role === "rootAdmin";
+  const userRole = (session.user as { role?: string }).role;
+  const globalManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
   let organization = await readOrganization(request, input.organizationId);
   if (!organization && globalManager) {
     try {
@@ -94,7 +95,8 @@ export async function GET(request: Request): Promise<Response> {
   if (!organizationId || !isUuid(organizationId)) {
     return NextResponse.json({ error: "organizationId must be a UUID" }, { status: 400 });
   }
-  const globalManager = session.user.role === "rootSuperAdmin" || session.user.role === "rootAdmin";
+  const userRole = (session.user as { role?: string }).role;
+  const globalManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
   let organization = await readOrganization(request, organizationId);
   if (!organization && globalManager) {
     try {

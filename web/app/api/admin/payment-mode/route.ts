@@ -15,7 +15,7 @@ export async function POST(request: Request): Promise<Response> {
 
 async function forward(request: Request, method: "GET" | "POST"): Promise<Response> {
   const session = await auth.api.getSession({ headers: request.headers });
-  const role = session?.user.role;
+  const role = (session?.user as { role?: string } | undefined)?.role;
   if (!session || (role !== "rootSuperAdmin" && role !== "rootAdmin")) {
     return NextResponse.json({ error: "根平台管理员权限不足" }, { status: 403 });
   }
