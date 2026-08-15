@@ -185,6 +185,10 @@ services:
       MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR: ${MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR:-120}
       MATCHPLANE_DATABASE_URL: postgres://${MATCHPLANE_POSTGRES_USER:-matchplane}:${MATCHPLANE_POSTGRES_PASSWORD:-matchplane_dev_only}@postgres:5432/${MATCHPLANE_POSTGRES_DB:-matchplane}
       MATCHPLANE_GATEWAY_INTERNAL_URL: http://gateway:8080
+      # The web session bridge calls the gateway's internal capability exchange. Keep this
+      # development fallback identical to the gateway's documented development default; in
+      # production use MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE instead of this inline value.
+      MATCHPLANE_GATEWAY_ADMIN_TOKEN: ${MATCHPLANE_GATEWAY_ADMIN_TOKEN:-matchplane-development-gateway-admin}
       MATCHPLANE_PAYMENT_INTERNAL_URL: http://payment-service:8080
     depends_on:
       migration:

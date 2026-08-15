@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
+import { isMountedPlatformPath } from "../../../../src/platform-mount";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,7 @@ interface SessionRequest {
   tenantId?: string;
   domainId?: string;
   subplatform?: string;
+  platformPath?: string;
   role?: RequestedRole;
 }
 
@@ -39,6 +41,16 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (input.domainId && !isUuid(input.domainId)) {
     return NextResponse.json({ error: "domainId must be a UUID when provided" }, { status: 400 });
+  }
+
+  const platformPath = normalizePlatformPath(
+    input.platformPath ?? (input.subplatform === "root" ? "/" : `/${input.subplatform}`),
+  );
+  if (!platformPath || (input.subplatform !== "root" && platformPath.split("/").filter(Boolean).at(-1) !== input.subplatform)) {
+    return NextResponse.json({ error: "platformPath must identify the requested platform node" }, { status: 400 });
+  }
+  if (!(await isMountedPlatformPath(platformPath))) {
+    return NextResponse.json({ error: "当前平台路径尚未激活" }, { status: 404 });
   }
 
   if (input.subplatform === "root") {
@@ -220,4 +232,10 @@ function isUuid(value: string): boolean {
 
 function isRequestedRole(value: unknown): value is RequestedRole {
   return value === "buyer" || value === "seller" || value === "subplatform_admin";
+}
+
+function normalizePlatformPath(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 512) return null;
+  const normalized = `/${value.split("/").filter(Boolean).join("/")}`;
+  return normalized === "/" || /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(normalized) ? normalized : null;
 }

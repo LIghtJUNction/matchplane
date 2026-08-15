@@ -79,6 +79,25 @@ export interface ListingSubmission {
   updated_at: string;
 }
 
+/** Public, contact-free recommendation returned by the domain adapter. */
+export interface RecommendedBackendListing {
+  listing_id: string;
+  tenant_id: string;
+  domain_id: string;
+  asset_id: string;
+  display_name: string;
+  attributes: Record<string, unknown>;
+  asking_amount: string;
+  currency: string;
+  currency_scale: number;
+  commission_bps?: number;
+  commission_collection?: string;
+  status?: string;
+  match_score: number;
+  match_reasons: string[];
+  [key: string]: unknown;
+}
+
 export interface ContactResponse {
   counterpart: {
     party_id: string;
@@ -298,6 +317,7 @@ export async function establishMarketplaceSession(input: {
   tenantId: string;
   domainId?: string;
   subplatform: string;
+  platformPath?: string;
   role: BetterAuthMarketplaceRole;
 }): Promise<PartySession> {
   const response = await fetch("/api/marketplace/session", {
@@ -370,6 +390,27 @@ export function createBuyerRequest(input: {
         budget_max: input.budgetMax ?? null,
         currency: input.currency,
         currency_scale: input.currencyScale,
+      }),
+    },
+    input.session,
+  );
+}
+
+export function getBuyerRecommendations(input: {
+  session: PartySession;
+  requestId: string;
+  exposureKey: string;
+  limit?: number;
+}): Promise<RecommendedBackendListing[]> {
+  return request<RecommendedBackendListing[]>(
+    `/v1/marketplace/buyer-requests/${encodeURIComponent(input.requestId)}/recommendations`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        buyer_party_id: input.session.partyId,
+        exposure_key: input.exposureKey,
+        limit: input.limit ?? 20,
       }),
     },
     input.session,
@@ -490,19 +531,12 @@ export async function createBuyerIntroduction(input: {
     },
     input.session,
   );
-  const recommendations = await request<Array<{ listing_id: string }>>(
-    `/v1/marketplace/buyer-requests/${requestResult.request_id}/recommendations`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        tenant_id: input.session.tenantId,
-        buyer_party_id: input.session.partyId,
-        exposure_key: input.exposureKey,
-        limit: 20,
-      }),
-    },
-    input.session,
-  );
+  const recommendations = await getBuyerRecommendations({
+    session: input.session,
+    requestId: requestResult.request_id,
+    exposureKey: input.exposureKey,
+    limit: 20,
+  });
   if (!recommendations.some((item) => item.listing_id === input.listingId)) {
     throw new MarketplaceApiError(409, "这台车不满足当前需求，请刷新匹配理由后再试");
   }

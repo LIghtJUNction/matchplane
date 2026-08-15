@@ -268,7 +268,9 @@ pub struct VehicleListing {
     pub domain_id: DomainId,
     /// Vehicle asset.
     pub asset_id: AssetId,
-    /// Seller identity.
+    /// Seller identity retained for authorization and contact release, never exposed in a
+    /// buyer-facing listing JSON response before an introduction is consented.
+    #[serde(skip_serializing)]
     pub seller_party_id: MarketplacePartyId,
     /// Public vehicle title.
     pub display_name: String,
@@ -3408,6 +3410,35 @@ mod tests {
         assert_eq!(
             promotion_charge("cpl", "contact_exchange", 1, 5_000),
             (0, 0)
+        );
+    }
+
+    #[test]
+    fn public_listing_serialization_does_not_expose_seller_identity() {
+        let listing = VehicleListing {
+            listing_id: VehicleListingId::new(),
+            tenant_id: TenantId::new(),
+            domain_id: DomainId::new(),
+            asset_id: AssetId::new(),
+            seller_party_id: MarketplacePartyId::new(),
+            display_name: "测试供给".to_owned(),
+            attributes: json!({"kind": "example"}),
+            asking_amount: "100".to_owned(),
+            currency: "CNY".to_owned(),
+            currency_scale: 2,
+            commission_bps: 100,
+            commission_collection: "offline_direct".to_owned(),
+            status: "active".to_owned(),
+            published_at: None,
+            expires_at: None,
+            version: 1,
+        };
+        let value = serde_json::to_value(listing).expect("listing should serialize");
+        assert!(
+            !value
+                .as_object()
+                .expect("object response")
+                .contains_key("seller_party_id")
         );
     }
 }

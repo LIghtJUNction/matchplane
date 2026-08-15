@@ -37,6 +37,7 @@ export function SubplatformAdminDashboard({
     if (!isLiveMarketplaceEnabled() || !subplatform.domainId) return;
     void getMarketplaceSession({
       subplatform: subplatform.slug,
+      platformPath: subplatform.path,
       tenantId: subplatform.tenantId,
       domainId: subplatform.domainId,
       role: "subplatform_admin",
@@ -66,6 +67,7 @@ export function SubplatformAdminDashboard({
     event.preventDefault();
     const session = await getMarketplaceSession({
       subplatform: subplatform.slug,
+      platformPath: subplatform.path,
       tenantId: subplatform.tenantId,
       domainId: subplatform.domainId,
       role: "subplatform_admin",

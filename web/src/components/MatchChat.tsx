@@ -5,7 +5,9 @@ import { ArrowUp, LockKeyhole, Sparkles } from "lucide-react";
 
 import {
   createBuyerRequest,
+  getBuyerRecommendations,
   isLiveMarketplaceEnabled,
+  type RecommendedBackendListing,
   routePlatformIntent,
   type PartySession,
 } from "../api";
@@ -29,9 +31,10 @@ interface PendingChat {
 interface MatchChatProps {
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
+  onRecommendations?: (recommendations: RecommendedBackendListing[]) => void;
 }
 
-export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
+export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchChatProps) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
@@ -64,7 +67,8 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
         if (live) {
           if (subplatform.domainId) {
             if (!session) throw new Error("Better Auth 会话尚未连接到当前子平台");
-            await createBuyerRequest({
+            if (!subplatform.currency) throw new Error("当前子平台尚未配置结算币种，暂时不能生成真实推荐");
+            const buyerRequest = await createBuyerRequest({
               session,
               domainId: subplatform.domainId,
               narrative: text,
@@ -76,9 +80,15 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
                 routing_source: route?.routing.source ?? null,
                 routing_degraded: route?.routing.degraded ?? false,
               },
-              currency: "CNY",
-              currencyScale: 2,
+              currency: subplatform.currency,
+              currencyScale: subplatform.currencyScale ?? 0,
             });
+            const recommendations = await getBuyerRecommendations({
+              session,
+              requestId: buyerRequest.request_id,
+              exposureKey: `chat-${requestId}`,
+            });
+            onRecommendations?.(recommendations);
           }
         }
         setMessages((current) => [
@@ -111,7 +121,7 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
         setSending(false);
       }
     },
-    [onNotice, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [onNotice, onRecommendations, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
@@ -120,6 +130,7 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
       const session = subplatform.domainId
         ? await getMarketplaceSession({
             subplatform: subplatform.slug,
+            platformPath: subplatform.path,
             tenantId: subplatform.tenantId,
             domainId: subplatform.domainId,
             role: "buyer",
@@ -153,6 +164,7 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
       const session = subplatform.domainId
         ? await getMarketplaceSession({
             subplatform: subplatform.slug,
+            platformPath: subplatform.path,
             tenantId: subplatform.tenantId,
             domainId: subplatform.domainId,
             role: "buyer",

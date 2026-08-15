@@ -49,6 +49,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
 
     const session = await getMarketplaceSession({
       subplatform: subplatform.slug,
+      platformPath: subplatform.path,
       tenantId: subplatform.tenantId,
       domainId: subplatform.domainId,
       role: "seller",

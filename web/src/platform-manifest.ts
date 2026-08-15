@@ -55,6 +55,9 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
                 registration.manifest,
                 registration.tenant_id AS "tenantId",
                 registration.domain_id AS "domainId",
+                schema_default.id AS "assetSchemaId",
+                market_default.quote_asset_key AS currency,
+                market_default.price_scale AS "currencyScale",
                 encode(registration.manifest_digest, 'hex') AS "manifestDigest",
                 encode(registration.build_digest, 'hex') AS "buildDigest",
                 registration.artifact_locator AS "artifactLocator",
@@ -77,8 +80,27 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
               ORDER BY r.version DESC
               LIMIT 1
            ) registration ON true
+           LEFT JOIN LATERAL (
+             SELECT s.id
+               FROM asset_schemas s
+              WHERE s.tenant_id = registration.tenant_id
+                AND s.domain_id = registration.domain_id
+                AND s.active
+              ORDER BY s.schema_version DESC, s.created_at DESC, s.id DESC
+              LIMIT 1
+           ) schema_default ON true
+           LEFT JOIN LATERAL (
+             SELECT m.quote_asset_key, m.price_scale
+               FROM markets m
+              WHERE m.tenant_id = registration.tenant_id
+                AND m.domain_id = registration.domain_id
+                AND m.status = 'active'
+              ORDER BY m.created_at ASC, m.id ASC
+              LIMIT 1
+           ) market_default ON true
        )
-       SELECT manifest, "tenantId", "domainId", "manifestDigest", "buildDigest", "artifactLocator", "artifactEntry", version
+       SELECT manifest, "tenantId", "domainId", "assetSchemaId", currency, "currencyScale",
+              "manifestDigest", "buildDigest", "artifactLocator", "artifactEntry", version
          FROM active_release
         WHERE platform_path = $2
           AND path_active
@@ -89,6 +111,9 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
       manifest?: unknown;
       tenantId?: unknown;
       domainId?: unknown;
+      assetSchemaId?: unknown;
+      currency?: unknown;
+      currencyScale?: unknown;
       manifestDigest?: unknown;
       buildDigest?: unknown;
       artifactLocator?: unknown;
@@ -114,6 +139,9 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
       ...(assets ? { assets } : {}),
       tenantId: typeof row.tenantId === "string" ? row.tenantId : undefined,
       domainId: typeof row.domainId === "string" ? row.domainId : undefined,
+      assetSchemaId: typeof row.assetSchemaId === "string" ? row.assetSchemaId : undefined,
+      currency: typeof row.currency === "string" ? row.currency : undefined,
+      currencyScale: Number.isInteger(row.currencyScale) ? row.currencyScale : undefined,
       manifestDigest: typeof row.manifestDigest === "string" ? row.manifestDigest : undefined,
       buildDigest: typeof row.buildDigest === "string" ? row.buildDigest : undefined,
       version: typeof row.version === "number" ? row.version : undefined,

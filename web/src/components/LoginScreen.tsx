@@ -67,6 +67,7 @@ export function LoginScreen() {
         tenantId: subplatform.tenantId,
         domainId: subplatform.domainId,
         subplatform: subplatform.slug,
+        platformPath: subplatform.path,
         role,
       });
     }

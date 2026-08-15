@@ -15,6 +15,7 @@ import { authClient, authFetchOptions } from "./auth-client";
  */
 export async function getMarketplaceSession(input: {
   subplatform: string;
+  platformPath?: string;
   tenantId?: string;
   domainId?: string;
   role: BetterAuthMarketplaceRole;
@@ -36,6 +37,7 @@ export async function getMarketplaceSession(input: {
         tenantId: input.tenantId,
         domainId: input.domainId,
         subplatform: input.subplatform,
+        platformPath: input.platformPath,
         role: input.role,
       });
     }

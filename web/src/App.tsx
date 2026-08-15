@@ -21,6 +21,7 @@ import { loadSubplatform, resolveSubplatform, type SubplatformConfig } from "./s
 import {
   createBuyerIntroduction,
   getPaymentSetting,
+  type RecommendedBackendListing,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
   switchPaymentMode,
@@ -32,7 +33,7 @@ import type { AssetListing, WorkspaceRole } from "./types";
 export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform(initialPath));
-  const [listings] = useState<AssetListing[]>([]);
+  const [listings, setListings] = useState<AssetListing[]>([]);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
@@ -179,7 +180,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               exit={{ opacity: 0, y: -8 }}
               transition={spring}
             >
-              <MatchChat onNotice={setNotice} subplatform={subplatform} />
+              <MatchChat
+                onNotice={setNotice}
+                onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations))}
+                subplatform={subplatform}
+              />
               {subplatform.pluginArtifact ? (
                 <PluginHost role={role} onNotice={setNotice} subplatform={subplatform} fallback={genericWorkspace} />
               ) : genericWorkspace}
@@ -208,6 +213,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             try {
               const session = await getMarketplaceSession({
                 subplatform: subplatform.slug,
+                platformPath: subplatform.path,
                 tenantId: subplatform.tenantId,
                 domainId: subplatform.domainId,
                 role: "buyer",
@@ -271,4 +277,52 @@ function listingFromLocation(): AssetListing | null {
   // Listings are loaded from the root API/subplatform adapter. Never hydrate a fabricated
   // inventory item from a URL parameter.
   return null;
+}
+
+function mapRecommendations(items: RecommendedBackendListing[]): AssetListing[] {
+  return items.map((item, index) => {
+    const attributes = item.attributes && typeof item.attributes === "object" && !Array.isArray(item.attributes)
+      ? item.attributes
+      : {};
+    const facts = Object.entries(attributes)
+      .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
+      .slice(0, 4)
+      .map(([label, value]) => ({ label, value: String(value) }));
+    const subtitle = facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ") || "来自当前子平台的真实供给";
+    const location = attributeText(attributes, ["location", "city", "地区", "城市"]);
+    return {
+      id: item.listing_id,
+      title: item.display_name,
+      subtitle,
+      price: formatMoney(item.asking_amount, item.currency, item.currency_scale),
+      location,
+      matchScore: Math.round(Math.max(0, Math.min(1, item.match_score)) * 100),
+      accent: (["cactus", "clay", "heather", "oat"] as const)[index % 4],
+      facts,
+      reasons: item.match_reasons,
+      trust: ["审核通过", "匹配理由可解释"],
+      response: "由当前子平台供给方确认",
+    };
+  });
+}
+
+function attributeText(attributes: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = attributes[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function formatMoney(amount: string, currency: string, scale: number): string {
+  try {
+    const numeric = BigInt(amount);
+    const divisor = 10n ** BigInt(Math.max(0, scale));
+    const whole = numeric / divisor;
+    const remainder = (numeric < 0n ? -numeric : numeric) % divisor;
+    if (scale === 0) return `${currency} ${whole}`;
+    return `${currency} ${whole}.${remainder.toString().padStart(scale, "0")}`;
+  } catch {
+    return `${currency} ${amount}`;
+  }
 }

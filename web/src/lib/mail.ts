@@ -74,7 +74,18 @@ async function loadEmailRoute(request?: Request): Promise<EmailRoute | null> {
             c.credential_secret_ref, c.from_address, c.reply_to, c.mode, c.enabled
        FROM subplatform_email_configs c
        JOIN domains d ON d.tenant_id = c.tenant_id AND d.id = c.domain_id
-      WHERE d.slug = $1 AND d.status = 'active' AND c.enabled = true
+      WHERE d.status = 'active' AND c.enabled = true
+        AND (
+          d.slug = $1
+          OR EXISTS (
+            SELECT 1
+              FROM subplatform_registrations r
+             WHERE r.tenant_id = c.tenant_id
+               AND r.domain_id = c.domain_id
+               AND r.slug = $1
+               AND r.state = 'active'
+          )
+        )
       ORDER BY c.updated_at DESC
       LIMIT 1`,
     [slug],
