@@ -1,0 +1,84 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "matchplane.fullname" . }}-egress
+  labels:
+    {{- include "matchplane.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "matchplane.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS is required to resolve the configured PostgreSQL, Kafka, Valkey, OTLP, and provider
+    # endpoints. The port-only rule avoids granting arbitrary application traffic to DNS pods.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # In-namespace service dependencies use their pod IPs after service routing.
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 50051
+        - protocol: TCP
+          port: 9092
+        - protocol: TCP
+          port: 9093
+    {{- if .Values.networkPolicy.allowPublicHttps }}
+    # Provider endpoints are HTTPS-only in the application. Do not allow public HTTPS to local,
+    # metadata, private, link-local, multicast, or reserved ranges.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+        - ipBlock:
+            cidr: ::/0
+            except:
+              - ::/128
+              - ::1/128
+              - 64:ff9b::/96
+              - 64:ff9b:1::/48
+              - 2001:2::/48
+              - 2001:10::/28
+              - 2001:20::/28
+              - 2001:db8::/32
+              - 2002::/16
+              - fc00::/7
+              - fe80::/10
+              - fec0::/10
+              - ff00::/8
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgress }}
+    # Explicit operator-supplied rules for private dependencies and provider allowlists.
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

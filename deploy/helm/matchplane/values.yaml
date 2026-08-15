@@ -10,6 +10,14 @@ imagePullSecrets: []
 nameOverride: ''
 fullnameOverride: ''
 
+networkPolicy:
+  # Fail closed for pod egress. Add private database/broker CIDRs or selectors below when those
+  # dependencies live outside this namespace.
+  enabled: true
+  # Provider adapters require HTTPS. Private, link-local, and reserved ranges are excluded.
+  allowPublicHttps: true
+  additionalEgress: []
+
 runtime:
   # This secret must provide database-url and valkey-url keys.
   existingSecret: matchplane-runtime
