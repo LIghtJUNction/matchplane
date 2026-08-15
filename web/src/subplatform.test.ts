@@ -2,16 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import { resolveSubplatform } from "./subplatform";
 
-describe("domain-neutral platform paths", () => {
-  it("keeps the complete recursive path and addresses its manifest", () => {
-    expect(resolveSubplatform("/market/auto")).toMatchObject({
-      slug: "auto",
-      path: "/market/auto",
-      manifestUrl: "/api/platform/manifest?path=%2Fmarket%2Fauto",
-    });
+describe("nested subplatform paths", () => {
+  it("keeps the complete canonical path while using the leaf slug for labels", () => {
+    const config = resolveSubplatform("/market/auto");
+
+    expect(config.slug).toBe("auto");
+    expect(config.path).toBe("/market/auto");
+    expect(config.manifestUrl).toBe("/api/platform/manifest?path=%2Fmarket%2Fauto");
   });
 
-  it("keeps the root node at the deployment root", () => {
-    expect(resolveSubplatform("/")).toMatchObject({ slug: "root", path: "/" });
+  it("keeps the deployment root as the shared root chat", () => {
+    const config = resolveSubplatform("/");
+
+    expect(config.path).toBe("/");
+    expect(config.slug).toBe("root");
+    expect(config.manifestUrl).toBeUndefined();
   });
 });

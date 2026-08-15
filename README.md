@@ -9,9 +9,14 @@ Every deployment uses the same recursive platform model: the current root is sim
 node without a parent, and a mounted platform can own its own children. Human accounts use Better
 Auth; platform-to-platform credentials use Better Auth organization API keys with explicit scopes.
 
-The repository is a Rust 2024 modular monorepo with independently deployable services. The same
-domain and deterministic matching engine power the initial `automotive` and `electronics`
-verticals.
+The packaged `matchplane` CLI is the common backend and operations entrypoint: use
+`matchplane serve <service>` to start a workload, `matchplane doctor/status --json` for bounded
+diagnostics, and `matchplane mcp serve` for read-only MCP tools. The web service's `/api/mcp`
+facade exposes the authenticated `platform.match` tool for buyer/seller Agents.
+
+The repository is a Rust 2024 modular monorepo with independently deployable services. The root
+engine is domain-neutral; automotive, electronics, and any future vertical are mounted adapters
+that supply their own manifest, UI, Agent Skill, MCP tools, and optional retrieval implementation.
 
 ## Prerequisites
 

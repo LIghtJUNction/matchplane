@@ -11,7 +11,7 @@ SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
 EnvironmentFile=/etc/matchplane/services/gateway.env
 Environment=MATCHPLANE_HTTP_ADDR=127.0.0.1:8080
-ExecStart=/usr/bin/matchplane-gateway
+ExecStart=/usr/bin/matchplane serve gateway
 Restart=on-failure
 RestartSec=3s
 NoNewPrivileges=true

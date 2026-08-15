@@ -114,6 +114,11 @@ reachable endpoint in this registration row. Do not use `0.0.0.0` as the adverti
 
 ## 4. Migrate and start the services
 
+Use the packaged CLI as the common backend entrypoint. Run `matchplane doctor --json` before
+enabling workloads, apply migrations with `matchplane migrate`, and let systemd/Compose/Helm invoke
+`matchplane serve <service>` for each workload. `matchplane mcp serve` is the read-only stdio
+operations surface for an on-call Agent.
+
 Run the one-shot initializer once for the release, then enable all runtime units together:
 
 ```sh

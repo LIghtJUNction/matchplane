@@ -28,7 +28,7 @@ spec:
         - name: matcher
           image: {{ include "matchplane.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["/usr/local/bin/matchplane-matcher"]
+          command: ["/usr/local/bin/matchplane", "serve", "matcher"]
           env:
             {{- include "matchplane.environment" (dict "root" . "service" "matcher") | nindent 12 }}
           securityContext:

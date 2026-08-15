@@ -25,6 +25,7 @@ web:
   betterAuthUrl: https://matx.tech
   trustedOrigins: ''
   rootTenantId: ''
+  rootOrganizationId: ''
   # The router provider is optional. Keep its API key in existingWebSecret under router-ai-key.
   routerAiUrl: ''
   routerAiModel: ''

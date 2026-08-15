@@ -17,7 +17,8 @@ Environment=NODE_ENV=production
 Environment=HOSTNAME=127.0.0.1
 Environment=PORT=4173
 WorkingDirectory=/usr/share/matchplane/web
-ExecStart=/usr/local/bin/node /usr/share/matchplane/web/server.js
+Environment=MATCHPLANE_WEB_NODE=/usr/local/bin/node
+ExecStart=/usr/bin/matchplane serve web
 Restart=on-failure
 RestartSec=3s
 NoNewPrivileges=true

@@ -150,8 +150,8 @@ p {
   right: 0;
   bottom: -0.6rem;
   left: 0;
-  height: 0.65rem;
-  background: linear-gradient(to bottom, rgba(240, 238, 230, 0.34), transparent);
+  height: 0.28rem;
+  background: rgba(240, 238, 230, 0.34);
   content: "";
   pointer-events: none;
 }
@@ -2069,7 +2069,7 @@ main {
   place-items: center;
   overflow: hidden;
   border-radius: 2.25rem;
-  background: linear-gradient(135deg, var(--cactus), var(--paper) 54%, var(--heather));
+  background: var(--cactus);
 }
 
 .generic-art-orbit {

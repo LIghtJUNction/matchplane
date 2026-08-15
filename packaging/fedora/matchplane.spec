@@ -72,6 +72,7 @@ echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.en
 %{_bindir}/matchplane-payment-service
 %{_bindir}/matchplane-projector
 %{_bindir}/matchplane-vector-worker
+%{_bindir}/matchplane
 %{_bindir}/xtask
 %{_unitdir}/matchplane-*.service
 %{_sysusersdir}/matchplane.conf
@@ -80,6 +81,8 @@ echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.en
 %{_docdir}/matchplane/README.md
 %{_docdir}/matchplane/ARCHITECTURE.md
 %{_docdir}/matchplane/marketplace-payments.md
+%{_docdir}/matchplane/cli-and-mcp.md
+%{_datadir}/matchplane/skills
 %license %{_datadir}/licenses/matchplane/LICENSE
 
 %changelog

@@ -3,14 +3,18 @@ import type { PoolClient } from "pg";
 
 import { NextResponse } from "next/server";
 
-import { auth, authDatabase } from "../../../../src/lib/auth";
+import { authDatabase } from "../../../../src/lib/auth";
 import {
   decidePlatformRoutes,
   isPlatformRouterConfigured,
   type PlatformRouteDecision,
 } from "../../../../src/platform-router";
 import { expandPlatformRouteTree, type PlatformRouteTrace } from "../../../../src/platform-orchestrator";
-import { isMountedPlatformPath } from "../../../../src/platform-mount";
+import {
+  isMountedPlatformPath,
+  isPlatformPathAccessibleByOrganization,
+} from "../../../../src/platform-mount";
+import { authenticatePlatformRequest } from "../../../../src/platform-request-auth";
 
 export const runtime = "nodejs";
 
@@ -25,8 +29,8 @@ const DEFAULT_AI_MAX_STEPS = 8;
  * registrations from PostgreSQL are delegated to, never a hard-coded vertical.
  */
 export async function POST(request: Request): Promise<Response> {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
+  const actor = await authenticatePlatformRequest(request);
+  if (!actor) return NextResponse.json({ error: "Better Auth session or platform API key is required" }, { status: 401 });
 
   const input = await parseBody(request);
   const narrative = input.narrative?.trim() ?? "";
@@ -39,6 +43,9 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (!(await isMountedPlatformPath(platformPath))) {
     return NextResponse.json({ error: "平台路径尚未激活" }, { status: 404 });
+  }
+  if (actor.organizationId && !(await isPlatformPathAccessibleByOrganization(platformPath, actor.organizationId))) {
+    return NextResponse.json({ error: "API key 不能访问该平台节点" }, { status: 403 });
   }
 
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
@@ -57,7 +64,7 @@ export async function POST(request: Request): Promise<Response> {
         WHERE auth_user_id = $1
           AND (source = 'ai' OR model IS NOT NULL)
           AND created_at >= clock_timestamp() - interval '1 hour'`,
-      [session.user.id],
+      [actor.subject],
     );
     const count = Number((recent.rows[0] as { count?: number } | undefined)?.count ?? 0);
     if (count >= configuredAiRequestsPerHour()) {
@@ -99,7 +106,7 @@ export async function POST(request: Request): Promise<Response> {
        VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
       [
         requestId,
-        session.user.id,
+        actor.subject,
         platformPath,
         narrative,
         JSON.stringify(routePlan),
@@ -116,7 +123,7 @@ export async function POST(request: Request): Promise<Response> {
       [
         randomUUID(),
         requestId,
-        session.user.id,
+        actor.subject,
         platformPath,
         routing.source,
         routing.costBearer,
@@ -146,6 +153,7 @@ export async function POST(request: Request): Promise<Response> {
       routePlan,
       routing,
       routingTrace: recursive.trace,
+      access: actor.access,
     },
     { status: 202, headers: { "cache-control": "no-store" } },
   );

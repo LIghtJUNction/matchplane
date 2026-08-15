@@ -60,7 +60,7 @@ subtle = "2.6.1"
 sqlx = { version = "0.9.0", default-features = false, features = ["bigdecimal", "derive", "json", "macros", "migrate", "postgres", "runtime-tokio", "time", "tls-rustls-ring-webpki", "uuid"] }
 thiserror = "2.0.20"
 time = { version = "0.3.55", features = ["formatting", "parsing", "serde", "serde-human-readable"] }
-tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.53.1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tonic = { version = "0.14.6", features = ["tls-ring"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"

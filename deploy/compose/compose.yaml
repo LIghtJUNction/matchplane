@@ -148,7 +148,7 @@ services:
   migration:
     <<: *matchplane-service
     restart: "no"
-    entrypoint: ["/usr/local/bin/xtask"]
+    entrypoint: ["/usr/local/bin/matchplane"]
     command: ["initialize"]
     depends_on:
       postgres:
@@ -156,7 +156,7 @@ services:
 
   gateway:
     <<: *matchplane-service
-    entrypoint: ["/usr/local/bin/matchplane-gateway"]
+    entrypoint: ["/usr/local/bin/matchplane", "serve", "gateway"]
     ports:
       - "127.0.0.1:${MATCHPLANE_GATEWAY_HOST_PORT:-8080}:8080"
 
@@ -175,6 +175,7 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-matchplane_dev_only_auth_secret_change_in_production}
       MATCHPLANE_ROOT_ADMIN_EMAIL: ${MATCHPLANE_ROOT_ADMIN_EMAIL:-admin@example.com}
       MATCHPLANE_ROOT_TENANT_ID: ${MATCHPLANE_ROOT_TENANT_ID:-00000000-0000-7000-8000-000000000100}
+      MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID: ${MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID:-}
       MATCHPLANE_ROUTER_AI_URL: ${MATCHPLANE_ROUTER_AI_URL:-}
       MATCHPLANE_ROUTER_AI_KEY: ${MATCHPLANE_ROUTER_AI_KEY:-}
       MATCHPLANE_ROUTER_AI_MODEL: ${MATCHPLANE_ROUTER_AI_MODEL:-}
@@ -206,7 +207,7 @@ services:
 
   payment-service:
     <<: *matchplane-service
-    entrypoint: ["/usr/local/bin/matchplane-payment-service"]
+    entrypoint: ["/usr/local/bin/matchplane", "serve", "payment-service"]
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -215,23 +216,23 @@ services:
 
   event-relay:
     <<: *matchplane-service
-    entrypoint: ["/usr/local/bin/matchplane-event-relay"]
+    entrypoint: ["/usr/local/bin/matchplane", "serve", "event-relay"]
 
   matcher:
     <<: *matchplane-service
-    entrypoint: ["/usr/local/bin/matchplane-matcher"]
+    entrypoint: ["/usr/local/bin/matchplane", "serve", "matcher"]
 
   projector:
     <<: *matchplane-service
-    entrypoint: ["/usr/local/bin/matchplane-projector"]
+    entrypoint: ["/usr/local/bin/matchplane", "serve", "projector"]
 
   vector-worker:
     <<: *matchplane-service
-    entrypoint: ["/usr/local/bin/matchplane-vector-worker"]
+    entrypoint: ["/usr/local/bin/matchplane", "serve", "vector-worker"]
 
   federation-hub:
     <<: *matchplane-service
-    entrypoint: ["/usr/local/bin/matchplane-federation-hub"]
+    entrypoint: ["/usr/local/bin/matchplane", "serve", "federation-hub"]
     ports:
       - "127.0.0.1:${MATCHPLANE_FEDERATION_HOST_PORT:-50051}:50051"
 

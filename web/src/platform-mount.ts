@@ -22,7 +22,8 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
                 o.slug,
                 o."parentOrganizationId",
                 o."tenantId",
-                '/' || o.slug AS platform_path
+                '/' || o.slug AS platform_path,
+                true AS path_active
            FROM "organization" o
           WHERE o."tenantId" = $1::text
             AND o."parentOrganizationId" IS NULL
@@ -31,7 +32,15 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
                 child.slug,
                 child."parentOrganizationId",
                 child."tenantId",
-                platform_tree.platform_path || '/' || child.slug
+                platform_tree.platform_path || '/' || child.slug,
+                platform_tree.path_active
+                  AND EXISTS (
+                    SELECT 1
+                      FROM subplatform_registrations registration
+                     WHERE registration.tenant_id = $1::uuid
+                       AND registration.slug = child.slug
+                       AND registration.state = 'active'
+                  ) AS path_active
            FROM "organization" child
            JOIN platform_tree
              ON child."parentOrganizationId" = platform_tree.id
@@ -41,19 +50,83 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
        SELECT 1
          FROM platform_tree
         WHERE platform_tree.platform_path = $2
-          AND EXISTS (
-            SELECT 1
-              FROM subplatform_registrations registration
-             WHERE registration.tenant_id = $1::uuid
-               AND registration.slug = platform_tree.slug
-               AND registration.state = 'active'
-          )
+          AND platform_tree.path_active
         LIMIT 1`,
       [rootTenantId, platformPath],
     );
     return result.rowCount === 1;
   } catch (error) {
     console.error("platform mount lookup failed", error);
+    return false;
+  }
+}
+
+/**
+ * Limit a machine key to its organization node and descendants. The root deployment can opt into
+ * a root-scoped key with MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID; without that explicit binding a
+ * child key cannot submit a request at `/`.
+ */
+export async function isPlatformPathAccessibleByOrganization(
+  platformPath: string,
+  organizationId: string,
+): Promise<boolean> {
+  if (platformPath === "/") {
+    return process.env.MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID?.trim() === organizationId;
+  }
+  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  if (!rootTenantId || !isUuid(rootTenantId) || !isUuid(organizationId) || !isPlatformPath(platformPath)) return false;
+
+  try {
+    const result = await authDatabase.query(
+      `WITH RECURSIVE platform_tree AS (
+         SELECT o.id,
+                o."parentOrganizationId",
+                o."tenantId",
+                '/' || o.slug AS platform_path,
+                true AS path_active
+           FROM "organization" o
+          WHERE o."tenantId" = $1::text
+            AND o."parentOrganizationId" IS NULL
+         UNION ALL
+         SELECT child.id,
+                child."parentOrganizationId",
+                child."tenantId",
+                platform_tree.platform_path || '/' || child.slug,
+                platform_tree.path_active
+                  AND EXISTS (
+                    SELECT 1
+                      FROM subplatform_registrations registration
+                     WHERE registration.tenant_id = $1::uuid
+                       AND registration.slug = child.slug
+                       AND registration.state = 'active'
+                  ) AS path_active
+           FROM "organization" child
+           JOIN platform_tree
+             ON child."parentOrganizationId" = platform_tree.id
+            AND child."tenantId" = platform_tree."tenantId"
+          WHERE length(platform_tree.platform_path) < 4_096
+       ),
+       key_scope(id, depth) AS (
+         SELECT id, 0
+           FROM "organization"
+          WHERE id = $2::uuid
+         UNION ALL
+         SELECT child.id, parent.depth + 1
+           FROM "organization" child
+           JOIN key_scope parent ON child."parentOrganizationId" = parent.id
+          WHERE parent.depth < 64
+       )
+       SELECT 1
+         FROM platform_tree
+         JOIN key_scope ON key_scope.id = platform_tree.id
+        WHERE platform_tree.platform_path = $3
+          AND platform_tree.path_active
+        LIMIT 1`,
+      [rootTenantId, organizationId, platformPath],
+    );
+    return result.rowCount === 1;
+  } catch (error) {
+    console.error("platform API-key mount lookup failed", error);
     return false;
   }
 }

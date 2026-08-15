@@ -17,6 +17,7 @@ binaries=(
   matchplane-payment-service
   matchplane-projector
   matchplane-vector-worker
+  matchplane
   xtask
 )
 
@@ -24,6 +25,7 @@ install -d "$root/usr/bin" "$root/etc/matchplane" "$root/etc/matchplane/services
 install -d "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" "$root/usr/share/doc/matchplane"
 install -d "$root/usr/share/licenses/matchplane"
 install -d "$root/usr/share/matchplane/web"
+install -d "$root/usr/share/matchplane/skills"
 if [[ ! -f $repository_root/web/.next/standalone/server.js ]]; then
   echo 'web/.next/standalone/server.js is missing; run bun install and bun run build in web/' >&2
   exit 1
@@ -40,6 +42,9 @@ install -Dm0644 "$repository_root/LICENSE" "$root/usr/share/licenses/matchplane/
 install -Dm0644 "$repository_root/ARCHITECTURE.md" "$root/usr/share/doc/matchplane/ARCHITECTURE.md"
 install -Dm0644 "$repository_root/docs/marketplace-payments.md" \
   "$root/usr/share/doc/matchplane/marketplace-payments.md"
+install -Dm0644 "$repository_root/docs/cli-and-mcp.md" \
+  "$root/usr/share/doc/matchplane/cli-and-mcp.md"
+cp -a "$repository_root/.agents/skills/." "$root/usr/share/matchplane/skills/"
 cp -a "$repository_root/web/.next/standalone/." "$root/usr/share/matchplane/web/"
 if [[ -d $repository_root/web/public ]]; then
   cp -a "$repository_root/web/public/." "$root/usr/share/matchplane/web/public/"

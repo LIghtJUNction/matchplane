@@ -1,0 +1,4 @@
+interface:
+  display_name: "MatchPlane Operations"
+  short_description: "Operate MatchPlane with CLI and safe MCP tools."
+  default_prompt: "Use the MatchPlane CLI and read-only MCP tools to diagnose configuration, service health, platform mounts, and deployment safety."

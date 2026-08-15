@@ -40,7 +40,7 @@ spec:
         - name: {{ $service.name }}
           image: {{ include "matchplane.image" $root }}
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["/usr/local/bin/{{ $service.binary }}"]
+          command: ["/usr/local/bin/matchplane", "serve", "{{ $service.name }}"]
           env:
             {{- include "matchplane.environment" (dict "root" $root "service" $service.name) | nindent 12 }}
           {{- with $service.port }}
@@ -181,6 +181,8 @@ spec:
                   key: root-admin-email
             - name: MATCHPLANE_ROOT_TENANT_ID
               value: {{ $root.Values.web.rootTenantId | quote }}
+            - name: MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID
+              value: {{ $root.Values.web.rootOrganizationId | quote }}
             - name: MATCHPLANE_ROUTER_AI_URL
               value: {{ $root.Values.web.routerAiUrl | quote }}
             - name: MATCHPLANE_ROUTER_AI_MODEL

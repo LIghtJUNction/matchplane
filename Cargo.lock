@@ -4474,6 +4474,8 @@ dependencies = [
  "clap",
  "matchplane-config",
  "matchplane-storage",
+ "reqwest",
+ "serde",
  "serde_json",
  "tokio",
 ]

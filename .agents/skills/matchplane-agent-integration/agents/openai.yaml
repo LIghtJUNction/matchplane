@@ -1,0 +1,4 @@
+interface:
+  display_name: "MatchPlane Agent Integration"
+  short_description: "Connect buyer and seller agents to MatchPlane contracts."
+  default_prompt: "Use the MatchPlane Agent, Skill, and MCP contracts to connect a buyer or seller agent without bypassing platform authorization, contact consent, or cost limits."

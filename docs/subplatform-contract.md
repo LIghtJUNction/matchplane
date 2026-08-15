@@ -141,12 +141,15 @@ selected canonical references, provider metadata and degraded state. AI ranking 
 cannot grant contact, release phone/WeChat details, authorize payment, mark a transaction
 complete, or bypass seller exposure/commission policy.
 
-The deployment platform is the token-cost bearer for every model call initiated by this protocol;
-buyers, sellers, and subplatform tenants are never charged a hidden token fee. Provider
-credentials stay on the server, requests carry bounded input/step/output budgets, and the routing
-audit records `cost_bearer: "platform"`, the selected model, and provider-reported usage when
-available. A subplatform may still operate its own MCP infrastructure, but it cannot shift an
-unbounded model call to a browser, charge a party for tokens, or silently reuse a root credential.
+The deployment platform is the token-cost bearer only for model calls made by its hosted router;
+buyers, sellers, and subplatform tenants are never charged a hidden token fee for that hosted path.
+When a buyer or seller brings its own Agent, that Agent owns its provider credentials and model
+costs; calls into MatchPlane MCP are bounded tool calls, not an invitation to spend from the root
+provider account. Provider credentials stay server-side, requests carry bounded input/step/output
+budgets, and hosted routing audits `cost_bearer: "platform"`, the selected model, and
+provider-reported usage when available. A subplatform may still operate its own MCP infrastructure,
+but it cannot shift an unbounded model call to a browser, charge a party for root tokens, or silently
+reuse a root credential.
 The normative Agent/Skill/MCP envelope is
 [`docs/agent-mcp-skill-protocol-v1.json`](agent-mcp-skill-protocol-v1.json).
 
