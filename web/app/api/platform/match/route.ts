@@ -184,7 +184,7 @@ async function readChildRoutePlan(platformPath: string, rootTenantId: string): P
         AND r.state = 'active'
         AND (($1::text IS NULL AND o."parentOrganizationId" IS NULL)
           OR ($1::text IS NOT NULL AND current_node.id IS NOT NULL
-              AND o."parentOrganizationId" = current_node.id::text))
+              AND o."parentOrganizationId" = current_node.id))
       ORDER BY r.slug ASC`,
     [currentSlug, rootTenantId, platformPath],
   );

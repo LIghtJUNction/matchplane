@@ -30,7 +30,7 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
                 platform_tree.platform_path || '/' || child.slug
            FROM "organization" child
            JOIN platform_tree
-             ON child."parentOrganizationId" = platform_tree.id::text
+             ON child."parentOrganizationId" = platform_tree.id
             AND child."tenantId" = platform_tree."tenantId"
           WHERE length(platform_tree.platform_path) < 4_096
        )
