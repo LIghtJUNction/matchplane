@@ -1430,7 +1430,7 @@ impl PaymentStore {
             let invoices = sqlx::query(
                 "SELECT id, tenant_id, offline_deal_id, kind, currency, currency_scale, \
                         billing_details_ciphertext, billing_details_nonce, encryption_key_version, \
-                        provider_key, provider_mode, invoice_number \
+                        provider_key, provider_mode, provider_credential_digest, invoice_number \
                  FROM invoice_requests WHERE payment_id = $1 AND status = 'issued' \
                    AND correction_of_invoice_id IS NULL FOR SHARE",
             )
@@ -1457,9 +1457,9 @@ impl PaymentStore {
                      (id, tenant_id, payment_id, offline_deal_id, correction_of_invoice_id, kind, \
                       idempotency_key, request_hash, amount, currency, currency_scale, description, \
                       billing_details_ciphertext, billing_details_nonce, encryption_key_version, \
-                      status, provider_key, provider_mode, requested_by) \
+                      status, provider_key, provider_mode, provider_credential_digest, requested_by) \
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11, $12, \
-                             $13, $14, $15, 'red_letter_pending', $16, $17, 'system:refund')",
+                             $13, $14, $15, 'red_letter_pending', $16, $17, $18, 'system:refund')",
                 )
                 .bind(correction_id)
                 .bind(invoice.try_get::<Uuid, _>("tenant_id")?)
@@ -1481,6 +1481,7 @@ impl PaymentStore {
                 .bind(invoice.try_get::<i32, _>("encryption_key_version")?)
                 .bind(invoice.try_get::<String, _>("provider_key")?)
                 .bind(invoice.try_get::<String, _>("provider_mode")?)
+                .bind(invoice.try_get::<Option<Vec<u8>>, _>("provider_credential_digest")?)
                 .execute(&mut *transaction)
                 .await?;
                 sqlx::query(
