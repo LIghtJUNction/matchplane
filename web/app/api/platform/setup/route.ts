@@ -18,7 +18,7 @@ export async function GET(): Promise<Response> {
   const rootAdminConfigured = isOperatorEmail(process.env.MATCHPLANE_ROOT_ADMIN_EMAIL);
 
   try {
-    const [tenantResult, domainsResult, registrationResult, accountResult] = await Promise.all([
+    const [tenantResult, domainsResult, registrationResult, accountResult, rootAdminResult] = await Promise.all([
       tenantConfigured
         ? authDatabase.query<{ slug: string; name: string }>(
             "SELECT slug, name FROM tenants WHERE id = $1::uuid LIMIT 1",
@@ -45,6 +45,14 @@ export async function GET(): Promise<Response> {
           )
         : Promise.resolve({ rows: [], rowCount: 0 } as { rows: Array<{ state: string; count: string }>; rowCount: number }),
       authDatabase.query<{ count: string }>('SELECT count(*)::text AS count FROM "user"'),
+      authDatabase.query<{ count: string }>(
+        `SELECT count(*)::text AS count
+           FROM "user"
+          WHERE "emailVerified" = true
+            AND lower(email) = lower($1)
+            AND role = ANY($2::text[])`,
+        [process.env.MATCHPLANE_ROOT_ADMIN_EMAIL?.trim() ?? "", ["rootSuperAdmin", "rootAdmin"]],
+      ),
     ]);
 
     const registrations = Object.fromEntries(
@@ -52,6 +60,7 @@ export async function GET(): Promise<Response> {
     );
     const tenant = tenantResult.rows[0] ?? null;
     const identityAccounts = Number.parseInt(accountResult.rows[0]?.count ?? "0", 10) || 0;
+    const rootAdminAccounts = Number.parseInt(rootAdminResult.rows[0]?.count ?? "0", 10) || 0;
     const activeChildren = registrations.active ?? 0;
 
     return NextResponse.json(
@@ -63,12 +72,13 @@ export async function GET(): Promise<Response> {
           tenant: tenant ? { slug: tenant.slug, name: tenant.name } : null,
           rootAdminConfigured,
           identityAccounts,
+          rootAdminAccounts,
         },
         domains: domainsResult.rows,
         registrations,
         routing: { activeChildren, ready: activeChildren > 0 },
         firstRun: {
-          needsRootAccount: identityAccounts === 0,
+          needsRootAccount: rootAdminAccounts === 0,
           readyForAdmin: rootAdminConfigured && Boolean(tenant),
         },
       },

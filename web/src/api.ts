@@ -32,6 +32,7 @@ export interface PlatformSetupStatus {
     tenant: { slug: string; name: string } | null;
     rootAdminConfigured: boolean;
     identityAccounts: number;
+    rootAdminAccounts: number;
   };
   domains: Array<{ id: string; slug: string; name: string }>;
   registrations: Record<string, number>;
