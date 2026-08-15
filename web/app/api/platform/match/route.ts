@@ -28,7 +28,10 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "platformPath is invalid" }, { status: 400 });
   }
 
-  const routePlan = await readChildRoutePlan(platformPath);
+  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  const routePlan = rootTenantId && isUuid(rootTenantId)
+    ? await readChildRoutePlan(platformPath, rootTenantId)
+    : [];
   const requestId = randomUUID();
   await authDatabase.query(
     `INSERT INTO platform_match_requests
@@ -72,33 +75,38 @@ async function parseBody(request: Request): Promise<MatchRequest> {
   }
 }
 
-async function readChildRoutePlan(platformPath: string): Promise<RouteHop[]> {
+async function readChildRoutePlan(platformPath: string, rootTenantId: string): Promise<RouteHop[]> {
   const currentSlug = platformPath === "/" ? null : platformPath.split("/").filter(Boolean).at(-1) ?? null;
   const result = await authDatabase.query(
     `WITH RECURSIVE current_nodes AS (
        SELECT o.id, o."parentOrganizationId", 0::int AS depth
          FROM "organization" o
-        WHERE ($1::text IS NULL AND o."parentOrganizationId" IS NULL)
-           OR ($1::text IS NOT NULL AND o.slug = $1::text)
+         WHERE (($1::text IS NULL AND o."parentOrganizationId" IS NULL)
+             OR ($1::text IS NOT NULL AND o.slug = $1::text))
+          AND o."tenantId" = $2::text
        UNION ALL
        SELECT child.id, child."parentOrganizationId", current_nodes.depth + 1
          FROM "organization" child
          JOIN current_nodes ON child."parentOrganizationId" = current_nodes.id
         WHERE current_nodes.depth < 64
+           AND child."tenantId" = $2::text
      )
      SELECT r.slug,
             COALESCE(r.manifest ->> 'displayName', r.slug) AS "displayName",
             COALESCE(r.manifest ->> 'description', '') AS description,
             r.tenant_id AS "tenantId",
             r.domain_id AS "domainId",
-            current_nodes.depth + 1 AS depth,
+            COALESCE(current_nodes.depth + 1, 1) AS depth,
             COALESCE(r.manifest -> 'routes' ->> 0, '/' || r.slug) AS path
-       FROM subplatform_registrations r
-       JOIN "organization" o ON o.slug = r.slug
-       JOIN current_nodes ON current_nodes.id = o."parentOrganizationId"
-      WHERE r.state IN ('ready', 'active')
-      ORDER BY current_nodes.depth ASC, r.slug ASC`,
-    [currentSlug],
+      FROM subplatform_registrations r
+      JOIN "organization" o ON o.slug = r.slug AND o."tenantId" = r.tenant_id::text
+      LEFT JOIN current_nodes ON current_nodes.id = o."parentOrganizationId"
+      WHERE r.tenant_id = $2::uuid
+        AND r.state IN ('ready', 'active')
+        AND (($1::text IS NULL AND o."parentOrganizationId" IS NULL)
+          OR ($1::text IS NOT NULL AND current_nodes.id IS NOT NULL))
+      ORDER BY COALESCE(current_nodes.depth, 0) ASC, r.slug ASC`,
+    [currentSlug, rootTenantId],
   );
   return result.rows.map((row) => ({
     slug: String(row.slug),
@@ -120,4 +128,8 @@ function normalizePlatformPath(value: string | undefined): string | null {
 
 function safeRoutePath(value: string, fallbackSlug: string): string {
   return /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(value) ? value : `/${fallbackSlug}`;
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
