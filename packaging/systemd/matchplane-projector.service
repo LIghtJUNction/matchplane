@@ -5,8 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=matchplane
-Group=matchplane
+User=matchplane-projector
+Group=matchplane-projector
+SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
 EnvironmentFile=/etc/matchplane/services/projector.env
 ExecStart=/usr/bin/matchplane-projector

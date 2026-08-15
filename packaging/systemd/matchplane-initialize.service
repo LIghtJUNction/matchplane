@@ -8,8 +8,9 @@ Before=matchplane-gateway.service matchplane-payment-service.service matchplane-
 
 [Service]
 Type=oneshot
-User=matchplane
-Group=matchplane
+User=matchplane-migration
+Group=matchplane-migration
+SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
 EnvironmentFile=/etc/matchplane/services/migration.env
 ExecStart=/usr/bin/xtask initialize

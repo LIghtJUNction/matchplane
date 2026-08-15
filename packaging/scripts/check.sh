@@ -27,6 +27,13 @@ if ! rg -q '^EnvironmentFile=/etc/matchplane/services/migration\.env$' \
   echo 'matchplane-initialize.service must require the migration environment file' >&2
   exit 1
 fi
+for service_user in relay matcher projector vector federation migration; do
+  if ! rg -q "^User=matchplane-${service_user}$" \
+    packaging/systemd/matchplane-*.service; then
+    echo "missing dedicated service user matchplane-${service_user}" >&2
+    exit 1
+  fi
+done
 
 if rg -n --glob '*.Dockerfile' --glob 'Dockerfile*' \
   '^FROM [^$@[:space:]]+:[^@[:space:]]+( |$)' deploy packaging; then

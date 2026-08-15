@@ -5,8 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=matchplane
-Group=matchplane
+User=matchplane-relay
+Group=matchplane-relay
+SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
 EnvironmentFile=/etc/matchplane/services/event-relay.env
 ExecStart=/usr/bin/matchplane-event-relay

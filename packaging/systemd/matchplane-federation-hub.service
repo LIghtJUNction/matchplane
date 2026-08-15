@@ -5,8 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=matchplane
-Group=matchplane
+User=matchplane-federation
+Group=matchplane-federation
+SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
 EnvironmentFile=/etc/matchplane/services/federation-hub.env
 ExecStart=/usr/bin/matchplane-federation-hub

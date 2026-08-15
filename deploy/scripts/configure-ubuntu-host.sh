@@ -157,12 +157,12 @@ write_service_environment() {
 write_service_environment web matchplane-web
 write_service_environment gateway matchplane-gateway
 write_service_environment payment-service matchplane-payment
-write_service_environment event-relay matchplane
-write_service_environment matcher matchplane
-write_service_environment projector matchplane
-write_service_environment vector-worker matchplane
-write_service_environment federation-hub matchplane
-write_service_environment migration matchplane
+write_service_environment event-relay matchplane-relay
+write_service_environment matcher matchplane-matcher
+write_service_environment projector matchplane-projector
+write_service_environment vector-worker matchplane-vector
+write_service_environment federation-hub matchplane-federation
+write_service_environment migration matchplane-migration
 
 systemctl daemon-reload
 systemctl reset-failed matchplane-initialize.service \
