@@ -227,6 +227,7 @@ p {
 }
 
 .header-actions {
+  position: relative;
   justify-self: end;
   display: flex;
   align-items: center;
@@ -289,6 +290,77 @@ p {
 .profile-copy small {
   color: var(--muted);
   font-size: 0.68rem;
+}
+
+.account-menu {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 0.65rem);
+  right: 0;
+  width: min(19rem, calc(100vw - 1.5rem));
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 1.2rem;
+  background: var(--ivory);
+  box-shadow: var(--shadow-large);
+}
+
+.account-menu-identity {
+  padding: 0.6rem 0.7rem 0.7rem;
+  display: grid;
+  gap: 0.18rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.account-menu-identity strong {
+  overflow: hidden;
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu-identity small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu-links {
+  padding: 0.45rem 0;
+  display: grid;
+  gap: 0.18rem;
+}
+
+.account-menu-links a,
+.account-menu-signout {
+  min-height: 2.75rem;
+  padding: 0 0.7rem;
+  display: flex;
+  align-items: center;
+  border: 0;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 0.78rem;
+  text-decoration: none;
+}
+
+.account-menu-links a:hover,
+.account-menu-links a:focus-visible,
+.account-menu-signout:hover,
+.account-menu-signout:focus-visible {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.account-menu-signout {
+  width: 100%;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  color: #8e3d2b;
 }
 
 main {
@@ -603,7 +675,7 @@ main {
 }
 
 .filter-menu button {
-  min-height: 2.35rem;
+  min-height: 2.75rem;
   padding: 0 0.78rem;
   display: inline-flex;
   align-items: center;
@@ -1406,6 +1478,64 @@ main {
 .state-reserved { background: rgba(150, 147, 173, 0.17); color: #5c5874; }
 .gateway-list > button > svg { color: var(--muted); }
 
+.route-manager {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.subsection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.subsection-heading > div { display: grid; gap: 0.15rem; }
+.subsection-heading strong { font-size: 0.74rem; }
+.subsection-heading button,
+.invoice-mode-card button {
+  min-height: 2.5rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.78rem;
+  background: var(--paper);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.subsection-heading button:hover,
+.subsection-heading button:focus-visible,
+.invoice-mode-card button:hover,
+.invoice-mode-card button:focus-visible { border-color: var(--line-strong); color: var(--ink); }
+
+.route-list {
+  margin-top: 0.6rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.route-row {
+  min-height: 3.2rem;
+  padding: 0.55rem 0.65rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: var(--paper);
+}
+
+.route-row > span { display: grid; min-width: 0; }
+.route-row strong { overflow: hidden; font-size: 0.7rem; text-overflow: ellipsis; white-space: nowrap; }
+.route-row small { margin-top: 0.14rem; overflow: hidden; color: var(--muted); font-size: 0.6rem; text-overflow: ellipsis; white-space: nowrap; }
+.route-empty { margin-top: 0.6rem; color: var(--muted); font-size: 0.66rem; line-height: 1.45; }
+.route-editor { margin-top: 0.65rem; }
+.route-editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+
 .gateway-row,
 .provider-row {
   min-height: 3.8rem;
@@ -1440,6 +1570,21 @@ main {
 .provider-row > b { background: rgba(120, 140, 93, 0.14); color: #4d622f; }
 .provider-list { display: grid; gap: 0.5rem; }
 .provider-row { grid-template-columns: 1fr auto; }
+.invoice-mode-card {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--paper);
+}
+.invoice-mode-card > div { display: grid; gap: 0.15rem; }
+.invoice-mode-card strong { font-size: 0.76rem; }
+.invoice-mode-card small { color: var(--muted); font-size: 0.62rem; }
+.invoice-mode-card button:disabled { cursor: not-allowed; opacity: 0.5; }
 .finance-record-list { margin-top: 0.65rem; display: grid; gap: 0.35rem; }
 .finance-record-row { min-height: 3.2rem; padding: 0.55rem 0.65rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; border-top: 1px solid var(--line); }
 .finance-record-row:first-child { border-top: 0; }

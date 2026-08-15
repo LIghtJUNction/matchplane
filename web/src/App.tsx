@@ -20,6 +20,7 @@ import { MatchChat } from "./components/MatchChat";
 import { loadSubplatform, resolveSubplatform, type SubplatformConfig } from "./subplatform";
 import {
   createBuyerIntroduction,
+  clearPartySessionCache,
   getPaymentSetting,
   type RecommendedBackendListing,
   isLiveMarketplaceEnabled,
@@ -29,6 +30,13 @@ import {
 import { getMarketplaceSession } from "./lib/marketplace-session";
 import { authClient, authFetchOptions } from "./lib/auth-client";
 import type { AssetListing, WorkspaceRole } from "./types";
+
+interface AuthenticatedUser {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  role?: string | null;
+}
 
 export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [role, setRole] = useState<WorkspaceRole>("buyer");
@@ -40,6 +48,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [paymentModeVersion, setPaymentModeVersion] = useState(1);
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   const closeListing = useCallback(() => setListing(null), []);
   const closeModeDialog = useCallback(() => setModeDialogOpen(false), []);
@@ -63,8 +73,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     void authClient
       .getSession({ fetchOptions: authFetchOptions(subplatform.slug) })
       .then(({ data }) => {
+        const user = data?.user as AuthenticatedUser | undefined;
+        setAuthUser(user?.id ? user : null);
         const requestedRole = roleFromLocation();
-        const userRole = (data?.user as { role?: string } | undefined)?.role;
+        const userRole = user?.role;
         const isRootManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
         if (requestedRole === "platform" && !isRootManager) {
           setRole("buyer");
@@ -72,12 +84,34 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         }
       })
       .catch(() => {
+        setAuthUser(null);
         if (roleFromLocation() === "platform") {
           setRole("buyer");
           setNotice("请先使用根平台管理员账号登录");
         }
       });
   }, [subplatform.slug]);
+
+  const openAccount = () => {
+    if (authUser) {
+      setAccountMenuOpen((open) => !open);
+      return;
+    }
+    window.location.assign(`/login?role=${role}&next=${encodeURIComponent(window.location.pathname)}`);
+  };
+
+  const signOut = async () => {
+    try {
+      const result = await authClient.signOut({ fetchOptions: authFetchOptions(subplatform.slug) });
+      if (result.error) throw new Error(result.error.message || "退出登录失败");
+      clearPartySessionCache();
+      setAuthUser(null);
+      setAccountMenuOpen(false);
+      setNotice("已退出当前账号");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "退出登录失败，请稍后重试");
+    }
+  };
 
   useEffect(() => {
     if (!hydrated) return;
@@ -154,10 +188,36 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             <div className="header-actions">
               <span className="secure-status"><ShieldCheck size={15} aria-hidden="true" />安全连接</span>
               <IconButton label="通知" onClick={() => setNotice("目前没有新的平台通知") }><Bell size={19} aria-hidden="true" /></IconButton>
-              <button className="profile-button" type="button" aria-label="打开个人账户" onClick={() => window.location.assign(`/login?role=${role}&next=${encodeURIComponent(window.location.pathname)}`)}>
+              <button className="profile-button" type="button" aria-label={authUser ? "打开个人账户菜单" : "登录账户"} aria-expanded={authUser ? accountMenuOpen : undefined} onClick={openAccount}>
                 <span><UserRound size={18} aria-hidden="true" /></span>
-                <span className="profile-copy"><strong>{subplatform.brandName}</strong><small>{role === "buyer" ? "买家" : role === "seller" ? "卖家" : "管理员"}</small></span>
+                <span className="profile-copy"><strong>{authUser?.name || subplatform.brandName}</strong><small>{authUser ? (role === "buyer" ? "买家" : role === "seller" ? "卖家" : "管理员") : "登录"}</small></span>
               </button>
+              <AnimatePresence>
+                {authUser && accountMenuOpen ? (
+                  <motion.div
+                    className="account-menu"
+                    role="menu"
+                    aria-label="个人账户菜单"
+                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                    transition={spring}
+                  >
+                    <div className="account-menu-identity">
+                      <strong>{authUser.name || "MatchPlane 用户"}</strong>
+                      <small>{authUser.email || "已登录的统一身份"}</small>
+                    </div>
+                    <div className="account-menu-links">
+                      <a role="menuitem" href={`${window.location.pathname}?role=buyer`}>买方工作台</a>
+                      <a role="menuitem" href={`${window.location.pathname}?role=seller`}>卖方工作台</a>
+                      {authUser.role === "rootSuperAdmin" || authUser.role === "rootAdmin" ? (
+                        <a role="menuitem" href="/?role=platform">根平台管理</a>
+                      ) : null}
+                    </div>
+                    <button className="account-menu-signout" type="button" role="menuitem" onClick={() => void signOut()}>退出登录</button>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
             </div>
           </div>
         </header>

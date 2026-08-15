@@ -21,6 +21,7 @@ vi.mock("./lib/auth-client", () => ({
         error: null,
       };
     }),
+    signOut: vi.fn(async () => ({ data: null, error: null })),
   },
   authFetchOptions: (subplatform: string) => ({
     headers: { "x-matchplane-subplatform": subplatform },
@@ -30,6 +31,7 @@ vi.mock("./lib/auth-client", () => ({
 
 import { App } from "./App";
 import { clearPartySessionCache, savePartySession } from "./api";
+import { authClient } from "./lib/auth-client";
 
 beforeEach(() => {
   window.scrollTo = vi.fn();
@@ -131,5 +133,18 @@ describe("MatchPlane workspaces", () => {
 
     await user.click(screen.getByRole("button", { name: "描述需求" }));
     expect(screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" })).toHaveFocus();
+  });
+
+  it("shows an account menu and signs out through Better Auth", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开个人账户菜单" }));
+    expect(screen.getByRole("menu", { name: "个人账户菜单" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "退出登录" }));
+
+    expect(authClient.signOut).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status")).toHaveTextContent("已退出当前账号");
   });
 });

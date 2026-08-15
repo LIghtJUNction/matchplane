@@ -139,9 +139,10 @@ interface ModeDialogProps {
   currentMode: "test" | "production";
   onClose: () => void;
   onConfirm: () => void;
+  resourceLabel?: string;
 }
 
-export function ModeDialog({ open, currentMode, onClose, onConfirm }: ModeDialogProps) {
+export function ModeDialog({ open, currentMode, onClose, onConfirm, resourceLabel = "" }: ModeDialogProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const target = currentMode === "test" ? "生产模式" : "测试模式";
   useOverlayLifecycle(open, onClose, closeRef);
@@ -153,7 +154,7 @@ export function ModeDialog({ open, currentMode, onClose, onConfirm }: ModeDialog
           <motion.button
             className="overlay-backdrop"
             type="button"
-            aria-label="取消切换支付模式"
+            aria-label={`取消切换${resourceLabel || "支付"}模式`}
             onClick={onClose}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -171,9 +172,9 @@ export function ModeDialog({ open, currentMode, onClose, onConfirm }: ModeDialog
           >
             <span className="dialog-icon"><ShieldCheck aria-hidden="true" /></span>
             <p className="eyebrow">管理员操作</p>
-            <h2 id="mode-dialog-title">切换到{target}？</h2>
+            <h2 id="mode-dialog-title">切换{resourceLabel ? `${resourceLabel}到` : "到"}{target}？</h2>
             <p>
-              切换前系统会检查目标模式至少有一个可用网关，并阻止存在未知支付结果时切换。
+              切换前系统会检查目标模式的配置，并阻止存在未知结果时切换。
               所有配置变更都会写入审计日志。
             </p>
             <div className="dialog-checks">

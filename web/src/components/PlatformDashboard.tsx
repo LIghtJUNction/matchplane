@@ -16,21 +16,28 @@ import { motion } from "motion/react";
 
 import {
   getInvoiceAdminRecords,
+  getInvoiceSetting,
   getInvoiceProviders,
   getPaymentAdminRecords,
   getPaymentGateways,
+  getPaymentRoutes,
   getPlatformSetupStatus,
   getRefundAdminRecords,
   isLiveMarketplaceEnabled,
   saveInvoiceProvider,
   savePaymentGateway,
+  savePaymentRoute,
+  switchInvoiceMode,
   type InvoiceProviderRecord,
   type InvoiceAdminRecord,
+  type InvoiceSetting,
   type PaymentAdminRecord,
   type PaymentGatewayRecord,
+  type PaymentRouteRecord,
   type PlatformSetupStatus,
   type RefundAdminRecord,
 } from "../api";
+import { ModeDialog } from "./Overlays";
 import { MetricCard, SectionHeading, spring } from "./Primitives";
 
 interface PlatformDashboardProps {
@@ -47,19 +54,27 @@ export function PlatformDashboard({
   const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
   const [setupError, setSetupError] = useState(false);
   const [gateways, setGateways] = useState<PaymentGatewayRecord[]>([]);
+  const [paymentRoutes, setPaymentRoutes] = useState<PaymentRouteRecord[]>([]);
   const [invoiceProviders, setInvoiceProviders] = useState<InvoiceProviderRecord[]>([]);
+  const [invoiceSetting, setInvoiceSetting] = useState<InvoiceSetting | null>(null);
   const [payments, setPayments] = useState<PaymentAdminRecord[]>([]);
   const [refunds, setRefunds] = useState<RefundAdminRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceAdminRecord[]>([]);
   const [financeView, setFinanceView] = useState<"invoices" | "refunds">("invoices");
   const [gatewayEditorOpen, setGatewayEditorOpen] = useState(false);
+  const [routeEditorOpen, setRouteEditorOpen] = useState(false);
   const [invoiceEditorOpen, setInvoiceEditorOpen] = useState(false);
+  const [invoiceModeDialogOpen, setInvoiceModeDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [gatewayName, setGatewayName] = useState("");
   const [gatewayKind, setGatewayKind] = useState<PaymentGatewayRecord["kind"]>("test");
   const [gatewayMode, setGatewayMode] = useState<"test" | "production">("test");
   const [gatewaySettings, setGatewaySettings] = useState("{}");
   const [gatewayCredentialRef, setGatewayCredentialRef] = useState("");
+  const [routeGatewayId, setRouteGatewayId] = useState("");
+  const [routeMethodCode, setRouteMethodCode] = useState("wechat");
+  const [routeCurrency, setRouteCurrency] = useState("CNY");
+  const [routePriority, setRoutePriority] = useState("100");
   const [invoiceName, setInvoiceName] = useState("");
   const [invoiceProviderKey, setInvoiceProviderKey] = useState("local_test");
   const [invoiceMode, setInvoiceMode] = useState<"test" | "production">("test");
@@ -72,19 +87,23 @@ export function PlatformDashboard({
     void Promise.allSettled([
       getPlatformSetupStatus(),
       getPaymentGateways(),
+      getPaymentRoutes(),
       getInvoiceProviders(),
+      getInvoiceSetting(),
       getPaymentAdminRecords(),
       getRefundAdminRecords(),
       getInvoiceAdminRecords(),
     ])
-      .then(([setupResult, gatewayResult, invoiceResult, paymentResult, refundResult, invoiceRecordResult]) => {
+      .then(([setupResult, gatewayResult, routeResult, invoiceResult, invoiceSettingResult, paymentResult, refundResult, invoiceRecordResult]) => {
         if (!mounted) return;
         if (setupResult.status === "fulfilled") setSetup(setupResult.value);
         else setSetupError(true);
         // Payment administration is intentionally allowed to be unavailable while the first
         // Better Auth session is still settling; the setup card remains useful in that state.
         if (gatewayResult.status === "fulfilled") setGateways(gatewayResult.value);
+        if (routeResult.status === "fulfilled") setPaymentRoutes(routeResult.value);
         if (invoiceResult.status === "fulfilled") setInvoiceProviders(invoiceResult.value);
+        if (invoiceSettingResult.status === "fulfilled") setInvoiceSetting(invoiceSettingResult.value);
         if (paymentResult.status === "fulfilled") setPayments(paymentResult.value);
         if (refundResult.status === "fulfilled") setRefunds(refundResult.value);
         if (invoiceRecordResult.status === "fulfilled") setInvoices(invoiceRecordResult.value);
@@ -95,18 +114,87 @@ export function PlatformDashboard({
   }, []);
 
   const refreshPaymentAdministration = async () => {
-    const [nextGateways, nextInvoiceProviders, nextPayments, nextRefunds, nextInvoices] = await Promise.all([
+    const [nextGateways, nextRoutes, nextInvoiceProviders, nextInvoiceSetting, nextPayments, nextRefunds, nextInvoices] = await Promise.all([
       getPaymentGateways(),
+      getPaymentRoutes(),
       getInvoiceProviders(),
+      getInvoiceSetting(),
       getPaymentAdminRecords(),
       getRefundAdminRecords(),
       getInvoiceAdminRecords(),
     ]);
     setGateways(nextGateways);
+    setPaymentRoutes(nextRoutes);
     setInvoiceProviders(nextInvoiceProviders);
+    setInvoiceSetting(nextInvoiceSetting);
     setPayments(nextPayments);
     setRefunds(nextRefunds);
     setInvoices(nextInvoices);
+  };
+
+  const submitPaymentRoute = async () => {
+    const priority = Number.parseInt(routePriority, 10);
+    if (!routeGatewayId) {
+      onNotice("请先选择一个已保存的支付网关");
+      return;
+    }
+    if (!/^[a-z0-9][a-z0-9._:-]{1,63}$/i.test(routeMethodCode.trim())) {
+      onNotice("支付方式编码只能包含字母、数字、点、下划线、冒号或短横线");
+      return;
+    }
+    if (!/^[A-Z]{3}$/.test(routeCurrency.trim().toUpperCase())) {
+      onNotice("币种必须是 3 位 ISO 4217 编码");
+      return;
+    }
+    if (!Number.isSafeInteger(priority) || priority < 0 || priority > 10_000) {
+      onNotice("优先级必须是 0 到 10000 的整数");
+      return;
+    }
+    setSaving(true);
+    try {
+      await savePaymentRoute({
+        gatewayId: routeGatewayId,
+        methodCode: routeMethodCode.trim(),
+        currency: routeCurrency.trim().toUpperCase(),
+        priority,
+        enabled: true,
+        reason: "platform dashboard create payment route",
+      });
+      await refreshPaymentAdministration();
+      setRouteEditorOpen(false);
+      setRouteMethodCode("wechat");
+      setRouteCurrency("CNY");
+      setRoutePriority("100");
+      onNotice("支付路由已保存；切换生产模式前请完成网关健康检查");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "支付路由保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmInvoiceModeChange = () => {
+    if (!invoiceSetting) {
+      setInvoiceModeDialogOpen(false);
+      onNotice("发票模式尚未读取完成");
+      return;
+    }
+    const nextMode = invoiceSetting.active_mode === "test" ? "production" : "test";
+    void switchInvoiceMode({
+      mode: nextMode,
+      providerId: invoiceSetting.provider_id ?? undefined,
+      expectedVersion: invoiceSetting.version,
+      reason: `web-admin switch invoice mode to ${nextMode}`,
+    })
+      .then((setting) => {
+        setInvoiceSetting(setting);
+        setInvoiceModeDialogOpen(false);
+        onNotice(`发票系统已切换为${setting.active_mode === "test" ? "测试" : "生产"}模式`);
+      })
+      .catch((error) => {
+        setInvoiceModeDialogOpen(false);
+        onNotice(error instanceof Error ? error.message : "发票模式切换失败");
+      });
   };
 
   const submitGateway = async () => {
@@ -284,6 +372,42 @@ export function PlatformDashboard({
               <button className="button button-dark" type="button" disabled={saving} onClick={() => void submitGateway()}>{saving ? "保存中…" : "保存网关"}</button>
             </div>
           ) : null}
+          <div className="route-manager">
+            <div className="subsection-heading">
+              <div>
+                <p className="eyebrow">路由矩阵</p>
+                <strong>支付方式与币种</strong>
+              </div>
+              <button type="button" onClick={() => setRouteEditorOpen((open) => !open)}>
+                {routeEditorOpen ? "关闭配置" : "配置路由"}
+              </button>
+            </div>
+            {paymentRoutes.length ? (
+              <div className="route-list" aria-label="已配置支付路由">
+                {paymentRoutes.map((route) => {
+                  const gateway = gateways.find((item) => item.gateway_id === route.gateway_id);
+                  return (
+                    <div className="route-row" key={route.route_id}>
+                      <span><strong>{route.method_code}</strong><small>{gateway?.name || route.gateway_id} · {route.currency} · 优先级 {route.priority}</small></span>
+                      <b className={route.enabled ? "status-chip is-on" : "status-chip"}>{route.enabled ? "启用" : "停用"}</b>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <p className="route-empty">还没有路由；先保存一个网关，再为微信、支付宝或其他协议指定币种。</p>}
+            {routeEditorOpen ? (
+              <div className="admin-editor route-editor" aria-label="支付路由配置">
+                <div className="admin-editor-heading"><strong>新增支付路由</strong><button type="button" onClick={() => setRouteEditorOpen(false)}>关闭</button></div>
+                <label><span>支付网关</span><select value={routeGatewayId} onChange={(event) => setRouteGatewayId(event.target.value)}><option value="">选择已保存的网关</option>{gateways.map((gateway) => <option key={gateway.gateway_id} value={gateway.gateway_id}>{gateway.name} · {gateway.kind}</option>)}</select></label>
+                <label><span>方式编码</span><input value={routeMethodCode} onChange={(event) => setRouteMethodCode(event.target.value)} placeholder="wechat / alipay / epay" /></label>
+                <div className="route-editor-grid">
+                  <label><span>币种</span><input value={routeCurrency} onChange={(event) => setRouteCurrency(event.target.value.toUpperCase())} maxLength={3} placeholder="CNY" /></label>
+                  <label><span>优先级</span><input value={routePriority} onChange={(event) => setRoutePriority(event.target.value)} inputMode="numeric" /></label>
+                </div>
+                <button className="button button-dark" type="button" disabled={saving || !gateways.length} onClick={() => void submitPaymentRoute()}>{saving ? "保存中…" : "保存路由"}</button>
+              </div>
+            ) : null}
+          </div>
         </section>
 
         <section className="surface commission-panel" aria-labelledby="commission-title">
@@ -321,6 +445,14 @@ export function PlatformDashboard({
             </div>
           ) : null}
           {invoiceProviders.length ? <div className="provider-list">{invoiceProviders.map((provider) => <div className="provider-row" key={provider.provider_id}><span><strong>{provider.name}</strong><small>{provider.provider_key} · {provider.mode}</small></span><b>{provider.enabled ? "启用" : "停用"}</b></div>)}</div> : null}
+          <div className="invoice-mode-card">
+            <div>
+              <p className="eyebrow">发票运行模式</p>
+              <strong>{invoiceSetting ? (invoiceSetting.active_mode === "test" ? "测试模式" : "生产模式") : "读取中…"}</strong>
+              <small>{invoiceSetting?.provider_id ? "已绑定发票 provider" : "尚未绑定默认 provider"}</small>
+            </div>
+            <button type="button" disabled={!invoiceSetting} onClick={() => setInvoiceModeDialogOpen(true)}>切换模式</button>
+          </div>
           {invoiceEditorOpen ? (
             <div className="admin-editor" aria-label="发票 provider 配置">
               <div className="admin-editor-heading"><strong>新增发票 provider</strong><button type="button" onClick={() => setInvoiceEditorOpen(false)}>关闭</button></div>
@@ -348,6 +480,13 @@ export function PlatformDashboard({
           <div><span><FileCheck2 aria-hidden="true" /></span><p><strong>审计记录</strong><small>由根平台审计流报告</small></p></div>
         </section>
       </div>
+      <ModeDialog
+        open={invoiceModeDialogOpen}
+        currentMode={invoiceSetting?.active_mode ?? "test"}
+        resourceLabel="发票"
+        onClose={() => setInvoiceModeDialogOpen(false)}
+        onConfirm={confirmInvoiceModeChange}
+      />
     </div>
   );
 }
