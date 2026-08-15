@@ -30,6 +30,7 @@ export async function getMarketplaceSession(input: {
     input.role === "subplatform_admin" ? "admin" : input.role,
     input.subplatform,
     input.platformPath,
+    data.user.id,
   );
   if (isLiveMarketplaceEnabled()) {
     if (!input.tenantId) throw new Error("当前子平台尚未完成 root tenant 注册");
@@ -40,6 +41,7 @@ export async function getMarketplaceSession(input: {
         subplatform: input.subplatform,
         platformPath: input.platformPath,
         role: input.role,
+        authUserId: data.user.id,
       });
     }
     return capability;

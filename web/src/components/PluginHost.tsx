@@ -29,8 +29,9 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
 
   useEffect(() => {
     contextTokenRef.current = createContextToken();
+    const targetOrigin = new URL(artifact?.url ?? window.location.href, window.location.href).origin;
     const onMessage = (event: MessageEvent<unknown>) => {
-      if (event.source !== frameRef.current?.contentWindow || !isRecord(event.data)) return;
+      if (event.origin !== targetOrigin || event.source !== frameRef.current?.contentWindow || !isRecord(event.data)) return;
       if (event.data.protocol !== "matchplane.plugin/v1") return;
       if (event.data.contextToken !== contextTokenRef.current) return;
       if (event.data.type === "chat.open") {
@@ -41,6 +42,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
       } else if (event.data.type === "listing.submit") {
         void submitPluginListing(event.data, {
           frame: frameRef.current?.contentWindow,
+          targetOrigin,
           contextToken: contextTokenRef.current,
           role,
           subplatform,
@@ -82,6 +84,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
             loading="lazy"
             onError={() => setFailed(true)}
             onLoad={() => {
+              const targetOrigin = window.location.origin;
               frameRef.current?.contentWindow?.postMessage({
                 protocol: "matchplane.plugin/v1",
                 type: "platform.context",
@@ -93,7 +96,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
                   contextToken: contextTokenRef.current,
                   capabilities: ["chat.open", "listing.select", "listing.submit", "navigation"],
                 },
-              }, "*");
+              }, targetOrigin);
             }}
           />
         )}
@@ -110,6 +113,7 @@ async function submitPluginListing(
   message: Record<string, unknown>,
   input: {
     frame: Window | null | undefined;
+    targetOrigin: string;
     contextToken: string | null;
     role: WorkspaceRole;
     subplatform: SubplatformConfig;
@@ -127,7 +131,7 @@ async function submitPluginListing(
       contextToken: input.contextToken,
       ok,
       ...(error ? { error } : {}),
-    }, "*");
+    }, input.targetOrigin);
   };
 
   try {

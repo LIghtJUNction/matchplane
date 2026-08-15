@@ -63,12 +63,17 @@ export function LoginScreen() {
   const finishSignIn = async () => {
     if (isLiveMarketplaceEnabled() && role !== "platform") {
       if (!subplatform.tenantId) throw new Error("当前子平台尚未完成 root tenant 注册");
+      const current = await authClient.getSession({
+        fetchOptions: authFetchOptions(subplatform.slug),
+      });
+      if (current.error || !current.data) throw new Error("Better Auth 会话尚未建立");
       await establishMarketplaceSession({
         tenantId: subplatform.tenantId,
         domainId: subplatform.domainId,
         subplatform: subplatform.slug,
         platformPath: subplatform.path,
         role,
+        authUserId: current.data.user.id,
       });
     }
     window.location.assign(next);

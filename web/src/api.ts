@@ -5,6 +5,8 @@ const apiBase = (process.env.NEXT_PUBLIC_MATCHPLANE_API_BASE_URL ?? "/api").repl
 export interface PartySession {
   tenantId: string;
   partyId: string;
+  /** Better Auth subject that was verified before this capability was exchanged. */
+  authUserId?: string;
   /** Recursive node scope used to isolate browser capability caches. */
   platformPath?: string;
   role: "buyer" | "seller" | "both";
@@ -165,6 +167,15 @@ export class MarketplaceApiError extends Error {
   }
 }
 
+/**
+ * Marketplace capabilities are deliberately held in memory only.  They are short-lived
+ * integration credentials, not login state; persisting them in localStorage would let an XSS
+ * survive a page reload with a bearer that can call the Rust gateway.  Better Auth's HttpOnly
+ * session cookie remains the durable browser credential and is exchanged again when needed.
+ */
+const capabilityCache = new Map<string, PartySession>();
+const MAX_CAPABILITY_CACHE_ENTRIES = 128;
+
 function authorization(session: PartySession): string {
   return `Bearer ${session.accessToken}`;
 }
@@ -276,44 +287,35 @@ export function readPartySession(
   role: PartySession["role"] | "admin",
   subplatform = "root",
   platformPath?: string,
+  authUserId?: string,
 ): PartySession | null {
-  try {
-    const storageRoles = role === "admin" ? ["admin", "both"] : [role];
-    const scopedKey = platformPath ? encodeURIComponent(platformPath) : subplatform;
-    const keys = [
-      ...storageRoles.map((storageRole) => `matchplane.party.${scopedKey}.${storageRole}`),
-      ...(!platformPath && role !== "admin" ? [`matchplane.party.${role}`] : []),
-    ];
-    for (const key of [...new Set(keys)]) {
-      const raw = window.localStorage.getItem(key);
-      if (!raw) continue;
-      try {
-        const parsed = JSON.parse(raw) as PartySession;
-        if (
-          typeof parsed.tenantId !== "string" ||
-          typeof parsed.partyId !== "string" ||
-          typeof parsed.accessToken !== "string" ||
-          typeof parsed.accessTokenExpiresAt !== "string" ||
-          !isCapabilityActive(parsed.accessTokenExpiresAt) ||
-          !["buyer", "seller", "both"].includes(parsed.role) ||
-          (role === "admin" && parsed.role !== "both")
-        ) {
-          window.localStorage.removeItem(key);
-          continue;
-        }
-        if (platformPath && parsed.platformPath !== platformPath) {
-          window.localStorage.removeItem(key);
-          continue;
-        }
-        return parsed;
-      } catch {
-        window.localStorage.removeItem(key);
-      }
+  pruneCapabilityCache();
+  const storageRoles = role === "admin" ? ["admin", "both"] : [role];
+  const scopedKey = platformPath ? encodeURIComponent(platformPath) : subplatform;
+  const keys = [
+    ...storageRoles.map((storageRole) => `matchplane.party.${scopedKey}.${storageRole}`),
+    ...(!platformPath && role !== "admin" ? [`matchplane.party.${role}`] : []),
+  ];
+  for (const key of [...new Set(keys)]) {
+    const parsed = capabilityCache.get(key);
+    if (!parsed) continue;
+    if (
+      typeof parsed.tenantId !== "string" ||
+      typeof parsed.partyId !== "string" ||
+      typeof parsed.accessToken !== "string" ||
+      typeof parsed.accessTokenExpiresAt !== "string" ||
+      !isCapabilityActive(parsed.accessTokenExpiresAt) ||
+      !["buyer", "seller", "both"].includes(parsed.role) ||
+      (role === "admin" && parsed.role !== "both") ||
+      (platformPath && parsed.platformPath !== platformPath) ||
+      (authUserId !== undefined && parsed.authUserId !== authUserId)
+    ) {
+      capabilityCache.delete(key);
+      continue;
     }
-    return null;
-  } catch {
-    return null;
+    return parsed;
   }
+  return null;
 }
 
 export function savePartySession(
@@ -322,8 +324,18 @@ export function savePartySession(
   storageRole: string = session.role,
   platformPath?: string,
 ): void {
+  pruneCapabilityCache();
   const scopedKey = platformPath ? encodeURIComponent(platformPath) : subplatform;
-  window.localStorage.setItem(`matchplane.party.${scopedKey}.${storageRole}`, JSON.stringify(session));
+  if (!capabilityCache.has(`matchplane.party.${scopedKey}.${storageRole}`) && capabilityCache.size >= MAX_CAPABILITY_CACHE_ENTRIES) {
+    const oldest = capabilityCache.keys().next().value;
+    if (typeof oldest === "string") capabilityCache.delete(oldest);
+  }
+  capabilityCache.set(`matchplane.party.${scopedKey}.${storageRole}`, session);
+}
+
+/** Clear all in-memory capabilities after logout or an account switch. */
+export function clearPartySessionCache(): void {
+  capabilityCache.clear();
 }
 
 /**
@@ -336,6 +348,7 @@ export async function establishMarketplaceSession(input: {
   subplatform: string;
   platformPath?: string;
   role: BetterAuthMarketplaceRole;
+  authUserId?: string;
 }): Promise<PartySession> {
   const response = await fetch("/api/marketplace/session", {
     method: "POST",
@@ -370,6 +383,7 @@ export async function establishMarketplaceSession(input: {
   const session: PartySession = {
     tenantId: result.tenant_id,
     partyId: result.party_id,
+    authUserId: input.authUserId,
     platformPath: input.platformPath,
     role: result.role,
     accessToken: result.access_token,
@@ -382,6 +396,12 @@ export async function establishMarketplaceSession(input: {
 function isCapabilityActive(value: string): boolean {
   const expiresAt = Date.parse(value);
   return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
+function pruneCapabilityCache(): void {
+  for (const [key, session] of capabilityCache) {
+    if (!isCapabilityActive(session.accessTokenExpiresAt)) capabilityCache.delete(key);
+  }
 }
 
 export function createBuyerRequest(input: {

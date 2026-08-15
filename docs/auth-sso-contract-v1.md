@@ -28,6 +28,9 @@ MatchPlane 不要求用户为每个子平台重复注册。Better Auth 是唯一
 
 - 根平台和子平台共享身份，不共享授权：`user_id` 相同不代表拥有其他组织权限。
 - 普通成员自动认领只接受 `member` 角色；任何管理员角色都不能通过公开入口获得。
+- 浏览器不持久化 marketplace bearer；短期 capability 只保存在页面内存中，过期或刷新后由
+  Better Auth 的 HttpOnly 会话重新交换。这样不会把 Rust 网关凭据留在 `localStorage` 或
+  `sessionStorage` 中。
 - 联系电话、微信号、SMTP secret、OAuth secret 不进入 Better Auth session、能力 token、MCP 工具响应或客户端 bundle。
 - 平台树变更、成员邀请、认领和能力签发都应记录审计事件；撤销成员关系后，下一次能力交换必须失败。
 

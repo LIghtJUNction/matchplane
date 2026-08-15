@@ -29,12 +29,14 @@ vi.mock("./lib/auth-client", () => ({
 }));
 
 import { App } from "./App";
+import { clearPartySessionCache, savePartySession } from "./api";
 
 beforeEach(() => {
   window.scrollTo = vi.fn();
   window.history.replaceState(null, "", "/");
   window.localStorage.clear();
   window.sessionStorage.clear();
+  clearPartySessionCache();
 });
 
 describe("MatchPlane workspaces", () => {
@@ -65,16 +67,13 @@ describe("MatchPlane workspaces", () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/?role=seller");
     window.sessionStorage.setItem("matchplane.test-auth", "true");
-    window.localStorage.setItem(
-      "matchplane.party.root.seller",
-      JSON.stringify({
-        tenantId: crypto.randomUUID(),
-        partyId: crypto.randomUUID(),
-        role: "seller",
-        accessToken: "demo-session-token",
-        accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      }),
-    );
+    savePartySession({
+      tenantId: crypto.randomUUID(),
+      partyId: crypto.randomUUID(),
+      role: "seller",
+      accessToken: "demo-session-token",
+      accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    }, "root", "seller");
     render(<App />);
 
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
@@ -107,16 +106,13 @@ describe("MatchPlane workspaces", () => {
   it("sends the conversation directly when the buyer is already signed in", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
-    window.localStorage.setItem(
-      "matchplane.party.root.buyer",
-      JSON.stringify({
-        tenantId: crypto.randomUUID(),
-        partyId: crypto.randomUUID(),
-        role: "buyer",
-        accessToken: "demo-session-token",
-        accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      }),
-    );
+    savePartySession({
+      tenantId: crypto.randomUUID(),
+      partyId: crypto.randomUUID(),
+      role: "buyer",
+      accessToken: "demo-session-token",
+      accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    }, "root", "buyer");
     render(<App />);
 
     const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
