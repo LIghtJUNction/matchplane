@@ -126,4 +126,17 @@ describe("MatchPlane workspaces", () => {
 
     expect(await screen.findByText(/需求已记录（演示模式）/)).toBeInTheDocument();
   });
+
+  it("keeps visible controls actionable instead of leaving placeholder buttons", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "通知" }));
+    expect(screen.getByRole("status")).toHaveTextContent("目前没有新的平台通知");
+
+    await user.click(screen.getByRole("button", { name: "筛选" }));
+    expect(screen.getByRole("group", { name: "高级筛选" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "已核验供给" }));
+    expect(screen.getByRole("status")).toHaveTextContent("已启用筛选：已核验供给");
+  });
 });
