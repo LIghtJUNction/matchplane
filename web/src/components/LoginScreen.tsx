@@ -35,8 +35,11 @@ export function LoginScreen() {
             ? "subplatform_admin"
             : "buyer",
     );
-    setNext(safeNext(params.get("next")));
-    setSubplatform(resolveSubplatform(window.location.pathname));
+    const nextPath = safeNext(params.get("next"));
+    setNext(nextPath);
+    // The login page is shared by every mounted platform. Resolve email routing
+    // and organization scope from the destination, not from `/login` itself.
+    setSubplatform(resolveSubplatform(nextPath));
   }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
