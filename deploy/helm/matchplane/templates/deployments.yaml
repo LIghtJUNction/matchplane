@@ -73,7 +73,7 @@ spec:
           {{- if or (eq $service.name "gateway") (eq $service.name "payment-service") }}
           volumeMounts:
             - name: application-secrets
-              mountPath: /run/matchplane/application-secrets
+              mountPath: /run/secrets
               readOnly: true
           {{- else if eq $service.name "federation-hub" }}
           volumeMounts:

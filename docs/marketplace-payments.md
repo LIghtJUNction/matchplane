@@ -111,9 +111,11 @@ built-in adapters for:
 Test and production configurations are separate. An administrator changes the active mode with an
 optimistic version check. A switch is rejected unless the target mode has an enabled route and the
 old mode has no unresolved payment outcomes. Production gateway credentials are read from restricted
-files or explicitly allow-listed `MATCHPLANE_PAYMENT_GATEWAY_*`,
-`MATCHPLANE_PAYMENT_PROVIDER_*`, and `MATCHPLANE_INVOICE_PROVIDER_*` environment variables;
-they are not stored in the database. Each gateway stores a SHA-256 digest of the resolved secret
+files (or an external secret manager that materializes those files); environment-variable references
+are accepted only in development and test profiles. Do not put
+`MATCHPLANE_PAYMENT_GATEWAY_*`, `MATCHPLANE_PAYMENT_PROVIDER_*`, or
+`MATCHPLANE_INVOICE_PROVIDER_*` credentials in the shared production environment file. Credentials
+are not stored in the database. Each gateway stores a SHA-256 digest of the resolved secret
 material and each payment snapshots that digest, so replacing a file or changing an environment
 variable behind the same reference fails closed. Legacy production gateways without a digest must
 be re-saved before they can authorize or accept callbacks.

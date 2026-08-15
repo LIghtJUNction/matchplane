@@ -842,18 +842,39 @@ pub async fn void_invoice(
     require_admin(&state, &headers)?;
     validate_actor(&request.actor)?;
     let invoice_id = parse_id(&invoice_id)?;
-    let invoice = state.invoices.invoice(invoice_id).await?;
-    let provider = invoice_provider(&state, &invoice).await?;
-    provider
-        .void(invoice_id)
-        .await
-        .map_err(|error| ApiError::gateway(&error))?;
-    state
+    let invoice = state
         .invoices
-        .void(invoice_id, &request.actor)
-        .await
-        .map(Json)
-        .map_err(ApiError::from)
+        .begin_void(invoice_id, &request.actor)
+        .await?;
+    let provider = match invoice_provider(&state, &invoice).await {
+        Ok(provider) => provider,
+        Err(error) => {
+            state
+                .invoices
+                .fail_void(
+                    invoice_id,
+                    "invoice provider resolution failed",
+                    &request.actor,
+                )
+                .await?;
+            return Err(error);
+        }
+    };
+    match provider.void(invoice_id).await {
+        Ok(_) => state
+            .invoices
+            .complete_void(invoice_id, &request.actor)
+            .await
+            .map(Json)
+            .map_err(ApiError::from),
+        Err(error) => {
+            state
+                .invoices
+                .fail_void(invoice_id, "provider void failed", &request.actor)
+                .await?;
+            Err(ApiError::gateway(&error))
+        }
+    }
 }
 
 pub async fn red_letter_invoice(
@@ -869,20 +890,93 @@ pub async fn red_letter_invoice(
         .invoices
         .begin_red_letter(invoice_id, &request.actor)
         .await?;
-    let original_invoice_id = invoice.correction_of_invoice_id.ok_or_else(|| {
-        ApiError::bad_request("red-letter operation requires a generated correction invoice")
-    })?;
-    let original = state.invoices.invoice(original_invoice_id).await?;
-    let original_reference = original
-        .provider_reference
-        .as_deref()
-        .ok_or_else(|| ApiError::bad_request("issued invoice has no provider reference"))?;
-    let provider = invoice_provider(&state, &invoice).await?;
-    let issue_request = issue_request(&state, &invoice)?;
-    let outcome = provider
+    let original_invoice_id = match invoice.correction_of_invoice_id {
+        Some(original_invoice_id) => original_invoice_id,
+        None => {
+            state
+                .invoices
+                .fail_red_letter(
+                    invoice_id,
+                    "correction invoice has no original invoice reference",
+                    &request.actor,
+                )
+                .await?;
+            return Err(ApiError::bad_request(
+                "red-letter operation requires a generated correction invoice",
+            ));
+        }
+    };
+    let original = match state.invoices.invoice(original_invoice_id).await {
+        Ok(original) => original,
+        Err(error) => {
+            state
+                .invoices
+                .fail_red_letter(invoice_id, "original invoice lookup failed", &request.actor)
+                .await?;
+            return Err(ApiError::from(error));
+        }
+    };
+    let original_reference = match original.provider_reference.as_deref() {
+        Some(reference) => reference,
+        None => {
+            state
+                .invoices
+                .fail_red_letter(
+                    invoice_id,
+                    "issued invoice has no provider reference",
+                    &request.actor,
+                )
+                .await?;
+            return Err(ApiError::bad_request(
+                "issued invoice has no provider reference",
+            ));
+        }
+    };
+    let provider = match invoice_provider(&state, &invoice).await {
+        Ok(provider) => provider,
+        Err(error) => {
+            state
+                .invoices
+                .fail_red_letter(
+                    invoice_id,
+                    "invoice provider resolution failed",
+                    &request.actor,
+                )
+                .await?;
+            return Err(error);
+        }
+    };
+    let issue_request = match issue_request(&state, &invoice) {
+        Ok(request) => request,
+        Err(error) => {
+            state
+                .invoices
+                .fail_red_letter(
+                    invoice_id,
+                    "invoice request preparation failed",
+                    &request.actor,
+                )
+                .await?;
+            return Err(error);
+        }
+    };
+    let outcome = match provider
         .red_letter(&issue_request, original_reference)
         .await
-        .map_err(|error| ApiError::gateway(&error))?;
+    {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            state
+                .invoices
+                .fail_red_letter(
+                    invoice_id,
+                    "provider red-letter issuance failed",
+                    &request.actor,
+                )
+                .await?;
+            return Err(ApiError::gateway(&error));
+        }
+    };
     let artifact = outcome
         .artifact
         .as_ref()
@@ -980,7 +1074,7 @@ pub async fn mutate_gateway(
         )
         .map_err(|error| ApiError::gateway(&error))?;
         ensure_gateway_environment(&state, &config)?;
-        let digest = GatewayFactory::credential_digest(&config)
+        let digest = GatewayFactory::credential_digest(&config, state.environment)
             .map_err(|error| ApiError::gateway(&error))?;
         let config = config.with_credential_digest(digest);
         build_gateway(&state, &config).await?;
@@ -1272,7 +1366,7 @@ async fn invoice_provider(
         }));
     }
     let config = state.invoices.provider_config(invoice).await?;
-    let secret = crate::gateways::resolve_secret(&config.credential_secret_ref)
+    let secret = crate::gateways::resolve_secret(&config.credential_secret_ref, state.environment)
         .map_err(|error| ApiError::gateway(&error))?;
     let expected = config.credential_digest.as_deref().ok_or_else(|| {
         ApiError::gateway(&PaymentError::Credential(
@@ -1326,10 +1420,11 @@ async fn build_gateway(
 ) -> Result<std::sync::Arc<dyn matchplane_payments::PaymentGateway>, ApiError> {
     ensure_gateway_environment(state, config)?;
     let gateway_id = config.gateway_id;
+    let environment = state.environment;
     let config = config.clone();
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(move || GatewayFactory::build(&config)),
+        tokio::task::spawn_blocking(move || GatewayFactory::build(&config, environment)),
     )
     .await
     .map_err(|_| ApiError {

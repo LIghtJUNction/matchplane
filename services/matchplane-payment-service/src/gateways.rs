@@ -1,5 +1,6 @@
 use std::{env, fs, path::Path, str::FromStr, sync::Arc};
 
+use matchplane_config::Environment;
 use matchplane_domain::PaymentGatewayId;
 use matchplane_payments::{
     AlipayGateway, EpayGateway, GatewayCapabilities, GatewayDescriptor, GatewayKind, GatewayMode,
@@ -94,22 +95,28 @@ pub struct GatewayFactory;
 
 impl GatewayFactory {
     /// Resolve and fingerprint production credentials without exposing their contents.
-    pub fn credential_digest(config: &GatewayConfig) -> Result<Option<Vec<u8>>, PaymentError> {
+    pub fn credential_digest(
+        config: &GatewayConfig,
+        environment: Environment,
+    ) -> Result<Option<Vec<u8>>, PaymentError> {
         if config.mode == GatewayMode::Test {
             return Ok(None);
         }
         let reference = config.credential_secret_ref.as_deref().ok_or_else(|| {
             PaymentError::Credential(format!("gateway {} has no secret reference", config.name))
         })?;
-        Ok(Some(resolve_secret_digest(reference)?))
+        Ok(Some(resolve_secret_digest(reference, environment)?))
     }
 
-    pub fn build(config: &GatewayConfig) -> Result<Arc<dyn PaymentGateway>, PaymentError> {
+    pub fn build(
+        config: &GatewayConfig,
+        environment: Environment,
+    ) -> Result<Arc<dyn PaymentGateway>, PaymentError> {
         let descriptor = config.descriptor();
         match config.kind {
             GatewayKind::Test => Ok(Arc::new(TestGateway::new(descriptor))),
             GatewayKind::Epay => {
-                let secrets = secrets(config)?;
+                let secrets = secrets(config, environment)?;
                 Ok(Arc::new(EpayGateway::with_currency(
                     descriptor,
                     required_setting(config, "base_url")?,
@@ -119,7 +126,7 @@ impl GatewayFactory {
                 )?))
             }
             GatewayKind::WaffoPancake => {
-                let secrets = secrets(config)?;
+                let secrets = secrets(config, environment)?;
                 Ok(Arc::new(WaffoGateway::new(
                     descriptor,
                     setting(config, "base_url").unwrap_or("https://api.waffo.com/"),
@@ -130,7 +137,7 @@ impl GatewayFactory {
                 )?))
             }
             GatewayKind::WechatPayV3 => {
-                let secrets = secrets(config)?;
+                let secrets = secrets(config, environment)?;
                 Ok(Arc::new(WechatPayGateway::with_api_v3_key(
                     descriptor,
                     setting(config, "base_url").unwrap_or("https://api.mch.weixin.qq.com/"),
@@ -144,7 +151,7 @@ impl GatewayFactory {
                 )?))
             }
             GatewayKind::AlipayOpenapi => {
-                let secrets = secrets(config)?;
+                let secrets = secrets(config, environment)?;
                 Ok(Arc::new(AlipayGateway::new(
                     descriptor,
                     setting(config, "gateway_url")
@@ -162,8 +169,11 @@ impl GatewayFactory {
     }
 }
 
-pub(crate) fn resolve_secret_digest(reference: &str) -> Result<Vec<u8>, PaymentError> {
-    let secret = resolve_secret(reference)?;
+pub(crate) fn resolve_secret_digest(
+    reference: &str,
+    environment: Environment,
+) -> Result<Vec<u8>, PaymentError> {
+    let secret = resolve_secret(reference, environment)?;
     Ok(Sha256::digest(secret.expose_secret().as_bytes()).to_vec())
 }
 
@@ -214,11 +224,11 @@ fn required_setting<'a>(config: &'a GatewayConfig, key: &str) -> Result<&'a str,
     })
 }
 
-fn secrets(config: &GatewayConfig) -> Result<Value, PaymentError> {
+fn secrets(config: &GatewayConfig, environment: Environment) -> Result<Value, PaymentError> {
     let reference = config.credential_secret_ref.as_deref().ok_or_else(|| {
         PaymentError::Credential(format!("gateway {} has no secret reference", config.name))
     })?;
-    let secret = resolve_secret(reference)?;
+    let secret = resolve_secret(reference, environment)?;
     let digest = Sha256::digest(secret.expose_secret().as_bytes());
     let expected = config.credential_digest.as_deref().ok_or_else(|| {
         PaymentError::Credential(format!(
@@ -240,7 +250,10 @@ fn secrets(config: &GatewayConfig) -> Result<Value, PaymentError> {
     })
 }
 
-pub(crate) fn resolve_secret(reference: &str) -> Result<SecretString, PaymentError> {
+pub(crate) fn resolve_secret(
+    reference: &str,
+    environment: Environment,
+) -> Result<SecretString, PaymentError> {
     if let Some(path) = reference.strip_prefix("file:") {
         if !path.starts_with('/') {
             return Err(PaymentError::Credential(
@@ -268,6 +281,12 @@ pub(crate) fn resolve_secret(reference: &str) -> Result<SecretString, PaymentErr
         return Ok(SecretString::new(value.trim().to_owned().into_boxed_str()));
     }
     if let Some(name) = reference.strip_prefix("env:") {
+        if environment == Environment::Production {
+            return Err(PaymentError::Credential(
+                "production credentials must use an approved secret file, not an environment reference"
+                    .to_owned(),
+            ));
+        }
         if !(name.starts_with("MATCHPLANE_PAYMENT_GATEWAY_")
             || name.starts_with("MATCHPLANE_PAYMENT_PROVIDER_")
             || name.starts_with("MATCHPLANE_INVOICE_PROVIDER_"))

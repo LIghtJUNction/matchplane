@@ -186,9 +186,12 @@ impl AdminStore {
         mutation: &InvoiceProviderMutation,
     ) -> Result<InvoiceProviderRecord, StoreError> {
         let validation = mutation.clone();
+        let environment = self.environment;
         tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            tokio::task::spawn_blocking(move || validate_invoice_provider(&validation)),
+            tokio::task::spawn_blocking(move || {
+                validate_invoice_provider_for_environment(&validation, environment)
+            }),
         )
         .await
         .map_err(|_| StoreError::Invalid("invoice provider validation timed out".to_owned()))?
@@ -241,7 +244,7 @@ impl AdminStore {
         let credential_digest = mutation
             .credential_secret_ref
             .as_deref()
-            .map(resolve_secret_digest)
+            .map(|reference| resolve_secret_digest(reference, self.environment))
             .transpose()?;
         let action = if let Some(current) = &before {
             if current.tenant_id != mutation.tenant_id {
@@ -386,6 +389,7 @@ impl AdminStore {
             provider_settings,
             credential_secret_ref,
             credential_digest,
+            self.environment,
         )
         .await?;
         let provider_id: Uuid = provider.try_get("id")?;
@@ -395,7 +399,8 @@ impl AdminStore {
         }
         let outstanding: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM invoice_requests WHERE tenant_id = $1 AND provider_mode = $2 \
-             AND status IN ('requested', 'reviewing', 'issuing', 'red_letter_pending')",
+             AND status IN ('requested', 'reviewing', 'issuing', 'voiding',
+                            'red_letter_pending', 'red_lettering')",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(current.active_mode.as_str())
@@ -528,7 +533,8 @@ impl AdminStore {
                     mutation.settings.clone(),
                     mutation.credential_secret_ref.clone(),
                 )?;
-                let credential_digest = GatewayFactory::credential_digest(&config)?;
+                let credential_digest =
+                    GatewayFactory::credential_digest(&config, self.environment)?;
                 let result = sqlx::query(
                     "UPDATE payment_gateway_configs SET name = $3, gateway_kind = $4, mode = $5, \
                      settings = $6, credential_secret_ref = $7, credential_secret_digest = $8, \
@@ -568,7 +574,7 @@ impl AdminStore {
                 mutation.settings.clone(),
                 mutation.credential_secret_ref.clone(),
             )?;
-            let credential_digest = GatewayFactory::credential_digest(&config)?;
+            let credential_digest = GatewayFactory::credential_digest(&config, self.environment)?;
             sqlx::query(
                 "INSERT INTO payment_gateway_configs \
                  (id, tenant_id, name, gateway_kind, mode, settings, credential_secret_ref, \
@@ -770,7 +776,7 @@ impl AdminStore {
                 row.try_get("credential_secret_ref")?,
             )?
             .with_credential_digest(row.try_get("credential_secret_digest")?);
-            validate_gateway_configuration(config).await?;
+            validate_gateway_configuration(config, self.environment).await?;
         }
         let outstanding: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM payment_intents WHERE tenant_id = $1 AND gateway_mode = $2 \
@@ -1003,7 +1009,10 @@ fn validate_gateway(mutation: &GatewayMutation) -> Result<(), StoreError> {
     }
 }
 
-fn validate_invoice_provider(mutation: &InvoiceProviderMutation) -> Result<(), StoreError> {
+fn validate_invoice_provider_for_environment(
+    mutation: &InvoiceProviderMutation,
+    environment: Environment,
+) -> Result<(), StoreError> {
     validate_actor_reason(&mutation.actor, &mutation.reason)?;
     if mutation.name.trim().is_empty() || mutation.name.len() > 200 {
         return Err(StoreError::Invalid(
@@ -1020,18 +1029,22 @@ fn validate_invoice_provider(mutation: &InvoiceProviderMutation) -> Result<(), S
             "invoice provider settings must be a JSON object".to_owned(),
         ));
     }
-    validate_invoice_provider_parts(
+    validate_invoice_provider_parts_for_environment(
         &mutation.provider_key,
         mutation.mode,
         &mutation.settings,
         mutation.credential_secret_ref.as_deref(),
+        environment,
     )
 }
 
-async fn validate_gateway_configuration(config: GatewayConfig) -> Result<(), StoreError> {
+async fn validate_gateway_configuration(
+    config: GatewayConfig,
+    environment: Environment,
+) -> Result<(), StoreError> {
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(move || GatewayFactory::build(&config)),
+        tokio::task::spawn_blocking(move || GatewayFactory::build(&config, environment)),
     )
     .await
     .map_err(|_| StoreError::Invalid("gateway validation timed out".to_owned()))?
@@ -1045,21 +1058,23 @@ async fn validate_invoice_provider_configuration(
     settings: Value,
     credential_secret_ref: Option<String>,
     credential_digest: Option<Vec<u8>>,
+    environment: Environment,
 ) -> Result<(), StoreError> {
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         tokio::task::spawn_blocking(move || {
-            validate_invoice_provider_parts(
+            validate_invoice_provider_parts_for_environment(
                 &provider_key,
                 mode,
                 &settings,
                 credential_secret_ref.as_deref(),
+                environment,
             )?;
             if mode == GatewayMode::Production {
                 let reference = credential_secret_ref.as_deref().ok_or_else(|| {
                     StoreError::Invalid("invoice provider credential is missing".to_owned())
                 })?;
-                let actual = resolve_secret_digest(reference)?;
+                let actual = resolve_secret_digest(reference, environment)?;
                 if credential_digest.as_deref() != Some(actual.as_slice()) {
                     return Err(StoreError::Invalid(
                         "invoice provider credential digest is missing or stale; re-save the provider"
@@ -1078,18 +1093,35 @@ async fn validate_invoice_provider_configuration(
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_invoice_provider_parts(
     provider_key: &str,
     mode: GatewayMode,
     settings: &Value,
     credential_secret_ref: Option<&str>,
 ) -> Result<(), StoreError> {
+    validate_invoice_provider_parts_for_environment(
+        provider_key,
+        mode,
+        settings,
+        credential_secret_ref,
+        Environment::Development,
+    )
+}
+
+fn validate_invoice_provider_parts_for_environment(
+    provider_key: &str,
+    mode: GatewayMode,
+    settings: &Value,
+    credential_secret_ref: Option<&str>,
+    environment: Environment,
+) -> Result<(), StoreError> {
     match (mode, provider_key, credential_secret_ref) {
         (GatewayMode::Test, "local_test", None) => Ok(()),
         (GatewayMode::Production, "http_json" | "fapiao_http", Some(reference))
             if reference.starts_with("file:") || reference.starts_with("env:") =>
         {
-            let secret = resolve_secret(reference)?;
+            let secret = resolve_secret(reference, environment)?;
             HttpInvoiceProvider::new(provider_key, settings, secret)?;
             Ok(())
         }

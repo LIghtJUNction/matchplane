@@ -378,7 +378,7 @@ impl InvoiceStore {
         Ok(())
     }
 
-    pub async fn void(
+    pub async fn begin_void(
         &self,
         invoice_id: InvoiceId,
         actor: &str,
@@ -394,6 +394,41 @@ impl InvoiceStore {
             ));
         }
         sqlx::query(
+            "UPDATE invoice_requests SET status = 'voiding', failure_reason = NULL, \
+                 version = version + 1 WHERE id = $1",
+        )
+        .bind(invoice_id.into_uuid())
+        .execute(&mut *transaction)
+        .await?;
+        insert_event(
+            &mut transaction,
+            invoice.tenant_id,
+            invoice_id,
+            "invoice_void_started",
+            Some(&invoice.status),
+            "voiding",
+            actor,
+        )
+        .await?;
+        let result = invoice_in(&mut transaction, invoice_id, false).await?;
+        transaction.commit().await?;
+        Ok(result)
+    }
+
+    pub async fn complete_void(
+        &self,
+        invoice_id: InvoiceId,
+        actor: &str,
+    ) -> Result<InvoiceRecord, StoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let invoice = invoice_in(&mut transaction, invoice_id, true).await?;
+        if invoice.status != "voiding" {
+            return Err(StoreError::Conflict(format!(
+                "invoice status {} cannot accept void result",
+                invoice.status
+            )));
+        }
+        sqlx::query(
             "UPDATE invoice_requests SET status = 'voided', version = version + 1 WHERE id = $1",
         )
         .bind(invoice_id.into_uuid())
@@ -404,7 +439,7 @@ impl InvoiceStore {
             invoice.tenant_id,
             invoice_id,
             "invoice_voided",
-            Some(&invoice.status),
+            Some("voiding"),
             "voided",
             actor,
         )
@@ -412,6 +447,38 @@ impl InvoiceStore {
         let result = invoice_in(&mut transaction, invoice_id, false).await?;
         transaction.commit().await?;
         Ok(result)
+    }
+
+    pub async fn fail_void(
+        &self,
+        invoice_id: InvoiceId,
+        reason: &str,
+        actor: &str,
+    ) -> Result<(), StoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let invoice = invoice_in(&mut transaction, invoice_id, true).await?;
+        if invoice.status == "voiding" {
+            sqlx::query(
+                "UPDATE invoice_requests SET status = 'failed', failure_reason = $2, \
+                     version = version + 1 WHERE id = $1",
+            )
+            .bind(invoice_id.into_uuid())
+            .bind(reason)
+            .execute(&mut *transaction)
+            .await?;
+            insert_event(
+                &mut transaction,
+                invoice.tenant_id,
+                invoice_id,
+                "invoice_void_failed",
+                Some("voiding"),
+                "failed",
+                actor,
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn begin_red_letter(
@@ -427,13 +494,20 @@ impl InvoiceStore {
                 invoice.status
             )));
         }
+        sqlx::query(
+            "UPDATE invoice_requests SET status = 'red_lettering', failure_reason = NULL, \
+                 version = version + 1 WHERE id = $1",
+        )
+        .bind(invoice_id.into_uuid())
+        .execute(&mut *transaction)
+        .await?;
         insert_event(
             &mut transaction,
             invoice.tenant_id,
             invoice_id,
             "red_letter_issue_started",
             Some("red_letter_pending"),
-            "red_letter_pending",
+            "red_lettering",
             actor,
         )
         .await?;
@@ -450,7 +524,7 @@ impl InvoiceStore {
     ) -> Result<InvoiceRecord, StoreError> {
         let mut transaction = self.pool.begin().await?;
         let invoice = invoice_in(&mut transaction, outcome.invoice_id, true).await?;
-        if invoice.status != "red_letter_pending" {
+        if invoice.status != "red_lettering" {
             return Err(StoreError::Conflict(format!(
                 "invoice status {} cannot accept a credit note",
                 invoice.status
@@ -480,7 +554,7 @@ impl InvoiceStore {
             invoice.tenant_id,
             outcome.invoice_id,
             "red_letter_issued",
-            Some("red_letter_pending"),
+            Some("red_lettering"),
             "red_lettered",
             actor,
         )
@@ -488,6 +562,38 @@ impl InvoiceStore {
         let result = invoice_in(&mut transaction, outcome.invoice_id, false).await?;
         transaction.commit().await?;
         Ok(result)
+    }
+
+    pub async fn fail_red_letter(
+        &self,
+        invoice_id: InvoiceId,
+        reason: &str,
+        actor: &str,
+    ) -> Result<(), StoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let invoice = invoice_in(&mut transaction, invoice_id, true).await?;
+        if invoice.status == "red_lettering" {
+            sqlx::query(
+                "UPDATE invoice_requests SET status = 'red_letter_pending', failure_reason = $2, \
+                     version = version + 1 WHERE id = $1",
+            )
+            .bind(invoice_id.into_uuid())
+            .bind(reason)
+            .execute(&mut *transaction)
+            .await?;
+            insert_event(
+                &mut transaction,
+                invoice.tenant_id,
+                invoice_id,
+                "red_letter_issue_failed",
+                Some("red_lettering"),
+                "red_letter_pending",
+                actor,
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn artifact(

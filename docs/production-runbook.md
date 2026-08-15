@@ -13,6 +13,12 @@ from `packaging/systemd/`. Require `sslmode=verify-full` in the PostgreSQL URL. 
 `/etc/matchplane/matchplane.env` owned by `root:matchplane`; gateway-only and payment-only secret
 subdirectories should be owned by their matching service groups, with secret files mode `0640`.
 
+Before enabling a production service, provision separate PostgreSQL roles and Valkey ACL users for
+the gateway, payment service, workers, and federation hub; keep migrations under a separate owner
+role. The checked-in single-host bootstrap uses one test role and must not be promoted to production.
+Do not place payment-provider credentials in the common environment file; use the payment-only
+secret directory or an external secret manager.
+
 The packaged production template is [packaging/config/matchplane.env](../packaging/config/matchplane.env).
 Replace every placeholder before enabling a service. In particular, use a unique node UUID,
 non-development database and Valkey credentials, three TLS files (server certificate, private key,

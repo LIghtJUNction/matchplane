@@ -38,3 +38,12 @@ spec:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: kafka-tls
+              mountPath: /run/matchplane/kafka
+              readOnly: true
+      volumes:
+        - name: kafka-tls
+          secret:
+            secretName: {{ required "runtime.existingKafkaTlsSecret is required" .Values.runtime.existingKafkaTlsSecret }}
+            defaultMode: 0440

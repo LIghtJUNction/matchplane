@@ -4,6 +4,7 @@ use std::{net::SocketAddr, str::FromStr};
 
 use config::{Config, Environment as EnvironmentSource};
 use matchplane_domain::FederationNodeId;
+use percent_encoding::percent_decode_str;
 use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
@@ -194,19 +195,9 @@ impl AppConfig {
                     "MATCHPLANE_REQUIRE_TLS must be true",
                 ));
             }
-            if self.database_url.contains("matchplane_dev_only") {
-                return Err(ConfigError::InsecureProduction(
-                    "development database password is forbidden",
-                ));
-            }
             if self.node_id == "00000000-0000-7000-8000-00000000000a" {
                 return Err(ConfigError::InsecureProduction(
                     "MATCHPLANE_NODE_ID must be unique and cannot use the development default",
-                ));
-            }
-            if self.database_url.contains("CHANGE_ME") || self.valkey_url.contains("CHANGE_ME") {
-                return Err(ConfigError::InsecureProduction(
-                    "database and Valkey credentials must be replaced",
                 ));
             }
             let valkey_url = Url::parse(&self.valkey_url).map_err(|_| {
@@ -220,13 +211,20 @@ impl AppConfig {
             let database_url = Url::parse(&self.database_url).map_err(|_| {
                 ConfigError::InsecureProduction("MATCHPLANE_DATABASE_URL must be a valid URL")
             })?;
-            let sslmode = database_url
-                .query_pairs()
-                .find(|(key, _)| key == "sslmode")
-                .map(|(_, value)| value);
-            if sslmode.as_deref() != Some("verify-full") {
+            if database_url.fragment().is_some() {
                 return Err(ConfigError::InsecureProduction(
-                    "PostgreSQL must use sslmode=verify-full in production",
+                    "MATCHPLANE_DATABASE_URL must not contain a fragment",
+                ));
+            }
+            reject_placeholder_credentials(&database_url, "database")?;
+            reject_placeholder_credentials(&valkey_url, "Valkey")?;
+            let sslmodes: Vec<_> = database_url
+                .query_pairs()
+                .filter(|(key, _)| key == "sslmode" || key == "ssl-mode")
+                .collect();
+            if sslmodes.len() != 1 || sslmodes[0].0 != "sslmode" || sslmodes[0].1 != "verify-full" {
+                return Err(ConfigError::InsecureProduction(
+                    "PostgreSQL must use exactly one canonical sslmode=verify-full option in production",
                 ));
             }
             if self.kafka_security_protocol != "SSL"
@@ -304,6 +302,31 @@ impl AppConfig {
     }
 }
 
+fn reject_placeholder_credentials(url: &Url, service: &'static str) -> Result<(), ConfigError> {
+    let mut values = Vec::new();
+    values.push(url.username().to_owned());
+    if let Some(password) = url.password() {
+        values.push(password.to_owned());
+    }
+    for (key, value) in url.query_pairs() {
+        if matches!(key.as_ref(), "user" | "username" | "password" | "pass") {
+            values.push(value.into_owned());
+        }
+    }
+    for value in values {
+        let decoded = percent_decode_str(&value)
+            .decode_utf8()
+            .map_err(|_| ConfigError::InsecureProduction("credentials must be valid UTF-8"))?;
+        if decoded.contains("matchplane_dev_only") || decoded.contains("CHANGE_ME") {
+            return Err(ConfigError::InsecureProduction(match service {
+                "database" => "development or placeholder database credentials are forbidden",
+                _ => "placeholder Valkey credentials are forbidden",
+            }));
+        }
+    }
+    Ok(())
+}
+
 fn validate_payment_callback_origin(value: &str) -> Result<(), ConfigError> {
     let value = value.trim();
     if value.is_empty() {
@@ -371,6 +394,35 @@ mod tests {
         let result = production_config().validate();
 
         assert!(result.is_ok(), "secure config failed: {result:?}");
+    }
+
+    #[test]
+    fn validate_should_reject_duplicate_or_alias_sslmode_options() {
+        for query in [
+            "sslmode=verify-full&sslmode=disable",
+            "sslmode=verify-full&ssl-mode=disable",
+            "ssl-mode=verify-full",
+        ] {
+            let mut config = production_config();
+            config.database_url = format!("postgres://matchplane:secret@db/matchplane?{query}");
+            assert!(
+                config.validate().is_err(),
+                "insecure query accepted: {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_should_reject_percent_encoded_placeholder_credentials() {
+        let mut config = production_config();
+        config.database_url =
+            "postgres://matchplane:matchplane%5Fdev%5Fonly@db/matchplane?sslmode=verify-full"
+                .to_owned();
+        assert!(config.validate().is_err());
+
+        let mut config = production_config();
+        config.valkey_url = "rediss://:CHANGE%5FME@valkey:6380/".to_owned();
+        assert!(config.validate().is_err());
     }
 
     #[test]

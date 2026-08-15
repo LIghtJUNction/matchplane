@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 config.workspace = true
 matchplane-domain.workspace = true
+percent-encoding.workspace = true
 serde.workspace = true
 sha2.workspace = true
 subtle.workspace = true

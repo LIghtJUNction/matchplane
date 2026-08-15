@@ -42,12 +42,12 @@ runtime:
   tlsCertificatePath: /run/matchplane/tls/server.crt
   tlsPrivateKeyPath: /run/matchplane/tls/server.key
   tlsClientCaPath: /run/matchplane/tls/client-ca.crt
-  contactDataKeyPath: /run/matchplane/application-secrets/contact-data.key
+  contactDataKeyPath: /run/secrets/contact-data.key
   contactDataKeyVersion: 1
-  invoiceDataKeyPath: /run/matchplane/application-secrets/invoice-data.key
+  invoiceDataKeyPath: /run/secrets/invoice-data.key
   invoiceDataKeyVersion: 1
-  paymentAdminTokenPath: /run/matchplane/application-secrets/payment-admin.token
-  gatewayAdminTokenPath: /run/matchplane/application-secrets/gateway-admin.token
+  paymentAdminTokenPath: /run/secrets/payment-admin.token
+  gatewayAdminTokenPath: /run/secrets/gateway-admin.token
   paymentCallbackOrigin: https://payments.example.com
 
 gateway:
