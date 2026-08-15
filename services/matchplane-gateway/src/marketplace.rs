@@ -26,6 +26,10 @@ use uuid::Uuid;
 
 use crate::{ApiError, AppState, parse_exact, parse_id, require_operator};
 
+const PARTY_REGISTRATION_GLOBAL_LIMIT: u32 = 10_000;
+const PARTY_REGISTRATION_TENANT_LIMIT: u32 = 100;
+const PARTY_REGISTRATION_WINDOW_SECS: u32 = 60 * 60;
+
 #[derive(Deserialize)]
 pub(super) struct CreatePartyRequest {
     party_id: Option<String>,
@@ -239,6 +243,38 @@ pub(super) async fn create_party(
         .transpose()?
         .unwrap_or_default();
     let tenant_id = parse_id(&request.tenant_id)?;
+    let global_allowed = state
+        .cache
+        .lock()
+        .await
+        .consume_fixed_window(
+            "mp:rate:party-registration:global",
+            PARTY_REGISTRATION_GLOBAL_LIMIT,
+            PARTY_REGISTRATION_WINDOW_SECS,
+        )
+        .await
+        .map_err(|error| ApiError::service_unavailable(error.to_string()))?;
+    if !global_allowed {
+        return Err(ApiError::too_many_requests(
+            "party registration rate limit exceeded",
+        ));
+    }
+    let tenant_allowed = state
+        .cache
+        .lock()
+        .await
+        .consume_fixed_window(
+            &party_registration_tenant_key(tenant_id),
+            PARTY_REGISTRATION_TENANT_LIMIT,
+            PARTY_REGISTRATION_WINDOW_SECS,
+        )
+        .await
+        .map_err(|error| ApiError::service_unavailable(error.to_string()))?;
+    if !tenant_allowed {
+        return Err(ApiError::too_many_requests(
+            "party registration rate limit exceeded",
+        ));
+    }
     let access_token = format!("mp_{}_{}", Uuid::now_v7().simple(), Uuid::now_v7().simple());
     let access_token_hash = Sha256::digest(access_token.as_bytes()).to_vec();
     let protected = state
@@ -268,6 +304,10 @@ pub(super) async fn create_party(
             access_token,
         }),
     ))
+}
+
+fn party_registration_tenant_key(tenant_id: TenantId) -> String {
+    format!("mp:rate:party-registration:tenant:{tenant_id}")
 }
 
 pub(super) async fn create_listing(
@@ -1010,5 +1050,15 @@ mod tests {
         let error = normalize_contact(&json!({"email": "seller@example.invalid"}))
             .expect_err("email-only contact must be rejected");
         assert!(error.message.contains("phone or wechat"));
+    }
+
+    #[test]
+    fn party_registration_rate_limit_key_is_tenant_scoped() {
+        let tenant_id = TenantId::from_uuid(Uuid::from_u128(1));
+
+        assert_eq!(
+            party_registration_tenant_key(tenant_id),
+            "mp:rate:party-registration:tenant:00000000-0000-0000-0000-000000000001"
+        );
     }
 }

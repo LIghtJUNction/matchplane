@@ -533,6 +533,21 @@ impl ApiError {
             message: "internal service error".to_owned(),
         }
     }
+
+    fn service_unavailable(message: String) -> Self {
+        error!(%message, "HTTP dependency unavailable");
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: "service temporarily unavailable".to_owned(),
+        }
+    }
+
+    fn too_many_requests(message: &str) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            message: message.to_owned(),
+        }
+    }
 }
 
 impl From<StorageError> for ApiError {

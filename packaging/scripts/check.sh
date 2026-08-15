@@ -13,6 +13,18 @@ bash -n packaging/aur/matchplane-git/matchplane.install
 bash -n packaging/aur/matchplane-bin/PKGBUILD.in
 bash -n packaging/aur/matchplane-bin/matchplane.install
 
+if rg -n --glob '*.Dockerfile' --glob 'Dockerfile*' \
+  '^FROM [^$@[:space:]]+:[^@[:space:]]+( |$)' deploy packaging; then
+  echo 'container build bases must be pinned by digest' >&2
+  exit 1
+fi
+
+if ! rg -q '^ARG TIMESCALE_IMAGE=[^@[:space:]]+@sha256:[0-9a-f]{64}$' \
+  deploy/compose/postgres/Dockerfile; then
+  echo 'Timescale build base must have a sha256 digest' >&2
+  exit 1
+fi
+
 if command -v systemd-analyze >/dev/null 2>&1; then
   verify_output=$(systemd-analyze verify packaging/systemd/*.service 2>&1 || true)
   unexpected=$(printf '%s\n' "$verify_output" \

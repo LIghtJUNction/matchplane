@@ -62,6 +62,15 @@ pub enum CacheError {
     /// Projection script returned an unknown code.
     #[error("Valkey projection returned unexpected code {0}")]
     UnexpectedProjectionCode(i64),
+    /// Rate-limit script returned an unknown code.
+    #[error("Valkey rate limiter returned unexpected code {0}")]
+    UnexpectedRateLimitCode(i64),
+    /// Rate-limit arguments were outside the supported bounds.
+    #[error("Valkey rate limiter received invalid parameters")]
+    InvalidRateLimitParameters,
+    /// Rate-limit key was empty, too long, or contained unsupported bytes.
+    #[error("Valkey rate limiter received an invalid key")]
+    InvalidRateLimitKey,
     /// Cached JSON is malformed or could not be encoded.
     #[error("Valkey projection JSON failed: {0}")]
     Json(#[from] serde_json::Error),
@@ -87,6 +96,59 @@ impl ValkeyCache {
     pub async fn ping(&mut self) -> Result<(), CacheError> {
         let _: String = self.connection.ping().await?;
         Ok(())
+    }
+
+    /// Atomically consumes one fixed-window rate-limit token.
+    ///
+    /// The counter and its expiry are updated in one Valkey script, so concurrent gateway
+    /// instances cannot race past the limit. Callers should use a bounded, namespaced key; this
+    /// method additionally rejects control characters and oversized keys to keep the keyspace
+    /// predictable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CacheError`] when the key or limits are invalid, Valkey is unavailable, or the
+    /// script returns an unknown result.
+    pub async fn consume_fixed_window(
+        &mut self,
+        key: &str,
+        limit: u32,
+        window_secs: u32,
+    ) -> Result<bool, CacheError> {
+        if key.is_empty()
+            || key.len() > 128
+            || !key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b":-_".contains(&byte))
+        {
+            return Err(CacheError::InvalidRateLimitKey);
+        }
+        if limit == 0 || window_secs == 0 {
+            return Err(CacheError::InvalidRateLimitParameters);
+        }
+
+        const LUA: &str = r#"
+local limit = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+if limit == nil or window == nil or limit <= 0 or window <= 0 then return -2 end
+local count = redis.call('INCR', KEYS[1])
+local ttl = redis.call('TTL', KEYS[1])
+if count == 1 or ttl < 0 then redis.call('EXPIRE', KEYS[1], window) end
+if count <= limit then return 1 end
+return 0
+"#;
+        let code: i64 = Script::new(LUA)
+            .key(key)
+            .arg(limit)
+            .arg(window_secs)
+            .invoke_async(&mut self.connection)
+            .await?;
+        match code {
+            1 => Ok(true),
+            0 => Ok(false),
+            -2 => Err(CacheError::InvalidRateLimitParameters),
+            other => Err(CacheError::UnexpectedRateLimitCode(other)),
+        }
     }
 
     /// Atomically replaces one derived book when its command sequence is contiguous.

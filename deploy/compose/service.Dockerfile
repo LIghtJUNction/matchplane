@@ -1,4 +1,4 @@
-FROM rust:1.97.0-trixie AS builder
+FROM rust:1.97.0-trixie@sha256:b92b8c8574f8f3b207fcb0912fb3e2de4041580b5934d90312d53938c9a038a9 AS builder
 
 ENV RUSTUP_TOOLCHAIN=1.97.0
 
@@ -24,7 +24,7 @@ RUN --mount=type=cache,id=matchplane-cargo-registry,target=/usr/local/cargo/regi
         target/release/xtask \
         /out/
 
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates libssl3 zlib1g \
