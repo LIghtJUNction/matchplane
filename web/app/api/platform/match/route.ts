@@ -7,6 +7,7 @@ import { authDatabase } from "../../../../src/lib/auth";
 import {
   decidePlatformRoutes,
   isPlatformRouterConfigured,
+  PlatformRouterQuotaExceededError,
   type PlatformRouteDecision,
 } from "../../../../src/platform-router";
 import { expandPlatformRouteTree, type PlatformRouteTrace } from "../../../../src/platform-orchestrator";
@@ -54,45 +55,52 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  const viewer = {
+    authUserId: actor.access === "session" ? actor.subject : null,
+    organizationId: actor.organizationId,
+  };
   const candidates = rootTenantId && isUuid(rootTenantId)
-    ? await readActiveDirectChildRoutes(platformPath, rootTenantId)
+    ? await readActiveDirectChildRoutes(platformPath, rootTenantId, viewer)
     : [];
-  // The platform pays for model calls.  Before making one, apply a bounded
-  // per-account admission limit so a leaked session cannot create an
-  // unbounded provider bill. When a provider is configured, even a degraded
-  // attempt counts against the admission budget; otherwise a failing provider
-  // could be retried forever while every row was labeled policy_fallback.
-  if (candidates.length > 0 && isPlatformRouterConfigured()) {
-    const recent = await authDatabase.query(
-      `SELECT coalesce(sum(model_calls), 0)::int AS count
-        FROM platform_ai_usage
-        WHERE auth_user_id = $1
-          AND model_calls > 0
-          AND created_at >= clock_timestamp() - interval '1 hour'`,
-      [actor.subject],
-    );
-    const count = Number((recent.rows[0] as { count?: number } | undefined)?.count ?? 0);
-    if (count >= configuredAiRequestsPerHour()) {
+  const requestId = randomUUID();
+  let recursive: Awaited<ReturnType<typeof expandPlatformRouteTree>>;
+  try {
+    recursive = await expandPlatformRouteTree({
+      platformPath,
+      narrative,
+      candidates,
+      loadChildren: async (childPath) => readActiveDirectChildRoutes(childPath, rootTenantId ?? "", viewer),
+      decide: ({ platformPath: currentPath, narrative: currentNarrative, candidates: currentCandidates }) =>
+        decidePlatformRoutes({
+          platformPath: currentPath,
+          narrative: currentNarrative,
+          candidates: currentCandidates.map(({ tenantId: _tenantId, domainId: _domainId, ...candidate }) => candidate),
+          admitCall: isPlatformRouterConfigured()
+            ? async () => {
+                if (!(await admitPlatformAiCall({
+                  authUserId: actor.subject,
+                  requestId,
+                  platformPath: currentPath,
+                  limit: configuredAiRequestsPerHour(),
+                }))) {
+                  throw new PlatformRouterQuotaExceededError();
+                }
+              }
+            : undefined,
+        }),
+      maxSteps: configuredAiMaxSteps(),
+      maxDepth: configuredAiMaxSteps(),
+    });
+  } catch (error) {
+    if (error instanceof PlatformRouterQuotaExceededError) {
       return NextResponse.json(
-        { error: "平台 AI 撮合额度暂时用尽，请稍后再试。" },
+        { error: error.message },
         { status: 429, headers: { "retry-after": "3600", "cache-control": "no-store" } },
       );
     }
+    console.error("platform route expansion failed", error);
+    return NextResponse.json({ error: "平台路由暂时不可用，请稍后再试。" }, { status: 503 });
   }
-  const recursive = await expandPlatformRouteTree({
-    platformPath,
-    narrative,
-    candidates,
-    loadChildren: async (childPath) => readActiveDirectChildRoutes(childPath, rootTenantId ?? ""),
-    decide: ({ platformPath: currentPath, narrative: currentNarrative, candidates: currentCandidates }) =>
-      decidePlatformRoutes({
-        platformPath: currentPath,
-        narrative: currentNarrative,
-        candidates: currentCandidates.map(({ tenantId: _tenantId, domainId: _domainId, ...candidate }) => candidate),
-      }),
-    maxSteps: configuredAiMaxSteps(),
-    maxDepth: configuredAiMaxSteps(),
-  });
   const routing = summarizeRouting(recursive.trace, recursive.truncated);
   const routePlan = recursive.routePlan;
   const modelCalls = recursive.trace.filter(({ decision }) => decision.source === "ai").length;
@@ -101,7 +109,6 @@ export async function POST(request: Request): Promise<Response> {
     : routing.degraded
       ? "degraded"
       : "delegated";
-  const requestId = randomUUID();
   let client: PoolClient | undefined;
   try {
     client = await authDatabase.connect();
@@ -164,6 +171,55 @@ export async function POST(request: Request): Promise<Response> {
     },
     { status: 202, headers: { "cache-control": "no-store" } },
   );
+}
+
+/**
+ * Serialize admission per subject and reserve exactly one provider call. The
+ * reservation is made before fetch, so concurrent requests cannot all observe
+ * the same remaining quota and overspend the platform's model budget.
+ */
+async function admitPlatformAiCall(input: {
+  authUserId: string;
+  requestId: string;
+  platformPath: string;
+  limit: number;
+}): Promise<boolean> {
+  const client = await authDatabase.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.authUserId]);
+    await client.query(
+      `DELETE FROM platform_ai_call_admissions
+        WHERE auth_user_id = $1
+          AND created_at < clock_timestamp() - interval '2 hours'`,
+      [input.authUserId],
+    );
+    const recent = await client.query<{ count: number }>(
+      `SELECT count(*)::int AS count
+         FROM platform_ai_call_admissions
+        WHERE auth_user_id = $1
+          AND created_at >= clock_timestamp() - interval '1 hour'`,
+      [input.authUserId],
+    );
+    const count = Number(recent.rows[0]?.count ?? 0);
+    if (count >= input.limit) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(
+      `INSERT INTO platform_ai_call_admissions
+        (id, auth_user_id, request_id, platform_path)
+       VALUES ($1::uuid, $2, $3::uuid, $4)`,
+      [randomUUID(), input.authUserId, input.requestId, input.platformPath],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function configuredAiRequestsPerHour(): number {

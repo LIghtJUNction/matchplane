@@ -6,6 +6,8 @@ import { NextResponse } from "next/server";
 import { authDatabase } from "../../../../src/lib/auth";
 import { isMountedPlatformPath } from "../../../../src/platform-mount";
 import { normalizePlatformPath } from "../../../../src/platform-agent-handoff";
+import { authenticatePlatformRequest } from "../../../../src/platform-request-auth";
+import { isActivePlatformPathVisible } from "../../../../src/platform-visibility";
 
 export const runtime = "nodejs";
 
@@ -34,6 +36,13 @@ export async function GET(request: Request): Promise<Response> {
   const platformPath = normalizePlatformPath(url.searchParams.get("path"));
   if (!platformPath || platformPath === "/") return NextResponse.json({ error: "plugin asset path is invalid" }, { status: 400 });
   if (!(await isMountedPlatformPath(platformPath))) return NextResponse.json({ error: "平台路径尚未激活" }, { status: 404 });
+  const actor = await authenticatePlatformRequest(request);
+  const viewer = actor
+    ? { authUserId: actor.access === "session" ? actor.subject : null, organizationId: actor.organizationId }
+    : undefined;
+  if (!(await isActivePlatformPathVisible(platformPath, viewer))) {
+    return NextResponse.json({ error: "plugin asset is not available" }, { status: 404 });
+  }
 
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   const artifactRoot = process.env.MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT?.trim();

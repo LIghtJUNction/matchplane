@@ -36,8 +36,12 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  const viewer = {
+    authUserId: actor.access === "session" ? actor.subject : null,
+    organizationId: actor.organizationId,
+  };
   const children = rootTenantId && isUuid(rootTenantId)
-    ? await readActiveDirectChildRoutes(handoff.platformPath, rootTenantId)
+    ? await readActiveDirectChildRoutes(handoff.platformPath, rootTenantId, viewer)
     : [];
   const expiresAt = new Date(Date.now() + HANDOFF_TTL_MINUTES * 60 * 1000);
   const inserted = await authDatabase.query(

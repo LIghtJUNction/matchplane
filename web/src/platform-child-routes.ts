@@ -22,6 +22,12 @@ export interface PlatformChildRoute {
 export async function readActiveDirectChildRoutes(
   platformPath: string,
   rootTenantId: string,
+  viewer?: {
+    /** Better Auth user id for a human session. */
+    authUserId?: string | null;
+    /** Better Auth organization id for a scoped Agent API key. */
+    organizationId?: string | null;
+  },
 ): Promise<PlatformChildRoute[]> {
   const currentSlug = platformPath === "/" ? null : platformPath.split("/").filter(Boolean).at(-1) ?? null;
   const result = await authDatabase.query(
@@ -49,11 +55,31 @@ export async function readActiveDirectChildRoutes(
        LEFT JOIN current_node ON true
       WHERE r.tenant_id = $2::uuid
         AND r.state = 'active'
+        AND (
+          r.membership_policy = 'public'
+          OR ($4::uuid IS NOT NULL AND EXISTS (
+            SELECT 1
+              FROM "member" m
+             WHERE m."organizationId" = o.id
+               AND m."userId" = $4::uuid
+          ))
+          OR ($5::uuid IS NOT NULL AND EXISTS (
+            WITH RECURSIVE key_scope(id, depth) AS (
+              SELECT $5::uuid, 0
+              UNION ALL
+              SELECT child.id, parent.depth + 1
+                FROM "organization" child
+                JOIN key_scope parent ON child."parentOrganizationId" = parent.id
+               WHERE parent.depth < 64
+            )
+            SELECT 1 FROM key_scope WHERE id = o.id
+          ))
+        )
         AND (($1::text IS NULL AND o."parentOrganizationId" IS NULL)
           OR ($1::text IS NOT NULL AND current_node.id IS NOT NULL
               AND o."parentOrganizationId" = current_node.id))
       ORDER BY r.slug ASC`,
-    [currentSlug, rootTenantId, platformPath],
+    [currentSlug, rootTenantId, platformPath, viewer?.authUserId ?? null, viewer?.organizationId ?? null],
   );
 
   return result.rows.map((row) => ({

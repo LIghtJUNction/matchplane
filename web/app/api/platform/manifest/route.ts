@@ -5,6 +5,8 @@ import { NextResponse } from "next/server";
 
 import { isMountedPlatformPath } from "../../../../src/platform-mount";
 import { readActivePlatformManifest } from "../../../../src/platform-manifest";
+import { authenticatePlatformRequest } from "../../../../src/platform-request-auth";
+import { isActivePlatformPathVisible } from "../../../../src/platform-visibility";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +19,13 @@ export async function GET(request: Request): Promise<Response> {
   }
   if (!(await isMountedPlatformPath(requestedPath))) {
     return NextResponse.json({ error: "platform is not active" }, { status: 404 });
+  }
+  const actor = await authenticatePlatformRequest(request);
+  const viewer = actor
+    ? { authUserId: actor.access === "session" ? actor.subject : null, organizationId: actor.organizationId }
+    : undefined;
+  if (!(await isActivePlatformPathVisible(requestedPath, viewer))) {
+    return NextResponse.json({ error: "platform manifest is not available" }, { status: 404 });
   }
   const registeredManifest = await readActivePlatformManifest(requestedPath);
   if (registeredManifest) {

@@ -75,13 +75,16 @@ If AI routing is enabled, configure `MATCHPLANE_ROUTER_AI_URL`,
 `MATCHPLANE_ROUTER_AI_MODEL`, and `MATCHPLANE_ROUTER_AI_KEY` only in the web service's restricted
 environment/secret file. The browser must never receive the provider key. The platform is the
 token-cost bearer: every Agent call is bounded to at most 24,000 input characters and 2,048 output
-tokens, and `MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR` (default 120 per verified account) limits
-abuse. `MATCHPLANE_ROUTER_AI_MAX_STEPS` (default 8, hard maximum 16) bounds how many platform
-nodes one chat request can traverse; each selected child is routed again only after its active
-registration is re-read. The `platform_ai_usage` ledger records the platform bearer, model, bounded budget, and
-provider-reported token counts without storing raw prompts or provider credentials. Set a lower
-quota for a public launch after observing provider limits; a missing provider deliberately produces
-an auditable policy fallback rather than billing a user.
+tokens, and `MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR` (default 120 per authenticated subject) limits
+abuse. Each provider call is atomically admitted under a per-subject PostgreSQL advisory lock and
+recorded in `platform_ai_call_admissions` before the network request, so concurrent chats cannot
+all pass the same remaining quota. `MATCHPLANE_ROUTER_AI_MAX_STEPS` (default 8, hard maximum 16)
+bounds how many platform nodes one chat request can traverse; each selected child is routed again
+only after its active registration and visibility policy are re-read. The `platform_ai_usage`
+ledger records the platform bearer, model, bounded budget, and provider-reported token counts
+without storing raw prompts or provider credentials. Set a lower quota for a public launch after
+observing provider limits; a missing provider deliberately produces an auditable policy fallback
+rather than billing a user.
 
 The package builder is a separate trust boundary. Configure
 `MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN` only in the web service's restricted secret file (or the

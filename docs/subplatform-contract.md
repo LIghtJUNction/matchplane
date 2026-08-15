@@ -139,8 +139,10 @@ accepted/degraded state instead of silently dropping the request.
 The chat is a funnel, not a single global vector search. The decision chain is:
 
 1. **商城/子平台** — the current node gives the routing Agent only its direct, activated child
-   registrations. The Agent may select zero or more of those public slugs; it cannot invent a slug,
-   query a sibling, skip an ancestor, or see credentials.
+   registrations visible to the current human membership or scoped Agent key. Public nodes are
+   visible to authenticated users; invite-only nodes appear only after the same root identity has
+   accepted membership. The Agent may select zero or more of those allowlisted slugs; it cannot
+   invent a slug, query a sibling, skip an ancestor, or see credentials.
 2. **商家** — the selected subplatform Agent uses its own Skill and authorized MCP tools to inspect
    seller labels, verification, promotion/exposure policy and merchant candidates. The root does not
    copy those fields into its schema.
@@ -338,6 +340,10 @@ release; it creates a new immutable version and requires an explicit activation.
   In production, the web page and manifest endpoint independently verify that the complete
   recursive path resolves to an active immutable registration; a static file in `public/` is not
   an activation grant.
+- Manifest and plugin-artifact reads apply the same `membership_policy` visibility check as Agent
+  routing. Public registrations may be fetched without a membership claim; invite-only releases
+  return the same not-found response until the caller's Better Auth user or scoped Agent key is
+  authorized for that organization subtree.
 
 ## Repository layout in this project
 

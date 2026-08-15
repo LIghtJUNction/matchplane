@@ -49,6 +49,14 @@ export interface PlatformRouteUsage {
   totalTokens: number;
 }
 
+/** Raised when the platform's own model-call budget has no remaining admission. */
+export class PlatformRouterQuotaExceededError extends Error {
+  constructor() {
+    super("平台 AI 撮合额度暂时用尽，请稍后再试。");
+    this.name = "PlatformRouterQuotaExceededError";
+  }
+}
+
 const MAX_CANDIDATES = 32;
 const MAX_RATIONALE_LENGTH = 1_000;
 const DEFAULT_TIMEOUT_MS = 4_000;
@@ -58,6 +66,8 @@ export async function decidePlatformRoutes(input: {
   platformPath: string;
   narrative: string;
   candidates: PlatformRouteCandidate[];
+  /** Atomically reserve one provider call immediately before it is made. */
+  admitCall?: () => Promise<void>;
 }): Promise<PlatformRouteDecision> {
   const candidates = input.candidates.slice(0, MAX_CANDIDATES);
   if (candidates.length === 0) {
@@ -82,6 +92,7 @@ export async function decidePlatformRoutes(input: {
   }
 
   try {
+    await input.admitCall?.();
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -126,6 +137,7 @@ export async function decidePlatformRoutes(input: {
       usage: readUsage(payload),
     };
   } catch (error) {
+    if (error instanceof PlatformRouterQuotaExceededError) throw error;
     const reason = error instanceof Error ? error.message : "AI 路由服务不可用";
     return policyFallback(candidates, `AI 路由降级：${reason.slice(0, 240)}`, model);
   }

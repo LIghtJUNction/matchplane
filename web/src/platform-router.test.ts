@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { decidePlatformRoutes, type PlatformRouteCandidate } from "./platform-router";
+import { decidePlatformRoutes, PlatformRouterQuotaExceededError, type PlatformRouteCandidate } from "./platform-router";
 
 const candidates: PlatformRouteCandidate[] = [
   {
@@ -81,6 +81,43 @@ describe("platform Agent router", () => {
     expect(decision.source).toBe("policy_fallback");
     expect(decision.degraded).toBe(true);
     expect(decision.costBearer).toBe("platform");
+  });
+
+  it("reserves a provider call before paying for it", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const admitCall = vi.fn(async () => undefined);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ selectedSlugs: ["used-car"] }) } }],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "找商品",
+      candidates,
+      admitCall,
+    });
+
+    expect(admitCall).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not turn an exhausted platform budget into a provider call", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "找商品",
+      candidates,
+      admitCall: async () => { throw new PlatformRouterQuotaExceededError(); },
+    })).rejects.toBeInstanceOf(PlatformRouterQuotaExceededError);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not call an insecure provider endpoint in production", async () => {
