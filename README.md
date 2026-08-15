@@ -61,6 +61,10 @@ the maintainer's AUR account.
 The Helm chart intentionally refuses to render without `image.digest` set to the immutable SHA-256
 digest of the published container image; a mutable tag is retained only as release metadata.
 
+For a single Ubuntu host, see the [production runbook](docs/production-runbook.md) before enabling
+production mode. It covers the pinned Kafka profile, operator-managed federation node registration,
+service ordering, payment onboarding, backups, and the DNS/certificate gate.
+
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) and the accepted decisions in `docs/adr/`.

@@ -1,5 +1,5 @@
 use anyhow::Context;
-use matchplane_config::AppConfig;
+use matchplane_config::{AppConfig, Environment};
 use matchplane_events::KafkaPublisher;
 use matchplane_observability::init;
 use matchplane_storage::PgStore;
@@ -19,6 +19,14 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("relay could not connect to PostgreSQL")?;
     store.ping().await.context("relay readiness failed")?;
+    store
+        .ensure_local_node(
+            config.node_id,
+            &format!("http://{}", config.grpc_addr),
+            config.environment != Environment::Production,
+        )
+        .await
+        .context("relay local federation node registration failed")?;
     let publisher = KafkaPublisher::new(&config.kafka_brokers, "matchplane-event-relay")
         .context("relay could not configure Kafka")?;
     info!(node_id = %config.node_id, "outbox relay ready");

@@ -1,5 +1,5 @@
 use anyhow::Context;
-use matchplane_config::AppConfig;
+use matchplane_config::{AppConfig, Environment};
 use matchplane_observability::init;
 use matchplane_storage::PgStore;
 use tracing::info;
@@ -20,6 +20,14 @@ async fn main() -> anyhow::Result<()> {
         .ping()
         .await
         .context("vector worker readiness failed")?;
+    store
+        .ensure_local_node(
+            config.node_id,
+            &format!("http://{}", config.grpc_addr),
+            config.environment != Environment::Production,
+        )
+        .await
+        .context("vector worker local federation node registration failed")?;
     info!(node_id = %config.node_id, "vector worker ready for caller embeddings");
     shutdown_signal().await;
     telemetry

@@ -11,6 +11,65 @@ const ABORTED: &str = "aborted";
 const EXPIRED: &str = "expired";
 
 impl PgStore {
+    /// Verifies or creates the local federation node registration used by durable commands.
+    ///
+    /// Development and test deployments may register their generated node id automatically.
+    /// Production deployments must pre-register the node so its operator-managed certificate and
+    /// signing metadata cannot be replaced implicitly during service startup.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::NotFound`] when production has no active registration, or a
+    /// PostgreSQL error when the registration cannot be read or written.
+    pub async fn ensure_local_node(
+        &self,
+        node_id: FederationNodeId,
+        grpc_endpoint: &str,
+        allow_auto_register: bool,
+    ) -> Result<(), StorageError> {
+        if grpc_endpoint.trim().is_empty() {
+            return Err(StorageError::InvalidData(
+                "local federation gRPC endpoint cannot be empty".to_owned(),
+            ));
+        }
+
+        if allow_auto_register {
+            let node_name = format!("matchplane-local-{node_id}");
+            let result = sqlx::query(
+                "INSERT INTO federation_nodes \
+                 (id, name, grpc_endpoint, signing_key, protocol_major, protocol_minor) \
+                 VALUES ($1, $2, $3, 'local-test-node', 1, 0) \
+                 ON CONFLICT (id) DO UPDATE SET \
+                   grpc_endpoint = EXCLUDED.grpc_endpoint, \
+                   last_seen_at = clock_timestamp(), \
+                   updated_at = clock_timestamp() \
+                 WHERE federation_nodes.status = 'active'",
+            )
+            .bind(node_id.into_uuid())
+            .bind(node_name)
+            .bind(grpc_endpoint)
+            .execute(self.pool())
+            .await?;
+            if result.rows_affected() != 1 {
+                return Err(StorageError::Conflict(
+                    "local federation node is disabled".to_owned(),
+                ));
+            }
+            return Ok(());
+        }
+
+        let registered =
+            sqlx::query("SELECT 1 FROM federation_nodes WHERE id = $1 AND status = 'active'")
+                .bind(node_id.into_uuid())
+                .fetch_optional(self.pool())
+                .await?
+                .is_some();
+        if !registered {
+            return Err(StorageError::NotFound("active local federation node"));
+        }
+        Ok(())
+    }
+
     /// Checks that a federation node is active and, when supplied, bound to the presented mTLS
     /// certificate SHA-256 fingerprint.
     ///

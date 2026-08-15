@@ -1,7 +1,7 @@
 use std::{fs, str::FromStr};
 
 use anyhow::Context;
-use matchplane_config::{AppConfig, ValidatedConfig};
+use matchplane_config::{AppConfig, Environment, ValidatedConfig};
 use matchplane_domain::{
     CausationId, CorrelationId, EventId, FederationNodeId, PayloadHash, Quantity, ShardId,
 };
@@ -169,6 +169,14 @@ async fn main() -> anyhow::Result<()> {
     let store = PgStore::connect(&config.database_url, 20)
         .await
         .context("federation hub could not connect to PostgreSQL")?;
+    store
+        .ensure_local_node(
+            config.node_id,
+            &format!("https://{}", config.grpc_addr),
+            config.environment != Environment::Production,
+        )
+        .await
+        .context("federation hub local node registration failed")?;
     let service = FederationService {
         store,
         target_node_id: config.node_id,

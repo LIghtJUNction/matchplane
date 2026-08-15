@@ -8,6 +8,7 @@ bash -n packaging/scripts/stage.sh packaging/scripts/archive.sh
 bash -n packaging/ubuntu/build-deb.sh packaging/ubuntu/postinst packaging/ubuntu/prerm
 bash -n packaging/fedora/build-rpm.sh
 bash -n deploy/scripts/configure-ubuntu-host.sh
+bash -n deploy/scripts/install-kafka.sh
 bash -n packaging/aur/matchplane-git/PKGBUILD.in
 bash -n packaging/aur/matchplane-git/matchplane.install
 bash -n packaging/aur/matchplane-bin/PKGBUILD.in
@@ -43,16 +44,21 @@ if rg -q 'MATCHPLANE_NODE_ID=00000000-0000-7000-8000-00000000000a' \
 fi
 
 if [[ ${MATCHPLANE_BUILD_PACKAGES:-0} == 1 ]]; then
+  package_version=$(awk -F'"' '$1 == "version = " { print $2; exit }' Cargo.toml)
+  if [[ ! $package_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo 'workspace package version is malformed' >&2
+    exit 1
+  fi
   bun install --frozen-lockfile --cwd web
   bun run --cwd web check
   cargo build --release --locked --workspace --bins
   output_directory=$(mktemp -d)
   trap 'rm -rf "$output_directory"' EXIT
-  packaging/scripts/archive.sh 0.1.8 target/release "$output_directory"
-  tar --list --zstd --file "$output_directory/matchplane-0.1.8-linux-x86_64.tar.zst" >/dev/null
+  packaging/scripts/archive.sh "$package_version" target/release "$output_directory"
+  tar --list --zstd --file "$output_directory/matchplane-$package_version-linux-x86_64.tar.zst" >/dev/null
   if command -v dpkg-deb >/dev/null 2>&1; then
-    packaging/ubuntu/build-deb.sh 0.1.8 target/release "$output_directory"
-    dpkg-deb --info "$output_directory/matchplane_0.1.8_amd64.deb" >/dev/null
+    packaging/ubuntu/build-deb.sh "$package_version" target/release "$output_directory"
+    dpkg-deb --info "$output_directory/matchplane_${package_version}_amd64.deb" >/dev/null
   fi
 fi
 

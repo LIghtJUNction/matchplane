@@ -9,7 +9,7 @@ use axum::{
     routing::{get, post},
 };
 use matchplane_cache::{CachedBook, ValkeyCache};
-use matchplane_config::{AppConfig, BearerToken};
+use matchplane_config::{AppConfig, BearerToken, Environment};
 use matchplane_domain::{
     AccountId, AssetId, CorrelationId, MarketId, OrderId, OrderIntent, OrderSide, Price, Quantity,
 };
@@ -137,6 +137,14 @@ async fn main() -> anyhow::Result<()> {
     let store = PgStore::connect(&config.database_url, 20)
         .await
         .context("gateway could not connect to PostgreSQL")?;
+    store
+        .ensure_local_node(
+            config.node_id,
+            &format!("http://{}", config.grpc_addr),
+            config.environment != Environment::Production,
+        )
+        .await
+        .context("gateway local federation node registration failed")?;
     let cache = ValkeyCache::connect(&config.valkey_url)
         .await
         .context("gateway could not connect to Valkey")?;

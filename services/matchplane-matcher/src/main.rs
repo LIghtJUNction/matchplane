@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use matchplane_config::AppConfig;
+use matchplane_config::{AppConfig, Environment};
 use matchplane_engine::OrderBook;
 use matchplane_events::{consumer, topics};
 use matchplane_observability::init;
@@ -26,6 +26,14 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("matcher could not connect to PostgreSQL")?;
     store.ping().await.context("matcher readiness failed")?;
+    store
+        .ensure_local_node(
+            config.node_id,
+            &format!("http://{}", config.grpc_addr),
+            config.environment != Environment::Production,
+        )
+        .await
+        .context("matcher local federation node registration failed")?;
     let consumer = consumer(
         &config.kafka_brokers,
         "matchplane-matcher-v1",

@@ -1,0 +1,27 @@
+[Unit]
+Description=Apache Kafka event broker for MatchPlane
+Documentation=https://kafka.apache.org/documentation/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kafka
+Group=kafka
+WorkingDirectory=/var/lib/kafka
+Environment="KAFKA_HEAP_OPTS=-Xms256m -Xmx512m"
+Environment=LOG_DIR=/var/lib/kafka/logs
+ExecStart=/opt/kafka/current/bin/kafka-server-start.sh /etc/kafka/server.properties
+ExecStop=/opt/kafka/current/bin/kafka-server-stop.sh
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=120s
+LimitNOFILE=100000
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kafka /run/kafka
+
+[Install]
+WantedBy=multi-user.target
