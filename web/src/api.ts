@@ -162,7 +162,12 @@ async function paymentRequest<T>(
 }
 
 export function isLiveMarketplaceEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_MATCHPLANE_LIVE_MODE === "true";
+  const configured = process.env.NEXT_PUBLIC_MATCHPLANE_LIVE_MODE;
+  if (configured === "false") return false;
+  if (configured === "true") return true;
+  // A production build must never silently fall back to the demo-only branch.
+  // Operators can still opt out explicitly for a local/demo deployment.
+  return process.env.NODE_ENV === "production";
 }
 
 export async function routePlatformIntent(input: {
