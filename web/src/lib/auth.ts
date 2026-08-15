@@ -2,7 +2,14 @@ import { betterAuth } from "better-auth";
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
 import { apiKey } from "@better-auth/api-key";
-import { admin as adminPlugin, organization } from "better-auth/plugins";
+import type { GenericOAuthConfig } from "better-auth/plugins";
+import {
+  admin as adminPlugin,
+  emailOTP,
+  genericOAuth,
+  magicLink,
+  organization,
+} from "better-auth/plugins";
 
 import {
   adminAccessControl,
@@ -37,6 +44,7 @@ const isProductionBuild = process.env.NEXT_PHASE === "phase-production-build";
 const secret = configuredSecret ?? (isProductionBuild ? randomBytes(32).toString("base64url") : undefined);
 const trustedOrigins = parseTrustedOrigins(baseURL, process.env.BETTER_AUTH_TRUSTED_ORIGINS);
 const isProductionRuntime = process.env.NODE_ENV === "production" && process.env.MATCHPLANE_ENVIRONMENT === "production";
+const configuredSocialProviders = configuredOAuthProviders();
 
 if (
   isProductionRuntime &&
@@ -103,6 +111,37 @@ export const auth = betterAuth({
       }),
   },
   plugins: [
+    emailOTP({
+      otpLength: 6,
+      expiresIn: 5 * 60,
+      allowedAttempts: 3,
+      storeOTP: "hashed",
+      rateLimit: { window: 60, max: 3 },
+      sendVerificationOTP: (data, context) =>
+        sendConfiguredAuthEmail({
+          request: context?.request,
+          recipient: data.email,
+          subject: "你的 MatchPlane 登录验证码",
+          text: `你的 MatchPlane 登录验证码是 ${data.otp}。验证码 5 分钟内有效，请勿转发给他人。`,
+          html: `<p>你的 MatchPlane 登录验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:0.3em">${escapeHtml(data.otp)}</p><p>验证码 5 分钟内有效，请勿转发给他人。</p>`,
+        }),
+    }),
+    magicLink({
+      expiresIn: 5 * 60,
+      storeToken: "hashed",
+      rateLimit: { window: 60, max: 5 },
+      sendMagicLink: (data, context) =>
+        sendConfiguredAuthEmail({
+          request: context?.request,
+          recipient: data.email,
+          subject: "继续你的 MatchPlane 匹配",
+          text: `请打开以下链接继续登录：${data.url}\n\n链接 5 分钟内有效。`,
+          html: `<p>请打开以下链接继续登录：</p><p><a href="${escapeHtml(data.url)}">继续登录 MatchPlane</a></p><p>链接 5 分钟内有效。</p>`,
+        }),
+    }),
+    ...(configuredSocialProviders.length
+      ? [genericOAuth({ config: configuredSocialProviders })]
+      : []),
     apiKey({
       configId: "platform",
       references: "organization",
@@ -210,4 +249,84 @@ function isHttpsOrigin(value: string): boolean {
 
 function isPlaceholderEmail(value: string): boolean {
   return value.endsWith("@example.com") || value.endsWith("@example.org") || value.endsWith("@example.net");
+}
+
+/**
+ * Social login is deliberately opt-in. A provider is exposed only when its complete server-side
+ * OAuth configuration is present; client code receives the provider id, never these credentials.
+ */
+export function configuredOAuthProviderIds(): string[] {
+  return configuredSocialProviders.map((provider) => provider.providerId);
+}
+
+function configuredOAuthProviders(): GenericOAuthConfig[] {
+  const definitions = [
+    { providerId: "wechat", envKey: "WECHAT" },
+    { providerId: "qq", envKey: "QQ" },
+    { providerId: "alipay", envKey: "ALIPAY" },
+  ] as const;
+
+  return definitions.flatMap(({ providerId, envKey }) => {
+    const prefix = `MATCHPLANE_${envKey}_OAUTH_`;
+    const clientId = process.env[`${prefix}CLIENT_ID`]?.trim();
+    const clientSecret = process.env[`${prefix}CLIENT_SECRET`]?.trim();
+    const authorizationUrl = safeOAuthUrl(process.env[`${prefix}AUTHORIZATION_URL`]);
+    const tokenUrl = safeOAuthUrl(process.env[`${prefix}TOKEN_URL`]);
+    const userInfoUrl = safeOAuthUrl(process.env[`${prefix}USERINFO_URL`]);
+    if (!clientId || !clientSecret || !authorizationUrl || !tokenUrl || !userInfoUrl) {
+      const anyConfigured = [clientId, clientSecret, authorizationUrl, tokenUrl, userInfoUrl].some(Boolean);
+      if (anyConfigured) console.warn(`${providerId} OAuth is not enabled: complete ${prefix} configuration is required`);
+      return [];
+    }
+
+    return [{
+      providerId,
+      clientId,
+      clientSecret,
+      authorizationUrl,
+      tokenUrl,
+      userInfoUrl,
+      scopes: parseOAuthScopes(process.env[`${prefix}SCOPES`]),
+      mapProfileToUser: (profile: Record<string, unknown>) => {
+        const subject = firstProfileString(profile, ["sub", "id", "openid", "unionid", "user_id", "uid"]);
+        const email = firstProfileString(profile, ["email", "email_address"])
+          ?? `${providerId}.${subject || "account"}@oauth.matchplane.invalid`;
+        return {
+          name: firstProfileString(profile, ["name", "nickname", "nick_name"]) ?? `${providerId} 用户`,
+          email,
+          emailVerified: Boolean(firstProfileString(profile, ["email", "email_address"])),
+          image: firstProfileString(profile, ["avatar", "avatar_url", "headimgurl", "picture"]),
+        };
+      },
+    } satisfies GenericOAuthConfig];
+  });
+}
+
+function safeOAuthUrl(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" && isProductionRuntime) return undefined;
+    if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function parseOAuthScopes(value: string | undefined): string[] {
+  const scopes = (value ?? "openid,profile,email")
+    .split(",")
+    .map((scope) => scope.trim())
+    .filter((scope) => /^[a-zA-Z0-9._:-]{1,64}$/.test(scope));
+  return scopes.length ? [...new Set(scopes)] : ["openid"];
+}
+
+function firstProfileString(profile: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = profile[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return undefined;
 }

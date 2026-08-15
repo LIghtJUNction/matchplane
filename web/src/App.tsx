@@ -4,11 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Bell,
-  LayoutDashboard,
-  Menu,
   ShieldCheck,
-  Sparkles,
-  Store,
   UserRound,
 } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
@@ -30,14 +26,8 @@ import {
   switchPaymentMode,
 } from "./api";
 import { getMarketplaceSession } from "./lib/marketplace-session";
+import { authClient, authFetchOptions } from "./lib/auth-client";
 import type { AssetListing, WorkspaceRole } from "./types";
-
-const roles: Array<{ id: WorkspaceRole; label: string; shortLabel: string; icon: typeof Sparkles }> = [
-  { id: "buyer", label: "买方需求", shortLabel: "需求", icon: Sparkles },
-  { id: "seller", label: "卖方供给", shortLabel: "供给", icon: Store },
-  { id: "platform", label: "平台管理", shortLabel: "平台", icon: LayoutDashboard },
-  { id: "subplatform_admin", label: "子平台管理员", shortLabel: "子管", icon: ShieldCheck },
-];
 
 export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [role, setRole] = useState<WorkspaceRole>("buyer");
@@ -69,6 +59,26 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   }, []);
 
   useEffect(() => {
+    void authClient
+      .getSession({ fetchOptions: authFetchOptions(subplatform.slug) })
+      .then(({ data }) => {
+        const requestedRole = roleFromLocation();
+        const userRole = (data?.user as { role?: string } | undefined)?.role;
+        const isRootManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
+        if (requestedRole === "platform" && !isRootManager) {
+          setRole("buyer");
+          setNotice("平台管理仅对根平台管理员开放，请使用管理员入口登录");
+        }
+      })
+      .catch(() => {
+        if (roleFromLocation() === "platform") {
+          setRole("buyer");
+          setNotice("请先使用根平台管理员账号登录");
+        }
+      });
+  }, [subplatform.slug]);
+
+  useEffect(() => {
     if (!hydrated) return;
     const url = new URL(window.location.href);
     url.searchParams.set("role", role);
@@ -90,11 +100,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         setNotice(error instanceof Error ? error.message : "支付模式读取失败");
       });
   }, [hydrated, role, subplatform.tenantId]);
-
-  const selectRole = (nextRole: WorkspaceRole) => {
-    setRole(nextRole);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
 
   const confirmModeChange = () => {
     const nextMode = paymentMode === "test" ? "production" : "test";
@@ -154,7 +159,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               />
               {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">根平台</a> : null}
             </div>
-            <RoleSwitcher role={role} onChange={selectRole} />
             <div className="header-actions">
               <span className="secure-status"><ShieldCheck size={15} aria-hidden="true" />安全连接</span>
               <IconButton label="通知" onClick={() => setNotice("目前没有新的平台通知") }><Bell size={19} aria-hidden="true" /></IconButton>
@@ -162,7 +166,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 <span><UserRound size={18} aria-hidden="true" /></span>
                 <span className="profile-copy"><strong>{subplatform.brandName}</strong><small>{role === "buyer" ? "买家" : role === "seller" ? "卖家" : "管理员"}</small></span>
               </button>
-              <IconButton label="打开菜单" onClick={() => setNotice("请使用上方工作台切换，或打开个人账户登录") }><Menu size={20} aria-hidden="true" /></IconButton>
             </div>
           </div>
         </header>
@@ -183,21 +186,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             </motion.div>
           </AnimatePresence>
         </main>
-
-        <nav className="mobile-nav" aria-label="工作台切换">
-          {roles.map(({ id, shortLabel, icon: Icon }) => (
-            <button
-              key={id}
-              className={role === id ? "is-active" : ""}
-              type="button"
-              onClick={() => selectRole(id)}
-              aria-current={role === id ? "page" : undefined}
-            >
-              <Icon size={20} aria-hidden="true" />
-              <span>{shortLabel}</span>
-            </button>
-          ))}
-        </nav>
 
         <ListingSheet
           listing={listing}
@@ -283,24 +271,4 @@ function listingFromLocation(): AssetListing | null {
   // Listings are loaded from the root API/subplatform adapter. Never hydrate a fabricated
   // inventory item from a URL parameter.
   return null;
-}
-
-function RoleSwitcher({ role, onChange }: { role: WorkspaceRole; onChange: (role: WorkspaceRole) => void }) {
-  return (
-    <div className="role-switcher" role="tablist" aria-label="选择工作台">
-      {roles.map(({ id, label }) => (
-        <button
-          key={id}
-          className={role === id ? "is-active" : ""}
-          type="button"
-          role="tab"
-          aria-selected={role === id}
-          onClick={() => onChange(id)}
-        >
-          {role === id ? <motion.span className="role-indicator" layoutId="role-indicator" /> : null}
-          <span>{label}</span>
-        </button>
-      ))}
-    </div>
-  );
 }

@@ -2,6 +2,7 @@
 
 mod bootstrap;
 mod federation;
+mod generic_marketplace;
 mod marketplace;
 mod matching;
 mod orders;
@@ -13,6 +14,12 @@ mod vectors;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use thiserror::Error;
 
+pub use generic_marketplace::{
+    CreateMarketplaceIntent, CreateMarketplaceIntroduction, CreateMarketplaceOffer,
+    MarketplaceIntent, MarketplaceIntentOutcome, MarketplaceIntroduction,
+    MarketplaceIntroductionOutcome, MarketplaceOffer, MarketplaceOfferCandidate,
+    MarketplaceOfferOutcome, MatchMarketplaceOffers,
+};
 pub use marketplace::{
     AcceptContactExchange, ApproveMarketplaceListingSubmission, AuthenticatedParty,
     BuyerVehicleRequest, ConfirmOfflineDeal, ContactEnvelope, CreateBuyerVehicleRequest,

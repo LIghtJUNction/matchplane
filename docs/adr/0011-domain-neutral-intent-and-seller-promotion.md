@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted for the marketplace foundation; vehicle APIs remain a vertical adapter during migration.
+Accepted for the marketplace foundation; the generic intent/offer/introduction kernel is now the
+stable path for new verticals, while vehicle APIs remain compatibility adapters during migration.
 
 ## Context
 
@@ -17,8 +18,10 @@ commission that depends on observing an off-platform sale is not a reliable prim
    vertical supplies labels (`buyer`/`seller`, `requester`/`provider`, or another pair) while the
    matching kernel uses `demand` and `supply` perspectives.
 2. A vertical adapts its concrete records to the domain-neutral concepts `MatchIntent`,
-   `MatchIntroduction`, and `ContactChannel`. A match stores its score and reasons at introduction
-   time so later model changes cannot rewrite history.
+   `MarketplaceOffer`, `MatchIntroduction`, and `ContactChannel`. The Rust gateway persists the
+   first three through `/v1/marketplace/intents`, `/v1/marketplace/offers`, and
+   `/v1/marketplace/introductions`; a match stores its score and reasons at introduction time so
+   later model changes cannot rewrite history.
 3. Contact exchange is a separate consented state transition. The demand side creates an
    introduction; the supply side explicitly accepts the contact request; only then may either side
    retrieve the other side's allow-listed phone/WeChat fields. The values remain encrypted at rest,
@@ -36,7 +39,8 @@ commission that depends on observing an off-platform sale is not a reliable prim
 ## Consequences
 
 - The current automotive `vehicle_listings`, `buyer_vehicle_requests`, and `offline_deals` remain
-  compatible adapters while generic intent/campaign APIs are introduced.
+  compatible adapters. New verticals do not need vehicle-shaped tables or processes; they define
+  their own JSON schema/retrieval Agent behind the generic kernel.
 - Seller promotion can be charged when exposure is delivered, even if buyer and seller leave the
   platform after exchanging contacts.
 - A future dating or services vertical reuses identity, consent, audit, and revenue primitives and

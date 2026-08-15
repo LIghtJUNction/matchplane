@@ -34,15 +34,20 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
 
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return listings;
-    return listings.filter((listing) =>
-      [listing.title, listing.subtitle, listing.location, ...listing.facts.map((fact) => fact.value)]
+    return listings.filter((listing) => {
+      const searchable = [listing.title, listing.subtitle, listing.location, listing.price, listing.trust?.join(" "), ...listing.facts.map((fact) => `${fact.label} ${fact.value}`)]
         .filter(Boolean)
         .join(" ")
-        .toLocaleLowerCase()
-        .includes(normalized),
-    );
-  }, [listings, query]);
+        .toLocaleLowerCase();
+      if (normalized && !searchable.includes(normalized)) return false;
+      for (const filter of activeFilters) {
+        if (filter === "已核验供给" && !(listing.trust?.length || /核验|verified/i.test(searchable))) return false;
+        if (filter === "支持线下协商" && !/线下|当面|offline/i.test(searchable)) return false;
+        if (filter === "有明确报价" && (!listing.price.trim() || listing.price.trim() === "—")) return false;
+      }
+      return true;
+    });
+  }, [activeFilters, listings, query]);
 
   const toggleSaved = (id: string) => {
     setSaved((current) => {
@@ -121,54 +126,56 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         </section>
       )}
 
-      <section className="discovery-panel" aria-label="搜索供给">
-        <label className="search-field">
-          <Search size={20} aria-hidden="true" />
-          <span className="sr-only">搜索供给</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索名称、属性或地点"
-            type="search"
-          />
-        </label>
-        <button
-          className={`filter-button${filtersOpen ? " is-active" : ""}`}
-          type="button"
-          aria-expanded={filtersOpen}
-          onClick={() => setFiltersOpen((open) => !open)}
-        >
-          <SlidersHorizontal size={18} aria-hidden="true" />
-          筛选
-        </button>
-        {filtersOpen ? (
-          <div className="filter-menu" role="group" aria-label="高级筛选">
-            {["已核验供给", "支持线下协商", "有明确报价"].map((filter) => {
-              const active = activeFilters.has(filter);
-              return (
-                <button
-                  key={filter}
-                  className={active ? "is-active" : ""}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => {
-                    setActiveFilters((current) => {
-                      const next = new Set(current);
-                      if (next.has(filter)) next.delete(filter);
-                      else next.add(filter);
-                      return next;
-                    });
-                    onNotice(active ? `已移除筛选：${filter}` : `已启用筛选：${filter}`);
-                  }}
-                >
-                  {filter}
-                  {active ? <Check size={14} aria-hidden="true" /> : null}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </section>
+      {listings.length ? (
+        <section className="discovery-panel" aria-label="搜索供给">
+          <label className="search-field">
+            <Search size={20} aria-hidden="true" />
+            <span className="sr-only">搜索供给</span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索名称、属性或地点"
+              type="search"
+            />
+          </label>
+          <button
+            className={`filter-button${filtersOpen ? " is-active" : ""}`}
+            type="button"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <SlidersHorizontal size={18} aria-hidden="true" />
+            <span>筛选{activeFilters.size ? ` · ${activeFilters.size}` : ""}</span>
+          </button>
+          {filtersOpen ? (
+            <div className="filter-menu" role="group" aria-label="高级筛选">
+              {["已核验供给", "支持线下协商", "有明确报价"].map((filter) => {
+                const active = activeFilters.has(filter);
+                return (
+                  <button
+                    key={filter}
+                    className={active ? "is-active" : ""}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => {
+                      setActiveFilters((current) => {
+                        const next = new Set(current);
+                        if (next.has(filter)) next.delete(filter);
+                        else next.add(filter);
+                        return next;
+                      });
+                      onNotice(active ? `已移除筛选：${filter}` : `已启用筛选：${filter}`);
+                    }}
+                  >
+                    {filter}
+                    {active ? <Check size={14} aria-hidden="true" /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section id="recommendations" className="content-section">
         <SectionHeading eyebrow="由供给方提交，审核后展示" title={`${visible.length} 个可用供给`} />
@@ -195,6 +202,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
                 : "平台不预置样例内容；卖家提交并通过审核后，这里会出现真实供给。"}
             </p>
             {query ? <button type="button" onClick={() => setQuery("")}>清除搜索</button> : null}
+            {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice("先描述你的目标，平台会从已激活的子平台开始路由"); }}>描述需求</button> : null}
           </div>
         )}
       </section>
@@ -232,8 +240,8 @@ function RootFlow() {
     <section className="root-flow" aria-labelledby="root-flow-title">
       <div className="root-flow-intro">
         <span className="hero-kicker"><Sparkles size={16} aria-hidden="true" /> 根平台 · 通用入口</span>
-        <h2 id="root-flow-title">从一句话开始，沿平台树找到答案。</h2>
-        <p>根平台只负责理解目标和路由。具体领域、商家和供给内容由已启用的子平台提供。</p>
+        <h2 id="root-flow-title">描述目标，平台负责继续找。</h2>
+        <p>根平台理解你的目标并沿已启用的平台树路由；具体领域、商家和供给内容由各子平台提供。</p>
       </div>
       <ol className="root-flow-steps">
         <li><span>01</span><div><strong>描述目标</strong><small>预算、时间和不能妥协的条件</small></div></li>

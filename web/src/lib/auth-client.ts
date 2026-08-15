@@ -2,7 +2,13 @@
 
 import { createAuthClient } from "better-auth/react";
 import { apiKeyClient } from "@better-auth/api-key/client";
-import { adminClient, organizationClient } from "better-auth/client/plugins";
+import {
+  adminClient,
+  emailOTPClient,
+  genericOAuthClient,
+  magicLinkClient,
+  organizationClient,
+} from "better-auth/client/plugins";
 
 import {
   adminAccessControl,
@@ -22,6 +28,9 @@ export const authClient = createAuthClient({
   },
   plugins: [
     apiKeyClient(),
+    emailOTPClient(),
+    magicLinkClient(),
+    genericOAuthClient(),
     adminClient({
       ac: adminAccessControl,
       roles: { rootSuperAdmin, rootAdmin },

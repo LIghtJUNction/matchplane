@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matchplane.dev/schemas/generic-marketplace-contract-v1.json",
+  "title": "MatchPlane domain-neutral marketplace contract v1",
+  "description": "The root persists bounded intent, offer and consent-gated introduction records. Vertical attributes and terms remain opaque JSON objects.",
+  "version": "v1",
+  "resources": {
+    "intent": {
+      "create": {
+        "method": "POST",
+        "path": "/v1/marketplace/intents",
+        "required": ["tenant_id", "domain_id", "participant_id", "side", "narrative", "idempotency_key"],
+        "properties": {
+          "intent_id": { "type": "string", "format": "uuid" },
+          "tenant_id": { "type": "string", "format": "uuid" },
+          "domain_id": { "type": "string", "format": "uuid" },
+          "participant_id": { "type": "string", "format": "uuid" },
+          "side": { "enum": ["demand", "supply"] },
+          "narrative": { "type": "string", "minLength": 1, "maxLength": 10000 },
+          "attributes": { "type": "object" },
+          "terms": { "type": "object" },
+          "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "expires_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "read": { "method": "GET", "path": "/v1/marketplace/intents/{intent_id}" }
+    },
+    "offer": {
+      "create": {
+        "method": "POST",
+        "path": "/v1/marketplace/offers",
+        "required": ["tenant_id", "domain_id", "supply_party_id", "external_key", "display_name"],
+        "properties": {
+          "offer_id": { "type": "string", "format": "uuid" },
+          "tenant_id": { "type": "string", "format": "uuid" },
+          "domain_id": { "type": "string", "format": "uuid" },
+          "supply_party_id": { "type": "string", "format": "uuid" },
+          "asset_id": { "type": ["string", "null"], "format": "uuid" },
+          "external_key": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "display_name": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "attributes": { "type": "object" },
+          "terms": { "type": "object" },
+          "expires_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "match": { "method": "POST", "path": "/v1/marketplace/intents/{intent_id}/matches" },
+      "activate": { "method": "POST", "path": "/v1/admin/marketplace/offers/{offer_id}/activate" }
+    },
+    "introduction": {
+      "create": {
+        "method": "POST",
+        "path": "/v1/marketplace/introductions",
+        "required": ["tenant_id", "intent_id", "offer_id", "participant_id", "score", "idempotency_key", "expires_at"],
+        "contactRelease": "separate seller-consent transition; this command never returns contact values"
+      },
+      "list": { "method": "GET", "path": "/v1/marketplace/introductions" }
+    }
+  },
+  "invariants": [
+    "Every write is tenant-scoped and authenticated with a short-lived marketplace party bearer token.",
+    "Demand and supply labels are kernel sides; buyer/seller terminology remains a vertical adapter concern.",
+    "Caller IDs and idempotency keys are replay-safe; a changed payload returns a conflict.",
+    "Agent scores and reasons are advisory and cannot grant contact, payment, or transaction authority.",
+    "A vertical may implement retrieval with its own MCP/Skill and any vector database, or use the deterministic fallback."
+  ],
+  "mcpTools": [
+    "marketplace.intent.create",
+    "marketplace.offer.create",
+    "marketplace.offer.match",
+    "marketplace.introduction.create",
+    "marketplace.introductions.list"
+  ]
+}

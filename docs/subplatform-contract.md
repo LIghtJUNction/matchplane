@@ -12,11 +12,14 @@ node uses the same API, account, manifest, administrator, API-key and audit mech
 
 ## Identity and authorization
 
-The root web service uses [Better Auth](https://better-auth.com/) for email/password accounts,
-verification, password reset, sessions, platform roles, and organization-scoped memberships.
+The root web service uses [Better Auth](https://better-auth.com/) for the single global identity:
+email/password accounts, email OTP, magic links, verification, password reset, sessions, platform
+roles, and organization-scoped memberships. A user never registers again for each child path.
 Subplatforms must not implement a second credential store. The organization slug is the mounted
-path, and the Better Auth organization membership is the source of truth for whether a user may
-request buyer/seller capabilities or administer that platform node. `organization.parentOrganizationId`
+path, and the Better Auth organization membership is the source of truth for platform-scoped
+authorization. For an active child that permits public access, the first authenticated buyer/seller
+request idempotently claims a `member` projection for that organization; private children require
+an invitation. Neither path can grant an admin role. `organization.parentOrganizationId`
 forms the recursive platform tree. A manager may administer descendants only when the target node's
 registration explicitly grants that ancestor relationship; data and audit records remain scoped to
 the target node. Rust marketplace memberships remain the domain projection used by the gateway and
@@ -31,6 +34,11 @@ that email receives the configured `rootSuperAdmin` role; ordinary root admins a
 Better Auth's Admin plugin, while `owner`, `admin`, `subplatform_admin`, `moderator`, and `member`
 are assigned through the Organization plugin. `BETTER_AUTH_SECRET` must be a unique production
 secret and is never generated or persisted by the repository.
+
+The login page discovers enabled methods from `/api/auth/providers`. WeChat, QQ and Alipay are
+reserved through Better Auth `genericOAuth` and remain hidden until the complete server-only
+provider configuration is present. See [auth-sso-contract-v1.md](auth-sso-contract-v1.md) for the
+session/capability exchange and administrator boundary.
 
 ## Platform API keys
 
@@ -202,6 +210,34 @@ vector store, embedding model, prompt, ranking formula or catalogue schema. Agen
 through their own Skill and MCP tools, while the root only checks authorization and the stable
 result envelope.
 
+## Domain-neutral marketplace kernel
+
+The Rust gateway exposes a small, vertical-independent persistence contract. It is the boundary
+between a platform Agent and a subplatform-owned schema or retrieval adapter:
+
+| Resource | Endpoint | Authority and purpose |
+| --- | --- | --- |
+| intent | `POST /v1/marketplace/intents` | An authenticated party creates a `demand` or `supply` narrative with opaque JSON `attributes` and `terms`. |
+| intent | `GET /v1/marketplace/intents/{id}?tenant_id=&participant_id=` | The owning party reads its intent. |
+| offer | `POST /v1/marketplace/offers` | An authenticated supply party creates a draft offer; `asset_id` is optional for services and other verticals. |
+| offer | `POST /v1/marketplace/intents/{id}/matches` | The owning demand party receives active offer candidates. A deterministic attribute fallback is available when no retrieval provider is configured. |
+| offer | `POST /v1/admin/marketplace/offers/{id}/activate` | An operator or vertical moderation workflow publishes a draft. |
+| introduction | `POST /v1/marketplace/introductions` | The owning demand party records one Agent-selected offer, score and bounded reasons. This never releases contact data. |
+| introduction | `GET /v1/marketplace/introductions?tenant_id=&participant_id=` | Either participant reads the introduction projection without contact values. |
+
+All writes accept caller-generated IDs and idempotency keys. The gateway checks the short-lived
+party bearer token, tenant/domain scope, demand/supply role, active lifecycle, expiry, and
+cross-party invariant. `attributes` and `terms` must be JSON objects and are never interpreted as
+vehicle fields by the root. Scores and reasons are advisory Agent output; contact release remains
+a separate consented transition in the existing introduction/contact contract.
+
+The same resources are available to external Agents through the authenticated HTTP MCP facade at
+`/api/mcp` using `marketplace.intent.create`, `marketplace.offer.create`,
+`marketplace.offer.match`, `marketplace.introduction.create`, and
+`marketplace.introductions.list`. The MCP facade forwards the caller's party capability to the
+Rust gateway and does not store a second schema or token. A caller-funded Agent therefore owns its
+model and vector-store cost while MatchPlane only enforces bounded, auditable state changes.
+
 The stable boundary carries canonical IDs and scores, never vectors:
 
 ```http
@@ -248,9 +284,10 @@ release; it creates a new immutable version and requires an explicit activation.
 
 ## Runtime boundaries
 
-- Root owns accounts. A party claims a subplatform through
-  `marketplace_subplatform_memberships`; the claim adds a scoped role and labels such as `seller`,
-  `dealer`, `admin`, or `verified`, without creating another account.
+- Root owns accounts. A party claims an active public subplatform through the Better Auth
+  organization membership projection; the claim adds only a scoped `member` role, and the Rust
+  marketplace projection adds labels such as `seller`, `dealer`, or `verified` without creating
+  another account. Admin labels require an invitation or an owner/admin action.
 - Every subplatform command carries `tenant_id`, `domain_id`, and the root capability token. The
   gateway checks an active membership for role-sensitive actions.
 - Plugins are static frontend adapters. They cannot ship a second database, issue tokens, bypass

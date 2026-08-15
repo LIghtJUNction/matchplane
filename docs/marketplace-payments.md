@@ -70,7 +70,19 @@ lower than the asking price, MatchPlane partially captures the earlier authoriza
 actual commission. If it is higher, the seller must authorize sufficient commission before
 completion.
 
-Key gateway endpoints are:
+The domain-neutral kernel is available before any vertical adapter is installed:
+
+- `POST /v1/marketplace/intents`
+- `GET /v1/marketplace/intents/{id}`
+- `POST /v1/marketplace/intents/{id}/matches`
+- `POST /v1/marketplace/offers`
+- `POST /v1/admin/marketplace/offers/{id}/activate`
+- `GET|POST /v1/marketplace/introductions`
+
+These resources carry opaque domain `attributes` and `terms`; the automotive resources below are
+compatibility adapters and are not required for a new subplatform.
+
+Key compatibility gateway endpoints are:
 
 - `POST /v1/marketplace/parties`
 - `POST /v1/marketplace/listings`

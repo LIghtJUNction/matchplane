@@ -1110,7 +1110,7 @@ pub(super) async fn seller_promotion(
         .map_err(ApiError::from)
 }
 
-async fn authenticate(
+pub(super) async fn authenticate(
     state: &AppState,
     headers: &HeaderMap,
     tenant_id: TenantId,
@@ -1137,7 +1137,7 @@ async fn authenticate(
         })
 }
 
-fn require_role(party: &AuthenticatedParty, role: &str) -> Result<(), ApiError> {
+pub(super) fn require_role(party: &AuthenticatedParty, role: &str) -> Result<(), ApiError> {
     if party.role == role || party.role == "both" {
         Ok(())
     } else {

@@ -44,11 +44,12 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 async function callTool(request: Request, id: JsonRpcId, params: unknown): Promise<Response> {
-  if (!isRecord(params) || (params.name !== "platform.match" && params.name !== "platform.agent.handoff")) {
+  if (!isRecord(params) || !supportedTool(params.name)) {
     return rpcError(id, -32602, "tools/call requires a supported MatchPlane tool");
   }
   const args = isRecord(params.arguments) ? params.arguments : {};
   const isHandoff = params.name === "platform.agent.handoff";
+  if (params.name.startsWith("marketplace.")) return callMarketplaceTool(request, id, params.name, args);
   const forwarded = new Request(new URL(isHandoff ? "/api/platform/agent/handoff" : "/api/platform/match", request.url), {
     method: "POST",
     headers: request.headers,
@@ -69,6 +70,84 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
       structuredContent: payload,
     },
   }, { status: 200, headers: { "cache-control": "no-store" } });
+}
+
+/**
+ * Forward the domain-neutral Rust marketplace contract without making the web layer own a
+ * vertical schema.  The caller supplies the short-lived party capability in Authorization;
+ * the gateway remains the authority for tenant scope, role checks, idempotency and consent.
+ */
+async function callMarketplaceTool(
+  request: Request,
+  id: JsonRpcId,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<Response> {
+  const gateway = (process.env.MATCHPLANE_GATEWAY_INTERNAL_URL ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  let path: string;
+  let method = "POST";
+  let body: string | undefined;
+  if (name === "marketplace.intent.create") {
+    path = "/v1/marketplace/intents";
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.offer.create") {
+    path = "/v1/marketplace/offers";
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.offer.match") {
+    const intentId = stringArgument(args, "intent_id");
+    if (!intentId) return rpcError(id, -32602, "marketplace.offer.match requires intent_id");
+    path = `/v1/marketplace/intents/${encodeURIComponent(intentId)}/matches`;
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.introduction.create") {
+    path = "/v1/marketplace/introductions";
+    body = JSON.stringify(args);
+  } else {
+    method = "GET";
+    const tenantId = stringArgument(args, "tenant_id");
+    const participantId = stringArgument(args, "participant_id");
+    if (!tenantId || !participantId) {
+      return rpcError(id, -32602, "marketplace.introductions.list requires tenant_id and participant_id");
+    }
+    path = `/v1/marketplace/introductions?tenant_id=${encodeURIComponent(tenantId)}&participant_id=${encodeURIComponent(participantId)}`;
+  }
+
+  const headers = new Headers({ accept: "application/json" });
+  const authorization = request.headers.get("authorization");
+  if (authorization) headers.set("authorization", authorization);
+  const requestId = request.headers.get("x-request-id");
+  if (requestId) headers.set("x-request-id", requestId);
+  if (body) headers.set("content-type", "application/json");
+  let result: Response;
+  try {
+    result = await fetch(`${gateway}${path}`, { method, headers, body, cache: "no-store" });
+  } catch {
+    return rpcError(id, -32003, "marketplace gateway is unavailable");
+  }
+  const payload = await result.json().catch(() => ({ error: "marketplace tool returned invalid JSON" }));
+  return NextResponse.json({
+    jsonrpc: "2.0",
+    id,
+    result: {
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      isError: !result.ok,
+      structuredContent: payload,
+    },
+  }, { status: 200, headers: { "cache-control": "no-store" } });
+}
+
+function supportedTool(name: unknown): name is string {
+  return name === "platform.match"
+    || name === "platform.agent.handoff"
+    || name === "marketplace.intent.create"
+    || name === "marketplace.offer.create"
+    || name === "marketplace.offer.match"
+    || name === "marketplace.introduction.create"
+    || name === "marketplace.introductions.list";
+}
+
+function stringArgument(args: Record<string, unknown>, key: string): string | null {
+  const value = args[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function toolList(): Record<string, unknown> {
@@ -137,7 +216,100 @@ function toolList(): Record<string, unknown> {
           selected_refs: { type: "array", maxItems: 100, items: { type: "string", maxLength: 256 } },
         },
       },
+    }, {
+      name: "marketplace.intent.create",
+      description: "Create a domain-neutral demand or supply intent using the caller's party capability.",
+      inputSchema: marketplaceIntentSchema(),
+    }, {
+      name: "marketplace.offer.create",
+      description: "Create a seller-owned draft offer; a platform moderator must activate it before matching.",
+      inputSchema: marketplaceOfferSchema(),
+    }, {
+      name: "marketplace.offer.match",
+      description: "Match an authenticated demand intent against active offers using the subplatform's canonical attributes.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["intent_id", "tenant_id", "participant_id"],
+        properties: {
+          intent_id: { type: "string", format: "uuid" },
+          tenant_id: { type: "string", format: "uuid" },
+          participant_id: { type: "string", format: "uuid" },
+          limit: { type: "integer", minimum: 1, maximum: 100 },
+        },
+      },
+    }, {
+      name: "marketplace.introduction.create",
+      description: "Create a consent-gated introduction from one demand intent to one selected offer; no contact is released.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["tenant_id", "intent_id", "offer_id", "participant_id", "score", "idempotency_key", "expires_at"],
+        properties: {
+          introduction_id: { type: "string", format: "uuid" },
+          tenant_id: { type: "string", format: "uuid" },
+          intent_id: { type: "string", format: "uuid" },
+          offer_id: { type: "string", format: "uuid" },
+          participant_id: { type: "string", format: "uuid" },
+          score: { type: "number", minimum: 0, maximum: 1 },
+          reasons: { type: "array", maxItems: 24, items: { type: "string", maxLength: 500 } },
+          idempotency_key: { type: "string", minLength: 1, maxLength: 240 },
+          expires_at: { type: "string", format: "date-time" },
+        },
+      },
+    }, {
+      name: "marketplace.introductions.list",
+      description: "List introductions visible to the authenticated demand or supply party without exposing contact values.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["tenant_id", "participant_id"],
+        properties: {
+          tenant_id: { type: "string", format: "uuid" },
+          participant_id: { type: "string", format: "uuid" },
+        },
+      },
     }],
+  };
+}
+
+function marketplaceIntentSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["tenant_id", "domain_id", "participant_id", "side", "narrative", "idempotency_key"],
+    properties: {
+      intent_id: { type: "string", format: "uuid" },
+      tenant_id: { type: "string", format: "uuid" },
+      domain_id: { type: "string", format: "uuid" },
+      participant_id: { type: "string", format: "uuid" },
+      side: { type: "string", enum: ["demand", "supply"] },
+      narrative: { type: "string", minLength: 1, maxLength: 10000 },
+      attributes: { type: "object" },
+      terms: { type: "object" },
+      idempotency_key: { type: "string", minLength: 1, maxLength: 240 },
+      expires_at: { type: ["string", "null"], format: "date-time" },
+    },
+  };
+}
+
+function marketplaceOfferSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["tenant_id", "domain_id", "supply_party_id", "external_key", "display_name"],
+    properties: {
+      offer_id: { type: "string", format: "uuid" },
+      tenant_id: { type: "string", format: "uuid" },
+      domain_id: { type: "string", format: "uuid" },
+      supply_party_id: { type: "string", format: "uuid" },
+      asset_id: { type: ["string", "null"], format: "uuid" },
+      external_key: { type: "string", minLength: 1, maxLength: 256 },
+      display_name: { type: "string", minLength: 1, maxLength: 500 },
+      attributes: { type: "object" },
+      terms: { type: "object" },
+      expires_at: { type: ["string", "null"], format: "date-time" },
+    },
   };
 }
 

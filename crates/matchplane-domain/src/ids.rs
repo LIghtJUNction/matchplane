@@ -119,6 +119,14 @@ id_type!(
     MatchIntroductionId
 );
 id_type!(
+    #[doc = "Identifies a domain-neutral demand or supply intent."]
+    MarketplaceIntentId
+);
+id_type!(
+    #[doc = "Identifies a domain-neutral supply offer."]
+    MarketplaceOfferId
+);
+id_type!(
     #[doc = "Identifies a seller-funded promotion campaign."]
     PromotionCampaignId
 );

@@ -31,6 +31,7 @@ use tower_http::{
 };
 use tracing::{error, info};
 
+mod generic_marketplace;
 mod marketplace;
 mod privacy;
 
@@ -249,6 +250,30 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/v1/marketplace/promotions/{campaign_id}",
             get(marketplace::seller_promotion),
+        )
+        .route(
+            "/v1/marketplace/intents",
+            post(generic_marketplace::create_intent),
+        )
+        .route(
+            "/v1/marketplace/intents/{intent_id}",
+            get(generic_marketplace::intent),
+        )
+        .route(
+            "/v1/marketplace/intents/{intent_id}/matches",
+            post(generic_marketplace::matches),
+        )
+        .route(
+            "/v1/marketplace/offers",
+            post(generic_marketplace::create_offer),
+        )
+        .route(
+            "/v1/admin/marketplace/offers/{offer_id}/activate",
+            post(generic_marketplace::activate_offer),
+        )
+        .route(
+            "/v1/marketplace/introductions",
+            get(generic_marketplace::introductions).post(generic_marketplace::create_introduction),
         )
         .with_state(state)
         .layer(CatchPanicLayer::new())
