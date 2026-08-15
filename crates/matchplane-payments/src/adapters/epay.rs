@@ -170,7 +170,9 @@ impl PaymentGateway for EpayGateway {
             .send()
             .await?;
         let status = response.status();
-        let body: Value = response.json().await?;
+        let body_bytes =
+            crate::read_provider_body(response, crate::MAX_PROVIDER_RESPONSE_BYTES).await?;
+        let body: Value = serde_json::from_slice(&body_bytes)?;
         if !status.is_success() {
             return Err(PaymentError::UnknownOutcome);
         }
@@ -217,7 +219,9 @@ impl PaymentGateway for EpayGateway {
             .send()
             .await?;
         let status = response.status();
-        let body: Value = response.json().await?;
+        let body_bytes =
+            crate::read_provider_body(response, crate::MAX_PROVIDER_RESPONSE_BYTES).await?;
+        let body: Value = serde_json::from_slice(&body_bytes)?;
         if !status.is_success() {
             return Err(PaymentError::UnknownOutcome);
         }

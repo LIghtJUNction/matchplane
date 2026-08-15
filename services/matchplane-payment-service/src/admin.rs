@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use matchplane_config::Environment;
 use matchplane_domain::{PaymentGatewayId, TenantId};
 use matchplane_payments::{GatewayKind, GatewayMode, HttpInvoiceProvider};
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::{
-    gateways::{GatewayConfig, GatewayFactory, resolve_secret},
+    gateways::{GatewayConfig, GatewayFactory, resolve_secret, resolve_secret_digest},
     store::StoreError,
 };
 
@@ -153,11 +154,12 @@ pub struct InvoiceSetting {
 #[derive(Debug, Clone)]
 pub struct AdminStore {
     pool: PgPool,
+    environment: Environment,
 }
 
 impl AdminStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, environment: Environment) -> Self {
+        Self { pool, environment }
     }
 
     pub async fn gateways(&self, tenant_id: TenantId) -> Result<Vec<GatewayRecord>, StoreError> {
@@ -184,6 +186,11 @@ impl AdminStore {
         mutation: &InvoiceProviderMutation,
     ) -> Result<InvoiceProviderRecord, StoreError> {
         validate_invoice_provider(mutation)?;
+        if self.environment == Environment::Production && mutation.mode == GatewayMode::Test {
+            return Err(StoreError::Invalid(
+                "test invoice providers cannot be configured in production".to_owned(),
+            ));
+        }
         let mut transaction = self.pool.begin().await?;
         serializable(&mut transaction).await?;
         let provider_id = mutation.provider_id.unwrap_or_else(Uuid::now_v7);
@@ -222,6 +229,11 @@ impl AdminStore {
                 ));
             }
         }
+        let credential_digest = mutation
+            .credential_secret_ref
+            .as_deref()
+            .map(resolve_secret_digest)
+            .transpose()?;
         let action = if let Some(current) = &before {
             if current.tenant_id != mutation.tenant_id {
                 return Err(StoreError::NotFound("invoice provider"));
@@ -234,8 +246,9 @@ impl AdminStore {
             }
             let result = sqlx::query(
                 "UPDATE invoice_provider_configs SET name = $3, provider_key = $4, mode = $5, \
-                     settings = $6, credential_secret_ref = $7, enabled = $8, version = version + 1 \
-                 WHERE tenant_id = $1 AND id = $2 AND version = $9",
+                     settings = $6, credential_secret_ref = $7, credential_secret_digest = $8, \
+                     enabled = $9, version = version + 1 \
+                 WHERE tenant_id = $1 AND id = $2 AND version = $10",
             )
             .bind(mutation.tenant_id.into_uuid())
             .bind(provider_id)
@@ -244,6 +257,7 @@ impl AdminStore {
             .bind(mutation.mode.as_str())
             .bind(&mutation.settings)
             .bind(&mutation.credential_secret_ref)
+            .bind(&credential_digest)
             .bind(mutation.enabled)
             .bind(current.version)
             .execute(&mut *transaction)
@@ -262,8 +276,9 @@ impl AdminStore {
             }
             sqlx::query(
                 "INSERT INTO invoice_provider_configs \
-                 (id, tenant_id, provider_key, name, mode, settings, credential_secret_ref, enabled) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                 (id, tenant_id, provider_key, name, mode, settings, credential_secret_ref, \
+                  credential_secret_digest, enabled) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(provider_id)
             .bind(mutation.tenant_id.into_uuid())
@@ -272,6 +287,7 @@ impl AdminStore {
             .bind(mutation.mode.as_str())
             .bind(&mutation.settings)
             .bind(&mutation.credential_secret_ref)
+            .bind(&credential_digest)
             .bind(mutation.enabled)
             .execute(&mut *transaction)
             .await?;
@@ -312,6 +328,11 @@ impl AdminStore {
         command: &InvoiceModeSwitch,
     ) -> Result<InvoiceSetting, StoreError> {
         validate_actor_reason(&command.actor, &command.reason)?;
+        if self.environment == Environment::Production && command.mode == GatewayMode::Test {
+            return Err(StoreError::Invalid(
+                "production cannot switch to test invoice mode".to_owned(),
+            ));
+        }
         let mut transaction = self.pool.begin().await?;
         serializable(&mut transaction).await?;
         let row = sqlx::query(
@@ -330,7 +351,7 @@ impl AdminStore {
             )));
         }
         let provider = sqlx::query(
-            "SELECT id, provider_key, mode, settings, credential_secret_ref \
+            "SELECT id, provider_key, mode, settings, credential_secret_ref, credential_secret_digest \
              FROM invoice_provider_configs \
              WHERE tenant_id = $1 AND enabled AND mode = $2 \
                AND ($3::uuid IS NULL OR id = $3) \
@@ -417,6 +438,11 @@ impl AdminStore {
         mutation: &GatewayMutation,
     ) -> Result<GatewayRecord, StoreError> {
         validate_gateway(mutation)?;
+        if self.environment == Environment::Production && mutation.mode == GatewayMode::Test {
+            return Err(StoreError::Invalid(
+                "test payment gateways cannot be configured in production".to_owned(),
+            ));
+        }
         let mut transaction = self.pool.begin().await?;
         serializable(&mut transaction).await?;
         let gateway_id = mutation.gateway_id.unwrap_or_default();
@@ -434,49 +460,99 @@ impl AdminStore {
             .fetch_one(&mut *transaction)
             .await?;
             if has_payment_history {
-                return Err(StoreError::Conflict(
-                    "payment gateway configuration is immutable after payment history exists; create a new gateway for rotation"
-                        .to_owned(),
-                ));
+                if mutation.enabled
+                    || mutation.name != current.name
+                    || mutation.kind != current.kind
+                    || mutation.mode != current.mode
+                    || mutation.settings != current.settings
+                {
+                    return Err(StoreError::Conflict(
+                        "historical payment gateways may only be disabled; create a new gateway for rotation"
+                            .to_owned(),
+                    ));
+                }
+                if mutation.expected_version != Some(current.version) {
+                    return Err(StoreError::Conflict(format!(
+                        "gateway version is {}, expected {:?}",
+                        current.version, mutation.expected_version
+                    )));
+                }
+                let result = sqlx::query(
+                    "UPDATE payment_gateway_configs SET enabled = false \
+                     WHERE tenant_id = $1 AND id = $2 AND version = $3",
+                )
+                .bind(mutation.tenant_id.into_uuid())
+                .bind(gateway_id.into_uuid())
+                .bind(current.version)
+                .execute(&mut *transaction)
+                .await?;
+                if result.rows_affected() != 1 {
+                    return Err(StoreError::Conflict(
+                        "gateway was concurrently modified".to_owned(),
+                    ));
+                }
+                "gateway_disabled"
+            } else {
+                if mutation.expected_version != Some(current.version) {
+                    return Err(StoreError::Conflict(format!(
+                        "gateway version is {}, expected {:?}",
+                        current.version, mutation.expected_version
+                    )));
+                }
+                let config = GatewayConfig::from_parts(
+                    gateway_id,
+                    mutation.name.clone(),
+                    mutation.kind.as_str(),
+                    mutation.mode.as_str(),
+                    mutation.settings.clone(),
+                    mutation.credential_secret_ref.clone(),
+                )?;
+                let credential_digest = GatewayFactory::credential_digest(&config)?;
+                let result = sqlx::query(
+                    "UPDATE payment_gateway_configs SET name = $3, gateway_kind = $4, mode = $5, \
+                     settings = $6, credential_secret_ref = $7, credential_secret_digest = $8, \
+                     enabled = $9, version = version + 1 \
+                 WHERE tenant_id = $1 AND id = $2 AND version = $10",
+                )
+                .bind(mutation.tenant_id.into_uuid())
+                .bind(gateway_id.into_uuid())
+                .bind(&mutation.name)
+                .bind(mutation.kind.as_str())
+                .bind(mutation.mode.as_str())
+                .bind(&mutation.settings)
+                .bind(&mutation.credential_secret_ref)
+                .bind(&credential_digest)
+                .bind(mutation.enabled)
+                .bind(current.version)
+                .execute(&mut *transaction)
+                .await?;
+                if result.rows_affected() != 1 {
+                    return Err(StoreError::Conflict(
+                        "gateway was concurrently modified".to_owned(),
+                    ));
+                }
+                "gateway_updated"
             }
-            if mutation.expected_version != Some(current.version) {
-                return Err(StoreError::Conflict(format!(
-                    "gateway version is {}, expected {:?}",
-                    current.version, mutation.expected_version
-                )));
-            }
-            let result = sqlx::query(
-                "UPDATE payment_gateway_configs SET name = $3, gateway_kind = $4, mode = $5, \
-                     settings = $6, credential_secret_ref = $7, enabled = $8, version = version + 1 \
-                 WHERE tenant_id = $1 AND id = $2 AND version = $9",
-            )
-            .bind(mutation.tenant_id.into_uuid())
-            .bind(gateway_id.into_uuid())
-            .bind(&mutation.name)
-            .bind(mutation.kind.as_str())
-            .bind(mutation.mode.as_str())
-            .bind(&mutation.settings)
-            .bind(&mutation.credential_secret_ref)
-            .bind(mutation.enabled)
-            .bind(current.version)
-            .execute(&mut *transaction)
-            .await?;
-            if result.rows_affected() != 1 {
-                return Err(StoreError::Conflict(
-                    "gateway was concurrently modified".to_owned(),
-                ));
-            }
-            "gateway_updated"
         } else {
             if mutation.expected_version.is_some() {
                 return Err(StoreError::Conflict(
                     "new gateway must not provide expected_version".to_owned(),
                 ));
             }
+            let config = GatewayConfig::from_parts(
+                gateway_id,
+                mutation.name.clone(),
+                mutation.kind.as_str(),
+                mutation.mode.as_str(),
+                mutation.settings.clone(),
+                mutation.credential_secret_ref.clone(),
+            )?;
+            let credential_digest = GatewayFactory::credential_digest(&config)?;
             sqlx::query(
                 "INSERT INTO payment_gateway_configs \
-                 (id, tenant_id, name, gateway_kind, mode, settings, credential_secret_ref, enabled) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                 (id, tenant_id, name, gateway_kind, mode, settings, credential_secret_ref, \
+                  credential_secret_digest, enabled) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(gateway_id.into_uuid())
             .bind(mutation.tenant_id.into_uuid())
@@ -485,6 +561,7 @@ impl AdminStore {
             .bind(mutation.mode.as_str())
             .bind(&mutation.settings)
             .bind(&mutation.credential_secret_ref)
+            .bind(&credential_digest)
             .bind(mutation.enabled)
             .execute(&mut *transaction)
             .await?;
@@ -620,6 +697,11 @@ impl AdminStore {
 
     pub async fn switch_mode(&self, command: &ModeSwitch) -> Result<PaymentSetting, StoreError> {
         validate_actor_reason(&command.actor, &command.reason)?;
+        if self.environment == Environment::Production && command.mode == GatewayMode::Test {
+            return Err(StoreError::Invalid(
+                "production cannot switch to test payment mode".to_owned(),
+            ));
+        }
         let mut transaction = self.pool.begin().await?;
         serializable(&mut transaction).await?;
         let row = sqlx::query(
@@ -642,7 +724,7 @@ impl AdminStore {
         }
         let route_configs = sqlx::query(
             "SELECT DISTINCT g.id, g.tenant_id, g.name, g.gateway_kind, g.mode, g.settings, \
-                    g.credential_secret_ref \
+                    g.credential_secret_ref, g.credential_secret_digest \
              FROM payment_routes r \
              JOIN payment_gateway_configs g ON g.tenant_id = r.tenant_id AND g.id = r.gateway_id \
              WHERE r.tenant_id = $1 AND r.enabled AND g.enabled AND g.mode = $2",
@@ -665,7 +747,8 @@ impl AdminStore {
                 &row.try_get::<String, _>("mode")?,
                 row.try_get("settings")?,
                 row.try_get("credential_secret_ref")?,
-            )?;
+            )?
+            .with_credential_digest(row.try_get("credential_secret_digest")?);
             GatewayFactory::build(&config)?;
         }
         let outstanding: i64 = sqlx::query_scalar(
@@ -934,7 +1017,20 @@ fn validate_invoice_provider_row(row: &sqlx::postgres::PgRow) -> Result<(), Stor
         mode,
         &settings,
         credential_secret_ref.as_deref(),
-    )
+    )?;
+    if mode == GatewayMode::Production {
+        let expected: Option<Vec<u8>> = row.try_get("credential_secret_digest")?;
+        let actual = resolve_secret_digest(credential_secret_ref.as_deref().ok_or_else(|| {
+            StoreError::Invalid("invoice provider credential is missing".to_owned())
+        })?)?;
+        if expected.as_deref() != Some(actual.as_slice()) {
+            return Err(StoreError::Invalid(
+                "invoice provider credential digest is missing or stale; re-save the provider"
+                    .to_owned(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_invoice_provider_parts(

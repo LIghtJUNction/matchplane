@@ -84,8 +84,9 @@ printf '%s\n' "$extension_assertion" | grep -Fx 'vector=0.8.6' >/dev/null
 webhook_claim_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
   --tuples-only --no-align --command \
   "SELECT count(*) FROM information_schema.columns \
-   WHERE table_name = 'payment_webhook_inbox' AND column_name = 'processing_at';")
-test "$webhook_claim_assertion" = 1
+   WHERE table_name = 'payment_webhook_inbox' \
+     AND column_name IN ('processing_at', 'processing_token');")
+test "$webhook_claim_assertion" = 2
 
 invoice_admin_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
   --tuples-only --no-align --command \
@@ -101,8 +102,25 @@ gateway_pin_assertion=$("${compose[@]}" exec -T postgres psql --username matchpl
   --tuples-only --no-align --command \
   "SELECT count(*) FROM information_schema.columns \
    WHERE table_name = 'payment_intents' \
-     AND column_name IN ('gateway_config_version', 'gateway_credential_secret_ref');")
-test "$gateway_pin_assertion" = 2
+     AND column_name IN ('gateway_config_version', 'gateway_credential_secret_ref', \
+                         'gateway_credential_digest');")
+test "$gateway_pin_assertion" = 3
+
+gateway_digest_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
+  --tuples-only --no-align --command \
+  "SELECT count(*) FROM information_schema.columns \
+   WHERE table_name = 'payment_gateway_configs' AND column_name = 'credential_secret_digest';")
+test "$gateway_digest_assertion" = 1
+
+invoice_digest_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
+  --tuples-only --no-align --command \
+  "SELECT (SELECT count(*) FROM information_schema.columns \
+             WHERE table_name = 'invoice_provider_configs' \
+               AND column_name = 'credential_secret_digest'), \
+          (SELECT count(*) FROM information_schema.columns \
+             WHERE table_name = 'invoice_requests' \
+               AND column_name = 'provider_credential_digest');")
+test "$invoice_digest_assertion" = '1|1'
 
 marketplace_authorization_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
   --tuples-only --no-align --command \

@@ -1,3 +1,4 @@
+use matchplane_config::Environment;
 use matchplane_domain::{InvoiceId, OfflineDealId, PaymentId, TenantId};
 use matchplane_payments::{InvoiceKind, InvoiceOutcome, PaymentError};
 use serde::Serialize;
@@ -73,6 +74,7 @@ pub struct InvoiceProviderConfig {
     pub provider_key: String,
     pub settings: Value,
     pub credential_secret_ref: String,
+    pub credential_digest: Option<Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -97,11 +99,12 @@ pub struct StoredArtifact {
 #[derive(Debug, Clone)]
 pub struct InvoiceStore {
     pool: PgPool,
+    environment: Environment,
 }
 
 impl InvoiceStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, environment: Environment) -> Self {
+        Self { pool, environment }
     }
 
     pub async fn request(&self, command: &NewInvoice) -> Result<PreparedInvoice, StoreError> {
@@ -126,6 +129,11 @@ impl InvoiceStore {
                 false,
             )
             .await?;
+            if self.environment == Environment::Production && invoice.provider_mode == "test" {
+                return Err(StoreError::Invalid(
+                    "production cannot reuse an invoice created with a test provider".to_owned(),
+                ));
+            }
             transaction.commit().await?;
             return Ok(PreparedInvoice {
                 invoice,
@@ -134,7 +142,7 @@ impl InvoiceStore {
         }
         validate_invoice_source(&mut transaction, command).await?;
         let provider = sqlx::query(
-            "SELECT c.provider_key, c.mode FROM invoice_settings s \
+            "SELECT c.provider_key, c.mode, c.credential_secret_digest FROM invoice_settings s \
              JOIN invoice_provider_configs c ON c.id = s.active_provider_id \
              WHERE s.tenant_id = $1 AND c.enabled AND c.mode = s.active_mode FOR SHARE OF c",
         )
@@ -144,12 +152,24 @@ impl InvoiceStore {
         .ok_or(StoreError::NotFound("active invoice provider"))?;
         let provider_key: String = provider.try_get("provider_key")?;
         let provider_mode: String = provider.try_get("mode")?;
+        if self.environment == Environment::Production && provider_mode == "test" {
+            return Err(StoreError::Invalid(
+                "production cannot create invoices through a test provider".to_owned(),
+            ));
+        }
+        let credential_digest: Option<Vec<u8>> = provider.try_get("credential_secret_digest")?;
+        if provider_mode == "production" && credential_digest.is_none() {
+            return Err(StoreError::Payment(PaymentError::Credential(
+                "invoice provider is missing an immutable credential digest; re-save it before issuing invoices"
+                    .to_owned(),
+            )));
+        }
         sqlx::query(
             "INSERT INTO invoice_requests \
              (id, tenant_id, payment_id, offline_deal_id, kind, idempotency_key, request_hash, \
               amount, currency, currency_scale, description, billing_details_ciphertext, billing_details_nonce, \
-              encryption_key_version, provider_key, provider_mode, requested_by) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+              encryption_key_version, provider_key, provider_mode, provider_credential_digest, requested_by) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
         )
         .bind(command.invoice_id.into_uuid())
         .bind(command.tenant_id.into_uuid())
@@ -167,6 +187,7 @@ impl InvoiceStore {
         .bind(command.encryption_key_version)
         .bind(provider_key)
         .bind(provider_mode)
+        .bind(&credential_digest)
         .bind(&command.requested_by)
         .execute(&mut *transaction)
         .await?;
@@ -202,13 +223,15 @@ impl InvoiceStore {
         invoice: &InvoiceRecord,
     ) -> Result<InvoiceProviderConfig, StoreError> {
         let row = sqlx::query(
-            "SELECT provider_key, mode, settings, credential_secret_ref \
-             FROM invoice_provider_configs \
-             WHERE tenant_id = $1 AND provider_key = $2 AND mode = $3 AND enabled",
+            "SELECT c.provider_key, c.mode, c.settings, c.credential_secret_ref, \
+                    c.credential_secret_digest \
+             FROM invoice_requests i \
+             JOIN invoice_provider_configs c ON c.tenant_id = i.tenant_id \
+                 AND c.provider_key = i.provider_key AND c.mode = i.provider_mode \
+                 AND c.credential_secret_digest IS NOT DISTINCT FROM i.provider_credential_digest \
+             WHERE i.id = $1 AND c.enabled",
         )
-        .bind(invoice.tenant_id.into_uuid())
-        .bind(&invoice.provider_key)
-        .bind(&invoice.provider_mode)
+        .bind(invoice.invoice_id.into_uuid())
         .fetch_optional(&self.pool)
         .await?
         .ok_or(StoreError::NotFound("invoice provider configuration"))?;
@@ -221,6 +244,7 @@ impl InvoiceStore {
             provider_key: row.try_get("provider_key")?,
             settings: row.try_get("settings")?,
             credential_secret_ref,
+            credential_digest: row.try_get("credential_secret_digest")?,
         })
     }
 

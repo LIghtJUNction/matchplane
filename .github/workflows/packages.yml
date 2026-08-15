@@ -107,6 +107,7 @@ jobs:
     container: archlinux:latest
     env:
       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      AUR_SSH_KNOWN_HOSTS: ${{ secrets.AUR_SSH_KNOWN_HOSTS }}
       VERSION: ${{ github.ref_name }}
     steps:
       - name: Install current Arch build toolchain
@@ -134,10 +135,13 @@ jobs:
       - name: Publish matchplane-git and matchplane-bin to AUR
         run: |
           test -n "$AUR_SSH_PRIVATE_KEY"
+          test -n "$AUR_SSH_KNOWN_HOSTS"
           install -d -m 0700 /root/.ssh
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /root/.ssh/id_ed25519
           chmod 0600 /root/.ssh/id_ed25519
-          ssh-keyscan aur.archlinux.org >> /root/.ssh/known_hosts
+          printf '%s\n' "$AUR_SSH_KNOWN_HOSTS" > /root/.ssh/known_hosts
+          chmod 0644 /root/.ssh/known_hosts
+          export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/known_hosts'
           git config --global user.name 'LIghtJUNction'
           git config --global user.email 'lightjunction.me@gmail.com'
           for package in matchplane-git matchplane-bin; do

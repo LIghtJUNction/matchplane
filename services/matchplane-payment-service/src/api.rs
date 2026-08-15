@@ -10,10 +10,11 @@ use axum::{
 use matchplane_config::Environment;
 use matchplane_domain::{InvoiceId, MarketplacePartyId, OfflineDealId, PaymentId, RefundId};
 use matchplane_payments::{
-    AuthorizePayment, CapturePayment, GatewayKind, HttpInvoiceProvider, InvoiceKind,
+    AuthorizePayment, CapturePayment, GatewayKind, GatewayMode, HttpInvoiceProvider, InvoiceKind,
     InvoiceProvider, InvoiceRecipient, IssueInvoice, Money, PaymentError, PaymentMethod,
     PaymentToken, QueryPayment, RefundPayment, TestInvoiceProvider, WebhookRequest,
 };
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
@@ -312,10 +313,7 @@ pub async fn authorize(
             }),
         ));
     }
-    let gateway = GatewayFactory::build(&prepared.gateway).map_err(|error| {
-        tracing::error!(gateway_id = %prepared.gateway.gateway_id, error = %error, "gateway construction failed");
-        ApiError::gateway(&error)
-    })?;
+    let gateway = build_gateway(&state, &prepared.gateway).await?;
     let result = gateway
         .authorize(&AuthorizePayment {
             payment_id,
@@ -363,10 +361,7 @@ pub async fn payment_webhook(
 ) -> Result<Response, ApiError> {
     let gateway_id = parse_id(&gateway_id)?;
     let config = state.store.webhook_gateway(gateway_id).await?;
-    let gateway = GatewayFactory::build(&config).map_err(|error| {
-        tracing::error!(gateway_id = %gateway_id, error = %error, "webhook gateway construction failed");
-        ApiError::gateway(&error)
-    })?;
+    let gateway = build_gateway(&state, &config).await?;
     let request = WebhookRequest {
         headers: headers
             .iter()
@@ -396,6 +391,13 @@ pub async fn payment_webhook(
         .process_webhook(gateway_id, &event, payload_hash.as_slice())
         .await
         .map_err(ApiError::from)?;
+    if receipt.status == "processing" {
+        return Err(ApiError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "webhook_in_progress",
+            message: "webhook is already being processed; retry the delivery".to_owned(),
+        });
+    }
     Ok(match config.kind {
         GatewayKind::Epay | GatewayKind::AlipayOpenapi => (
             [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
@@ -462,10 +464,7 @@ pub async fn reconcile(
             duplicate: true,
         }));
     }
-    let gateway = GatewayFactory::build(&prepared.gateway).map_err(|error| {
-        tracing::error!(gateway_id = %prepared.gateway.gateway_id, error = %error, "gateway construction failed");
-        ApiError::gateway(&error)
-    })?;
+    let gateway = build_gateway(&state, &prepared.gateway).await?;
     if !gateway.descriptor().capabilities.status_query {
         let error = PaymentError::Unsupported {
             gateway: gateway.descriptor().kind.as_str(),
@@ -531,10 +530,7 @@ pub async fn capture(
             duplicate: true,
         }));
     }
-    let gateway = GatewayFactory::build(&prepared.gateway).map_err(|error| {
-        tracing::error!(gateway_id = %prepared.gateway.gateway_id, error = %error, "gateway construction failed");
-        ApiError::gateway(&error)
-    })?;
+    let gateway = build_gateway(&state, &prepared.gateway).await?;
     if !gateway.descriptor().capabilities.manual_capture {
         return Err(ApiError::gateway(&PaymentError::Unsupported {
             gateway: gateway.descriptor().kind.as_str(),
@@ -636,10 +632,7 @@ pub async fn refund(
             }),
         ));
     }
-    let gateway = GatewayFactory::build(&prepared.gateway).map_err(|error| {
-        tracing::error!(gateway_id = %prepared.gateway.gateway_id, error = %error, "gateway construction failed");
-        ApiError::gateway(&error)
-    })?;
+    let gateway = build_gateway(&state, &prepared.gateway).await?;
     if !gateway.descriptor().capabilities.refund {
         return Err(ApiError::gateway(&PaymentError::Unsupported {
             gateway: gateway.descriptor().kind.as_str(),
@@ -986,7 +979,11 @@ pub async fn mutate_gateway(
             request.credential_secret_ref.clone(),
         )
         .map_err(|error| ApiError::gateway(&error))?;
-        GatewayFactory::build(&config).map_err(|error| ApiError::gateway(&error))?;
+        ensure_gateway_environment(&state, &config)?;
+        let digest = GatewayFactory::credential_digest(&config)
+            .map_err(|error| ApiError::gateway(&error))?;
+        let config = config.with_credential_digest(digest);
+        build_gateway(&state, &config).await?;
     }
     state
         .admin
@@ -1259,6 +1256,11 @@ async fn invoice_provider(
     invoice: &InvoiceRecord,
 ) -> Result<std::sync::Arc<dyn InvoiceProvider>, ApiError> {
     if invoice.provider_key == "local_test" && invoice.provider_mode == "test" {
+        if state.environment == Environment::Production {
+            return Err(ApiError::bad_request(
+                "production cannot construct a test invoice provider",
+            ));
+        }
         return Ok(std::sync::Arc::new(TestInvoiceProvider));
     }
     if invoice.provider_mode != "production"
@@ -1272,9 +1274,74 @@ async fn invoice_provider(
     let config = state.invoices.provider_config(invoice).await?;
     let secret = crate::gateways::resolve_secret(&config.credential_secret_ref)
         .map_err(|error| ApiError::gateway(&error))?;
-    let provider = HttpInvoiceProvider::new(config.provider_key, &config.settings, secret)
-        .map_err(|error| ApiError::gateway(&error))?;
+    let expected = config.credential_digest.as_deref().ok_or_else(|| {
+        ApiError::gateway(&PaymentError::Credential(
+            "invoice provider has no immutable credential digest".to_owned(),
+        ))
+    })?;
+    let actual = Sha256::digest(secret.expose_secret());
+    if expected != actual.as_slice() {
+        return Err(ApiError::gateway(&PaymentError::Credential(
+            "invoice provider credential material no longer matches its pinned digest".to_owned(),
+        )));
+    }
+    let provider_key = config.provider_key;
+    let settings = config.settings;
+    let provider = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || {
+            HttpInvoiceProvider::new(provider_key, &settings, secret)
+        }),
+    )
+    .await
+    .map_err(|_| ApiError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "invoice_provider_resolution_timeout",
+        message: "invoice provider endpoint resolution timed out; retry the operation".to_owned(),
+    })?
+    .map_err(|error| {
+        ApiError::internal(format!(
+            "invoice provider construction task failed: {error}"
+        ))
+    })?
+    .map_err(|error| ApiError::gateway(&error))?;
     Ok(std::sync::Arc::new(provider))
+}
+
+fn ensure_gateway_environment(
+    state: &AppState,
+    config: &crate::gateways::GatewayConfig,
+) -> Result<(), ApiError> {
+    if state.environment == Environment::Production && config.mode == GatewayMode::Test {
+        return Err(ApiError::bad_request(
+            "production cannot construct a test payment gateway",
+        ));
+    }
+    Ok(())
+}
+
+async fn build_gateway(
+    state: &AppState,
+    config: &crate::gateways::GatewayConfig,
+) -> Result<std::sync::Arc<dyn matchplane_payments::PaymentGateway>, ApiError> {
+    ensure_gateway_environment(state, config)?;
+    let gateway_id = config.gateway_id;
+    let config = config.clone();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || GatewayFactory::build(&config)),
+    )
+    .await
+    .map_err(|_| ApiError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "gateway_resolution_timeout",
+        message: "gateway endpoint resolution timed out; retry the operation".to_owned(),
+    })?
+    .map_err(|error| ApiError::internal(format!("gateway construction task failed: {error}")))?;
+    result.map_err(|error| {
+        tracing::error!(gateway_id = %gateway_id, error = %error, "gateway construction failed");
+        ApiError::gateway(&error)
+    })
 }
 
 fn issue_request(state: &AppState, invoice: &InvoiceRecord) -> Result<IssueInvoice, ApiError> {

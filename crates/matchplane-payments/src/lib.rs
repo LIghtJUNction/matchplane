@@ -11,11 +11,15 @@ mod invoice;
 mod test_gateway;
 mod types;
 
+use futures_util::StreamExt;
 use std::{
     collections::BTreeSet,
     net::{IpAddr, SocketAddr, ToSocketAddrs},
     time::Duration,
 };
+
+pub(crate) const MAX_PROVIDER_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+pub(crate) const MAX_INVOICE_PROVIDER_RESPONSE_BYTES: usize = 12 * 1024 * 1024;
 
 /// Validate an outbound provider endpoint before constructing an HTTP adapter.
 ///
@@ -107,6 +111,35 @@ pub(crate) fn provider_http_client(
     Ok((url, client))
 }
 
+/// Read a provider response with a hard aggregate limit, including chunked responses that do not
+/// advertise a Content-Length. Provider data is untrusted and must be bounded before JSON,
+/// signature, or invoice-artifact processing allocates additional memory.
+pub(crate) async fn read_provider_body(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, PaymentError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        return Err(PaymentError::Invalid(
+            "provider response exceeds the configured size limit".to_owned(),
+        ));
+    }
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if body.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(PaymentError::Invalid(
+                "provider response exceeds the configured size limit".to_owned(),
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 fn is_forbidden_provider_address(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(address) => {
@@ -120,12 +153,16 @@ fn is_forbidden_provider_address(ip: IpAddr) -> bool {
                 || in_ipv4_range(value, 0x6440_0000, 10) // 100.64.0.0/10 (CGNAT)
                 || in_ipv4_range(value, 0xc000_0000, 24) // 192.0.0.0/24
                 || in_ipv4_range(value, 0xc000_0200, 24) // 192.0.2.0/24 (documentation)
+                || in_ipv4_range(value, 0xc01f_c400, 24) // 192.31.196.0/24 (AS112)
+                || in_ipv4_range(value, 0xc034_c100, 24) // 192.52.193.0/24 (AS112)
+                || in_ipv4_range(value, 0xc0af_3000, 24) // 192.175.48.0/24 (AS112)
                 || in_ipv4_range(value, 0xc058_6300, 24) // 192.88.99.0/24 (deprecated anycast)
                 || in_ipv4_range(value, 0xc612_0000, 15) // 198.18.0.0/15 (benchmarking)
                 || in_ipv4_range(value, 0xc633_6400, 24) // 198.51.100.0/24 (documentation)
                 || in_ipv4_range(value, 0xcb00_7100, 24) // 203.0.113.0/24 (documentation)
                 || in_ipv4_range(value, 0xe000_0000, 4) // 224.0.0.0/4 (multicast)
                 || in_ipv4_range(value, 0xf000_0000, 4) // 240.0.0.0/4 (reserved)
+                || value == 0xa83f_8110 // 168.63.129.16 (Azure platform virtual IP)
         }
         IpAddr::V6(address) => {
             let segments = address.segments();
@@ -147,6 +184,17 @@ fn is_forbidden_provider_address(ip: IpAddr) -> bool {
                     && (segments[1] & 0xfff0) == 0x0010) // 2001:10::/28 (ORCHID)
                 || (segments[0] == 0x2001
                     && (segments[1] & 0xfff0) == 0x0020) // 2001:20::/28 (ORCHIDv2)
+                || (segments[0] == 0x0100
+                    && segments[1..].iter().all(|segment| *segment == 0)) // 100::/64 (discard-only)
+                || (segments[0] & 0xffc0) == 0xfec0 // fec0::/10 (deprecated site-local)
+                || (segments[0] == 0x0064
+                    && segments[1] == 0xff9b
+                    && segments[2..6].iter().all(|segment| *segment == 0)) // 64:ff9b::/96 (NAT64 well-known prefix)
+                || (segments[0] == 0x0064
+                    && segments[1] == 0xff9b
+                    && segments[2] == 1) // 64:ff9b:1::/48 (NAT64 local-use prefix)
+                || segments[0] == 0x2002 // 2002::/16 (6to4)
+                || (segments[0] == 0x2001 && segments[1] == 0) // 2001::/32 (Teredo)
                 || (segments[0] == 0x3fff && segments[1] & 0xfff0 == 0x0) // 3fff::/20 (documentation)
         }
     }
@@ -214,6 +262,10 @@ mod endpoint_tests {
             "192.0.2.8",
             "198.18.0.8",
             "203.0.113.8",
+            "192.31.196.8",
+            "192.52.193.8",
+            "192.175.48.8",
+            "168.63.129.16",
             "224.0.0.1",
             "240.0.0.1",
             "::",
@@ -222,6 +274,12 @@ mod endpoint_tests {
             "fe80::8",
             "2001:db8::8",
             "ff02::1",
+            "100::",
+            "fec0::8",
+            "64:ff9b::a9fe:a9fe",
+            "64:ff9b:1::a9fe:a9fe",
+            "2001::a9fe:a9fe",
+            "2002:c000:0208::",
         ] {
             let address = address.parse::<IpAddr>().expect("test address is valid");
             assert!(

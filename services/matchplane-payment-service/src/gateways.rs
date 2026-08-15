@@ -7,6 +7,7 @@ use matchplane_payments::{
 };
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 /// Non-secret gateway configuration loaded from PostgreSQL.
 #[derive(Debug, Clone)]
@@ -19,6 +20,11 @@ pub struct GatewayConfig {
     pub credential_secret_ref: Option<String>,
     /// Immutable configuration revision selected for a payment operation.
     pub version: i64,
+    /// SHA-256 of the resolved credential material selected for this operation.
+    ///
+    /// The reference is retained for lookup, but this digest prevents a mutable file or
+    /// environment-variable alias from silently changing credentials.
+    pub credential_digest: Option<Vec<u8>>,
 }
 
 impl GatewayConfig {
@@ -63,7 +69,13 @@ impl GatewayConfig {
             settings,
             credential_secret_ref,
             version,
+            credential_digest: None,
         })
+    }
+
+    pub fn with_credential_digest(mut self, credential_digest: Option<Vec<u8>>) -> Self {
+        self.credential_digest = credential_digest;
+        self
     }
 
     fn descriptor(&self) -> GatewayDescriptor {
@@ -81,6 +93,17 @@ impl GatewayConfig {
 pub struct GatewayFactory;
 
 impl GatewayFactory {
+    /// Resolve and fingerprint production credentials without exposing their contents.
+    pub fn credential_digest(config: &GatewayConfig) -> Result<Option<Vec<u8>>, PaymentError> {
+        if config.mode == GatewayMode::Test {
+            return Ok(None);
+        }
+        let reference = config.credential_secret_ref.as_deref().ok_or_else(|| {
+            PaymentError::Credential(format!("gateway {} has no secret reference", config.name))
+        })?;
+        Ok(Some(resolve_secret_digest(reference)?))
+    }
+
     pub fn build(config: &GatewayConfig) -> Result<Arc<dyn PaymentGateway>, PaymentError> {
         let descriptor = config.descriptor();
         match config.kind {
@@ -139,6 +162,11 @@ impl GatewayFactory {
     }
 }
 
+pub(crate) fn resolve_secret_digest(reference: &str) -> Result<Vec<u8>, PaymentError> {
+    let secret = resolve_secret(reference)?;
+    Ok(Sha256::digest(secret.expose_secret().as_bytes()).to_vec())
+}
+
 fn capabilities(kind: GatewayKind) -> GatewayCapabilities {
     match kind {
         GatewayKind::Test | GatewayKind::WaffoPancake => GatewayCapabilities {
@@ -191,6 +219,19 @@ fn secrets(config: &GatewayConfig) -> Result<Value, PaymentError> {
         PaymentError::Credential(format!("gateway {} has no secret reference", config.name))
     })?;
     let secret = resolve_secret(reference)?;
+    let digest = Sha256::digest(secret.expose_secret().as_bytes());
+    let expected = config.credential_digest.as_deref().ok_or_else(|| {
+        PaymentError::Credential(format!(
+            "gateway {} has no immutable credential digest",
+            config.name
+        ))
+    })?;
+    if expected != digest.as_slice() {
+        return Err(PaymentError::Credential(format!(
+            "gateway {} credential material no longer matches its pinned digest",
+            config.name
+        )));
+    }
     serde_json::from_str(secret.expose_secret()).map_err(|_| {
         PaymentError::Credential(format!(
             "gateway {} secret must be a JSON object",

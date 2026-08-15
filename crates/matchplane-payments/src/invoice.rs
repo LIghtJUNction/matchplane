@@ -237,11 +237,15 @@ impl HttpInvoiceProvider {
                 .get(name)
                 .and_then(Value::as_str)
                 .unwrap_or(default);
+            let encoded = value.to_ascii_lowercase();
             if !value.starts_with('/')
                 || value.contains("//")
+                || value.contains('\\')
                 || value.contains("..")
                 || value.contains('?')
                 || value.contains('#')
+                || encoded.contains("%2f")
+                || encoded.contains("%5c")
             {
                 return Err(PaymentError::Invalid(format!(
                     "invoice provider {name} must be an absolute path without a query"
@@ -266,12 +270,18 @@ impl HttpInvoiceProvider {
     }
 
     async fn post(&self, path: &str, body: Value) -> Result<Value, PaymentError> {
-        let url = self
-            .base_url
-            .join(path.trim_start_matches('/'))
-            .map_err(|error| {
-                PaymentError::Invalid(format!("invoice provider URL is invalid: {error}"))
-            })?;
+        let mut url = self.base_url.clone();
+        url.set_path(path);
+        url.set_query(None);
+        url.set_fragment(None);
+        if url.scheme() != self.base_url.scheme()
+            || url.host() != self.base_url.host()
+            || url.port_or_known_default() != self.base_url.port_or_known_default()
+        {
+            return Err(PaymentError::Invalid(
+                "invoice provider path escaped the configured provider origin".to_owned(),
+            ));
+        }
         let response = self
             .client
             .post(url)
@@ -281,7 +291,8 @@ impl HttpInvoiceProvider {
             .send()
             .await?;
         let status = response.status();
-        let bytes = response.bytes().await?;
+        let bytes =
+            crate::read_provider_body(response, crate::MAX_INVOICE_PROVIDER_RESPONSE_BYTES).await?;
         let value: Value = if bytes.is_empty() {
             Value::Null
         } else {

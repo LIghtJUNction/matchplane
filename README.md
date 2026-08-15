@@ -54,8 +54,9 @@ just check
 Packaging definitions live under `packaging/` for AUR (`matchplane-git` and
 `matchplane-bin`), Ubuntu `.deb`, and Fedora `.rpm`. No project license has been selected; see
 `docs/adr/0010-project-license.md`. Package CI builds both AUR variants, an Ubuntu `.deb`, and Fedora
-RPM/SRPM artifacts; tagged releases publish artifacts and, when `AUR_SSH_PRIVATE_KEY` is configured,
-push `matchplane-git` and `matchplane-bin` to the maintainer's AUR account.
+RPM/SRPM artifacts; tagged releases publish artifacts and, when both `AUR_SSH_PRIVATE_KEY` and the
+reviewed `AUR_SSH_KNOWN_HOSTS` entry are configured, push `matchplane-git` and `matchplane-bin` to
+the maintainer's AUR account.
 
 ## Architecture
 

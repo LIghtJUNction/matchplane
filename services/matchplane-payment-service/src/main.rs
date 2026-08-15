@@ -78,9 +78,9 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("payment service could not connect to PostgreSQL")?;
     let state = Arc::new(AppState {
-        store: PaymentStore::new(pool.clone()),
-        invoices: InvoiceStore::new(pool.clone()),
-        admin: AdminStore::new(pool),
+        store: PaymentStore::new(pool.clone(), config.environment),
+        invoices: InvoiceStore::new(pool.clone(), config.environment),
+        admin: AdminStore::new(pool, config.environment),
         telemetry,
         invoice_cipher,
         admin_auth,

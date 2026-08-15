@@ -125,7 +125,7 @@ impl AlipayGateway {
             .send()
             .await?;
         let status = response.status();
-        let body = response.bytes().await?;
+        let body = crate::read_provider_body(response, crate::MAX_PROVIDER_RESPONSE_BYTES).await?;
         let value: Value = serde_json::from_slice(&body)?;
         let response_key = format!("{}_response", method.replace('.', "_"));
         let response_value = value.get(&response_key).ok_or_else(|| {

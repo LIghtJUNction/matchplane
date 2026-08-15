@@ -109,7 +109,10 @@ optimistic version check. A switch is rejected unless the target mode has an ena
 old mode has no unresolved payment outcomes. Production gateway credentials are read from restricted
 files or explicitly allow-listed `MATCHPLANE_PAYMENT_GATEWAY_*`,
 `MATCHPLANE_PAYMENT_PROVIDER_*`, and `MATCHPLANE_INVOICE_PROVIDER_*` environment variables;
-they are not stored in the database.
+they are not stored in the database. Each gateway stores a SHA-256 digest of the resolved secret
+material and each payment snapshots that digest, so replacing a file or changing an environment
+variable behind the same reference fails closed. Legacy production gateways without a digest must
+be re-saved before they can authorize or accept callbacks.
 
 Payment endpoints include authorization, manual capture, refunds, status reads, and invoice
 management. An administrator can call the idempotent
@@ -139,7 +142,9 @@ In production, configure:
 
 The administrator API is rooted at `/v1/admin/payment-*` and `/v1/admin/invoice-*` and requires the
 payment administrator bearer token. Payment gateway and route mutations are version-checked and
-audited. Invoice provider mutations are version-checked and audited without returning secret
+audited. A gateway with payment history can only be disabled (without changing its pinned revision)
+to revoke new routes and webhook acceptance; create a new gateway for credential rotation. Invoice
+provider mutations are version-checked and audited without returning secret
 references; switching the invoice mode preflights the selected provider, refuses local-test
 providers in production, and refuses to switch while invoices are outstanding. The packaged
 systemd deployment binds the payment API to `127.0.0.1:8081`; Compose publishes it on configurable
@@ -177,8 +182,9 @@ uses RSA2, WeChat Pay v3 uses platform RSA verification plus API-v3 AES-GCM reso
 and Waffo uses its configured RSA public key. Every verified event is bound to the configured
 gateway and merchant order, checked against the stored amount, deduplicated by provider event id,
 and applied to the payment/refund state machine. Inbox rows are claimed before state application;
-concurrent deliveries are acknowledged without double-applying, and a claim older than five
-minutes is retryable after a process crash. Provider references are also checked against the
+an active claim returns a retryable service-unavailable response, and a claim older than five
+minutes can be reclaimed after a process crash. Claim tokens prevent a stale worker from finishing
+over a newer retry. Provider references are also checked against the
 merchant order/payment identity before mutation. Unknown or mismatched events are retained in the
 inbox for audit and never mutate a payment. Successful EPay and Alipay callbacks receive the
 provider-required plain-text `success` acknowledgement; WeChat receives `{"code":"SUCCESS"}` and

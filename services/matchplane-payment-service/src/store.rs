@@ -1,9 +1,10 @@
+use matchplane_config::Environment;
 use matchplane_domain::{
     MarketplacePartyId, OfflineDealId, PaymentGatewayId, PaymentId, RefundId, TenantId,
 };
 use matchplane_payments::{
-    GatewayKind, PaymentError, PaymentOutcome, PaymentStatus, PaymentWebhook, RefundOutcome,
-    RefundWebhook, WebhookEvent, calculate_commission_reversal,
+    GatewayKind, GatewayMode, PaymentError, PaymentOutcome, PaymentStatus, PaymentWebhook,
+    RefundOutcome, RefundWebhook, WebhookEvent, calculate_commission_reversal,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -144,11 +145,12 @@ pub struct WebhookReceipt {
 #[derive(Debug, Clone)]
 pub struct PaymentStore {
     pool: PgPool,
+    environment: Environment,
 }
 
 impl PaymentStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, environment: Environment) -> Self {
+        Self { pool, environment }
     }
 
     pub async fn ping(&self) -> Result<(), StoreError> {
@@ -182,7 +184,8 @@ impl PaymentStore {
         gateway_id: PaymentGatewayId,
     ) -> Result<GatewayConfig, StoreError> {
         let row = sqlx::query(
-            "SELECT id, name, gateway_kind, mode, settings, credential_secret_ref, version \
+            "SELECT id, name, gateway_kind, mode, settings, credential_secret_ref, \
+                    credential_secret_digest, version \
              FROM payment_gateway_configs \
              WHERE id = $1 AND enabled AND mode = 'production'",
         )
@@ -215,6 +218,11 @@ impl PaymentStore {
             let payment_id = PaymentId::from_uuid(row.try_get("id")?);
             let payment = payment_in(&mut transaction, payment_id).await?;
             let gateway = gateway_in(&mut transaction, payment.payment_id).await?;
+            if self.environment == Environment::Production && gateway.mode == GatewayMode::Test {
+                return Err(StoreError::Invalid(
+                    "production cannot execute payments through a test gateway".to_owned(),
+                ));
+            }
             transaction.commit().await?;
             return Ok(PreparedPayment {
                 payment,
@@ -278,7 +286,8 @@ impl PaymentStore {
         .await?
         .ok_or(StoreError::NotFound("payment settings"))?;
         let route = sqlx::query(
-            "SELECT g.id, g.name, g.gateway_kind, g.mode, g.settings, g.credential_secret_ref, g.version \
+            "SELECT g.id, g.name, g.gateway_kind, g.mode, g.settings, g.credential_secret_ref, \
+                    g.credential_secret_digest, g.version \
              FROM payment_routes r JOIN payment_gateway_configs g ON g.id = r.gateway_id \
              WHERE r.tenant_id = $1 AND r.enabled AND g.enabled AND g.mode = $2 \
                AND r.method_code IN ($3, '*') AND r.currency IN ($4, '*') \
@@ -293,16 +302,27 @@ impl PaymentStore {
         .await?
         .ok_or(StoreError::NotFound("active payment route"))?;
         let gateway = gateway_from_row(&route)?;
+        if self.environment == Environment::Production && gateway.mode == GatewayMode::Test {
+            return Err(StoreError::Invalid(
+                "production cannot authorize through a test gateway".to_owned(),
+            ));
+        }
+        if gateway.mode == GatewayMode::Production && gateway.credential_digest.is_none() {
+            return Err(StoreError::Payment(PaymentError::Credential(
+                "payment gateway is missing an immutable credential digest; re-save it before enabling payments"
+                    .to_owned(),
+            )));
+        }
         let gateway_kind = gateway.kind.as_str();
 
         sqlx::query(
             "INSERT INTO payment_intents \
              (id, tenant_id, gateway_id, offline_deal_id, payer_party_id, merchant_order_id, idempotency_key, \
              request_hash, transaction_channel, purpose, gateway_kind, gateway_mode, \
-              gateway_config_version, gateway_credential_secret_ref, payment_method, amount, \
-              commission_amount, currency, currency_scale, status) \
+             gateway_config_version, gateway_credential_secret_ref, gateway_credential_digest, payment_method, amount, \
+             commission_amount, currency, currency_scale, status) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, \
-                     $14, $15, $16::numeric, $17::numeric, $18, $19, 'requested')",
+                     $14, $15, $16, $17::numeric, $18::numeric, $19, $20, 'requested')",
         )
         .bind(command.payment_id.into_uuid())
         .bind(command.tenant_id.into_uuid())
@@ -318,6 +338,7 @@ impl PaymentStore {
         .bind(&active_mode)
         .bind(gateway.version)
         .bind(&gateway.credential_secret_ref)
+        .bind(&gateway.credential_digest)
         .bind(&command.payment_method)
         .bind(command.amount.to_string())
         .bind(command.commission_amount.to_string())
@@ -424,10 +445,12 @@ impl PaymentStore {
             ));
         }
         let mut transaction = self.pool.begin().await?;
+        let processing_token = Uuid::now_v7();
         let inserted = sqlx::query(
             "INSERT INTO payment_webhook_inbox \
-             (gateway_id, provider_event_id, payload_hash, event_type, provider_reference, status, processing_at) \
-             VALUES ($1, $2, $3, $4, $5, 'processing', clock_timestamp()) \
+             (gateway_id, provider_event_id, payload_hash, event_type, provider_reference, status, \
+              processing_at, processing_token) \
+             VALUES ($1, $2, $3, $4, $5, 'processing', clock_timestamp(), $6) \
              ON CONFLICT (gateway_id, provider_event_id) DO NOTHING",
         )
         .bind(gateway_id.into_uuid())
@@ -435,6 +458,7 @@ impl PaymentStore {
         .bind(payload_hash)
         .bind(event_type)
         .bind(provider_reference)
+        .bind(processing_token)
         .execute(&mut *transaction)
         .await?;
         if inserted.rows_affected() == 0 {
@@ -475,10 +499,12 @@ impl PaymentStore {
             }
             sqlx::query(
                 "UPDATE payment_webhook_inbox SET status = 'processing', processing_at = clock_timestamp(), \
-                 failure_reason = NULL, processed_at = NULL WHERE gateway_id = $1 AND provider_event_id = $2",
+                 failure_reason = NULL, processed_at = NULL, processing_token = $3 \
+                 WHERE gateway_id = $1 AND provider_event_id = $2",
             )
             .bind(gateway_id.into_uuid())
             .bind(provider_event_id)
+            .bind(processing_token)
             .execute(&mut *transaction)
             .await?;
         }
@@ -490,16 +516,28 @@ impl PaymentStore {
         };
         match result {
             Ok(true) => {
-                self.finish_webhook(gateway_id, provider_event_id, "processed", None)
-                    .await?;
+                self.finish_webhook(
+                    gateway_id,
+                    provider_event_id,
+                    processing_token,
+                    "processed",
+                    None,
+                )
+                .await?;
                 Ok(WebhookReceipt {
                     duplicate: false,
                     status: "processed".to_owned(),
                 })
             }
             Ok(false) => {
-                self.finish_webhook(gateway_id, provider_event_id, "ignored", None)
-                    .await?;
+                self.finish_webhook(
+                    gateway_id,
+                    provider_event_id,
+                    processing_token,
+                    "ignored",
+                    None,
+                )
+                .await?;
                 Ok(WebhookReceipt {
                     duplicate: false,
                     status: "ignored".to_owned(),
@@ -509,6 +547,7 @@ impl PaymentStore {
                 self.finish_webhook(
                     gateway_id,
                     provider_event_id,
+                    processing_token,
                     "failed",
                     Some(&error.to_string()),
                 )
@@ -522,20 +561,30 @@ impl PaymentStore {
         &self,
         gateway_id: PaymentGatewayId,
         provider_event_id: &str,
+        processing_token: Uuid,
         status: &str,
         failure_reason: Option<&str>,
     ) -> Result<(), StoreError> {
-        sqlx::query(
+        let updated = sqlx::query(
             "UPDATE payment_webhook_inbox SET status = $3, failure_reason = $4, processing_at = NULL, \
+             processing_token = NULL, \
              processed_at = CASE WHEN $3 IN ('processed', 'ignored') THEN clock_timestamp() ELSE NULL END \
-             WHERE gateway_id = $1 AND provider_event_id = $2",
+             WHERE gateway_id = $1 AND provider_event_id = $2 AND status = 'processing' \
+               AND processing_token = $5",
         )
         .bind(gateway_id.into_uuid())
         .bind(provider_event_id)
         .bind(status)
         .bind(failure_reason)
+        .bind(processing_token)
         .execute(&self.pool)
-        .await?;
+        .await?
+        .rows_affected();
+        if updated != 1 {
+            return Err(StoreError::Conflict(
+                "webhook claim was reclaimed before it could be completed".to_owned(),
+            ));
+        }
         Ok(())
     }
 
@@ -1539,12 +1588,14 @@ async fn gateway_in(
     payment_id: PaymentId,
 ) -> Result<GatewayConfig, StoreError> {
     let row = sqlx::query(
-        "SELECT g.id, g.name, g.gateway_kind, g.mode, g.settings, g.credential_secret_ref, g.version \
+        "SELECT g.id, g.name, g.gateway_kind, g.mode, g.settings, g.credential_secret_ref, \
+                p.gateway_credential_digest AS credential_digest, g.version \
          FROM payment_intents p \
          JOIN payment_gateway_configs g ON g.tenant_id = p.tenant_id \
              AND g.id = p.gateway_id \
              AND g.version = p.gateway_config_version \
              AND g.credential_secret_ref IS NOT DISTINCT FROM p.gateway_credential_secret_ref \
+             AND g.credential_secret_digest IS NOT DISTINCT FROM p.gateway_credential_digest \
          WHERE p.id = $1",
     )
     .bind(payment_id.into_uuid())
@@ -1633,6 +1684,13 @@ fn gateway_from_row(row: &sqlx::postgres::PgRow) -> Result<GatewayConfig, Paymen
         row.try_get("version")
             .map_err(|error| PaymentError::Invalid(error.to_string()))?,
     )
+    .and_then(|config| {
+        let digest = row
+            .try_get("credential_secret_digest")
+            .or_else(|_| row.try_get("credential_digest"))
+            .map_err(|error| PaymentError::Invalid(error.to_string()))?;
+        Ok(config.with_credential_digest(digest))
+    })
 }
 
 async fn serializable(transaction: &mut Transaction<'_, Postgres>) -> Result<(), StoreError> {

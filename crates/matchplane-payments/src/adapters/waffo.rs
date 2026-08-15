@@ -92,7 +92,8 @@ impl WaffoGateway {
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned)
             .ok_or(PaymentError::Signature)?;
-        let response_bytes = response.bytes().await?;
+        let response_bytes =
+            crate::read_provider_body(response, crate::MAX_PROVIDER_RESPONSE_BYTES).await?;
         verify_rsa_sha256(&self.waffo_public_key, &response_bytes, &response_signature)?;
         let value: Value = serde_json::from_slice(&response_bytes)?;
         if !status.is_success() {

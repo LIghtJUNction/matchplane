@@ -161,7 +161,8 @@ impl WechatPayGateway {
         let response = request.send().await?;
         let status = response.status();
         let headers = response.headers().clone();
-        let response_bytes = response.bytes().await?;
+        let response_bytes =
+            crate::read_provider_body(response, crate::MAX_PROVIDER_RESPONSE_BYTES).await?;
         self.verify_response(&headers, &response_bytes)?;
         let value = if response_bytes.is_empty() {
             Value::Null
