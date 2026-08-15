@@ -2322,6 +2322,55 @@ main {
   box-shadow: var(--shadow-large);
 }
 
+.oauth-consent-card {
+  width: min(100%, 34rem);
+}
+
+.oauth-consent-card h1 {
+  max-width: 12ch;
+}
+
+.oauth-consent-scopes {
+  margin: 1.45rem 0 0;
+  padding: 0.85rem 0;
+  display: grid;
+  gap: 0.2rem;
+  border-block: 1px solid var(--line);
+  list-style: none;
+}
+
+.oauth-consent-scopes li {
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+.oauth-consent-scopes svg {
+  flex: 0 0 auto;
+  color: var(--olive);
+}
+
+.oauth-consent-actions {
+  margin-top: 1.25rem;
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr;
+  gap: 0.65rem;
+}
+
+.oauth-consent-actions .button {
+  min-height: 2.85rem;
+}
+
+.login-footnote {
+  margin-top: 1rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.55;
+}
+
 .login-mark {
   width: 2.6rem;
   height: 2.6rem;

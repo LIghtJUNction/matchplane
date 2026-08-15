@@ -2,11 +2,13 @@ import { betterAuth } from "better-auth";
 import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
 import { apiKey } from "@better-auth/api-key";
+import { oauthProvider } from "@better-auth/oauth-provider";
 import type { GenericOAuthConfig } from "better-auth/plugins";
 import {
   admin as adminPlugin,
   emailOTP,
   genericOAuth,
+  jwt,
   magicLink,
   organization,
 } from "better-auth/plugins";
@@ -45,6 +47,8 @@ const secret = configuredSecret ?? (isProductionBuild ? randomBytes(32).toString
 const trustedOrigins = parseTrustedOrigins(baseURL, process.env.BETTER_AUTH_TRUSTED_ORIGINS);
 const isProductionRuntime = process.env.NODE_ENV === "production" && process.env.MATCHPLANE_ENVIRONMENT === "production";
 const configuredSocialProviders = configuredOAuthProviders();
+const oidcEnabled = process.env.MATCHPLANE_OIDC_ENABLED !== "false";
+const oidcIssuer = `${baseURL}/api/auth`;
 
 if (
   isProductionRuntime &&
@@ -111,6 +115,62 @@ export const auth = betterAuth({
       }),
   },
   plugins: [
+    ...(oidcEnabled ? [jwt({
+      jwks: {
+        keyPairConfig: { alg: "EdDSA", crv: "Ed25519" },
+        rotationInterval: 60 * 60 * 24 * 30,
+        gracePeriod: 60 * 60 * 24 * 30,
+      },
+      jwt: {
+        issuer: oidcIssuer,
+        expirationTime: "15m",
+      },
+      // OAuth/OIDC owns its own tokens. Do not add a signed JWT to ordinary
+      // Better Auth session responses where it could be mistaken for a platform
+      // capability.
+      disableSettingJwtHeader: true,
+    }), oauthProvider({
+      scopes: ["openid", "profile", "email"],
+      loginPage: "/login",
+      consentPage: "/oauth/consent",
+      requirePKCE: true,
+      allowDynamicClientRegistration: false,
+      clientRegistrationDefaultScopes: ["openid", "profile", "email"],
+      clientRegistrationAllowedScopes: ["openid", "profile", "email"],
+      grantTypes: ["authorization_code", "refresh_token"],
+      disableJwtPlugin: false,
+      storeClientSecret: "hashed",
+      storeTokens: "hashed",
+      prefix: {
+        opaqueAccessToken: "mp_at_",
+        refreshToken: "mp_rt_",
+        clientSecret: "mp_cs_",
+      },
+      advertisedMetadata: {
+        scopes_supported: ["openid", "profile", "email"],
+        claims_supported: [
+          "sub",
+          "iss",
+          "aud",
+          "exp",
+          "iat",
+          "sid",
+          "email",
+          "email_verified",
+          "name",
+        ],
+      },
+      silenceWarnings: {
+        oauthAuthServerConfig: true,
+        openidConfig: true,
+      },
+      // Cross-origin clients are root-managed confidential applications.  Keep the
+      // ownership scope stable across root administrators while rejecting all
+      // organization-scoped users from the provider's CRUD surface.
+      clientReference: ({ user }) => isRootPlatformRole(user?.role) ? "root-platform" : undefined,
+      clientPrivileges: ({ action, user }) =>
+        isRootPlatformRole(user?.role) && ["create", "read", "update", "delete", "list", "rotate"].includes(action),
+    })] : []),
     emailOTP({
       otpLength: 6,
       expiresIn: 5 * 60,
@@ -269,6 +329,10 @@ function isHttpsOrigin(value: string): boolean {
 
 function isPlaceholderEmail(value: string): boolean {
   return value.endsWith("@example.com") || value.endsWith("@example.org") || value.endsWith("@example.net");
+}
+
+function isRootPlatformRole(role: unknown): boolean {
+  return role === "rootSuperAdmin" || role === "rootAdmin";
 }
 
 /**

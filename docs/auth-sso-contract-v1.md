@@ -10,10 +10,27 @@ MatchPlane 不要求用户为每个子平台重复注册。Better Auth 是唯一
 4. 只有注册记录 `membership_policy=public` 的 active 子平台，用户第一次以买家/卖家访问时才会自动写入 Better Auth `member` 关系。这个认领是幂等的，不会创建第二个用户，也不会授予管理权限；`invite` 节点必须接受邀请。
 5. 未开放公开认领的子平台返回邀请提示；用户仍使用同一个账号接受邀请即可加入。
 
-同一部署下的路径（例如 `/` 与 `/used-car`）直接复用根平台的 Better Auth cookie。若未来把
-子平台部署到不同域名，不复制用户表或要求再次注册：把根平台作为唯一 OIDC/授权中心，子平台
-只接收一次性授权码并建立本地 `member` 投影；授权码兑换后立即失效，撮合 API 仍使用当前
+同一部署下的路径（例如 `/` 与 `/used-car`）直接复用根平台的 Better Auth cookie。子平台若部署到
+不同域名，也不复制用户表或要求再次注册：根平台的 Better Auth OAuth Provider（OIDC）是唯一授权中心，
+子平台是 OIDC relying party。子平台必须使用 Authorization Code + PKCE (S256)、`state`、`nonce`，把
+回调收到的一次性 code 在服务端兑换，并以 `(issuer, sub)` 建立本地 member 投影；不得把 email 当作
+身份主键。code 兑换后立即失效，子平台本地会话只保存最小身份投影，撮合 API 仍使用当前
 `tenant_id`、`domain_id` 和 `platform_path` 的短期 capability。这样“一个账号”在同源路径和跨域联邦部署中保持相同语义。
+
+### 跨域 OIDC 实现
+
+当 `MATCHPLANE_OIDC_ENABLED=true`（生产默认通过部署配置开启）时，根平台提供：
+
+- `/.well-known/openid-configuration`：OIDC discovery；
+- `/api/auth/oauth2/authorize`、`/api/auth/oauth2/token`、`/api/auth/oauth2/userinfo`：Authorization Code 流程；
+- `/api/auth/jwks`：签名密钥集合，Better Auth JWT 插件负责轮换；
+- `/oauth/consent`：用户可读的授权确认页。
+
+客户端注册关闭匿名动态注册。根平台管理员为每个外域子平台登记精确 redirect URI、客户端类型、
+允许 scope 和 reference id；机密 web 客户端的 secret 只保存在子平台服务端，浏览器永远不接触。
+默认只允许 `openid profile email`，不通过 OIDC claim 传递管理员角色或联系方式。目标子平台在
+完成 OIDC 回调后，仍必须向根平台交换自己的平台 capability，并重新检查成员策略、组织祖先链和
+注册版本。用户撤销根会话或子平台成员关系后，刷新 token、userinfo 和下一次 capability 交换必须失败。
 
 根平台普通买家/卖家不需要额外组织成员关系。根平台超级管理员是 Better Auth 全局 `rootSuperAdmin`；每个子平台创建者是该组织的 `owner`，即该子平台的超级管理员。子平台 `admin`/`subplatform_admin` 和 `moderator` 只能由组织管理员邀请或由根平台管理员配置。
 

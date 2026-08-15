@@ -28,6 +28,7 @@ export function LoginScreen() {
   const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
   const [method, setMethod] = useState<AuthMethod>("password");
   const [next, setNext] = useState("/");
+  const [oauthQuery, setOauthQuery] = useState<string | null>(null);
   const [role, setRole] = useState<BetterAuthMarketplaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform());
   const [socialProviders, setSocialProviders] = useState<SocialProvider[]>([]);
@@ -38,6 +39,10 @@ export function LoginScreen() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const signedOAuthQuery = params.has("sig") && params.has("client_id") && params.has("redirect_uri")
+      ? params.toString()
+      : null;
+    setOauthQuery(signedOAuthQuery);
     const requestedRole = params.get("role");
     setRole(
       requestedRole === "seller"
@@ -104,6 +109,9 @@ export function LoginScreen() {
     setError(null);
     setNotice(null);
     try {
+      if (oauthQuery && mode === "sign-up") {
+        throw new Error("请先创建并验证账号，再从子平台重新发起统一登录授权");
+      }
       const options = authFetchOptions(subplatform.slug);
       if (method === "email-otp" && !otpSent) {
         const result = await authClient.emailOtp.sendVerificationOtp({
@@ -122,13 +130,20 @@ export function LoginScreen() {
           email: normalizedEmail,
           otp: otp.trim(),
           name: normalizedName || undefined,
+          ...(oauthQuery ? { oauth_query: oauthQuery } : {}),
           fetchOptions: options,
-        });
+        } as never);
         if (result.error) throw new Error(result.error.message || "验证码登录失败");
+        const oauthRedirect = oauthRedirectUrl(result.data);
+        if (oauthQuery && oauthRedirect) {
+          window.location.assign(oauthRedirect);
+          return;
+        }
         await finishSignIn();
         return;
       }
       if (method === "magic-link") {
+        if (oauthQuery) throw new Error("跨域统一登录请使用密码或邮箱验证码，免密链接暂不支持授权回调");
         const result = await authClient.signIn.magicLink({
           email: normalizedEmail,
           name: normalizedName || undefined,
@@ -155,12 +170,18 @@ export function LoginScreen() {
             email: normalizedEmail,
             password,
             callbackURL: next,
+            ...(oauthQuery ? { oauth_query: oauthQuery } : {}),
             fetchOptions: options,
-          });
+          } as never);
       if (result.error) throw new Error(result.error.message || "Better Auth 未完成登录");
       if (mode === "sign-up") {
         setNotice("验证邮件已由 Better Auth 发出。完成邮箱验证后，用同一个账号登录所有已开放的子平台。");
         setSubmitting(false);
+        return;
+      }
+      const oauthRedirect = oauthRedirectUrl(result.data);
+      if (oauthQuery && oauthRedirect) {
+        window.location.assign(oauthRedirect);
         return;
       }
       await finishSignIn();
@@ -178,8 +199,9 @@ export function LoginScreen() {
         providerId: provider,
         callbackURL: next,
         errorCallbackURL: `/login?role=${role}&next=${encodeURIComponent(next)}`,
+        ...(oauthQuery ? { oauth_query: oauthQuery, additionalData: { query: oauthQuery } } : {}),
         fetchOptions: authFetchOptions(subplatform.slug),
-      });
+      } as never);
       if (result.error) throw new Error(result.error.message || `${socialLabels[provider]}登录未完成`);
       if (result.data?.url) window.location.assign(result.data.url);
       else throw new Error("登录服务没有返回跳转地址");
@@ -273,6 +295,12 @@ export function LoginScreen() {
       </section>
     </main>
   );
+}
+
+function oauthRedirectUrl(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const url = (value as { url?: unknown }).url;
+  return typeof url === "string" && url.length > 0 ? url : null;
 }
 
 function isEmail(value: string): boolean {

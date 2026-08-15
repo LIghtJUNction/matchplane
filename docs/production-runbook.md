@@ -106,6 +106,16 @@ active immutable `subplatform_registrations` version. This check also protects t
 endpoint; disabling a registration removes both UI and Agent routing without deleting its audit
 history. Static package rendering is intentionally available only in non-production profiles.
 
+For a child hosted on a different origin, keep `MATCHPLANE_OIDC_ENABLED=true` on the root web
+service. Better Auth then exposes the root OIDC discovery document, Authorization Code + PKCE
+endpoints, rotating JWKS, and the consent page. A root platform administrator must register each
+active child through `/api/platform/oidc/clients` with its exact HTTPS callback URI; anonymous
+dynamic client registration is disabled. The returned `client_secret` is shown once and belongs
+only in the child server's secret store. The child identifies users by `(issuer, sub)`, then
+exchanges the OIDC result for its own path-scoped MatchPlane capability; OIDC claims never grant
+administrator, contact, payment, or sibling-platform access. Disable a client when a child is
+removed so refresh tokens are revoked while the registration remains auditable.
+
 ## 2. Install the event broker
 
 For a single host, install the pinned KRaft profile as root from the repository checkout:
