@@ -154,6 +154,22 @@ jobs:
           chmod 0600 /root/.ssh/id_ed25519
           printf '%s\n' "$AUR_SSH_KNOWN_HOSTS" > /root/.ssh/known_hosts
           chmod 0644 /root/.ssh/known_hosts
+          # Keep strict host-key checking and verify the supplied known_hosts file against
+          # AUR's published Ed25519 fingerprint before allowing a package push.
+          aur_host_keys=$(ssh-keygen -F aur.archlinux.org -f /root/.ssh/known_hosts || true)
+          test -n "$aur_host_keys"
+          expected_aur_fingerprint='SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4'
+          verified_aur_host=false
+          while read -r _ key_type key _; do
+            [ -n "${key_type:-}" ] || continue
+            fingerprint=$(printf '%s %s\n' "$key_type" "$key" \
+              | ssh-keygen -lf /dev/stdin -E sha256 | awk '{print $2}')
+            if [ "$fingerprint" = "$expected_aur_fingerprint" ]; then
+              verified_aur_host=true
+              break
+            fi
+          done <<<"$aur_host_keys"
+          test "$verified_aur_host" = true
           export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/known_hosts'
           git config --global user.name 'LIghtJUNction'
           git config --global user.email 'lightjunction.me@gmail.com'
