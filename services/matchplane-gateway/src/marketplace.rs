@@ -1142,7 +1142,16 @@ pub(super) async fn exposure_metrics(
 ) -> Result<Json<ExposureMetrics>, ApiError> {
     let tenant_id = parse_id(&query.tenant_id)?;
     let seller_party_id = parse_id(&query.party_id)?;
-    let party = authenticate(&state, &headers, tenant_id, seller_party_id).await?;
+    let party = if let Some(domain_id) = query
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?
+    {
+        authenticate_domain(&state, &headers, tenant_id, seller_party_id, domain_id).await?
+    } else {
+        authenticate(&state, &headers, tenant_id, seller_party_id).await?
+    };
     require_role(&party, "seller")?;
     state
         .store

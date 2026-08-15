@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
@@ -157,9 +158,112 @@ export async function POST(request: Request): Promise<Response> {
     access_token: string;
     access_token_expires_at: string;
   };
+  if (!isUuid(body.party_id) || body.tenant_id !== input.tenantId) {
+    return NextResponse.json({ error: "撮合会话服务返回了无效的平台身份" }, { status: 502 });
+  }
+  if (input.subplatform !== "root") {
+    try {
+      await upsertMarketplaceMembershipProjection({
+        tenantId: input.tenantId,
+        domainId: input.domainId!,
+        partyId: body.party_id,
+        authUserId: session.user.id,
+        requestedRole: input.role,
+      });
+    } catch (error) {
+      console.error("marketplace membership projection failed", error);
+      return NextResponse.json(
+        { error: "平台成员授权投影暂时不可用；未返回撮合 capability" },
+        { status: 503 },
+      );
+    }
+  }
+  try {
+    await recordPlatformAuditEvent({
+      tenantId: input.tenantId,
+      domainId: input.domainId ?? null,
+      platformPath,
+      actorAuthUserId: session.user.id,
+      actorPartyId: body.party_id,
+      eventType: "marketplace.capability.issued",
+      metadata: {
+        role: input.role,
+        membershipProjection: input.subplatform === "root" ? "root" : "active",
+        expiresAt: body.access_token_expires_at,
+      },
+      requestId: request.headers.get("x-request-id"),
+    });
+  } catch (error) {
+    console.error("marketplace capability audit failed", error);
+    return NextResponse.json(
+      { error: "撮合 capability 审计暂时不可用；未返回凭据" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json(body, {
     headers: { "cache-control": "no-store" },
   });
+}
+
+async function upsertMarketplaceMembershipProjection(input: {
+  tenantId: string;
+  domainId: string;
+  partyId: string;
+  authUserId: string;
+  requestedRole: RequestedRole;
+}): Promise<void> {
+  const role = input.requestedRole === "subplatform_admin" ? "admin" : input.requestedRole;
+  await authDatabase.query(
+    `INSERT INTO marketplace_subplatform_memberships
+       (tenant_id, domain_id, party_id, role, labels, status, approved_at, approved_by)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, ARRAY['better-auth:member'], 'active', clock_timestamp(), $5)
+     ON CONFLICT (tenant_id, domain_id, party_id) DO UPDATE
+       SET role = CASE
+                    WHEN marketplace_subplatform_memberships.role = 'admin' OR EXCLUDED.role = 'admin'
+                      THEN 'admin'
+                    WHEN marketplace_subplatform_memberships.role = EXCLUDED.role
+                      THEN EXCLUDED.role
+                    ELSE 'both'
+                  END,
+           labels = ARRAY['better-auth:member'],
+           status = 'active',
+           approved_at = COALESCE(marketplace_subplatform_memberships.approved_at, clock_timestamp()),
+           approved_by = COALESCE(marketplace_subplatform_memberships.approved_by, EXCLUDED.approved_by),
+           version = marketplace_subplatform_memberships.version + 1,
+           updated_at = clock_timestamp()`,
+    [input.tenantId, input.domainId, input.partyId, role, input.authUserId],
+  );
+}
+
+async function recordPlatformAuditEvent(input: {
+  tenantId: string;
+  domainId: string | null;
+  platformPath: string;
+  actorAuthUserId: string;
+  actorPartyId: string;
+  eventType: string;
+  metadata: Record<string, unknown>;
+  requestId: string | null;
+}): Promise<void> {
+  const requestId = input.requestId?.trim();
+  await authDatabase.query(
+    `INSERT INTO platform_audit_events
+       (id, tenant_id, domain_id, platform_path, actor_auth_user_id, actor_party_id,
+        event_type, outcome, request_id, metadata)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6::uuid,
+             $7, 'success', $8, $9::jsonb)`,
+    [
+      randomUUID(),
+      input.tenantId,
+      input.domainId,
+      input.platformPath,
+      input.actorAuthUserId,
+      input.actorPartyId,
+      input.eventType,
+      requestId && requestId.length <= 200 ? requestId : null,
+      JSON.stringify(input.metadata),
+    ],
+  );
 }
 
 async function readOrganizationMembership(

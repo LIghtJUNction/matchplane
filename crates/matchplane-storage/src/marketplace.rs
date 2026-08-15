@@ -863,7 +863,11 @@ impl PgStore {
              ON CONFLICT (tenant_id, id) DO UPDATE SET \
                scope_domain_id = EXCLUDED.scope_domain_id, platform_path = EXCLUDED.platform_path, \
                external_key = EXCLUDED.external_key, display_name = EXCLUDED.display_name, \
-               role = EXCLUDED.role, access_token_hash = EXCLUDED.access_token_hash, \
+               role = CASE \
+                   WHEN marketplace_parties.role = 'both' OR EXCLUDED.role = 'both' THEN 'both' \
+                   WHEN marketplace_parties.role = EXCLUDED.role THEN EXCLUDED.role \
+                   ELSE 'both' \
+               END, access_token_hash = EXCLUDED.access_token_hash, \
                access_token_expires_at = EXCLUDED.access_token_expires_at, \
                contact_ciphertext = EXCLUDED.contact_ciphertext, contact_nonce = EXCLUDED.contact_nonce, \
                contact_key_version = EXCLUDED.contact_key_version, version = marketplace_parties.version + 1 \
@@ -990,10 +994,26 @@ impl PgStore {
             ));
         }
         let row = sqlx::query(
-            "SELECT id, tenant_id, scope_domain_id, platform_path, role FROM marketplace_parties \
-             WHERE tenant_id = $1 AND id = $2 AND access_token_hash = $3 \
-               AND scope_domain_id IS NOT DISTINCT FROM $4::uuid \
-               AND status = 'active' AND access_token_expires_at > clock_timestamp()",
+            "SELECT p.id, p.tenant_id, p.scope_domain_id, p.platform_path, p.role \
+               FROM marketplace_parties p \
+              WHERE p.tenant_id = $1 AND p.id = $2 AND p.access_token_hash = $3 \
+                AND p.scope_domain_id IS NOT DISTINCT FROM $4::uuid \
+                AND p.status = 'active' AND p.access_token_expires_at > clock_timestamp() \
+                AND (p.platform_path = '/' \
+                     OR EXISTS ( \
+                         SELECT 1 FROM marketplace_subplatform_memberships m \
+                          WHERE m.tenant_id = p.tenant_id \
+                            AND m.domain_id = p.scope_domain_id \
+                            AND m.party_id = p.id \
+                            AND m.status = 'active' \
+                     ) \
+                     OR NOT EXISTS ( \
+                         SELECT 1 \
+                           FROM marketplace_party_auth_links l \
+                           JOIN \"user\" u ON u.id = l.auth_user_id \
+                          WHERE l.tenant_id = p.tenant_id \
+                            AND l.party_id = p.id \
+                     ))",
         )
         .bind(tenant_id.into_uuid())
         .bind(party_id.into_uuid())

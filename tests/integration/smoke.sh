@@ -128,6 +128,14 @@ marketplace_authorization_assertion=$("${compose[@]}" exec -T postgres psql --us
    WHERE table_name = 'marketplace_asset_authorizations';")
 test "$marketplace_authorization_assertion" = 1
 
+platform_audit_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
+  --tuples-only --no-align --command \
+  "SELECT (SELECT count(*) FROM information_schema.tables \
+             WHERE table_name = 'platform_audit_events'), \
+          (SELECT count(*) FROM information_schema.tables \
+             WHERE table_name = 'marketplace_subplatform_memberships');")
+test "$platform_audit_assertion" = '1|1'
+
 bash "$repository_root/tests/integration/marketplace-smoke.sh"
 
 echo 'MatchPlane end-to-end smoke test passed'
