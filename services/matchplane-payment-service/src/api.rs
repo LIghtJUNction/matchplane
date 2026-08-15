@@ -805,15 +805,55 @@ pub async fn issue_invoice(
         .invoices
         .begin_issue(invoice_id, &request.actor)
         .await?;
-    let provider = invoice_provider(&state, &invoice).await?;
-    let issue_request = issue_request(&state, &invoice)?;
+    let provider = match invoice_provider(&state, &invoice).await {
+        Ok(provider) => provider,
+        Err(error) => {
+            state
+                .invoices
+                .fail_issue(
+                    invoice_id,
+                    "invoice provider resolution failed",
+                    &request.actor,
+                )
+                .await?;
+            return Err(error);
+        }
+    };
+    let issue_request = match issue_request(&state, &invoice) {
+        Ok(request) => request,
+        Err(error) => {
+            state
+                .invoices
+                .fail_issue(
+                    invoice_id,
+                    "invoice request preparation failed",
+                    &request.actor,
+                )
+                .await?;
+            return Err(error);
+        }
+    };
     match provider.issue(&issue_request).await {
         Ok(outcome) => {
-            let artifact = outcome
+            let artifact = match outcome
                 .artifact
                 .as_ref()
                 .map(|artifact| encrypt_artifact(&state, invoice_id, "invoice", artifact))
-                .transpose()?;
+                .transpose()
+            {
+                Ok(artifact) => artifact,
+                Err(error) => {
+                    state
+                        .invoices
+                        .fail_issue(
+                            invoice_id,
+                            "invoice artifact encryption failed",
+                            &request.actor,
+                        )
+                        .await?;
+                    return Err(error);
+                }
+            };
             let invoice = state
                 .invoices
                 .complete_issue(&outcome, artifact.as_ref(), &request.actor)
@@ -977,11 +1017,25 @@ pub async fn red_letter_invoice(
             return Err(ApiError::gateway(&error));
         }
     };
-    let artifact = outcome
+    let artifact = match outcome
         .artifact
         .as_ref()
         .map(|artifact| encrypt_artifact(&state, invoice_id, "credit_note", artifact))
-        .transpose()?;
+        .transpose()
+    {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            state
+                .invoices
+                .fail_red_letter(
+                    invoice_id,
+                    "credit note artifact encryption failed",
+                    &request.actor,
+                )
+                .await?;
+            return Err(error);
+        }
+    };
     state
         .invoices
         .complete_red_letter(&outcome, artifact.as_ref(), &request.actor)

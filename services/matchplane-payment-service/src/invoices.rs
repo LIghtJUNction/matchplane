@@ -4,6 +4,7 @@ use matchplane_payments::{InvoiceKind, InvoiceOutcome, PaymentError};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Row, Transaction};
+use std::time::Duration;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -105,6 +106,39 @@ pub struct InvoiceStore {
 impl InvoiceStore {
     pub fn new(pool: PgPool, environment: Environment) -> Self {
         Self { pool, environment }
+    }
+
+    /// Requeues invoice operations that lost their process before a provider result was
+    /// durably recorded. The resulting status deliberately requires operator review before a
+    /// retry, because the provider may have accepted the request before the process failed.
+    pub async fn reap_stale_operations(&self, age: Duration) -> Result<u64, StoreError> {
+        let mut transaction = self.pool.begin().await?;
+        let rows = sqlx::query(
+            "UPDATE invoice_requests
+                SET status = CASE WHEN status = 'red_lettering' THEN 'red_letter_pending' ELSE 'reviewing' END,
+                    failure_reason = 'provider outcome is unknown; reconcile with the provider before retrying',
+                    version = version + 1
+              WHERE status IN ('issuing', 'voiding', 'red_lettering')
+                AND updated_at < clock_timestamp() - $1::interval
+              RETURNING id, tenant_id, status",
+        )
+        .bind(format!("{} seconds", age.as_secs()))
+        .fetch_all(&mut *transaction)
+        .await?;
+        for row in &rows {
+            insert_event(
+                &mut transaction,
+                TenantId::from_uuid(row.try_get("tenant_id")?),
+                InvoiceId::from_uuid(row.try_get("id")?),
+                "invoice_operation_reconciliation_required",
+                None,
+                row.try_get("status")?,
+                "system:invoice-reaper",
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(rows.len() as u64)
     }
 
     pub async fn request(&self, command: &NewInvoice) -> Result<PreparedInvoice, StoreError> {

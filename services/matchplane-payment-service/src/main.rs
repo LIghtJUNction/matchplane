@@ -87,6 +87,19 @@ async fn main() -> anyhow::Result<()> {
         environment: config.environment,
         payment_callback_origin,
     });
+    let invoice_reaper = state.invoices.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            if let Err(error) = invoice_reaper
+                .reap_stale_operations(Duration::from_secs(15 * 60))
+                .await
+            {
+                tracing::error!(%error, "invoice operation reaper failed");
+            }
+        }
+    });
     let app = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
