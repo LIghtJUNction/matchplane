@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../../src/lib/auth";
+import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,9 @@ export const runtime = "nodejs";
  * during registration) and must match this activation request byte-for-byte.
  */
 export async function POST(request: Request): Promise<Response> {
+  if (!hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+  }
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
 

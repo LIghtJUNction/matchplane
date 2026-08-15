@@ -2,10 +2,14 @@ import { NextResponse } from "next/server";
 
 import { auth } from "../../../../src/lib/auth";
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
+import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request): Promise<Response> {
+  if (!hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+  }
   return forward(request, "GET");
 }
 
@@ -14,6 +18,9 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 async function forward(request: Request, method: "GET" | "POST"): Promise<Response> {
+  if (method === "POST" && !hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+  }
   const session = await auth.api.getSession({ headers: request.headers });
   const role = (session?.user as { role?: string } | undefined)?.role;
   if (!session || (role !== "rootSuperAdmin" && role !== "rootAdmin")) {

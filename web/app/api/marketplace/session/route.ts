@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
 import { isMountedPlatformPath, readActivePlatformScope } from "../../../../src/platform-mount";
+import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,9 @@ interface SessionRequest {
  * Rust marketplace API. The operator credential never leaves this server route.
  */
 export async function POST(request: Request): Promise<Response> {
+  if (!hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+  }
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) {
     return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });

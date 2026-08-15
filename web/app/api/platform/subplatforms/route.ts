@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
+import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,9 @@ const allowedScopes = new Set([
  * build digest is supplied by that worker.
  */
 export async function POST(request: Request): Promise<Response> {
+  if (!hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+  }
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
 
@@ -154,6 +158,9 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  if (!hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+  }
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
   const parentId = new URL(request.url).searchParams.get("parentOrganizationId");

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { POST as establishAgentSession } from "../marketplace/agent-session/route";
 import { POST as matchPlatform } from "../platform/match/route";
 import { POST as handoffAgent } from "../platform/agent/handoff/route";
+import { hasTrustedBrowserOrigin } from "../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,9 @@ export const runtime = "nodejs";
  * in the delegated platform match route; this handler only translates JSON-RPC tool calls.
  */
 export async function POST(request: Request): Promise<Response> {
+  if (!hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "请求来源未被平台信任" } }, { status: 403 });
+  }
   let message: JsonRpcRequest;
   try {
     const value = await request.json();

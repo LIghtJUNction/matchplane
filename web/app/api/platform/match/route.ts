@@ -16,6 +16,7 @@ import {
   isPlatformPathAccessibleByOrganization,
 } from "../../../../src/platform-mount";
 import { authenticatePlatformRequest } from "../../../../src/platform-request-auth";
+import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
 
@@ -30,6 +31,9 @@ const DEFAULT_AI_MAX_STEPS = 8;
  * registrations from PostgreSQL are delegated to, never a hard-coded vertical.
  */
 export async function POST(request: Request): Promise<Response> {
+  if (!hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+  }
   const actor = await authenticatePlatformRequest(request);
   if (!actor) return NextResponse.json({ error: "Better Auth session or platform API key is required" }, { status: 401 });
 

@@ -5,6 +5,7 @@ import { readActiveDirectChildRoutes } from "../../../../../src/platform-child-r
 import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization } from "../../../../../src/platform-mount";
 import { authenticatePlatformRequest } from "../../../../../src/platform-request-auth";
 import { parseAgentHandoff, type AgentHandoffEnvelope } from "../../../../../src/platform-agent-handoff";
+import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,9 @@ const HANDOFF_TTL_MINUTES = 15;
  * capabilities that the caller is authorized to continue with.
  */
 export async function POST(request: Request): Promise<Response> {
+  if (!hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+  }
   const actor = await authenticatePlatformRequest(request, { agent: ["handoff"] });
   if (!actor) return NextResponse.json({ error: "Better Auth session or agent API key is required" }, { status: 401 });
 
@@ -97,6 +101,9 @@ export async function POST(request: Request): Promise<Response> {
 
 /** Read back a handoff owned by the same session or API key. */
 export async function GET(request: Request): Promise<Response> {
+  if (!hasTrustedBrowserOrigin(request)) {
+    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+  }
   const actor = await authenticatePlatformRequest(request, { agent: ["handoff"] });
   if (!actor) return NextResponse.json({ error: "Better Auth session or agent API key is required" }, { status: 401 });
   const requestId = new URL(request.url).searchParams.get("request_id");
