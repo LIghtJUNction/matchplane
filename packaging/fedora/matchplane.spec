@@ -73,7 +73,6 @@ echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.en
 %{_bindir}/matchplane-projector
 %{_bindir}/matchplane-vector-worker
 %{_bindir}/matchplane
-%{_bindir}/xtask
 %{_unitdir}/matchplane-*.service
 %{_sysusersdir}/matchplane.conf
 %{_tmpfilesdir}/matchplane.conf

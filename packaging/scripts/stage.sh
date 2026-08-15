@@ -18,7 +18,6 @@ binaries=(
   matchplane-projector
   matchplane-vector-worker
   matchplane
-  xtask
 )
 
 install -d "$root/usr/bin" "$root/etc/matchplane" "$root/etc/matchplane/services" "$root/usr/lib/systemd/system"

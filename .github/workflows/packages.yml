@@ -43,7 +43,7 @@ jobs:
         run: cargo build --release --locked --workspace --bins
       - name: Verify runtime linkage
         run: |
-          for binary in matchplane-event-relay matchplane-federation-hub matchplane-gateway matchplane-matcher matchplane-payment-service matchplane-projector matchplane-vector-worker matchplane xtask; do
+          for binary in matchplane-event-relay matchplane-federation-hub matchplane-gateway matchplane-matcher matchplane-payment-service matchplane-projector matchplane-vector-worker matchplane; do
             ldd "target/release/$binary"
           done
       - name: Build portable archive
