@@ -17,6 +17,9 @@ check: web-check subplatform-check
 compose-config:
     docker compose --env-file .env.example -f deploy/compose/compose.yaml config --quiet
 
+web-image-check:
+    docker build --file deploy/compose/web.Dockerfile --tag matchplane/web:check .
+
 dev:
     docker compose --env-file .env.example -f deploy/compose/compose.yaml up --build -d
 

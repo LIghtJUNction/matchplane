@@ -30,6 +30,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ printf "%s@%s" .Values.image.repository $digest }}
 {{- end }}
 
+{{- define "matchplane.webImage" -}}
+{{- $digest := required "web.image.digest must be set to an immutable sha256 digest" .Values.web.image.digest -}}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" $digest) -}}
+{{- fail "web.image.digest must match sha256:<64 lowercase hexadecimal characters>" -}}
+{{- end -}}
+{{ printf "%s@%s" .Values.web.image.repository $digest }}
+{{- end }}
+
 {{- define "matchplane.environment" -}}
 - name: MATCHPLANE_ENVIRONMENT
   value: {{ .Values.runtime.environment | quote }}

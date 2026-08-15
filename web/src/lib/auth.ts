@@ -25,22 +25,37 @@ const database = new Pool({
 // Better Auth APIs for credentials, sessions, roles, and API-key verification.
 export const authDatabase = database;
 
-const baseURL =
+const baseURL = (
   process.env.BETTER_AUTH_URL ??
   process.env.NEXT_PUBLIC_BETTER_AUTH_URL ??
-  "http://localhost:4173";
+  "http://localhost:4173"
+).trim().replace(/\/$/, "");
 
 const configuredRootAdminEmail = process.env.MATCHPLANE_ROOT_ADMIN_EMAIL?.trim().toLowerCase();
 const configuredSecret = process.env.BETTER_AUTH_SECRET?.trim();
 const isProductionBuild = process.env.NEXT_PHASE === "phase-production-build";
 const secret = configuredSecret ?? (isProductionBuild ? randomBytes(32).toString("base64url") : undefined);
+const trustedOrigins = parseTrustedOrigins(baseURL, process.env.BETTER_AUTH_TRUSTED_ORIGINS);
+const isProductionRuntime = process.env.NODE_ENV === "production" && process.env.MATCHPLANE_ENVIRONMENT === "production";
 
 if (
-  process.env.NODE_ENV === "production" &&
+  isProductionRuntime &&
   !isProductionBuild &&
-  (!secret || secret.startsWith("CHANGE_ME"))
+  (!secret || secret.startsWith("CHANGE_ME") || secret.length < 32)
 ) {
   throw new Error("BETTER_AUTH_SECRET must be configured for the Next.js authentication service");
+}
+
+if (isProductionRuntime && !isProductionBuild) {
+  if (!process.env.MATCHPLANE_DATABASE_URL?.trim()) {
+    throw new Error("MATCHPLANE_DATABASE_URL must be configured for the Next.js authentication service");
+  }
+  if (!isHttpsOrigin(baseURL)) {
+    throw new Error("BETTER_AUTH_URL must be an HTTPS origin in production");
+  }
+  if (!configuredRootAdminEmail || isPlaceholderEmail(configuredRootAdminEmail)) {
+    throw new Error("MATCHPLANE_ROOT_ADMIN_EMAIL must be an operator-owned address in production");
+  }
 }
 
 /**
@@ -55,10 +70,10 @@ export const auth = betterAuth({
   baseURL,
   basePath: "/api/auth",
   secret,
-  trustedOrigins: async (request) => {
-    const origins = [baseURL, request?.headers.get("origin") ?? undefined];
-    return origins.filter((origin): origin is string => Boolean(origin));
-  },
+  // Never reflect the request's Origin header here. It is attacker-controlled and doing so
+  // would turn CSRF protection into an allow-any-origin policy. Operators may explicitly add
+  // known front-end origins through BETTER_AUTH_TRUSTED_ORIGINS.
+  trustedOrigins,
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
@@ -178,4 +193,21 @@ function escapeHtml(value: string): string {
       "'": "&#39;",
     })[character] ?? character,
   );
+}
+
+function parseTrustedOrigins(base: string, additional: string | undefined): string[] {
+  const values = [base, ...(additional ?? "").split(",").map((value) => value.trim()).filter(Boolean)];
+  return [...new Set(values.map((value) => new URL(value).origin))];
+}
+
+function isHttpsOrigin(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isPlaceholderEmail(value: string): boolean {
+  return value.endsWith("@example.com") || value.endsWith("@example.org") || value.endsWith("@example.net");
 }

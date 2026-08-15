@@ -65,6 +65,9 @@ the maintainer's AUR account.
 
 The Helm chart intentionally refuses to render without `image.digest` set to the immutable SHA-256
 digest of the published container image; a mutable tag is retained only as release metadata.
+Tagged CI releases publish both the Rust service image and the standalone Next.js/Better Auth web
+image to GHCR. Kubernetes deployments must provide both immutable digests and a
+`matchplane-web-secrets` Secret containing `better-auth-secret` and `root-admin-email`.
 
 For a single Ubuntu host, see the [production runbook](docs/production-runbook.md) before enabling
 production mode. It covers the pinned Kafka profile, operator-managed federation node registration,

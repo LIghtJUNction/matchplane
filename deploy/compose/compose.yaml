@@ -160,6 +160,43 @@ services:
     ports:
       - "127.0.0.1:${MATCHPLANE_GATEWAY_HOST_PORT:-8080}:8080"
 
+  web:
+    image: matchplane/web:dev
+    build:
+      context: ../..
+      dockerfile: deploy/compose/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      MATCHPLANE_ENVIRONMENT: ${MATCHPLANE_ENVIRONMENT:-development}
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 4173
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:4173}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-matchplane_dev_only_auth_secret_change_in_production}
+      MATCHPLANE_ROOT_ADMIN_EMAIL: ${MATCHPLANE_ROOT_ADMIN_EMAIL:-admin@example.com}
+      MATCHPLANE_DATABASE_URL: postgres://${MATCHPLANE_POSTGRES_USER:-matchplane}:${MATCHPLANE_POSTGRES_PASSWORD:-matchplane_dev_only}@postgres:5432/${MATCHPLANE_POSTGRES_DB:-matchplane}
+      MATCHPLANE_GATEWAY_INTERNAL_URL: http://gateway:8080
+      MATCHPLANE_PAYMENT_INTERNAL_URL: http://payment-service:8080
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      gateway:
+        condition: service_started
+      payment-service:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${MATCHPLANE_WEB_HOST_PORT:-4173}:4173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health/web').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - matchplane
+    security_opt:
+      - no-new-privileges:true
+
   payment-service:
     <<: *matchplane-service
     entrypoint: ["/usr/local/bin/matchplane-payment-service"]

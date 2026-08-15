@@ -13,7 +13,7 @@ Environment=NODE_ENV=production
 Environment=HOSTNAME=127.0.0.1
 Environment=PORT=4173
 WorkingDirectory=/usr/share/matchplane/web
-ExecStart=/usr/bin/node /usr/share/matchplane/web/server.js
+ExecStart=/usr/local/bin/node /usr/share/matchplane/web/server.js
 Restart=on-failure
 RestartSec=3s
 NoNewPrivileges=true
@@ -25,6 +25,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
+UMask=0077
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
 

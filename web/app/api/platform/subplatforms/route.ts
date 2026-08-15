@@ -1,0 +1,315 @@
+import { createHash, randomUUID } from "node:crypto";
+
+import { NextResponse } from "next/server";
+
+import { auth, authDatabase } from "../../../../src/lib/auth";
+
+export const runtime = "nodejs";
+
+const MAX_SOURCE_LOCATOR_LENGTH = 2_048;
+const MAX_MANIFEST_BYTES = 64 * 1024;
+const allowedScopes = new Set([
+  "marketplace:read",
+  "marketplace:write",
+  "retrieval:query",
+  "retrieval:write",
+  "platform:read",
+]);
+
+/**
+ * Root-side registration intake. It records an immutable source/manifest and creates the
+ * Better Auth organization in the same request. Fetching and building untrusted package code is
+ * intentionally a separate worker concern; a registration is only `validated` until a signed
+ * build digest is supplied by that worker.
+ */
+export async function POST(request: Request): Promise<Response> {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
+
+  const input = await parseBody(request);
+  const manifest = validateManifest(input.manifest, input.slug, input.packageId);
+  if (!manifest.ok) return NextResponse.json({ error: manifest.error }, { status: 400 });
+  if (!input.tenantId || !isUuid(input.tenantId) || !input.domainId || !isUuid(input.domainId)) {
+    return NextResponse.json({ error: "tenantId and domainId must be UUIDs" }, { status: 400 });
+  }
+  if (!isSourceKind(input.sourceKind)) {
+    return NextResponse.json({ error: "sourceKind must be git or archive" }, { status: 400 });
+  }
+  const sourceError = validateSource(input);
+  if (sourceError) return NextResponse.json({ error: sourceError }, { status: 400 });
+  if (input.parentOrganizationId && !isUuid(input.parentOrganizationId)) {
+    return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
+  }
+  const requestedScopes = normalizeScopes(input.requestedScopes ?? manifest.value.requiredScopes);
+  if (!requestedScopes) return NextResponse.json({ error: "requestedScopes contains an unsupported scope" }, { status: 400 });
+
+  const parentId = input.parentOrganizationId ?? null;
+  const canManage = await canManageParent(session.user.id, session.user.role, parentId);
+  if (!canManage) return NextResponse.json({ error: "当前账号没有注册该平台节点的权限" }, { status: 403 });
+
+  const parentError = await validateParent(parentId);
+  if (parentError) return NextResponse.json({ error: parentError }, { status: 400 });
+  const domainExists = await authDatabase.query(
+    "SELECT 1 FROM domains WHERE tenant_id = $1::uuid AND id = $2::uuid LIMIT 1",
+    [input.tenantId, input.domainId],
+  );
+  if (domainExists.rowCount !== 1) {
+    return NextResponse.json({ error: "tenantId/domainId 不属于已注册的 root domain" }, { status: 400 });
+  }
+
+  const manifestDigest = sha256Hex(canonicalJson(manifest.value));
+  const sourceDigest = input.sourceDigest!;
+  const registrationId = randomUUID();
+  let organization: { id: string; name: string; slug: string };
+  try {
+    organization = (await auth.api.createOrganization({
+      body: {
+        name: manifest.value.displayName,
+        slug: manifest.value.slug,
+        userId: session.user.id,
+        metadata: {
+          tenantId: input.tenantId,
+          domainId: input.domainId,
+          packageId: manifest.value.id,
+          parentOrganizationId: parentId,
+        },
+      },
+    })) as { id: string; name: string; slug: string };
+  } catch (error) {
+    console.error("subplatform organization creation failed", error);
+    return NextResponse.json({ error: "子平台组织创建失败；slug 可能已被占用" }, { status: 409 });
+  }
+
+  const client = await authDatabase.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE "organization"
+          SET "tenantId" = $2,
+              "domainId" = $3,
+              "sourceRepository" = $4,
+              "parentOrganizationId" = $5,
+              "metadata" = $6
+        WHERE id = $1::uuid`,
+      [organization.id, input.tenantId, input.domainId, input.sourceLocator, parentId, JSON.stringify({
+        packageId: manifest.value.id,
+        manifestDigest,
+        sourceDigest,
+      })],
+    );
+    await client.query(
+      `INSERT INTO subplatform_registrations
+        (id, tenant_id, domain_id, package_id, slug, source_kind, source_locator,
+         pinned_revision, source_digest, manifest_digest, build_digest, manifest,
+         requested_scopes, state, registered_by)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8,
+               decode($9, 'hex'), decode($10, 'hex'), $11, $12::jsonb, $13, 'validated', $14)`,
+      [
+        registrationId,
+        input.tenantId,
+        input.domainId,
+        manifest.value.id,
+        manifest.value.slug,
+        input.sourceKind,
+        input.sourceLocator,
+        input.pinnedRevision,
+        sourceDigest,
+        manifestDigest,
+        input.buildDigest ? Buffer.from(input.buildDigest, "hex") : null,
+        JSON.stringify(manifest.value),
+        requestedScopes,
+        session.user.id,
+      ],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    await authDatabase.query('DELETE FROM "organization" WHERE id = $1::uuid', [organization.id]).catch(() => undefined);
+    console.error("subplatform registration persistence failed", error);
+    return NextResponse.json({ error: "子平台注册记录保存失败" }, { status: 500 });
+  } finally {
+    client.release();
+  }
+
+  return NextResponse.json({
+    registrationId,
+    organizationId: organization.id,
+    slug: organization.slug,
+    state: "validated",
+    manifestDigest,
+    sourceDigest,
+    next: "isolated_builder_must_attach_build_digest_before_activation",
+  }, { status: 201, headers: { "cache-control": "no-store" } });
+}
+
+export async function GET(request: Request): Promise<Response> {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
+  const parentId = new URL(request.url).searchParams.get("parentOrganizationId");
+  if (parentId && !isUuid(parentId)) return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
+  if (!(await canManageParent(session.user.id, session.user.role, parentId || null))) {
+    return NextResponse.json({ error: "平台管理员权限不足" }, { status: 403 });
+  }
+  const rows = await authDatabase.query(
+    `WITH RECURSIVE nodes AS (
+       SELECT id, name, slug, "parentOrganizationId", "tenantId", "domainId", "sourceRepository", "createdAt"
+         FROM "organization"
+        WHERE ($1::uuid IS NULL AND "parentOrganizationId" IS NULL)
+           OR id = $1::uuid
+       UNION ALL
+       SELECT child.id, child.name, child.slug, child."parentOrganizationId", child."tenantId",
+              child."domainId", child."sourceRepository", child."createdAt"
+         FROM "organization" child
+         JOIN nodes parent ON child."parentOrganizationId" = parent.id
+     )
+     SELECT id, name, slug, "parentOrganizationId" AS "parentOrganizationId", "tenantId" AS "tenantId",
+            "domainId" AS "domainId", "sourceRepository" AS "sourceRepository", "createdAt" AS "createdAt"
+       FROM nodes
+      ORDER BY "createdAt" ASC`,
+    [parentId || null],
+  );
+  return NextResponse.json({ organizations: rows.rows }, { headers: { "cache-control": "no-store" } });
+}
+
+interface RegistrationRequest {
+  tenantId?: string;
+  domainId?: string;
+  parentOrganizationId?: string | null;
+  packageId?: string;
+  slug?: string;
+  sourceKind?: "git" | "archive";
+  sourceLocator?: string;
+  pinnedRevision?: string;
+  sourceDigest?: string;
+  buildDigest?: string;
+  manifest?: unknown;
+  requestedScopes?: string[];
+}
+
+async function parseBody(request: Request): Promise<RegistrationRequest> {
+  try {
+    const body = await request.json();
+    return body && typeof body === "object" && !Array.isArray(body) ? body as RegistrationRequest : {};
+  } catch {
+    return {};
+  }
+}
+
+async function canManageParent(userId: string, role: string | null | undefined, parentId: string | null): Promise<boolean> {
+  if (!parentId) return role === "rootSuperAdmin" || role === "rootAdmin";
+  if (role === "rootSuperAdmin" || role === "rootAdmin") return true;
+  const result = await authDatabase.query(
+    `SELECT 1 FROM member
+      WHERE "organizationId" = $1::uuid AND "userId" = $2::uuid
+        AND role LIKE ANY($3::text[])
+      LIMIT 1`,
+    [parentId, userId, ["%owner%", "%admin%", "%subplatform_admin%"]],
+  );
+  return result.rowCount === 1;
+}
+
+async function validateParent(parentId: string | null): Promise<string | null> {
+  if (!parentId) return null;
+  const result = await authDatabase.query(
+    `WITH RECURSIVE chain(id, parent_id, depth) AS (
+       SELECT id, "parentOrganizationId", 0 FROM "organization" WHERE id = $1::uuid
+       UNION ALL
+       SELECT parent.id, parent."parentOrganizationId", chain.depth + 1
+         FROM "organization" parent JOIN chain ON parent.id = chain.parent_id
+        WHERE chain.depth < 64
+     )
+     SELECT count(*)::int AS count, coalesce(max(depth), 0)::int AS depth FROM chain`,
+    [parentId],
+  );
+  const row = result.rows[0] as { count: number; depth: number } | undefined;
+  if (!row || row.count === 0) return "parentOrganizationId 不存在";
+  if (row.depth >= 64) return "平台树深度超过 64 层，可能存在循环关系";
+  return null;
+}
+
+function validateSource(input: RegistrationRequest): string | null {
+  const locator = input.sourceLocator?.trim();
+  if (!locator || locator.length > MAX_SOURCE_LOCATOR_LENGTH) return "sourceLocator 长度必须为 1..2048";
+  const revision = input.pinnedRevision?.trim();
+  if (!revision || !/^[0-9a-f]{7,128}$/i.test(revision)) return "pinnedRevision 必须是不可变的 commit/digest";
+  if (input.sourceKind === "git") {
+    try {
+      const url = new URL(locator);
+      if (!(url.protocol === "https:" || url.protocol === "ssh:") || url.username || url.password || !url.hostname) {
+        return "git sourceLocator 只能使用不带凭据的 HTTPS/SSH URL";
+      }
+    } catch {
+      return "git sourceLocator 不是有效 URL";
+    }
+  } else if (!input.sourceDigest) {
+    return "archive 注册必须提供上传对象的 SHA-256 sourceDigest";
+  } else if (!locator.startsWith("upload://") && !locator.startsWith("https://")) {
+    return "archive sourceLocator 必须是 upload:// 或 HTTPS 不可变对象地址";
+  }
+  if (!input.sourceDigest || !/^[0-9a-f]{64}$/i.test(input.sourceDigest)) return "sourceDigest 必须是已验证来源的 SHA-256";
+  if (input.buildDigest && !/^[0-9a-f]{64}$/i.test(input.buildDigest)) return "buildDigest 必须是 SHA-256";
+  return null;
+}
+
+function validateManifest(value: unknown, slug: string | undefined, packageId: string | undefined):
+  | { ok: true; value: Manifest }
+  | { ok: false; error: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { ok: false, error: "manifest 必须是 JSON 对象" };
+  const manifest = value as Partial<Manifest>;
+  const serialized = JSON.stringify(value);
+  if (!serialized || Buffer.byteLength(serialized, "utf8") > MAX_MANIFEST_BYTES) return { ok: false, error: "manifest 过大" };
+  if (manifest.apiVersion !== "matchplane.subplatform/v1" || manifest.rootApiVersion !== "v1") return { ok: false, error: "manifest API 版本不受支持" };
+  if (!stringMatches(manifest.id, /^[a-z0-9][a-z0-9._-]{1,127}$/) || manifest.id !== packageId) return { ok: false, error: "manifest.id 与 packageId 不一致" };
+  if (!stringMatches(manifest.slug, /^[a-z0-9][a-z0-9-]{1,62}$/) || manifest.slug !== slug) return { ok: false, error: "manifest.slug 与 slug 不一致" };
+  if (!stringMatches(manifest.displayName, /^.{1,200}$/u) || !stringMatches(manifest.entry, /^(?!\/)(?!.*\.\.).+$/)) return { ok: false, error: "manifest displayName/entry 无效" };
+  if (!Array.isArray(manifest.routes) || manifest.routes.length === 0 || manifest.routes.some((route) => !stringMatches(route, /^\/[a-z0-9][a-z0-9-]*(?:\/.*)?$/))) return { ok: false, error: "manifest.routes 无效" };
+  if (!Array.isArray(manifest.capabilities) || manifest.capabilities.some((item) => !stringMatches(item, /^[a-z0-9_:-]+$/))) return { ok: false, error: "manifest.capabilities 无效" };
+  if (!Array.isArray(manifest.requiredScopes) || manifest.requiredScopes.some((item) => !allowedScopes.has(item))) return { ok: false, error: "manifest.requiredScopes 无效" };
+  if (!manifest.assets || typeof manifest.assets !== "object" || !stringMatches(manifest.assets.staticDirectory, /^(?!\/)(?!.*\.\.).+$/) || !stringMatches(manifest.assets.buildCommand, /^.{1,500}$/u)) return { ok: false, error: "manifest.assets 无效" };
+  if (manifest.retrieval && (manifest.retrieval.protocol !== "matchplane.retrieval/v1" || manifest.retrieval.owner !== "subplatform")) return { ok: false, error: "manifest.retrieval 必须声明 subplatform-owned v1" };
+  return { ok: true, value: manifest as Manifest };
+}
+
+function normalizeScopes(scopes: string[]): string[] | null {
+  if (!Array.isArray(scopes) || scopes.length > 32 || scopes.some((scope) => !allowedScopes.has(scope))) return null;
+  return [...new Set(scopes)];
+}
+
+function isSourceKind(value: RegistrationRequest["sourceKind"]): value is "git" | "archive" {
+  return value === "git" || value === "archive";
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function stringMatches(value: unknown, pattern: RegExp): value is string {
+  return typeof value === "string" && pattern.test(value);
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+interface Manifest {
+  apiVersion: "matchplane.subplatform/v1";
+  id: string;
+  slug: string;
+  displayName: string;
+  rootApiVersion: "v1";
+  entry: string;
+  routes: string[];
+  capabilities: string[];
+  requiredScopes: string[];
+  assets: { staticDirectory: string; buildCommand: string };
+  retrieval?: { protocol: "matchplane.retrieval/v1"; owner: "subplatform" };
+  [key: string]: unknown;
+}

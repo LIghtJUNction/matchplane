@@ -124,5 +124,93 @@ spec:
       {{- with $root.Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
-      {{- end }}
 {{- end }}
+{{- end }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "matchplane.fullname" $root }}-web
+  labels:
+    {{- include "matchplane.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ $root.Values.web.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "matchplane.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "matchplane.selectorLabels" $root | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      serviceAccountName: {{ include "matchplane.fullname" $root }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: web
+          image: {{ include "matchplane.webImage" $root }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["node", "server.js"]
+          env:
+            - name: MATCHPLANE_ENVIRONMENT
+              value: {{ $root.Values.runtime.environment | quote }}
+            - name: NODE_ENV
+              value: production
+            - name: HOSTNAME
+              value: 0.0.0.0
+            - name: PORT
+              value: "4173"
+            - name: BETTER_AUTH_URL
+              value: {{ required "web.betterAuthUrl is required" $root.Values.web.betterAuthUrl | quote }}
+            - name: BETTER_AUTH_TRUSTED_ORIGINS
+              value: {{ $root.Values.web.trustedOrigins | quote }}
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
+                  key: better-auth-secret
+            - name: MATCHPLANE_ROOT_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
+                  key: root-admin-email
+            - name: MATCHPLANE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "runtime.existingSecret is required" $root.Values.runtime.existingSecret }}
+                  key: database-url
+            - name: MATCHPLANE_GATEWAY_INTERNAL_URL
+              value: {{ printf "http://%s-gateway:%v" (include "matchplane.fullname" $root) $root.Values.gateway.service.port | quote }}
+            - name: MATCHPLANE_PAYMENT_INTERNAL_URL
+              value: {{ printf "http://%s-payment-service:%v" (include "matchplane.fullname" $root) $root.Values.paymentService.service.port | quote }}
+          ports:
+            - name: http
+              containerPort: 4173
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /api/health/web
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml (default $root.Values.resources $root.Values.web.resources) | nindent 12 }}

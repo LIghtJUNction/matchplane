@@ -30,7 +30,7 @@ fi
 if command -v systemd-analyze >/dev/null 2>&1; then
   verify_output=$(systemd-analyze verify packaging/systemd/*.service 2>&1 || true)
   unexpected=$(printf '%s\n' "$verify_output" \
-    | grep -Ev 'Command /usr/bin/(matchplane-[a-z-]+|xtask) is not executable: No such file or directory' \
+    | grep -Ev 'Command (/usr/local/bin/node|/usr/bin/(matchplane-[a-z-]+|xtask)) is not executable: No such file or directory' \
     || true)
   if [[ -n $unexpected ]]; then
     printf '%s\n' "$unexpected" >&2

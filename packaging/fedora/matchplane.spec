@@ -21,7 +21,7 @@ BuildRequires:  protobuf-devel
 BuildRequires:  rust
 BuildRequires:  systemd-rpm-macros
 Requires:       ca-certificates
-Requires:       nodejs
+Requires:       nodejs >= 22.12.0
 Requires:       systemd
 
 %description

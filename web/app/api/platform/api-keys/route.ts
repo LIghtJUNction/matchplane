@@ -31,10 +31,20 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "expiresIn must be between one day and one year" }, { status: 400 });
   }
 
-  const organization = await readOrganization(request, input.organizationId);
+  const globalManager = session.user.role === "rootSuperAdmin" || session.user.role === "rootAdmin";
+  let organization = await readOrganization(request, input.organizationId);
+  if (!organization && globalManager) {
+    try {
+      await auth.api.addMember({
+        body: { organizationId: input.organizationId, userId: session.user.id, role: "admin" },
+      });
+      organization = await readOrganization(request, input.organizationId);
+    } catch (error) {
+      console.error("root manager membership projection failed", error);
+    }
+  }
   if (!organization) return NextResponse.json({ error: "platform organization not found" }, { status: 404 });
   const member = organization.members?.find((candidate) => candidate.userId === session.user.id);
-  const globalManager = session.user.role === "rootSuperAdmin" || session.user.role === "rootAdmin";
   const scopedManager = member?.role
     .split(",")
     .some((role) => role === "owner" || role === "admin" || role === "subplatform_admin");
@@ -83,9 +93,19 @@ export async function GET(request: Request): Promise<Response> {
   if (!organizationId || !isUuid(organizationId)) {
     return NextResponse.json({ error: "organizationId must be a UUID" }, { status: 400 });
   }
-  const organization = await readOrganization(request, organizationId);
-  const member = organization?.members?.find((candidate) => candidate.userId === session.user.id);
   const globalManager = session.user.role === "rootSuperAdmin" || session.user.role === "rootAdmin";
+  let organization = await readOrganization(request, organizationId);
+  if (!organization && globalManager) {
+    try {
+      await auth.api.addMember({
+        body: { organizationId, userId: session.user.id, role: "admin" },
+      });
+      organization = await readOrganization(request, organizationId);
+    } catch (error) {
+      console.error("root manager membership projection failed", error);
+    }
+  }
+  const member = organization?.members?.find((candidate) => candidate.userId === session.user.id);
   const scopedManager = member?.role
     .split(",")
     .some((role) => role === "owner" || role === "admin" || role === "subplatform_admin");

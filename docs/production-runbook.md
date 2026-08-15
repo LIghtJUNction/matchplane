@@ -8,7 +8,7 @@ tenant.
 ## 1. Prepare the host
 
 Install PostgreSQL with TimescaleDB and pgvector, Valkey with TLS enabled, Nginx, `curl`, `openssl`,
-and the release package. Create the `matchplane` system user/group and install the systemd units
+Node.js 22.12.0 or newer, and the release package. Create the `matchplane` system user/group and install the systemd units
 from `packaging/systemd/`. Require `sslmode=verify-full` in the PostgreSQL URL. Keep
 `/etc/matchplane/matchplane.env` owned by `root:matchplane`; gateway-only and payment-only secret
 subdirectories should be owned by their matching service groups, with secret files mode `0640`.
@@ -22,7 +22,11 @@ secret directory or an external secret manager.
 The packaged production template is [packaging/config/matchplane.env](../packaging/config/matchplane.env).
 Replace every placeholder before enabling a service. In particular, use a unique node UUID,
 non-development database and Valkey credentials, three TLS files (server certificate, private key,
-and client CA), and a platform-owned HTTPS payment callback origin.
+and client CA), a platform-owned HTTPS payment callback origin, an HTTPS `BETTER_AUTH_URL`, a
+high-entropy `BETTER_AUTH_SECRET` (at least 32 characters), and an operator-owned
+`MATCHPLANE_ROOT_ADMIN_EMAIL`. The authentication service rejects the example email and placeholder
+secret at runtime, and only the explicitly configured `BETTER_AUTH_URL` plus
+`BETTER_AUTH_TRUSTED_ORIGINS` are accepted as browser origins.
 
 ## 2. Install the event broker
 
@@ -74,11 +78,12 @@ systemctl enable --now \
   matchplane-gateway.service matchplane-payment-service.service \
   matchplane-event-relay.service matchplane-matcher.service \
   matchplane-projector.service matchplane-vector-worker.service \
-  matchplane-federation-hub.service
+  matchplane-federation-hub.service matchplane-web.service
 ```
 
-The gateway listens on `127.0.0.1:8080`, payment on `127.0.0.1:8081`, and federation gRPC on the
-configured address. Keep Kafka, PostgreSQL, Valkey, and the payment API off the public interface.
+The web/Better Auth process listens on `127.0.0.1:4173`, the gateway on `127.0.0.1:8080`, payment on
+`127.0.0.1:8081`, and federation gRPC on the configured address. Keep Kafka, PostgreSQL, Valkey,
+and the payment API off the public interface.
 Expose only the Nginx routes in [deploy/nginx/matchplane.conf](../deploy/nginx/matchplane.conf).
 
 ## 5. Verify before opening traffic
@@ -87,11 +92,12 @@ Run health probes and inspect the worker consumer groups:
 
 ```sh
 curl --fail https://PUBLIC_ORIGIN/api/health/ready
+curl --fail https://PUBLIC_ORIGIN/api/health/web
 curl --fail http://127.0.0.1:8081/health/ready
 systemctl --no-pager --plain --full status \
   matchplane-gateway matchplane-payment-service matchplane-event-relay \
   matchplane-matcher matchplane-projector matchplane-vector-worker \
-  matchplane-federation-hub kafka
+  matchplane-federation-hub matchplane-web kafka
 journalctl -u matchplane-matcher -u matchplane-projector --since '-10 min' --no-pager
 ```
 

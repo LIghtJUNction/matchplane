@@ -86,6 +86,13 @@ The root validates the manifest against the schema before registration. `id` is 
 `slug` is unique within a root tenant and becomes the URL path. `rootApiVersion` and capabilities
 are negotiated before the package is enabled.
 
+The built-in registration intake is `POST /api/platform/subplatforms`. It requires a Better Auth
+root/parent administrator session, an existing `tenantId`/`domainId`, a pinned Git commit or
+immutable archive locator, and the manifest JSON. It creates the Better Auth organization,
+records the recursive parent and immutable digest in `subplatform_registrations`, and returns
+`state: validated`. An isolated builder must attach a signed `build_digest` before a separate
+activation operation is allowed; the web request never clones or executes untrusted package code.
+
 ## Retrieval boundary
 
 Vector retrieval is an optional subplatform-owned adapter. A manifest that owns retrieval declares:

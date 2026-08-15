@@ -2,6 +2,11 @@
 .github
 target
 dist
-web/out
+web/node_modules
 web/.next
+web/out
+subplatforms/auto/node_modules
 deploy/compose/data
+**/*.pkg.tar.*
+**/*.rpm
+**/*.deb

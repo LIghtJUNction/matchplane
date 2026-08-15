@@ -86,9 +86,59 @@ jobs:
           path: dist/*.rpm
           if-no-files-found: error
 
+  containers:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Normalize image names
+        run: |
+          owner=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "VERSION=${VERSION#v}" >> "$GITHUB_ENV"
+          echo "IMAGE_PREFIX=ghcr.io/${owner}" >> "$GITHUB_ENV"
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Build and publish immutable service image
+        run: |
+          docker build \
+            --file deploy/compose/service.Dockerfile \
+            --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
+            --label org.opencontainers.image.version="$VERSION" \
+            --tag "$IMAGE_PREFIX/matchplane:$VERSION" .
+          docker push "$IMAGE_PREFIX/matchplane:$VERSION"
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_PREFIX/matchplane:$VERSION")
+          printf 'matchplane=%s\n' "$digest" > service-digest.txt
+      - name: Build and publish immutable web image
+        run: |
+          docker build \
+            --file deploy/compose/web.Dockerfile \
+            --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
+            --label org.opencontainers.image.version="$VERSION" \
+            --tag "$IMAGE_PREFIX/matchplane-web:$VERSION" .
+          docker push "$IMAGE_PREFIX/matchplane-web:$VERSION"
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_PREFIX/matchplane-web:$VERSION")
+          printf 'matchplane-web=%s\n' "$digest" >> service-digest.txt
+      - name: Upload image digests
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: container-digests
+          path: service-digest.txt
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [portable-and-deb, rpm]
+    needs: [portable-and-deb, rpm, containers]
     runs-on: ubuntu-latest
     permissions:
       contents: write

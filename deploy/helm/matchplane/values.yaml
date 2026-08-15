@@ -10,6 +10,28 @@ imagePullSecrets: []
 nameOverride: ''
 fullnameOverride: ''
 
+web:
+  replicas: 2
+  image:
+    repository: ghcr.io/lightjunction/matchplane-web
+    # Production renders must provide the immutable digest published by CI.
+    digest: ''
+  service:
+    type: ClusterIP
+    port: 4173
+  # This secret must provide better-auth-secret and root-admin-email. The optional
+  # trusted-origins key can contain a comma-separated allowlist of extra origins.
+  existingSecret: matchplane-web-secrets
+  betterAuthUrl: https://matx.tech
+  trustedOrigins: ''
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: '1'
+      memory: 512Mi
+
 networkPolicy:
   # Fail closed for pod egress. Add private database/broker CIDRs or selectors below when those
   # dependencies live outside this namespace.
@@ -24,6 +46,7 @@ runtime:
   # These secrets are split so the public gateway cannot read payment credentials or invoice keys.
   existingGatewaySecret: matchplane-gateway-secrets
   existingPaymentSecret: matchplane-payment-secrets
+  existingWebSecret: matchplane-web-secrets
   # This secret must provide server.crt, server.key, and client-ca.crt keys.
   existingTlsSecret: matchplane-federation-tls
   # This secret must provide ca.crt, client.crt, and client.key for Kafka mTLS.

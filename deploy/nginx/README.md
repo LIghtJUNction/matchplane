@@ -1,4 +1,4 @@
-# Bare-IP HTTPS deployment
+# MatchPlane HTTPS deployment
 
 The checked-in Nginx configuration serves the packaged web client, proxies the
 marketplace API under `/api/`, and proxies public payment operations under
@@ -6,9 +6,11 @@ marketplace API under `/api/`, and proxies public payment operations under
 the public listener.
 
 `matchplane-bootstrap.conf` provides the HTTP webroot needed for the first ACME
-challenge. After Certbot 5.4 or newer has issued the IP certificate, replace it
-with `matchplane.conf`.
+challenge. After Certbot has issued the `matx.tech` certificate, replace it with
+`matchplane.conf`.
 
-IP certificates use Let's Encrypt's `shortlived` profile and are valid for about
-six days. Renewal must remain automated. The server installs a Certbot deploy
-hook that runs `nginx -t` and reloads Nginx after a successful renewal.
+The repository configuration assumes DNS for `matx.tech` points at the host and
+that Certbot stores the certificate under
+`/etc/letsencrypt/live/matx.tech/`. Renewal must remain automated; the server
+installs a Certbot deploy hook that runs `nginx -t` and reloads Nginx after a
+successful renewal.
