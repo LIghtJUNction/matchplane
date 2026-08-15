@@ -161,7 +161,10 @@ jobs:
           expected_aur_fingerprint='SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4'
           verified_aur_host=false
           while read -r _ key_type key _; do
-            [ -n "${key_type:-}" ] || continue
+            # ssh-keygen -F emits a comment header before the matching key.
+            # Only hash real Ed25519 key records so the gate stays quiet and
+            # cannot mistake diagnostic output for a fingerprint.
+            [ "${key_type:-}" = ssh-ed25519 ] || continue
             fingerprint=$(printf '%s %s\n' "$key_type" "$key" \
               | ssh-keygen -lf /dev/stdin -E sha256 | awk '{print $2}')
             if [ "$fingerprint" = "$expected_aur_fingerprint" ]; then
