@@ -7,6 +7,7 @@ export interface PartySession {
   partyId: string;
   role: "buyer" | "seller" | "both";
   accessToken: string;
+  accessTokenExpiresAt: string;
 }
 
 export type BetterAuthMarketplaceRole = "buyer" | "seller" | "subplatform_admin" | "platform";
@@ -253,21 +254,33 @@ export function switchPaymentMode(input: {
 export function readPartySession(role: PartySession["role"] | "admin", subplatform = "root"): PartySession | null {
   try {
     const storageRoles = role === "admin" ? ["admin", "both"] : [role];
-    const raw = storageRoles
-      .map((storageRole) => window.localStorage.getItem(`matchplane.party.${subplatform}.${storageRole}`))
-      .find(Boolean) ?? (role === "admin" ? window.localStorage.getItem(`matchplane.party.${subplatform}.both`) : window.localStorage.getItem(`matchplane.party.${role}`));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PartySession;
-    if (
-      typeof parsed.tenantId !== "string" ||
-      typeof parsed.partyId !== "string" ||
-      typeof parsed.accessToken !== "string" ||
-      !["buyer", "seller", "both"].includes(parsed.role)
-    ) {
-      return null;
+    const keys = [
+      ...storageRoles.map((storageRole) => `matchplane.party.${subplatform}.${storageRole}`),
+      ...(role === "admin" ? [] : [`matchplane.party.${role}`]),
+    ];
+    for (const key of [...new Set(keys)]) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as PartySession;
+        if (
+          typeof parsed.tenantId !== "string" ||
+          typeof parsed.partyId !== "string" ||
+          typeof parsed.accessToken !== "string" ||
+          typeof parsed.accessTokenExpiresAt !== "string" ||
+          !isCapabilityActive(parsed.accessTokenExpiresAt) ||
+          !["buyer", "seller", "both"].includes(parsed.role) ||
+          (role === "admin" && parsed.role !== "both")
+        ) {
+          window.localStorage.removeItem(key);
+          continue;
+        }
+        return parsed;
+      } catch {
+        window.localStorage.removeItem(key);
+      }
     }
-    if (role === "admin" && parsed.role !== "both") return null;
-    return parsed;
+    return null;
   } catch {
     return null;
   }
@@ -312,15 +325,25 @@ export async function establishMarketplaceSession(input: {
     party_id: string;
     role: PartySession["role"];
     access_token: string;
+    access_token_expires_at: string;
   };
+  if (!isCapabilityActive(result.access_token_expires_at)) {
+    throw new MarketplaceApiError(502, "撮合会话服务返回了无效的能力过期时间");
+  }
   const session: PartySession = {
     tenantId: result.tenant_id,
     partyId: result.party_id,
     role: result.role,
     accessToken: result.access_token,
+    accessTokenExpiresAt: result.access_token_expires_at,
   };
   savePartySession(session, input.subplatform, input.role === "subplatform_admin" ? "admin" : input.role);
   return session;
+}
+
+function isCapabilityActive(value: string): boolean {
+  const expiresAt = Date.parse(value);
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
 }
 
 export function createBuyerRequest(input: {

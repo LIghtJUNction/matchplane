@@ -35,7 +35,8 @@ platform. A Better Auth organization API key is the machine identity; bind it to
 `both`. Call `marketplace.agent.session` through `/api/mcp` (or
 `POST /api/marketplace/agent-session`) with the active `tenant_id`, `domain_id`, `platform_path`,
 and requested role. The platform verifies the mounted path, parent/child organization access, and
-active registration before returning a short-lived party bearer.
+active registration before returning a short-lived (15-minute) party bearer plus its
+`access_token_expires_at` deadline.
 
 Use that bearer only as `Authorization: Bearer ...` for the generic marketplace MCP tools. The
 exchange derives the party identity from the API key, so callers cannot choose a participant ID;

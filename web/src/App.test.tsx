@@ -72,6 +72,7 @@ describe("MatchPlane workspaces", () => {
         partyId: crypto.randomUUID(),
         role: "seller",
         accessToken: "demo-session-token",
+        accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       }),
     );
     render(<App />);
@@ -113,6 +114,7 @@ describe("MatchPlane workspaces", () => {
         partyId: crypto.randomUUID(),
         role: "buyer",
         accessToken: "demo-session-token",
+        accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       }),
     );
     render(<App />);

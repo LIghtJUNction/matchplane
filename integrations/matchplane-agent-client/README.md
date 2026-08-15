@@ -5,7 +5,8 @@ same class and MCP contract for both roles; only the organization API-key metada
 the requested role, and the domain-neutral `side`/resource payload differ.
 
 Keep the API key and returned party capability in the Agent's server-side secret store. Do not
-bundle this package into a browser application.
+bundle this package into a browser application. Treat `access_token_expires_at` as a hard 15-minute
+deadline and request a fresh capability after it expires.
 
 ```ts
 import { MatchPlaneAgentClient } from "@matchplane/agent-client";

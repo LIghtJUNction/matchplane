@@ -18,6 +18,7 @@ export interface PartyCapability {
   party_id: string;
   role: "buyer" | "seller" | "both";
   access_token: string;
+  access_token_expires_at: string;
   platform_path: string;
   cost_bearer: "caller";
 }

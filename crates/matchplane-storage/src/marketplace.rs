@@ -41,6 +41,8 @@ pub struct CreateMarketplaceParty {
     pub role: String,
     /// SHA-256 hash of the high-entropy capability token returned at registration.
     pub access_token_hash: Vec<u8>,
+    /// Hard expiry for the capability token.
+    pub access_token_expires_at: OffsetDateTime,
     /// Protected contact record.
     pub contact: EncryptedContact,
 }
@@ -62,6 +64,8 @@ pub struct EnsureMarketplaceParty {
     pub role: String,
     /// SHA-256 hash of the newly issued capability token.
     pub access_token_hash: Vec<u8>,
+    /// Hard expiry for the newly issued capability token.
+    pub access_token_expires_at: OffsetDateTime,
     /// Protected contact record.
     pub contact: EncryptedContact,
 }
@@ -775,6 +779,7 @@ impl PgStore {
         if command.access_token_hash.len() != 32
             || command.contact.nonce.len() != 12
             || command.contact.key_version <= 0
+            || command.access_token_expires_at <= OffsetDateTime::now_utc()
         {
             return Err(StorageError::InvalidData(
                 "party credential or contact envelope is malformed".to_owned(),
@@ -783,8 +788,8 @@ impl PgStore {
         let row = sqlx::query(
             "INSERT INTO marketplace_parties \
              (id, tenant_id, external_key, display_name, role, access_token_hash, \
-              contact_ciphertext, contact_nonce, contact_key_version) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+              access_token_expires_at, contact_ciphertext, contact_nonce, contact_key_version) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
              RETURNING id, tenant_id, external_key, display_name, role, status, version, created_at",
         )
         .bind(command.party_id.into_uuid())
@@ -793,6 +798,7 @@ impl PgStore {
         .bind(&command.display_name)
         .bind(&command.role)
         .bind(&command.access_token_hash)
+        .bind(command.access_token_expires_at)
         .bind(&command.contact.ciphertext)
         .bind(&command.contact.nonce)
         .bind(command.contact.key_version)
@@ -814,6 +820,7 @@ impl PgStore {
             || command.access_token_hash.len() != 32
             || command.contact.nonce.len() != 12
             || command.contact.key_version <= 0
+            || command.access_token_expires_at <= OffsetDateTime::now_utc()
         {
             return Err(StorageError::InvalidData(
                 "Better Auth party bridge credential or identity is malformed".to_owned(),
@@ -832,11 +839,12 @@ impl PgStore {
         let row = sqlx::query(
             "INSERT INTO marketplace_parties \
              (id, tenant_id, external_key, display_name, role, access_token_hash, \
-              contact_ciphertext, contact_nonce, contact_key_version) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+              access_token_expires_at, contact_ciphertext, contact_nonce, contact_key_version) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
              ON CONFLICT (tenant_id, id) DO UPDATE SET \
                external_key = EXCLUDED.external_key, display_name = EXCLUDED.display_name, \
                role = EXCLUDED.role, access_token_hash = EXCLUDED.access_token_hash, \
+               access_token_expires_at = EXCLUDED.access_token_expires_at, \
                contact_ciphertext = EXCLUDED.contact_ciphertext, contact_nonce = EXCLUDED.contact_nonce, \
                contact_key_version = EXCLUDED.contact_key_version, version = marketplace_parties.version + 1 \
              RETURNING id, tenant_id, external_key, display_name, role, status, version, created_at",
@@ -847,6 +855,7 @@ impl PgStore {
         .bind(&command.display_name)
         .bind(&command.role)
         .bind(&command.access_token_hash)
+        .bind(command.access_token_expires_at)
         .bind(&command.contact.ciphertext)
         .bind(&command.contact.nonce)
         .bind(command.contact.key_version)
@@ -958,7 +967,8 @@ impl PgStore {
         }
         let row = sqlx::query(
             "SELECT id, tenant_id, role FROM marketplace_parties \
-             WHERE tenant_id = $1 AND id = $2 AND access_token_hash = $3 AND status = 'active'",
+             WHERE tenant_id = $1 AND id = $2 AND access_token_hash = $3 \
+               AND status = 'active' AND access_token_expires_at > clock_timestamp()",
         )
         .bind(tenant_id.into_uuid())
         .bind(party_id.into_uuid())

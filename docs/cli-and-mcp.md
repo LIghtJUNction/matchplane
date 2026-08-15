@@ -43,7 +43,8 @@ For a machine buyer or seller to continue into the generic marketplace tools, cr
 organization API key with `marketplace:write` and API-key metadata `agentRole: buyer`, `seller`, or
 `both`. Call `marketplace.agent.session` through `/api/mcp` (or
 `POST /api/marketplace/agent-session`) with the active `tenant_id`, `domain_id`, `platform_path`,
-and role. The response is a tenant/role-scoped short-lived party bearer. Pass that bearer as
+and role. The response is a tenant/role-scoped 15-minute party bearer and its
+`access_token_expires_at` deadline. Pass that bearer as
 `Authorization: Bearer ...` to the `marketplace.intent.*`, `marketplace.offer.*`, and
 `marketplace.introduction.*` tools. The exchange does not create a browser session, accept a
 caller-selected participant ID, or expose contact values.

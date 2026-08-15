@@ -31,6 +31,7 @@ use crate::{ApiError, AppState, parse_exact, parse_id, require_operator};
 const PARTY_REGISTRATION_GLOBAL_LIMIT: u32 = 10_000;
 const PARTY_REGISTRATION_TENANT_LIMIT: u32 = 100;
 const PARTY_REGISTRATION_WINDOW_SECS: u32 = 60 * 60;
+const PARTY_CAPABILITY_TTL: Duration = Duration::minutes(15);
 
 #[derive(Deserialize)]
 pub(super) struct CreatePartyRequest {
@@ -59,6 +60,9 @@ pub(super) struct CreatedPartyResponse {
     party: MarketplaceParty,
     /// Returned exactly once. Clients must store it as a secret.
     access_token: String,
+    /// Hard expiry for the returned tenant-scoped capability.
+    #[serde(with = "time::serde::rfc3339")]
+    access_token_expires_at: OffsetDateTime,
 }
 
 #[derive(Debug, Deserialize)]
@@ -336,6 +340,7 @@ pub(super) async fn create_party(
     }
     let access_token = format!("mp_{}_{}", Uuid::now_v7().simple(), Uuid::now_v7().simple());
     let access_token_hash = Sha256::digest(access_token.as_bytes()).to_vec();
+    let access_token_expires_at = OffsetDateTime::now_utc() + PARTY_CAPABILITY_TTL;
     let protected = state
         .contact_cipher
         .encrypt(&contact_bytes, &contact_aad(tenant_id, party_id))
@@ -349,6 +354,7 @@ pub(super) async fn create_party(
             display_name: request.display_name,
             role: request.role,
             access_token_hash,
+            access_token_expires_at,
             contact: EncryptedContact {
                 ciphertext: protected.ciphertext,
                 nonce: protected.nonce.to_vec(),
@@ -361,6 +367,7 @@ pub(super) async fn create_party(
         Json(CreatedPartyResponse {
             party,
             access_token,
+            access_token_expires_at,
         }),
     ))
 }
@@ -393,6 +400,7 @@ pub(super) async fn ensure_party_session(
     let contact_bytes = serde_json::to_vec(&contact)
         .map_err(|error| ApiError::bad_request(format!("contact is invalid: {error}")))?;
     let access_token = format!("mp_{}_{}", Uuid::now_v7().simple(), Uuid::now_v7().simple());
+    let access_token_expires_at = OffsetDateTime::now_utc() + PARTY_CAPABILITY_TTL;
     let protected = state
         .contact_cipher
         .encrypt(&contact_bytes, &contact_aad(tenant_id, party_id))
@@ -407,6 +415,7 @@ pub(super) async fn ensure_party_session(
             display_name: request.display_name,
             role: request.role,
             access_token_hash: Sha256::digest(access_token.as_bytes()).to_vec(),
+            access_token_expires_at,
             contact: EncryptedContact {
                 ciphertext: protected.ciphertext,
                 nonce: protected.nonce.to_vec(),
@@ -419,6 +428,7 @@ pub(super) async fn ensure_party_session(
         Json(CreatedPartyResponse {
             party,
             access_token,
+            access_token_expires_at,
         }),
     ))
 }

@@ -90,6 +90,7 @@ export async function POST(request: Request): Promise<Response> {
     party_id: string;
     role: "buyer" | "seller" | "both";
     access_token: string;
+    access_token_expires_at: string;
   };
   return NextResponse.json(
     {
@@ -97,6 +98,7 @@ export async function POST(request: Request): Promise<Response> {
       party_id: body.party_id,
       role: body.role,
       access_token: body.access_token,
+      access_token_expires_at: body.access_token_expires_at,
       platform_path: input.platformPath,
       domain_id: input.domainId,
       cost_bearer: "caller",

@@ -120,6 +120,7 @@ export async function POST(request: Request): Promise<Response> {
     party_id: string;
     role: "buyer" | "seller" | "both";
     access_token: string;
+    access_token_expires_at: string;
   };
   return NextResponse.json(body, {
     headers: { "cache-control": "no-store" },

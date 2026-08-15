@@ -169,7 +169,8 @@ impl PaymentStore {
         }
         sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM marketplace_parties \
-             WHERE tenant_id = $1 AND id = $2 AND access_token_hash = $3 AND status = 'active')",
+             WHERE tenant_id = $1 AND id = $2 AND access_token_hash = $3 \
+               AND status = 'active' AND access_token_expires_at > clock_timestamp())",
         )
         .bind(tenant_id.into_uuid())
         .bind(party_id.into_uuid())

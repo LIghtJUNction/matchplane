@@ -11,7 +11,7 @@ function fakeFetch() {
       return new Response(JSON.stringify({
         jsonrpc: "2.0",
         id: "1",
-        result: { structuredContent: { tenant_id: "t", domain_id: "d", party_id: "p", role: "buyer", access_token: "secret", cost_bearer: "caller" } },
+        result: { structuredContent: { tenant_id: "t", domain_id: "d", party_id: "p", role: "buyer", access_token: "secret", access_token_expires_at: "2099-01-01T00:00:00Z", cost_bearer: "caller" } },
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", result: { structuredContent: { ok: true } } }), {
@@ -33,6 +33,7 @@ describe("MatchPlane external Agent client", () => {
       role: "buyer",
     });
     expect(capability.role).toBe("buyer");
+    expect(capability.access_token_expires_at).toBe("2099-01-01T00:00:00Z");
     expect(fake.calls[0]?.url).toBe("https://matx.tech/api/mcp");
     expect(new Headers(fake.calls[0]?.init?.headers).get("x-matchplane-api-key")).toBe("mpk_test");
 

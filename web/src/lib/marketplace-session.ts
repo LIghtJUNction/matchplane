@@ -49,5 +49,6 @@ export async function getMarketplaceSession(input: {
     partyId: data.user.id,
     role: input.role === "subplatform_admin" ? "both" : input.role,
     accessToken: "demo-capability-not-for-api",
+    accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
   };
 }
