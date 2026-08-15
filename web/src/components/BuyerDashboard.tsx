@@ -29,6 +29,9 @@ interface BuyerDashboardProps {
 export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform }: BuyerDashboardProps) {
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState<Set<string>>(() => new Set());
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(() => new Set());
+  const isRoot = subplatform.slug === "root";
 
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -62,15 +65,16 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         <div className="hero-copy">
           <span className="hero-kicker">
             <Sparkles size={16} aria-hidden="true" />
-            需求由你定义
+            {isRoot ? "根平台 · 需求由你定义" : "需求由你定义"}
           </span>
           <h1 id="buyer-hero-title">
             把目标说清楚，
             <span>找到合适的供给方。</span>
           </h1>
           <p>
-            告诉我们真实用途、预算和不能妥协的条件。MatchPlane 会解释每一次推荐，
-            撮合后你可以直接联系供给方，也可以在线下完成交易。
+            {isRoot
+              ? "告诉根平台真实用途、预算和不能妥协的条件。系统会先在根平台理解需求，再把它传递给合适的子平台。"
+              : "告诉我们真实用途、预算和不能妥协的条件。MatchPlane 会解释每一次推荐，撮合后你可以直接联系供给方，也可以在线下完成交易。"}
           </p>
           <div className="hero-actions">
             <motion.button
@@ -86,7 +90,10 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
             <motion.button
               className="button button-quiet"
               type="button"
-              onClick={() => onNotice("需求编辑器已保存你的当前筛选条件")}
+              onClick={() => {
+                document.getElementById("match-chat-input")?.focus();
+                onNotice("已回到需求输入框，可以继续补充预算、时间和不能妥协的条件");
+              }}
               whileTap={{ scale: 0.97 }}
               transition={spring}
             >
@@ -127,10 +134,42 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
             type="search"
           />
         </label>
-        <button className="filter-button" type="button" onClick={() => onNotice("高级筛选已展开")}>
+        <button
+          className={`filter-button${filtersOpen ? " is-active" : ""}`}
+          type="button"
+          aria-expanded={filtersOpen}
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
           <SlidersHorizontal size={18} aria-hidden="true" />
           筛选
         </button>
+        {filtersOpen ? (
+          <div className="filter-menu" role="group" aria-label="高级筛选">
+            {["已核验供给", "支持线下协商", "有明确报价"].map((filter) => {
+              const active = activeFilters.has(filter);
+              return (
+                <button
+                  key={filter}
+                  className={active ? "is-active" : ""}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    setActiveFilters((current) => {
+                      const next = new Set(current);
+                      if (next.has(filter)) next.delete(filter);
+                      else next.add(filter);
+                      return next;
+                    });
+                    onNotice(active ? `已移除筛选：${filter}` : `已启用筛选：${filter}`);
+                  }}
+                >
+                  {filter}
+                  {active ? <Check size={14} aria-hidden="true" /> : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </section>
 
       <section id="recommendations" className="content-section">

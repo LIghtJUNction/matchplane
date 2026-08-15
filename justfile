@@ -38,5 +38,7 @@ package-check:
 subplatform-check:
     test -f .gitmodules
     test -f subplatforms/auto/matchplane.subplatform.json
-    python3 -c 'import json; m=json.load(open("subplatforms/auto/matchplane.subplatform.json")); assert m["apiVersion"] == "matchplane.subplatform/v1"; assert m["rootApiVersion"] == "v1"; assert m["slug"] == "auto"'
+    test -f web/public/used-car/matchplane.subplatform.json
+    cmp subplatforms/auto/matchplane.subplatform.json web/public/used-car/matchplane.subplatform.json
+    python3 -c 'import json; m=json.load(open("subplatforms/auto/matchplane.subplatform.json")); assert m["apiVersion"] == "matchplane.subplatform/v1"; assert m["rootApiVersion"] == "v1"; assert m["slug"] == "used-car"'
     test -n "$$(git -C subplatforms/auto rev-parse HEAD)"

@@ -1,5 +1,7 @@
 export interface SubplatformConfig {
   slug: string;
+  /** Canonical mounted path. The root node is `/`; children may be nested. */
+  path: string;
   brandName: string;
   label: string;
   description: string;
@@ -17,12 +19,14 @@ export function resolveSubplatform(pathname = "/"): SubplatformConfig {
   return slug === "root"
     ? {
         slug: "root",
+        path: "/",
         brandName: "MatchPlane",
         label: "通用 AI 撮合",
         description: "把需求交给合适的供给方。",
       }
     : {
         slug,
+        path: `/${slug}`,
         brandName: slug,
         label: "",
         description: "",
@@ -47,9 +51,11 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       currencyScale?: number;
       currency?: string;
       email?: { providerKey?: string; fromAddress?: string };
+      routes?: string[];
     };
     return {
       ...base,
+      path: validRoute(manifest.routes?.[0]) || base.path,
       brandName: manifest.displayName?.trim() || base.brandName,
       label: manifest.label?.trim() || manifest.displayName?.trim() || base.label,
       description: manifest.description?.trim() || base.description,
@@ -63,4 +69,8 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
   } catch {
     return base;
   }
+}
+
+function validRoute(value: string | undefined): string | undefined {
+  return value && /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(value) ? value : undefined;
 }

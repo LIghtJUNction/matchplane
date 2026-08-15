@@ -6,9 +6,11 @@ import { ArrowUp, LockKeyhole, Sparkles } from "lucide-react";
 import {
   createBuyerRequest,
   isLiveMarketplaceEnabled,
+  routePlatformIntent,
   type PartySession,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
+import { authClient, authFetchOptions } from "../lib/auth-client";
 import type { SubplatformConfig } from "../subplatform";
 
 const PENDING_CHAT_KEY = "matchplane.pending-chat";
@@ -34,6 +36,7 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const isRoot = subplatform.slug === "root";
 
   const submitMessage = useCallback(
     async (rawText: string, session?: PartySession) => {
@@ -54,19 +57,26 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
       ]);
 
       try {
+        const route = isLiveMarketplaceEnabled()
+          ? await routePlatformIntent({ platformPath: platformPath(subplatform), narrative: text })
+          : null;
         if (isLiveMarketplaceEnabled()) {
-          if (!subplatform.domainId) {
-            throw new Error("当前子平台尚未完成 root domain 注册");
+          if (subplatform.domainId) {
+            if (!session) throw new Error("Better Auth 会话尚未连接到当前子平台");
+            await createBuyerRequest({
+              session,
+              domainId: subplatform.domainId,
+              narrative: text,
+              requirements: {
+                source: "conversation",
+                intent: "general_match",
+                platform_path: platformPath(subplatform),
+                delegated_route_count: route?.routePlan.length ?? 0,
+              },
+              currency: "CNY",
+              currencyScale: 2,
+            });
           }
-          if (!session) throw new Error("Better Auth 会话尚未连接到当前子平台");
-          await createBuyerRequest({
-            session,
-            domainId: subplatform.domainId,
-            narrative: text,
-            requirements: { source: "conversation", intent: "general_match" },
-            currency: "CNY",
-            currencyScale: 2,
-          });
         }
         setMessages((current) => [
           ...current,
@@ -74,7 +84,9 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
             id: `${requestId}-assistant-done`,
             role: "assistant",
             text: isLiveMarketplaceEnabled()
-              ? "需求已进入撮合队列。接下来我会解释匹配理由，再让你决定是否联系供给方。"
+              ? route?.routePlan.length
+                ? `需求已沿当前平台向下传递，已交给 ${route.routePlan.map((hop) => hop.displayName).join("、")} 继续匹配。接下来我会解释匹配理由，再让你决定是否联系供给方。`
+                : "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。"
               : "需求已记录（演示模式）。登录状态有效，下一步会按你的条件给出匹配与理由。",
           },
         ]);
@@ -92,25 +104,34 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
         setSending(false);
       }
     },
-    [onNotice, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId],
+    [onNotice, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
     let cancelled = false;
-    void getMarketplaceSession({
-      subplatform: subplatform.slug,
-      tenantId: subplatform.tenantId,
-      domainId: subplatform.domainId,
-      role: "buyer",
-    }).then(async (session) => {
+    void (async () => {
+      const session = subplatform.domainId
+        ? await getMarketplaceSession({
+            subplatform: subplatform.slug,
+            tenantId: subplatform.tenantId,
+            domainId: subplatform.domainId,
+            role: "buyer",
+          })
+        : null;
+      const authState = subplatform.domainId
+        ? null
+        : await authClient.getSession({ fetchOptions: authFetchOptions(subplatform.slug) });
       if (cancelled) return;
-      setSignedIn(Boolean(session));
-      if (!session) return;
+      if (subplatform.domainId && !session) {
+        setSignedIn(false);
+        return;
+      }
+      setSignedIn(Boolean(session || authState?.data));
       const pending = readPendingChat();
       if (!pending) return;
       window.sessionStorage.removeItem(PENDING_CHAT_KEY);
-      if (!cancelled) void submitMessage(pending.text, session);
-    }).catch(() => {
+      if (!cancelled) void submitMessage(pending.text, session ?? undefined);
+    })().catch(() => {
       if (!cancelled) setSignedIn(false);
     });
     return () => { cancelled = true; };
@@ -121,30 +142,38 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
     const text = message.trim();
     if (!text || sending) return;
 
-    void getMarketplaceSession({
-      subplatform: subplatform.slug,
-      tenantId: subplatform.tenantId,
-      domainId: subplatform.domainId,
-      role: "buyer",
-    }).then(async (session) => {
-      if (!session) {
+    void (async () => {
+      const session = subplatform.domainId
+        ? await getMarketplaceSession({
+            subplatform: subplatform.slug,
+            tenantId: subplatform.tenantId,
+            domainId: subplatform.domainId,
+            role: "buyer",
+          })
+        : null;
+      const authState = subplatform.domainId
+        ? null
+        : await authClient.getSession({ fetchOptions: authFetchOptions(subplatform.slug) });
+      if (!session && !authState?.data) {
         const next = `${window.location.pathname}${window.location.search}`;
         window.sessionStorage.setItem(PENDING_CHAT_KEY, JSON.stringify({ text, next } satisfies PendingChat));
         window.location.assign(`/login?next=${encodeURIComponent(next)}`);
         return;
       }
       setSignedIn(true);
-      void submitMessage(text, session);
-    }).catch((error) => onNotice(error instanceof Error ? error.message : "Better Auth 会话校验失败"));
+      void submitMessage(text, session ?? undefined);
+    })().catch((error) => onNotice(error instanceof Error ? error.message : "Better Auth 会话校验失败"));
   };
 
   return (
     <section className="match-chat" aria-labelledby="match-chat-title">
       <div className="match-chat-heading">
         <div>
-          <span className="eyebrow"><Sparkles size={14} aria-hidden="true" /> AI 撮合入口</span>
+          <span className="eyebrow"><Sparkles size={14} aria-hidden="true" /> {isRoot ? "根平台 AI 撮合入口" : `${subplatform.label || "当前平台"} AI 撮合入口`}</span>
           <h1 id="match-chat-title">先说说你想解决什么。</h1>
-          <p>不用先选分类。告诉我目标、预算、时间和不能妥协的条件，{subplatform.label || "当前子平台"} 会把需求交给合适的供给方。</p>
+          <p>{isRoot
+            ? "不用先选分类。根平台会理解你的目标，再把需求沿平台层级传递给已启用的子平台。"
+            : `不用先选分类。告诉我目标、预算、时间和不能妥协的条件，${subplatform.label || "当前平台"} 会先处理，再继续询问下属平台。`}</p>
         </div>
         <span className={`match-chat-status${signedIn ? " is-signed-in" : ""}`}>
           <LockKeyhole size={14} aria-hidden="true" />
@@ -178,6 +207,10 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
       <p className="match-chat-footnote">联系方式只在双方同意后交换；线下成交也会保留平台撮合记录。</p>
     </section>
   );
+}
+
+function platformPath(subplatform: SubplatformConfig): string {
+  return subplatform.path || (subplatform.slug === "root" ? "/" : `/${subplatform.slug}`);
 }
 
 function readPendingChat(): PendingChat | null {

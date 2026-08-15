@@ -178,6 +178,24 @@ p {
   text-decoration: none;
 }
 
+.brand-cluster {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.root-platform-link {
+  width: max-content;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-decoration: none;
+}
+
+.root-platform-link:hover {
+  color: var(--ink);
+}
+
 .brand-mark {
   position: relative;
   width: 2.15rem;
@@ -539,6 +557,38 @@ main {
   color: var(--ivory);
   cursor: pointer;
   font-weight: 630;
+}
+
+.filter-button.is-active {
+  background: var(--cactus-deep);
+}
+
+.filter-menu {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.2rem;
+}
+
+.filter-menu button {
+  min-height: 2.35rem;
+  padding: 0 0.78rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.filter-menu button.is-active {
+  border-color: var(--cactus-deep);
+  background: var(--cactus);
+  color: #31574b;
 }
 
 .filter-button span {

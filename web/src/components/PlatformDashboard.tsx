@@ -57,7 +57,7 @@ export function PlatformDashboard({
 
       <div className="platform-layout">
         <section className="surface gateway-panel" aria-labelledby="gateway-title">
-          <SectionHeading eyebrow="标准化支付接口" title="支付网关" action="配置网关" />
+          <SectionHeading eyebrow="标准化支付接口" title="支付网关" action="配置网关" onAction={() => onNotice("网关配置需要管理员会话")} />
           <div className="gateway-empty">
             <CreditCard size={24} aria-hidden="true" />
             <strong>等待管理员接入支付网关</strong>
@@ -81,7 +81,7 @@ export function PlatformDashboard({
         </section>
 
         <section className="surface finance-activity" aria-labelledby="finance-activity-title">
-          <SectionHeading eyebrow="财务动态" title="支付、发票与退款" action="查看全部" />
+          <SectionHeading eyebrow="财务动态" title="支付、发票与退款" action="查看全部" onAction={() => onNotice("财务动态将在接入真实支付服务后显示")} />
           <div className="finance-empty"><ReceiptText size={22} aria-hidden="true" /><p>暂无财务动态。接入支付服务后，这里显示真实事件。</p></div>
           <div className="finance-actions">
             <button type="button" onClick={() => onNotice("已进入发票管理")}>

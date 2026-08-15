@@ -36,9 +36,9 @@ const roles: Array<{ id: WorkspaceRole; label: string; shortLabel: string; icon:
   { id: "subplatform_admin", label: "子平台管理员", shortLabel: "子管", icon: ShieldCheck },
 ];
 
-export function App() {
+export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [role, setRole] = useState<WorkspaceRole>("buyer");
-  const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform());
+  const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform(initialPath));
   const [listings] = useState<AssetListing[]>([]);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -130,19 +130,22 @@ export function App() {
         <a className="skip-link" href="#main-content">跳到主要内容</a>
         <header className="app-header">
           <div className="header-inner">
-            <Brand
-              label={subplatform.brandName}
-              homeHref={subplatform.slug === "root" ? "#top" : `/${subplatform.slug}`}
-            />
+            <div className="brand-cluster">
+              <Brand
+                label={subplatform.brandName}
+                homeHref={subplatform.slug === "root" ? "#top" : `/${subplatform.slug}`}
+              />
+              {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">根平台</a> : null}
+            </div>
             <RoleSwitcher role={role} onChange={selectRole} />
             <div className="header-actions">
               <span className="secure-status"><ShieldCheck size={15} aria-hidden="true" />安全连接</span>
-              <IconButton label="通知"><Bell size={19} aria-hidden="true" /></IconButton>
+              <IconButton label="通知" onClick={() => setNotice("目前没有新的平台通知") }><Bell size={19} aria-hidden="true" /></IconButton>
               <button className="profile-button" type="button" aria-label="打开个人账户" onClick={() => window.location.assign(`/login?role=${role}&next=${encodeURIComponent(window.location.pathname)}`)}>
                 <span><UserRound size={18} aria-hidden="true" /></span>
                 <span className="profile-copy"><strong>{subplatform.brandName}</strong><small>{role === "buyer" ? "买家" : role === "seller" ? "卖家" : "管理员"}</small></span>
               </button>
-              <IconButton label="打开菜单"><Menu size={20} aria-hidden="true" /></IconButton>
+              <IconButton label="打开菜单" onClick={() => setNotice("请使用上方工作台切换，或打开个人账户登录") }><Menu size={20} aria-hidden="true" /></IconButton>
             </div>
           </div>
         </header>

@@ -1,0 +1,27 @@
+{
+  "apiVersion": "matchplane.subplatform/v1",
+  "id": "com.matx.auto",
+  "slug": "used-car",
+  "displayName": "Matx Auto",
+  "description": "二手车需求、车源与线下看车撮合 UI",
+  "rootApiVersion": "v1",
+  "entry": "src/index.ts",
+  "routes": ["/used-car"],
+  "capabilities": [
+    "demand",
+    "supply",
+    "explainable_matching",
+    "contact_exchange",
+    "offline_viewing",
+    "seller_promotion"
+  ],
+  "requiredScopes": ["marketplace:read", "marketplace:write"],
+  "retrieval": {
+    "protocol": "matchplane.retrieval/v1",
+    "owner": "subplatform"
+  },
+  "assets": {
+    "staticDirectory": "src",
+    "buildCommand": "bun run build"
+  }
+}

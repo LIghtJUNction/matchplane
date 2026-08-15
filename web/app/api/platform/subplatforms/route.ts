@@ -266,6 +266,8 @@ function validateManifest(value: unknown, slug: string | undefined, packageId: s
   if (!stringMatches(manifest.id, /^[a-z0-9][a-z0-9._-]{1,127}$/) || manifest.id !== packageId) return { ok: false, error: "manifest.id 与 packageId 不一致" };
   if (!stringMatches(manifest.slug, /^[a-z0-9][a-z0-9-]{1,62}$/) || manifest.slug !== slug) return { ok: false, error: "manifest.slug 与 slug 不一致" };
   if (!stringMatches(manifest.displayName, /^.{1,200}$/u) || !stringMatches(manifest.entry, /^(?!\/)(?!.*\.\.).+$/)) return { ok: false, error: "manifest displayName/entry 无效" };
+  if (manifest.description !== undefined && !stringMatches(manifest.description, /^.{0,2000}$/u)) return { ok: false, error: "manifest.description 无效" };
+  if (manifest.email !== undefined && !validateManifestEmail(manifest.email)) return { ok: false, error: "manifest.email 无效" };
   if (!Array.isArray(manifest.routes) || manifest.routes.length === 0 || manifest.routes.some((route) => !stringMatches(route, /^\/[a-z0-9][a-z0-9-]*(?:\/.*)?$/))) return { ok: false, error: "manifest.routes 无效" };
   if (!Array.isArray(manifest.capabilities) || manifest.capabilities.some((item) => !stringMatches(item, /^[a-z0-9_:-]+$/))) return { ok: false, error: "manifest.capabilities 无效" };
   if (!Array.isArray(manifest.requiredScopes) || manifest.requiredScopes.some((item) => !allowedScopes.has(item))) return { ok: false, error: "manifest.requiredScopes 无效" };
@@ -291,6 +293,14 @@ function stringMatches(value: unknown, pattern: RegExp): value is string {
   return typeof value === "string" && pattern.test(value);
 }
 
+function validateManifestEmail(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const email = value as { providerKey?: unknown; fromAddress?: unknown };
+  if (email.providerKey !== undefined && !stringMatches(email.providerKey, /^[a-z0-9][a-z0-9._-]{1,99}$/)) return false;
+  if (email.fromAddress !== undefined && !stringMatches(email.fromAddress, /^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return false;
+  return true;
+}
+
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -308,6 +318,8 @@ interface Manifest {
   id: string;
   slug: string;
   displayName: string;
+  description?: string;
+  email?: { providerKey?: string; fromAddress?: string };
   rootApiVersion: "v1";
   entry: string;
   routes: string[];
@@ -323,6 +335,8 @@ const manifestKeys = new Set([
   "id",
   "slug",
   "displayName",
+  "description",
+  "email",
   "rootApiVersion",
   "entry",
   "routes",

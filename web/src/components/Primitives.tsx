@@ -46,10 +46,12 @@ export function SectionHeading({
   eyebrow,
   title,
   action,
+  onAction,
 }: {
   eyebrow?: string;
   title: string;
   action?: string;
+  onAction?: () => void;
 }) {
   return (
     <div className="section-heading">
@@ -58,7 +60,7 @@ export function SectionHeading({
         <h2>{title}</h2>
       </div>
       {action ? (
-        <button className="text-action" type="button">
+        <button className="text-action" type="button" onClick={onAction}>
           {action}
           <ChevronRight size={17} aria-hidden="true" />
         </button>
@@ -120,9 +122,9 @@ export function ActivityList({ items }: { items: ActivityItem[] }) {
   );
 }
 
-export function InlineLink({ children }: { children: ReactNode }) {
+export function InlineLink({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
   return (
-    <button className="inline-link" type="button">
+    <button className="inline-link" type="button" onClick={onClick}>
       {children}
       <ArrowUpRight size={15} aria-hidden="true" />
     </button>

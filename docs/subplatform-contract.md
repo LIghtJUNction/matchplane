@@ -95,6 +95,18 @@ activation operation is allowed; the web request never clones or executes untrus
 
 ## Retrieval boundary
 
+## Recursive platform chat
+
+Every mounted path exposes the same chat entry. A request submitted at `/` is accepted by the
+deployment root and delegated to the currently activated child registrations; a request submitted
+at `/parent/child` is first recorded at that node and then delegated to its activated descendants.
+The routing envelope is domain-neutral and carries the canonical platform path, request id and
+bounded narrative. It never invents a vehicle or other vertical field. The web boundary is
+`POST /api/platform/match`; the root stores the envelope in `platform_match_requests`, and each
+child may then create its own domain-scoped buyer request through the stable marketplace API.
+Unactivated, disabled or missing registrations are not called, and the root returns an explicit
+accepted/degraded state instead of silently dropping the request.
+
 Vector retrieval is an optional subplatform-owned adapter. A manifest that owns retrieval declares:
 
 ```json

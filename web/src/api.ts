@@ -89,6 +89,23 @@ export interface ContactResponse {
   platform_commission_settlement: string;
 }
 
+export interface PlatformRouteHop {
+  slug: string;
+  path: string;
+  displayName: string;
+  description: string;
+  tenantId: string;
+  domainId: string;
+  depth: number;
+}
+
+export interface PlatformIntentRoute {
+  requestId: string;
+  platformPath: string;
+  status: "accepted" | "delegated";
+  routePlan: PlatformRouteHop[];
+}
+
 export class MarketplaceApiError extends Error {
   readonly status: number;
 
@@ -146,6 +163,32 @@ async function paymentRequest<T>(
 
 export function isLiveMarketplaceEnabled(): boolean {
   return process.env.NEXT_PUBLIC_MATCHPLANE_LIVE_MODE === "true";
+}
+
+export async function routePlatformIntent(input: {
+  platformPath: string;
+  narrative: string;
+}): Promise<PlatformIntentRoute> {
+  const response = await fetch("/api/platform/match", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    let message = `平台撮合请求失败（${response.status}）`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // Preserve the HTTP status when an upstream error is not JSON.
+    }
+    throw new MarketplaceApiError(response.status, message);
+  }
+  return (await response.json()) as PlatformIntentRoute;
 }
 
 export function getPaymentSetting(tenantId: string): Promise<PaymentSetting> {
