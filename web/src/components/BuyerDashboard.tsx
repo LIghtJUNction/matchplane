@@ -177,7 +177,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         </section>
       ) : null}
 
-      <section id="recommendations" className="content-section">
+      <section id="recommendations" className={`content-section${isRoot ? " root-content" : ""}`}>
         <SectionHeading eyebrow="由供给方提交，审核后展示" title={`${visible.length} 个可用供给`} />
         {visible.length ? (
           <div className="vehicle-grid">
@@ -237,16 +237,15 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
 
 function RootFlow() {
   return (
-    <section className="root-flow" aria-labelledby="root-flow-title">
-      <div className="root-flow-intro">
-        <span className="hero-kicker"><Sparkles size={16} aria-hidden="true" /> 根平台 · 通用入口</span>
-        <h2 id="root-flow-title">描述目标，平台负责继续找。</h2>
-        <p>根平台理解你的目标并沿已启用的平台树路由；具体领域、商家和供给内容由各子平台提供。</p>
+    <section className="root-routing-strip" aria-labelledby="root-routing-title">
+      <div className="root-routing-copy">
+        <h2 id="root-routing-title">一句话，开始一条匹配路径。</h2>
+        <p>根平台只做理解与路由；具体领域、商家和供给内容由各子平台提供。</p>
       </div>
-      <ol className="root-flow-steps">
-        <li><span>01</span><div><strong>描述目标</strong><small>预算、时间和不能妥协的条件</small></div></li>
-        <li><span>02</span><div><strong>选择平台</strong><small>AI 只在已激活的子平台中做路由</small></div></li>
-        <li><span>03</span><div><strong>联系供给方</strong><small>双方同意后交换联系方式</small></div></li>
+      <ol className="root-routing-steps">
+        <li><span aria-hidden="true" /><div><strong>描述目标</strong><small>预算与约束</small></div></li>
+        <li><span aria-hidden="true" /><div><strong>沿平台树路由</strong><small>只访问已激活节点</small></div></li>
+        <li><span aria-hidden="true" /><div><strong>双方同意后联系</strong><small>保留撮合与审计记录</small></div></li>
       </ol>
     </section>
   );

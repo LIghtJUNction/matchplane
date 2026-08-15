@@ -207,10 +207,30 @@ export const auth = betterAuth({
     user: {
       create: {
         before: async (user) => {
-          if (!configuredRootAdminEmail || user.email.toLowerCase() !== configuredRootAdminEmail) {
+          if (
+            !configuredRootAdminEmail ||
+            user.email.toLowerCase() !== configuredRootAdminEmail ||
+            user.emailVerified !== true
+          ) {
             return;
           }
           return { data: { ...user, role: "rootSuperAdmin" } };
+        },
+      },
+      update: {
+        after: async (user, context) => {
+          if (
+            !configuredRootAdminEmail ||
+            user.email.toLowerCase() !== configuredRootAdminEmail ||
+            user.emailVerified !== true ||
+            user.role === "rootSuperAdmin"
+          ) {
+            return;
+          }
+          // Email verification and magic-link/OTP flows update the user after the
+          // initial row is created. Promote only after that proof exists, then let
+          // the hook's idempotency guard prevent a second write.
+          await context?.context.internalAdapter.updateUser(user.id, { role: "rootSuperAdmin" });
         },
       },
     },
@@ -292,9 +312,13 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
         const email = firstProfileString(profile, ["email", "email_address"])
           ?? `${providerId}.${subject || "account"}@oauth.matchplane.invalid`;
         return {
+          id: subject ? `${providerId}:${subject}` : undefined,
           name: firstProfileString(profile, ["name", "nickname", "nick_name"]) ?? `${providerId} 用户`,
           email,
-          emailVerified: Boolean(firstProfileString(profile, ["email", "email_address"])),
+          // Never treat the mere presence of an email field as proof that the provider
+          // verified it.  This keeps an unverified social profile from becoming the
+          // configured root-admin identity or silently linking to a password account.
+          emailVerified: firstProfileBoolean(profile, ["email_verified", "emailVerified", "verified_email"]),
           image: firstProfileString(profile, ["avatar", "avatar_url", "headimgurl", "picture"]),
         };
       },
@@ -329,4 +353,13 @@ function firstProfileString(profile: Record<string, unknown>, keys: string[]): s
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
   }
   return undefined;
+}
+
+function firstProfileBoolean(profile: Record<string, unknown>, keys: string[]): boolean {
+  for (const key of keys) {
+    const value = profile[key];
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string" && /^(true|1|yes)$/i.test(value.trim())) return true;
+  }
+  return false;
 }

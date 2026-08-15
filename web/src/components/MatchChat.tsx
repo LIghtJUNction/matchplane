@@ -186,7 +186,7 @@ export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchCha
   };
 
   return (
-    <section className="match-chat" aria-labelledby="match-chat-title">
+    <section className={`match-chat${isRoot ? " is-root" : ""}`} aria-labelledby="match-chat-title">
       <div className="match-chat-heading">
         <div>
           <span className="eyebrow"><Sparkles size={14} aria-hidden="true" /> {isRoot ? "根平台 AI 撮合入口" : `${subplatform.label || "当前平台"} AI 撮合入口`}</span>
