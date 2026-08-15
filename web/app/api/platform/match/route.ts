@@ -171,7 +171,9 @@ async function readChildRoutePlan(platformPath: string, rootTenantId: string): P
             COALESCE(r.manifest ->> 'description', '') AS description,
             r.tenant_id AS "tenantId",
             r.domain_id AS "domainId",
-            COALESCE(r.manifest -> 'routes' ->> 0, '/' || r.slug) AS path,
+            CASE WHEN $3::text = '/' THEN '/' || r.slug
+                 ELSE $3::text || '/' || r.slug
+            END AS path,
             COALESCE(r.manifest -> 'capabilities', '[]'::jsonb) AS capabilities,
             COALESCE(r.manifest -> 'agent' -> 'stages', '[]'::jsonb) AS "agentStages",
             COALESCE(r.manifest -> 'agent' -> 'skills', '[]'::jsonb) AS "agentSkills"
@@ -184,7 +186,7 @@ async function readChildRoutePlan(platformPath: string, rootTenantId: string): P
           OR ($1::text IS NOT NULL AND current_node.id IS NOT NULL
               AND o."parentOrganizationId" = current_node.id::text))
       ORDER BY r.slug ASC`,
-    [currentSlug, rootTenantId],
+    [currentSlug, rootTenantId, platformPath],
   );
   return result.rows.map((row) => ({
     slug: String(row.slug),

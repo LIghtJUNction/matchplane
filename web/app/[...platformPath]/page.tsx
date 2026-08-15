@@ -1,4 +1,9 @@
 import { App } from "../../src/App";
+import { isMountedPlatformPath } from "../../src/platform-mount";
+import { notFound } from "next/navigation";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 /**
  * Every registered platform owns a URL path, but it still renders through the same
@@ -11,5 +16,7 @@ export default async function PlatformPathPage({
   params: Promise<{ platformPath: string[] }>;
 }) {
   const { platformPath } = await params;
-  return <App initialPath={`/${platformPath.join("/")}`} />;
+  const initialPath = `/${platformPath.join("/")}`;
+  if (!(await isMountedPlatformPath(initialPath))) notFound();
+  return <App initialPath={initialPath} />;
 }

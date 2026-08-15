@@ -15,7 +15,9 @@ export interface SubplatformConfig {
 }
 
 export function resolveSubplatform(pathname = "/"): SubplatformConfig {
-  const slug = pathname.split("/").filter(Boolean)[0] ?? "root";
+  const segments = pathname.split("/").filter(Boolean);
+  const path = segments.length ? `/${segments.join("/")}` : "/";
+  const slug = segments.at(-1) ?? "root";
   return slug === "root"
     ? {
         slug: "root",
@@ -26,11 +28,13 @@ export function resolveSubplatform(pathname = "/"): SubplatformConfig {
       }
     : {
         slug,
-        path: `/${slug}`,
+        path,
         brandName: slug,
         label: "",
         description: "",
-        manifestUrl: `/${slug}/matchplane.subplatform.json`,
+        manifestUrl: segments.length === 1
+          ? `${path}/matchplane.subplatform.json`
+          : `/api/platform/manifest?path=${encodeURIComponent(path)}`,
       };
 }
 
@@ -53,9 +57,13 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       email?: { providerKey?: string; fromAddress?: string };
       routes?: string[];
     };
+    const declaredRoute = validRoute(manifest.routes?.[0]);
+    const mountedRoute = declaredRoute && routeBelongsToMount(declaredRoute, base.path)
+      ? declaredRoute
+      : base.path;
     return {
       ...base,
-      path: validRoute(manifest.routes?.[0]) || base.path,
+      path: mountedRoute,
       brandName: manifest.displayName?.trim() || base.brandName,
       label: manifest.label?.trim() || manifest.displayName?.trim() || base.label,
       description: manifest.description?.trim() || base.description,
@@ -73,4 +81,8 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
 
 function validRoute(value: string | undefined): string | undefined {
   return value && /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(value) ? value : undefined;
+}
+
+function routeBelongsToMount(route: string, mount: string): boolean {
+  return mount === "/" || route === mount || route.startsWith(`${mount}/`);
 }

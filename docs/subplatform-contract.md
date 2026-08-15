@@ -228,6 +228,9 @@ release; it creates a new immutable version and requires an explicit activation.
 - A path is activated only after manifest validation, API compatibility, CSP/resource checks,
   package scan, and an operator audit entry. Disable/revoke removes the path while preserving the
   root account and history.
+  In production, the web page and manifest endpoint independently verify that the complete
+  recursive path resolves to an active immutable registration; a static file in `public/` is not
+  an activation grant.
 
 ## Repository layout in this project
 

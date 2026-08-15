@@ -64,6 +64,12 @@ provider-reported token counts without storing raw prompts or provider credentia
 quota for a public launch after observing provider limits; a missing provider deliberately produces
 an auditable policy fallback rather than billing a user.
 
+The production Next.js route is fail-closed against unregistered package assets. A path is rendered
+only when its complete recursive path resolves through the Better Auth organization tree and has an
+active immutable `subplatform_registrations` version. This check also protects the manifest
+endpoint; disabling a registration removes both UI and Agent routing without deleting its audit
+history. Static package rendering is intentionally available only in non-production profiles.
+
 ## 2. Install the event broker
 
 For a single host, install the pinned KRaft profile as root from the repository checkout:
