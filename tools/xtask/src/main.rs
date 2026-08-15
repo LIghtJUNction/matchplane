@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use matchplane_config::AppConfig;
+use matchplane_config::{AppConfig, Environment};
 use matchplane_storage::PgStore;
 
 #[derive(Debug, Parser)]
@@ -30,12 +30,29 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn initialize() -> anyhow::Result<()> {
+    let environment = AppConfig::load()
+        .context("initialization configuration is invalid")?
+        .environment;
     migrate().await?;
+    if environment == Environment::Production {
+        // Production initialization must never seed deterministic test payment
+        // or invoice providers. The packaged unit can safely run this command
+        // on a fresh database because production is migration-only.
+        return Ok(());
+    }
     bootstrap().await
 }
 
 async fn bootstrap() -> anyhow::Result<()> {
     let config = AppConfig::load().context("bootstrap configuration is invalid")?;
+    if config.environment == Environment::Production {
+        anyhow::bail!("demo bootstrap is disabled in production; run `xtask migrate` instead");
+    }
+    if std::env::var("MATCHPLANE_ALLOW_DEMO_BOOTSTRAP").as_deref() != Ok("true") {
+        anyhow::bail!(
+            "demo bootstrap requires MATCHPLANE_ALLOW_DEMO_BOOTSTRAP=true in development or test"
+        );
+    }
     let store = PgStore::connect(&config.database_url, 2)
         .await
         .context("bootstrap runner could not connect to PostgreSQL")?;

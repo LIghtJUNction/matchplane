@@ -8,6 +8,7 @@ x-matchplane-service: &matchplane-service
   restart: unless-stopped
   environment: &matchplane-environment
     MATCHPLANE_ENVIRONMENT: development
+    MATCHPLANE_ALLOW_DEMO_BOOTSTRAP: "true"
     MATCHPLANE_NODE_ID: 00000000-0000-7000-8000-00000000000a
     MATCHPLANE_HTTP_ADDR: 0.0.0.0:8080
     MATCHPLANE_GRPC_ADDR: 0.0.0.0:50051

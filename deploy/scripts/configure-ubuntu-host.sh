@@ -103,6 +103,7 @@ environment_file=$(mktemp /etc/matchplane/matchplane.env.XXXXXX)
 trap 'rm -f "$environment_file"' EXIT
 {
   printf '%s\n' 'MATCHPLANE_ENVIRONMENT=test'
+  printf '%s\n' 'MATCHPLANE_ALLOW_DEMO_BOOTSTRAP=true'
   printf 'MATCHPLANE_NODE_ID=%s\n' "$node_id"
   printf '%s\n' 'MATCHPLANE_GRPC_ADDR=127.0.0.1:50051'
   printf 'MATCHPLANE_DATABASE_URL=postgres://matchplane:%s@127.0.0.1:5432/matchplane\n' \
