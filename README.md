@@ -58,6 +58,9 @@ RPM/SRPM artifacts; tagged releases publish artifacts and, when both `AUR_SSH_PR
 reviewed `AUR_SSH_KNOWN_HOSTS` entry are configured, push `matchplane-git` and `matchplane-bin` to
 the maintainer's AUR account.
 
+The Helm chart intentionally refuses to render without `image.digest` set to the immutable SHA-256
+digest of the published container image; a mutable tag is retained only as release metadata.
+
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) and the accepted decisions in `docs/adr/`.
