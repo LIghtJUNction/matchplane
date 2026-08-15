@@ -1,4 +1,4 @@
-use std::{fmt, time::Duration};
+use std::fmt;
 
 use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
@@ -12,7 +12,7 @@ use crate::{
     WebhookEvent, WebhookRequest,
 };
 
-use super::common::{require_https, sign_rsa_sha256, verify_rsa_sha256};
+use super::common::{provider_client, sign_rsa_sha256, verify_rsa_sha256};
 
 /// Waffo Pancake signed REST adapter with manual authorization/capture support.
 pub struct WaffoGateway {
@@ -58,16 +58,11 @@ impl WaffoGateway {
                 "Waffo adapter requires a production waffo_pancake descriptor".to_owned(),
             ));
         }
-        require_https(base_url)?;
+        let (base_url, client) = provider_client(base_url)?;
         Ok(Self {
             descriptor,
-            client: reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(15))
-                .build()?,
-            base_url: reqwest::Url::parse(base_url).map_err(|error| {
-                PaymentError::Invalid(format!("Waffo base URL is invalid: {error}"))
-            })?,
+            client,
+            base_url,
             merchant_id: merchant_id.into(),
             api_key,
             private_key,

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, time::Duration};
+use std::{collections::BTreeMap, fmt};
 
 use async_trait::async_trait;
 use secrecy::SecretString;
@@ -14,7 +14,7 @@ use crate::{
 };
 
 use super::common::{
-    decimal_money, require_https, required_field, sign_rsa_sha256, verify_rsa_sha256,
+    decimal_money, provider_client, required_field, sign_rsa_sha256, verify_rsa_sha256,
 };
 
 /// Direct Alipay OpenAPI RSA2 adapter for website and mobile website payments.
@@ -59,16 +59,11 @@ impl AlipayGateway {
                 "Alipay adapter requires a production alipay_openapi descriptor".to_owned(),
             ));
         }
-        require_https(gateway_url)?;
+        let (gateway_url, client) = provider_client(gateway_url)?;
         Ok(Self {
             descriptor,
-            client: reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(15))
-                .build()?,
-            gateway_url: reqwest::Url::parse(gateway_url).map_err(|error| {
-                PaymentError::Invalid(format!("Alipay gateway URL is invalid: {error}"))
-            })?,
+            client,
+            gateway_url,
             app_id: app_id.into(),
             merchant_private_key,
             alipay_public_key: alipay_public_key.into(),

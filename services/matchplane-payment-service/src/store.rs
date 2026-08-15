@@ -182,7 +182,7 @@ impl PaymentStore {
         gateway_id: PaymentGatewayId,
     ) -> Result<GatewayConfig, StoreError> {
         let row = sqlx::query(
-            "SELECT id, name, gateway_kind, mode, settings, credential_secret_ref \
+            "SELECT id, name, gateway_kind, mode, settings, credential_secret_ref, version \
              FROM payment_gateway_configs \
              WHERE id = $1 AND enabled AND mode = 'production'",
         )
@@ -214,7 +214,7 @@ impl PaymentStore {
             }
             let payment_id = PaymentId::from_uuid(row.try_get("id")?);
             let payment = payment_in(&mut transaction, payment_id).await?;
-            let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
+            let gateway = gateway_in(&mut transaction, payment.payment_id).await?;
             transaction.commit().await?;
             return Ok(PreparedPayment {
                 payment,
@@ -278,7 +278,7 @@ impl PaymentStore {
         .await?
         .ok_or(StoreError::NotFound("payment settings"))?;
         let route = sqlx::query(
-            "SELECT g.id, g.name, g.gateway_kind, g.mode, g.settings, g.credential_secret_ref \
+            "SELECT g.id, g.name, g.gateway_kind, g.mode, g.settings, g.credential_secret_ref, g.version \
              FROM payment_routes r JOIN payment_gateway_configs g ON g.id = r.gateway_id \
              WHERE r.tenant_id = $1 AND r.enabled AND g.enabled AND g.mode = $2 \
                AND r.method_code IN ($3, '*') AND r.currency IN ($4, '*') \
@@ -298,10 +298,11 @@ impl PaymentStore {
         sqlx::query(
             "INSERT INTO payment_intents \
              (id, tenant_id, gateway_id, offline_deal_id, payer_party_id, merchant_order_id, idempotency_key, \
-              request_hash, transaction_channel, purpose, gateway_kind, gateway_mode, \
-              payment_method, amount, commission_amount, currency, currency_scale, status) \
+             request_hash, transaction_channel, purpose, gateway_kind, gateway_mode, \
+              gateway_config_version, gateway_credential_secret_ref, payment_method, amount, \
+              commission_amount, currency, currency_scale, status) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, \
-                     $14::numeric, $15::numeric, $16, $17, 'requested')",
+                     $14, $15, $16::numeric, $17::numeric, $18, $19, 'requested')",
         )
         .bind(command.payment_id.into_uuid())
         .bind(command.tenant_id.into_uuid())
@@ -315,6 +316,8 @@ impl PaymentStore {
         .bind(&command.purpose)
         .bind(gateway_kind)
         .bind(&active_mode)
+        .bind(gateway.version)
+        .bind(&gateway.credential_secret_ref)
         .bind(&command.payment_method)
         .bind(command.amount.to_string())
         .bind(command.commission_amount.to_string())
@@ -804,7 +807,7 @@ impl PaymentStore {
             }
             let operation_status: String = row.try_get("status")?;
             let payment = payment_in(&mut transaction, payment_id).await?;
-            let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
+            let gateway = gateway_in(&mut transaction, payment.payment_id).await?;
             transaction.commit().await?;
             return Ok(PreparedOperation {
                 payment,
@@ -829,7 +832,7 @@ impl PaymentStore {
         .bind(request_hash)
         .execute(&mut *transaction)
         .await?;
-        let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
+        let gateway = gateway_in(&mut transaction, payment.payment_id).await?;
         transaction.commit().await?;
         Ok(PreparedOperation {
             payment,
@@ -996,7 +999,7 @@ impl PaymentStore {
             }
             let operation_status: String = row.try_get("status")?;
             let payment = payment_in(&mut transaction, payment_id).await?;
-            let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
+            let gateway = gateway_in(&mut transaction, payment.payment_id).await?;
             let execute = matches!(operation_status.as_str(), "started" | "unknown")
                 && payment.status == "capture_pending";
             if execute {
@@ -1058,7 +1061,7 @@ impl PaymentStore {
         )
         .await?;
         let payment = payment_in(&mut transaction, payment_id).await?;
-        let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
+        let gateway = gateway_in(&mut transaction, payment.payment_id).await?;
         transaction.commit().await?;
         Ok(PreparedOperation {
             payment,
@@ -1180,7 +1183,7 @@ impl PaymentStore {
             let refund_id = RefundId::from_uuid(row.try_get("id")?);
             let payment = payment_in(&mut transaction, command.payment_id).await?;
             let refund = refund_in(&mut transaction, refund_id).await?;
-            let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
+            let gateway = gateway_in(&mut transaction, payment.payment_id).await?;
             let execute =
                 status == "requested" || (status == "unknown" && gateway.kind != GatewayKind::Epay);
             transaction.commit().await?;
@@ -1243,7 +1246,7 @@ impl PaymentStore {
         .execute(&mut *transaction)
         .await?;
         let refund = refund_in(&mut transaction, command.refund_id).await?;
-        let gateway = gateway_in(&mut transaction, payment.gateway_id).await?;
+        let gateway = gateway_in(&mut transaction, payment.payment_id).await?;
         transaction.commit().await?;
         Ok(PreparedRefund {
             payment,
@@ -1533,16 +1536,21 @@ fn refund_from_row(row: &sqlx::postgres::PgRow) -> Result<RefundRecord, StoreErr
 
 async fn gateway_in(
     transaction: &mut Transaction<'_, Postgres>,
-    gateway_id: PaymentGatewayId,
+    payment_id: PaymentId,
 ) -> Result<GatewayConfig, StoreError> {
     let row = sqlx::query(
-        "SELECT id, name, gateway_kind, mode, settings, credential_secret_ref \
-         FROM payment_gateway_configs WHERE id = $1 AND enabled",
+        "SELECT g.id, g.name, g.gateway_kind, g.mode, g.settings, g.credential_secret_ref, g.version \
+         FROM payment_intents p \
+         JOIN payment_gateway_configs g ON g.tenant_id = p.tenant_id \
+             AND g.id = p.gateway_id \
+             AND g.version = p.gateway_config_version \
+             AND g.credential_secret_ref IS NOT DISTINCT FROM p.gateway_credential_secret_ref \
+         WHERE p.id = $1",
     )
-    .bind(gateway_id.into_uuid())
+    .bind(payment_id.into_uuid())
     .fetch_optional(&mut **transaction)
     .await?
-    .ok_or(StoreError::NotFound("enabled payment gateway"))?;
+    .ok_or(StoreError::NotFound("pinned payment gateway configuration"))?;
     gateway_from_row(&row).map_err(StoreError::from)
 }
 
@@ -1607,7 +1615,7 @@ async fn validate_capture_target(
 }
 
 fn gateway_from_row(row: &sqlx::postgres::PgRow) -> Result<GatewayConfig, PaymentError> {
-    GatewayConfig::from_parts(
+    GatewayConfig::from_parts_with_version(
         PaymentGatewayId::from_uuid(
             row.try_get("id")
                 .map_err(|error| PaymentError::Invalid(error.to_string()))?,
@@ -1621,6 +1629,8 @@ fn gateway_from_row(row: &sqlx::postgres::PgRow) -> Result<GatewayConfig, Paymen
         row.try_get::<Value, _>("settings")
             .map_err(|error| PaymentError::Invalid(error.to_string()))?,
         row.try_get("credential_secret_ref")
+            .map_err(|error| PaymentError::Invalid(error.to_string()))?,
+        row.try_get("version")
             .map_err(|error| PaymentError::Invalid(error.to_string()))?,
     )
 }

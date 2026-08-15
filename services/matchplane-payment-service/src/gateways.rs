@@ -17,6 +17,8 @@ pub struct GatewayConfig {
     pub mode: GatewayMode,
     pub settings: Value,
     pub credential_secret_ref: Option<String>,
+    /// Immutable configuration revision selected for a payment operation.
+    pub version: i64,
 }
 
 impl GatewayConfig {
@@ -28,6 +30,31 @@ impl GatewayConfig {
         settings: Value,
         credential_secret_ref: Option<String>,
     ) -> Result<Self, PaymentError> {
+        Self::from_parts_with_version(
+            gateway_id,
+            name,
+            kind,
+            mode,
+            settings,
+            credential_secret_ref,
+            1,
+        )
+    }
+
+    pub fn from_parts_with_version(
+        gateway_id: PaymentGatewayId,
+        name: String,
+        kind: &str,
+        mode: &str,
+        settings: Value,
+        credential_secret_ref: Option<String>,
+        version: i64,
+    ) -> Result<Self, PaymentError> {
+        if version <= 0 {
+            return Err(PaymentError::Invalid(
+                "payment gateway configuration version must be positive".to_owned(),
+            ));
+        }
         Ok(Self {
             gateway_id,
             name,
@@ -35,6 +62,7 @@ impl GatewayConfig {
             mode: GatewayMode::from_str(mode)?,
             settings,
             credential_secret_ref,
+            version,
         })
     }
 

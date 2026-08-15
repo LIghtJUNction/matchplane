@@ -97,6 +97,13 @@ invoice_admin_assertion=$("${compose[@]}" exec -T postgres psql --username match
              WHERE tenant_id = '$tenant_id' AND active_mode = 'test');")
 test "$invoice_admin_assertion" = '1|1|1'
 
+gateway_pin_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
+  --tuples-only --no-align --command \
+  "SELECT count(*) FROM information_schema.columns \
+   WHERE table_name = 'payment_intents' \
+     AND column_name IN ('gateway_config_version', 'gateway_credential_secret_ref');")
+test "$gateway_pin_assertion" = 2
+
 marketplace_authorization_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane \
   --tuples-only --no-align --command \
   "SELECT count(*) FROM information_schema.tables \

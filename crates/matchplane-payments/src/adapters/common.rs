@@ -11,8 +11,8 @@ use signature::{SignatureEncoding, Signer, Verifier};
 
 use crate::{Money, PaymentError};
 
-pub(super) fn require_https(base_url: &str) -> Result<(), PaymentError> {
-    crate::validate_https_url(base_url, "production gateway URL").map(|_| ())
+pub(super) fn provider_client(base_url: &str) -> Result<(url::Url, reqwest::Client), PaymentError> {
+    crate::provider_http_client(base_url, "production gateway URL", Duration::from_secs(15))
 }
 
 pub(super) fn sign_rsa_sha256(
@@ -82,3 +82,4 @@ pub(super) fn required_field<'a>(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| PaymentError::Invalid(format!("provider webhook omitted {field}")))
 }
+use std::time::Duration;

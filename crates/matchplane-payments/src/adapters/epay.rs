@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, time::Duration};
+use std::{collections::BTreeMap, fmt};
 
 use async_trait::async_trait;
 use md5::{Digest, Md5};
@@ -14,7 +14,7 @@ use crate::{
     WebhookRequest,
 };
 
-use super::common::{decimal_money, require_https, required_field};
+use super::common::{decimal_money, provider_client, required_field};
 
 /// EPay-compatible redirect, query, and refund adapter.
 pub struct EpayGateway {
@@ -69,16 +69,11 @@ impl EpayGateway {
                 "EPay adapter requires a production epay descriptor".to_owned(),
             ));
         }
-        require_https(base_url)?;
+        let (base_url, client) = provider_client(base_url)?;
         Ok(Self {
             descriptor,
-            client: reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(15))
-                .build()?,
-            base_url: reqwest::Url::parse(base_url).map_err(|error| {
-                PaymentError::Invalid(format!("EPay base URL is invalid: {error}"))
-            })?,
+            client,
+            base_url,
             merchant_id: merchant_id.into(),
             merchant_key,
             currency: currency.into(),
@@ -345,7 +340,7 @@ mod tests {
                     status_query: true,
                 },
             },
-            "https://pay.example.invalid/",
+            "https://1.1.1.1/",
             "merchant",
             SecretString::new("secret-key".into()),
         )
@@ -394,7 +389,7 @@ mod tests {
                     status_query: true,
                 },
             },
-            "https://pay.example.invalid/",
+            "https://1.1.1.1/",
             "merchant",
             SecretString::new("secret-key".into()),
         )

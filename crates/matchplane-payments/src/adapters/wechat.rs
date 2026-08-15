@@ -1,7 +1,4 @@
-use std::{
-    fmt,
-    time::{Duration, SystemTime},
-};
+use std::{fmt, time::SystemTime};
 
 use aes_gcm::{
     Aes256Gcm,
@@ -20,7 +17,7 @@ use crate::{
     WebhookEvent, WebhookRequest,
 };
 
-use super::common::{require_https, required_field, sign_rsa_sha256, verify_rsa_sha256};
+use super::common::{provider_client, required_field, sign_rsa_sha256, verify_rsa_sha256};
 
 /// Direct WeChat Pay API v3 adapter for Native, JSAPI, and H5 checkout.
 pub struct WechatPayGateway {
@@ -99,16 +96,11 @@ impl WechatPayGateway {
                 "WeChat Pay adapter requires a production wechat_pay_v3 descriptor".to_owned(),
             ));
         }
-        require_https(base_url)?;
+        let (base_url, client) = provider_client(base_url)?;
         Ok(Self {
             descriptor,
-            client: reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(15))
-                .build()?,
-            base_url: reqwest::Url::parse(base_url).map_err(|error| {
-                PaymentError::Invalid(format!("WeChat Pay base URL is invalid: {error}"))
-            })?,
+            client,
+            base_url,
             app_id: app_id.into(),
             merchant_id: merchant_id.into(),
             merchant_serial: merchant_serial.into(),
