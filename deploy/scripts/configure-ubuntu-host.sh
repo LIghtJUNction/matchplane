@@ -29,6 +29,7 @@ fi
 install -d -m 0750 -o root -g matchplane /etc/matchplane/secrets
 install -d -m 0750 -o root -g matchplane-gateway /etc/matchplane/secrets/gateway
 install -d -m 0750 -o root -g matchplane-payment /etc/matchplane/secrets/payment
+install -d -m 0750 -o root -g root /etc/matchplane/services
 
 create_hex_secret() {
   local path=$1
@@ -109,14 +110,11 @@ trap 'rm -f "$environment_file"' EXIT
   printf '%s\n' 'MATCHPLANE_ALLOW_DEMO_BOOTSTRAP=true'
   printf 'MATCHPLANE_NODE_ID=%s\n' "$node_id"
   printf '%s\n' 'MATCHPLANE_GRPC_ADDR=127.0.0.1:50051'
-  printf 'MATCHPLANE_DATABASE_URL=postgres://matchplane:%s@127.0.0.1:5432/matchplane\n' \
-    "$database_password"
   printf '%s\n' 'MATCHPLANE_KAFKA_BROKERS=127.0.0.1:9092'
   printf '%s\n' 'MATCHPLANE_KAFKA_SECURITY_PROTOCOL=PLAINTEXT'
   printf '%s\n' 'MATCHPLANE_KAFKA_SSL_CA_LOCATION='
   printf '%s\n' 'MATCHPLANE_KAFKA_SSL_CERTIFICATE_LOCATION='
   printf '%s\n' 'MATCHPLANE_KAFKA_SSL_KEY_LOCATION='
-  printf '%s\n' 'MATCHPLANE_VALKEY_URL=redis://127.0.0.1:6379/'
   printf '%s\n' 'MATCHPLANE_LOG_FILTER=info,matchplane=info'
   printf '%s\n' 'MATCHPLANE_OTLP_ENDPOINT=http://127.0.0.1:4317'
   printf '%s\n' 'MATCHPLANE_REQUIRE_TLS=false'
@@ -136,6 +134,35 @@ trap 'rm -f "$environment_file"' EXIT
 } >"$environment_file"
 install -m 0640 -o root -g matchplane "$environment_file" \
   /etc/matchplane/matchplane.env
+
+# The test profile deliberately uses one generated database/cache identity, but
+# still writes one unit-scoped environment file. Production operators must
+# replace these with distinct role/ACL URLs and per-client Kafka TLS paths.
+write_service_environment() {
+  local service=$1
+  local group=$2
+  local service_file
+  service_file=$(mktemp "/etc/matchplane/services/.${service}.env.XXXXXX")
+  {
+    printf 'MATCHPLANE_SERVICE_ROLE=%s\n' "$service"
+    printf 'MATCHPLANE_DATABASE_URL=postgres://matchplane:%s@127.0.0.1:5432/matchplane\n' \
+      "$database_password"
+    printf '%s\n' 'MATCHPLANE_VALKEY_URL=redis://127.0.0.1:6379/'
+  } >"$service_file"
+  install -m 0640 -o root -g "$group" "$service_file" \
+    "/etc/matchplane/services/${service}.env"
+  rm -f "$service_file"
+}
+
+write_service_environment web matchplane-web
+write_service_environment gateway matchplane-gateway
+write_service_environment payment-service matchplane-payment
+write_service_environment event-relay matchplane
+write_service_environment matcher matchplane
+write_service_environment projector matchplane
+write_service_environment vector-worker matchplane
+write_service_environment federation-hub matchplane
+write_service_environment migration matchplane
 
 systemctl daemon-reload
 systemctl reset-failed matchplane-initialize.service \

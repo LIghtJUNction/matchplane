@@ -38,55 +38,97 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ printf "%s@%s" .Values.web.image.repository $digest }}
 {{- end }}
 
+{{/*
+  Runtime credentials are intentionally selected per workload. The legacy
+  runtime.existingSecret value remains a development/test fallback only; a
+  production render fails unless every workload has its own secret. Each
+  workload secret must expose database-url and valkey-url. This keeps a
+  compromised public service from inheriting the payment/migration identity.
+*/}}
+{{- define "matchplane.runtimeSecret" -}}
+{{- $root := .root -}}
+{{- $service := .service -}}
+{{- $serviceSecrets := default (dict) $root.Values.runtime.serviceSecrets -}}
+{{- $serviceSecret := default "" (index $serviceSecrets $service) -}}
+{{- if and (eq $root.Values.runtime.environment "production") (not $serviceSecret) -}}
+{{- fail (printf "runtime.serviceSecrets.%s is required in production" $service) -}}
+{{- end -}}
+{{- if $serviceSecret -}}
+{{- $serviceSecret -}}
+{{- else -}}
+{{- required "runtime.existingSecret is required for non-production renders" $root.Values.runtime.existingSecret -}}
+{{- end -}}
+{{- end }}
+
+{{/* Kafka clients also receive distinct mTLS material per workload. */}}
+{{- define "matchplane.kafkaTlsSecret" -}}
+{{- $root := .root -}}
+{{- $service := .service -}}
+{{- $kafkaSecrets := default (dict) $root.Values.runtime.kafkaTlsSecrets -}}
+{{- $serviceSecret := default "" (index $kafkaSecrets $service) -}}
+{{- if and (eq $root.Values.runtime.environment "production") (not $serviceSecret) -}}
+{{- fail (printf "runtime.kafkaTlsSecrets.%s is required in production" $service) -}}
+{{- end -}}
+{{- if $serviceSecret -}}
+{{- $serviceSecret -}}
+{{- else -}}
+{{- required "runtime.existingKafkaTlsSecret is required for non-production renders" $root.Values.runtime.existingKafkaTlsSecret -}}
+{{- end -}}
+{{- end }}
+
 {{- define "matchplane.environment" -}}
+{{- $root := .root -}}
+{{- $service := .service -}}
 - name: MATCHPLANE_ENVIRONMENT
-  value: {{ .Values.runtime.environment | quote }}
+  value: {{ $root.Values.runtime.environment | quote }}
+- name: MATCHPLANE_SERVICE_ROLE
+  value: {{ $service | quote }}
 - name: MATCHPLANE_NODE_ID
-  value: {{ required "runtime.nodeId must be a unique UUID" .Values.runtime.nodeId | quote }}
+  value: {{ required "runtime.nodeId must be a unique UUID" $root.Values.runtime.nodeId | quote }}
 - name: MATCHPLANE_DATABASE_URL
   valueFrom:
     secretKeyRef:
-      name: {{ required "runtime.existingSecret is required" .Values.runtime.existingSecret }}
+      name: {{ include "matchplane.runtimeSecret" (dict "root" $root "service" $service) }}
       key: database-url
 - name: MATCHPLANE_KAFKA_BROKERS
-  value: {{ .Values.runtime.kafkaBrokers | quote }}
+  value: {{ $root.Values.runtime.kafkaBrokers | quote }}
 - name: MATCHPLANE_KAFKA_SECURITY_PROTOCOL
-  value: {{ .Values.runtime.kafkaSecurityProtocol | quote }}
+  value: {{ $root.Values.runtime.kafkaSecurityProtocol | quote }}
 - name: MATCHPLANE_KAFKA_SSL_CA_LOCATION
-  value: {{ .Values.runtime.kafkaSslCaLocation | quote }}
+  value: {{ $root.Values.runtime.kafkaSslCaLocation | quote }}
 - name: MATCHPLANE_KAFKA_SSL_CERTIFICATE_LOCATION
-  value: {{ .Values.runtime.kafkaSslCertificateLocation | quote }}
+  value: {{ $root.Values.runtime.kafkaSslCertificateLocation | quote }}
 - name: MATCHPLANE_KAFKA_SSL_KEY_LOCATION
-  value: {{ .Values.runtime.kafkaSslKeyLocation | quote }}
+  value: {{ $root.Values.runtime.kafkaSslKeyLocation | quote }}
 - name: MATCHPLANE_VALKEY_URL
   valueFrom:
     secretKeyRef:
-      name: {{ required "runtime.existingSecret is required" .Values.runtime.existingSecret }}
+      name: {{ include "matchplane.runtimeSecret" (dict "root" $root "service" $service) }}
       key: valkey-url
 - name: MATCHPLANE_LOG_FILTER
-  value: {{ .Values.runtime.logFilter | quote }}
+  value: {{ $root.Values.runtime.logFilter | quote }}
 - name: MATCHPLANE_OTLP_ENDPOINT
-  value: {{ .Values.runtime.otlpEndpoint | quote }}
+  value: {{ $root.Values.runtime.otlpEndpoint | quote }}
 - name: MATCHPLANE_REQUIRE_TLS
-  value: {{ .Values.runtime.requireTls | quote }}
+  value: {{ $root.Values.runtime.requireTls | quote }}
 - name: MATCHPLANE_TLS_CERTIFICATE_PATH
-  value: {{ .Values.runtime.tlsCertificatePath | quote }}
+  value: {{ $root.Values.runtime.tlsCertificatePath | quote }}
 - name: MATCHPLANE_TLS_PRIVATE_KEY_PATH
-  value: {{ .Values.runtime.tlsPrivateKeyPath | quote }}
+  value: {{ $root.Values.runtime.tlsPrivateKeyPath | quote }}
 - name: MATCHPLANE_TLS_CLIENT_CA_PATH
-  value: {{ .Values.runtime.tlsClientCaPath | quote }}
+  value: {{ $root.Values.runtime.tlsClientCaPath | quote }}
 - name: MATCHPLANE_CONTACT_DATA_KEY_FILE
-  value: {{ .Values.runtime.contactDataKeyPath | quote }}
+  value: {{ $root.Values.runtime.contactDataKeyPath | quote }}
 - name: MATCHPLANE_CONTACT_DATA_KEY_VERSION
-  value: {{ .Values.runtime.contactDataKeyVersion | quote }}
+  value: {{ $root.Values.runtime.contactDataKeyVersion | quote }}
 - name: MATCHPLANE_INVOICE_DATA_KEY_FILE
-  value: {{ .Values.runtime.invoiceDataKeyPath | quote }}
+  value: {{ $root.Values.runtime.invoiceDataKeyPath | quote }}
 - name: MATCHPLANE_INVOICE_DATA_KEY_VERSION
-  value: {{ .Values.runtime.invoiceDataKeyVersion | quote }}
+  value: {{ $root.Values.runtime.invoiceDataKeyVersion | quote }}
 - name: MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE
-  value: {{ .Values.runtime.paymentAdminTokenPath | quote }}
+  value: {{ $root.Values.runtime.paymentAdminTokenPath | quote }}
 - name: MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE
-  value: {{ .Values.runtime.gatewayAdminTokenPath | quote }}
+  value: {{ $root.Values.runtime.gatewayAdminTokenPath | quote }}
 - name: MATCHPLANE_PAYMENT_CALLBACK_ORIGIN
-  value: {{ .Values.runtime.paymentCallbackOrigin | quote }}
+  value: {{ $root.Values.runtime.paymentCallbackOrigin | quote }}
 {{- end }}

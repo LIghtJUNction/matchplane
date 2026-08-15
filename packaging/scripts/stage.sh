@@ -20,7 +20,7 @@ binaries=(
   xtask
 )
 
-install -d "$root/usr/bin" "$root/etc/matchplane" "$root/usr/lib/systemd/system"
+install -d "$root/usr/bin" "$root/etc/matchplane" "$root/etc/matchplane/services" "$root/usr/lib/systemd/system"
 install -d "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" "$root/usr/share/doc/matchplane"
 install -d "$root/usr/share/licenses/matchplane"
 install -d "$root/usr/share/matchplane/web"

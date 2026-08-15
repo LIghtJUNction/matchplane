@@ -9,6 +9,7 @@ User=matchplane-payment
 Group=matchplane-payment
 SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
+EnvironmentFile=/etc/matchplane/services/payment-service.env
 Environment=MATCHPLANE_HTTP_ADDR=127.0.0.1:8081
 ExecStart=/usr/bin/matchplane-payment-service
 Restart=on-failure

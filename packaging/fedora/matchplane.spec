@@ -54,6 +54,7 @@ packaging/scripts/stage.sh %{buildroot} target/release
 
 %post
 %systemd_post matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
+echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.env before enabling services.'
 
 %preun
 %systemd_preun matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
@@ -63,6 +64,7 @@ packaging/scripts/stage.sh %{buildroot} target/release
 
 %files
 %config(noreplace) %attr(0640,root,matchplane) /etc/matchplane/matchplane.env
+%dir %attr(0750,root,root) /etc/matchplane/services
 %{_bindir}/matchplane-event-relay
 %{_bindir}/matchplane-federation-hub
 %{_bindir}/matchplane-gateway

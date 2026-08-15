@@ -8,6 +8,7 @@ Type=simple
 User=matchplane
 Group=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
+EnvironmentFile=/etc/matchplane/services/projector.env
 ExecStart=/usr/bin/matchplane-projector
 Restart=on-failure
 RestartSec=3s

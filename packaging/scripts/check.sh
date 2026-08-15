@@ -15,6 +15,19 @@ bash -n packaging/aur/matchplane-git/matchplane.install
 bash -n packaging/aur/matchplane-bin/PKGBUILD.in
 bash -n packaging/aur/matchplane-bin/matchplane.install
 
+for service in web gateway payment-service event-relay matcher projector vector-worker federation-hub; do
+  unit="packaging/systemd/matchplane-${service}.service"
+  if ! rg -q "^EnvironmentFile=/etc/matchplane/services/${service}\.env$" "$unit"; then
+    echo "$unit must require its workload-scoped environment file" >&2
+    exit 1
+  fi
+done
+if ! rg -q '^EnvironmentFile=/etc/matchplane/services/migration\.env$' \
+  packaging/systemd/matchplane-initialize.service; then
+  echo 'matchplane-initialize.service must require the migration environment file' >&2
+  exit 1
+fi
+
 if rg -n --glob '*.Dockerfile' --glob 'Dockerfile*' \
   '^FROM [^$@[:space:]]+:[^@[:space:]]+( |$)' deploy packaging; then
   echo 'container build bases must be pinned by digest' >&2
@@ -41,6 +54,11 @@ fi
 if rg -q 'MATCHPLANE_NODE_ID=00000000-0000-7000-8000-00000000000a' \
   deploy/scripts/configure-ubuntu-host.sh packaging/config/matchplane.env; then
   echo 'production deployment templates must not persist the development node id' >&2
+  exit 1
+fi
+
+if rg -n '^MATCHPLANE_(DATABASE|VALKEY)_URL=' packaging/config/matchplane.env; then
+  echo 'shared package environment must not contain workload database or Valkey URLs' >&2
   exit 1
 fi
 

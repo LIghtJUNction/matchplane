@@ -30,6 +30,8 @@ pub enum Environment {
 pub struct AppConfig {
     /// Environment safety profile.
     pub environment: Environment,
+    /// Workload identity used to apply service-specific production checks.
+    pub service_role: String,
     /// Stable federation node UUID.
     pub node_id: String,
     /// HTTP listen address.
@@ -71,6 +73,8 @@ pub struct AppConfig {
 pub struct ValidatedConfig {
     /// Environment safety profile.
     pub environment: Environment,
+    /// Workload identity used to apply service-specific production checks.
+    pub service_role: String,
     /// Stable federation node ID.
     pub node_id: FederationNodeId,
     /// Parsed HTTP listen address.
@@ -141,6 +145,7 @@ impl AppConfig {
     pub fn load() -> Result<ValidatedConfig, ConfigError> {
         let config = Config::builder()
             .set_default("environment", "development")?
+            .set_default("service_role", "generic")?
             .set_default("node_id", "00000000-0000-7000-8000-00000000000a")?
             .set_default("http_addr", "0.0.0.0:8080")?
             .set_default("grpc_addr", "0.0.0.0:50051")?
@@ -190,6 +195,22 @@ impl AppConfig {
         }
 
         if self.environment == Environment::Production {
+            if !matches!(
+                self.service_role.as_str(),
+                "web"
+                    | "gateway"
+                    | "payment-service"
+                    | "event-relay"
+                    | "matcher"
+                    | "projector"
+                    | "vector-worker"
+                    | "federation-hub"
+                    | "migration"
+            ) {
+                return Err(ConfigError::InsecureProduction(
+                    "MATCHPLANE_SERVICE_ROLE must identify a known workload in production",
+                ));
+            }
             if !self.require_tls {
                 return Err(ConfigError::InsecureProduction(
                     "MATCHPLANE_REQUIRE_TLS must be true",
@@ -227,31 +248,36 @@ impl AppConfig {
                     "PostgreSQL must use exactly one canonical sslmode=verify-full option in production",
                 ));
             }
-            if self.kafka_security_protocol != "SSL"
+            if matches!(
+                self.service_role.as_str(),
+                "event-relay" | "matcher" | "projector"
+            ) && (self.kafka_security_protocol != "SSL"
                 || self.kafka_ssl_ca_location.trim().is_empty()
                 || self.kafka_ssl_certificate_location.trim().is_empty()
-                || self.kafka_ssl_key_location.trim().is_empty()
+                || self.kafka_ssl_key_location.trim().is_empty())
             {
                 return Err(ConfigError::InsecureProduction(
-                    "production Kafka must use mTLS with security.protocol=SSL and CA, certificate, and key paths",
+                    "Kafka workloads must use mTLS with security.protocol=SSL and CA, certificate, and key paths",
                 ));
             }
-            for (field, value) in [
-                (
-                    "MATCHPLANE_TLS_CERTIFICATE_PATH",
-                    self.tls_certificate_path.as_str(),
-                ),
-                (
-                    "MATCHPLANE_TLS_PRIVATE_KEY_PATH",
-                    self.tls_private_key_path.as_str(),
-                ),
-                (
-                    "MATCHPLANE_TLS_CLIENT_CA_PATH",
-                    self.tls_client_ca_path.as_str(),
-                ),
-            ] {
-                if value.trim().is_empty() {
-                    return Err(ConfigError::Empty(field));
+            if self.service_role == "federation-hub" {
+                for (field, value) in [
+                    (
+                        "MATCHPLANE_TLS_CERTIFICATE_PATH",
+                        self.tls_certificate_path.as_str(),
+                    ),
+                    (
+                        "MATCHPLANE_TLS_PRIVATE_KEY_PATH",
+                        self.tls_private_key_path.as_str(),
+                    ),
+                    (
+                        "MATCHPLANE_TLS_CLIENT_CA_PATH",
+                        self.tls_client_ca_path.as_str(),
+                    ),
+                ] {
+                    if value.trim().is_empty() {
+                        return Err(ConfigError::Empty(field));
+                    }
                 }
             }
             if !self.otlp_endpoint.starts_with("https://") {
@@ -269,6 +295,7 @@ impl AppConfig {
 
         Ok(ValidatedConfig {
             environment: self.environment,
+            service_role: self.service_role,
             node_id: FederationNodeId::from_str(&self.node_id)?,
             http_addr: self
                 .http_addr
@@ -358,6 +385,7 @@ mod tests {
     fn production_config() -> AppConfig {
         AppConfig {
             environment: Environment::Production,
+            service_role: "gateway".to_owned(),
             node_id: FederationNodeId::new().to_string(),
             http_addr: "127.0.0.1:8080".to_owned(),
             grpc_addr: "127.0.0.1:50051".to_owned(),
@@ -445,6 +473,47 @@ mod tests {
         let error = config
             .validate()
             .expect_err("callback origins must not contain a path");
+
+        assert!(matches!(error, ConfigError::InsecureProduction(_)));
+    }
+
+    #[test]
+    fn validate_should_require_kafka_tls_only_for_kafka_workloads() {
+        let mut config = production_config();
+        config.service_role = "event-relay".to_owned();
+        config.kafka_security_protocol = "PLAINTEXT".to_owned();
+
+        let error = config
+            .validate()
+            .expect_err("Kafka clients must fail closed without mTLS");
+
+        assert!(matches!(error, ConfigError::InsecureProduction(_)));
+    }
+
+    #[test]
+    fn validate_should_require_federation_tls_only_for_federation_hub() {
+        let mut config = production_config();
+        config.service_role = "federation-hub".to_owned();
+        config.tls_certificate_path.clear();
+
+        let error = config
+            .validate()
+            .expect_err("federation hub must fail closed without server TLS");
+
+        assert!(matches!(
+            error,
+            ConfigError::Empty("MATCHPLANE_TLS_CERTIFICATE_PATH")
+        ));
+    }
+
+    #[test]
+    fn validate_should_reject_an_unknown_production_workload() {
+        let mut config = production_config();
+        config.service_role = "unknown".to_owned();
+
+        let error = config
+            .validate()
+            .expect_err("unknown workloads must not inherit generic production checks");
 
         assert!(matches!(error, ConfigError::InsecureProduction(_)));
     }

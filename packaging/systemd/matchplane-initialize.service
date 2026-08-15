@@ -11,6 +11,7 @@ Type=oneshot
 User=matchplane
 Group=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
+EnvironmentFile=/etc/matchplane/services/migration.env
 ExecStart=/usr/bin/xtask initialize
 NoNewPrivileges=true
 PrivateTmp=true

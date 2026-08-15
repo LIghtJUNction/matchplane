@@ -42,7 +42,7 @@ spec:
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           command: ["/usr/local/bin/{{ $service.binary }}"]
           env:
-            {{- include "matchplane.environment" $root | nindent 12 }}
+            {{- include "matchplane.environment" (dict "root" $root "service" $service.name) | nindent 12 }}
           {{- with $service.port }}
           ports:
             - name: {{ ternary "http" "grpc" (eq . 8080) }}
@@ -80,7 +80,7 @@ spec:
             - name: federation-tls
               mountPath: /run/matchplane/tls
               readOnly: true
-          {{- else if or (eq $service.name "event-relay") (eq $service.name "matcher") (eq $service.name "projector") }}
+          {{- else if or (eq $service.name "event-relay") (eq $service.name "projector") }}
           volumeMounts:
             - name: kafka-tls
               mountPath: /run/matchplane/kafka
@@ -92,21 +92,17 @@ spec:
           secret:
             secretName: {{ if eq $service.name "gateway" }}{{ required "runtime.existingGatewaySecret is required" $root.Values.runtime.existingGatewaySecret }}{{ else }}{{ required "runtime.existingPaymentSecret is required" $root.Values.runtime.existingPaymentSecret }}{{ end }}
             defaultMode: 0440
-        - name: kafka-tls
-          secret:
-            secretName: {{ required "runtime.existingKafkaTlsSecret is required" $root.Values.runtime.existingKafkaTlsSecret }}
-            defaultMode: 0440
       {{- else if eq $service.name "federation-hub" }}
       volumes:
         - name: federation-tls
           secret:
             secretName: {{ required "runtime.existingTlsSecret is required" $root.Values.runtime.existingTlsSecret }}
             defaultMode: 0440
-      {{- else if or (eq $service.name "event-relay") (eq $service.name "matcher") (eq $service.name "projector") }}
+      {{- else if or (eq $service.name "event-relay") (eq $service.name "projector") }}
       volumes:
         - name: kafka-tls
           secret:
-            secretName: {{ required "runtime.existingKafkaTlsSecret is required" $root.Values.runtime.existingKafkaTlsSecret }}
+            secretName: {{ include "matchplane.kafkaTlsSecret" (dict "root" $root "service" $service.name) }}
             defaultMode: 0440
       {{- end }}
       {{- with $root.Values.imagePullSecrets }}
@@ -161,6 +157,8 @@ spec:
           env:
             - name: MATCHPLANE_ENVIRONMENT
               value: {{ $root.Values.runtime.environment | quote }}
+            - name: MATCHPLANE_SERVICE_ROLE
+              value: web
             - name: NODE_ENV
               value: production
             - name: HOSTNAME
@@ -198,7 +196,7 @@ spec:
             - name: MATCHPLANE_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "runtime.existingSecret is required" $root.Values.runtime.existingSecret }}
+                  name: {{ include "matchplane.runtimeSecret" (dict "root" $root "service" "web") }}
                   key: database-url
             - name: MATCHPLANE_GATEWAY_INTERNAL_URL
               value: {{ printf "http://%s-gateway:%v" (include "matchplane.fullname" $root) $root.Values.gateway.service.port | quote }}

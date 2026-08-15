@@ -8,6 +8,7 @@ Type=simple
 User=matchplane
 Group=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
+EnvironmentFile=/etc/matchplane/services/vector-worker.env
 ExecStart=/usr/bin/matchplane-vector-worker
 Restart=on-failure
 RestartSec=3s

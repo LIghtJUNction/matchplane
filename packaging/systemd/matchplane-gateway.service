@@ -9,6 +9,7 @@ User=matchplane-gateway
 Group=matchplane-gateway
 SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
+EnvironmentFile=/etc/matchplane/services/gateway.env
 Environment=MATCHPLANE_HTTP_ADDR=127.0.0.1:8080
 ExecStart=/usr/bin/matchplane-gateway
 Restart=on-failure

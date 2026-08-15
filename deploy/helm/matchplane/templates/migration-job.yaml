@@ -28,7 +28,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/xtask", "migrate"]
           env:
-            {{- include "matchplane.environment" . | nindent 12 }}
+            {{- include "matchplane.environment" (dict "root" . "service" "migration") | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

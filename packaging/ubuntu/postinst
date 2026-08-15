@@ -31,4 +31,4 @@ if command -v systemctl >/dev/null 2>&1; then
     fi
   fi
 fi
-printf '%s\n' 'Configure /etc/matchplane/matchplane.env before enabling services.'
+printf '%s\n' 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.env before enabling services.'

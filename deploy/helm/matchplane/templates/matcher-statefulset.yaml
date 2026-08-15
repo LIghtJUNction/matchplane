@@ -30,7 +30,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/matchplane-matcher"]
           env:
-            {{- include "matchplane.environment" . | nindent 12 }}
+            {{- include "matchplane.environment" (dict "root" . "service" "matcher") | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -45,5 +45,5 @@ spec:
       volumes:
         - name: kafka-tls
           secret:
-            secretName: {{ required "runtime.existingKafkaTlsSecret is required" .Values.runtime.existingKafkaTlsSecret }}
+            secretName: {{ include "matchplane.kafkaTlsSecret" (dict "root" . "service" "matcher") }}
             defaultMode: 0440

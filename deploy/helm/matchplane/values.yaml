@@ -46,8 +46,21 @@ networkPolicy:
   additionalEgress: []
 
 runtime:
-  # This secret must provide database-url and valkey-url keys.
+  # Legacy shared secret retained only for development/test renders. Production
+  # requires a distinct secret for every workload below.
   existingSecret: matchplane-runtime
+  # Each secret must provide database-url and valkey-url. Use distinct
+  # PostgreSQL roles and Valkey ACL users; do not reuse the migration identity.
+  serviceSecrets:
+    web: ''
+    gateway: ''
+    payment-service: ''
+    event-relay: ''
+    matcher: ''
+    projector: ''
+    vector-worker: ''
+    federation-hub: ''
+    migration: ''
   # These secrets are split so the public gateway cannot read payment credentials or invoice keys.
   existingGatewaySecret: matchplane-gateway-secrets
   existingPaymentSecret: matchplane-payment-secrets
@@ -56,6 +69,11 @@ runtime:
   existingTlsSecret: matchplane-federation-tls
   # This secret must provide ca.crt, client.crt, and client.key for Kafka mTLS.
   existingKafkaTlsSecret: matchplane-kafka-tls
+  # Production requires a distinct Kafka mTLS identity per client workload.
+  kafkaTlsSecrets:
+    event-relay: ''
+    matcher: ''
+    projector: ''
   environment: production
   # Override with a unique UUID per federation node before a production install.
   nodeId: ''

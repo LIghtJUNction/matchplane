@@ -10,16 +10,37 @@ tenant.
 Install PostgreSQL with TimescaleDB and pgvector, Valkey with TLS enabled, Nginx, `curl`, `openssl`,
 Node.js 22.12.0 or newer, and the release package. Create the `matchplane` system user/group and install the systemd units
 from `packaging/systemd/`. Require `sslmode=verify-full` in the PostgreSQL URL. Keep
-`/etc/matchplane/matchplane.env` owned by `root:matchplane`; gateway-only and payment-only secret
-subdirectories should be owned by their matching service groups, with secret files mode `0640`.
+`/etc/matchplane/matchplane.env` owned by `root:matchplane`; service-specific credential files under
+`/etc/matchplane/services/` must be owned by `root:<service-group>` with mode `0640`.
 
 Before enabling a production service, provision separate PostgreSQL roles and Valkey ACL users for
-the gateway, payment service, workers, and federation hub; keep migrations under a separate owner
-role. The checked-in single-host bootstrap uses one test role and must not be promoted to production.
+the web process, gateway, payment service, event relay, matcher, projector, vector worker and
+federation hub; keep migrations under a separate owner role. Grant each runtime role only the
+tables/functions it needs and never make it a database owner or `CREATEROLE`/`CREATEDB` role. Put
+the resulting URLs in one file per unit, for example
+`/etc/matchplane/services/payment-service.env`, with only `MATCHPLANE_DATABASE_URL` and
+`MATCHPLANE_VALKEY_URL` plus that workload's Kafka TLS paths. Only `event-relay`, `matcher`, and
+`projector` need Kafka client paths; only `federation-hub` needs the server certificate, private
+key, and client CA paths. The checked-in single-host bootstrap
+uses one test role and must not be promoted to production.
 Do not place payment-provider credentials in the common environment file; use the payment-only
 secret directory or an external secret manager.
 
-The packaged production template is [packaging/config/matchplane.env](../packaging/config/matchplane.env).
+Kafka must likewise issue a distinct client certificate (or SASL identity) for each Kafka client.
+The relay may publish only outbox topics, the matcher may consume commands and publish match
+results, and the projector may consume book deltas and use its Valkey namespace. Do not reuse one
+`client.key` across those units. The units load their per-service files after the common template,
+so a missing file stops the unit instead of silently falling back to a shared production identity.
+
+The packaged production template is [packaging/config/matchplane.env](../packaging/config/matchplane.env),
+and the systemd units require the per-service files described above. A deployment must provision
+all of those files before enabling the units; the package does not generate database or broker
+credentials.
+
+For Helm, set `runtime.serviceSecrets.<workload>` and
+`runtime.kafkaTlsSecrets.<workload>` for every workload in `deploy/helm/matchplane/values.yaml`.
+The chart deliberately fails a production render when one is missing; `runtime.existingSecret` and
+`runtime.existingKafkaTlsSecret` are compatibility fallbacks for test renders only.
 Replace every placeholder before enabling a service. In particular, use a unique node UUID,
 non-development database and Valkey credentials, three TLS files (server certificate, private key,
 and client CA), a platform-owned HTTPS payment callback origin, an HTTPS `BETTER_AUTH_URL`, a
@@ -114,7 +135,10 @@ provider routes.
 Before each update, record the running release and take both an encrypted PostgreSQL backup and a
 copy of the current binaries, web release, Nginx configuration, and secret references. Verify the
 dump with `pg_restore --list` (or the equivalent PostgreSQL tool) and copy a second backup to a
-separate host. Keep a release-scoped, one-shot rollback timer armed for at least ten minutes while
+separate host. Download `SHA256SUMS` and verify it before unpacking; for releases published by CI,
+also verify the GitHub Artifact Attestation against this repository and ref (for example,
+`gh attestation verify matchplane-*.tar.zst --repo LIghtJUNction/matchplane`). Keep a release-scoped,
+one-shot rollback timer armed for at least ten minutes while
 the health and authenticated business probes run. Cancel it only after an operator confirms the
 release; otherwise let it restore the previous application release and configuration.
 
