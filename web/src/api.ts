@@ -96,14 +96,33 @@ export interface PlatformRouteHop {
   description: string;
   tenantId: string;
   domainId: string;
+  capabilities: string[];
+  agentStages: string[];
+  agentSkills: string[];
   depth: number;
+}
+
+export interface PlatformRouteDecision {
+  selectedSlugs: string[];
+  source: "ai" | "policy_fallback";
+  model: string | null;
+  rationale: string;
+  confidence: number | null;
+  degraded: boolean;
+  costBearer: "platform";
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  } | null;
 }
 
 export interface PlatformIntentRoute {
   requestId: string;
   platformPath: string;
-  status: "accepted" | "delegated";
+  status: "accepted" | "delegated" | "degraded";
   routePlan: PlatformRouteHop[];
+  routing: PlatformRouteDecision;
 }
 
 export class MarketplaceApiError extends Error {

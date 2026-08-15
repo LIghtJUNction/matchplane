@@ -57,10 +57,11 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
       ]);
 
       try {
-        const route = isLiveMarketplaceEnabled()
+        const live = isLiveMarketplaceEnabled();
+        const route = live
           ? await routePlatformIntent({ platformPath: platformPath(subplatform), narrative: text })
           : null;
-        if (isLiveMarketplaceEnabled()) {
+        if (live) {
           if (subplatform.domainId) {
             if (!session) throw new Error("Better Auth 会话尚未连接到当前子平台");
             await createBuyerRequest({
@@ -72,6 +73,8 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
                 intent: "general_match",
                 platform_path: platformPath(subplatform),
                 delegated_route_count: route?.routePlan.length ?? 0,
+                routing_source: route?.routing.source ?? null,
+                routing_degraded: route?.routing.degraded ?? false,
               },
               currency: "CNY",
               currencyScale: 2,
@@ -83,10 +86,12 @@ export function MatchChat({ onNotice, subplatform }: MatchChatProps) {
           {
             id: `${requestId}-assistant-done`,
             role: "assistant",
-            text: isLiveMarketplaceEnabled()
-              ? route?.routePlan.length
-                ? `需求已沿当前平台向下传递，已交给 ${route.routePlan.map((hop) => hop.displayName).join("、")} 继续匹配。接下来我会解释匹配理由，再让你决定是否联系供给方。`
-                : "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。"
+            text: live
+              ? route?.status === "degraded" && route.routePlan.length
+                ? `AI 路由暂时不可用，已按受控策略把需求交给 ${route.routePlan.map((hop) => hop.displayName).join("、")}；子平台会继续筛选商家和具体商品。`
+                : route?.routePlan.length
+                  ? `AI 已从当前节点的候选商城中选出 ${route.routePlan.map((hop) => hop.displayName).join("、")}，接下来由子平台继续挑选商家、货柜和商品，并解释匹配理由。`
+                  : "需求已记录在当前平台节点，当前没有已激活的下级商城；管理员启用子平台后会继续向下传递。"
               : "需求已记录（演示模式）。登录状态有效，下一步会按你的条件给出匹配与理由。",
           },
         ]);

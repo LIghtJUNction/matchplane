@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matchplane.dev/schemas/platform-routing-protocol-v1.json",
+  "title": "MatchPlane staged Agent routing protocol v1",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/result" }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "stage": {
+      "type": "string",
+      "enum": ["platform", "merchant", "inventory"]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform_path"],
+      "properties": {
+        "platform_path": {
+          "type": "string",
+          "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$",
+          "maxLength": 512
+        },
+        "tenant_id": {
+          "type": ["string", "null"],
+          "format": "uuid"
+        },
+        "domain_id": {
+          "type": ["string", "null"],
+          "format": "uuid"
+        }
+      }
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["narrative", "requirements"],
+      "properties": {
+        "narrative": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "requirements": {
+          "type": "object"
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "kind", "label"],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["platform", "merchant", "inventory"]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "maxLength": 100 }
+        },
+        "metadata": {
+          "type": "object"
+        }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "score", "reasons"],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "score": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "reasons": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "model": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "stage", "scope", "intent", "candidates", "limit"],
+      "properties": {
+        "protocol": { "const": "matchplane.routing/v1" },
+        "request_id": { "$ref": "#/$defs/uuid" },
+        "stage": { "$ref": "#/$defs/stage" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "intent": { "$ref": "#/$defs/intent" },
+        "candidates": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/candidate" }
+        },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "trace_id": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "stage", "selected", "provider", "degraded"],
+      "properties": {
+        "protocol": { "const": "matchplane.routing/v1" },
+        "request_id": { "$ref": "#/$defs/uuid" },
+        "stage": { "$ref": "#/$defs/stage" },
+        "selected": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/selection" }
+        },
+        "provider": { "$ref": "#/$defs/provider" },
+        "degraded": { "type": "boolean" },
+        "generated_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    }
+  }
+}

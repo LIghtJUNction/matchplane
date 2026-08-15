@@ -164,9 +164,27 @@ export async function GET(request: Request): Promise<Response> {
          FROM "organization" child
          JOIN nodes parent ON child."parentOrganizationId" = parent.id
      )
-     SELECT id, name, slug, "parentOrganizationId" AS "parentOrganizationId", "tenantId" AS "tenantId",
-            "domainId" AS "domainId", "sourceRepository" AS "sourceRepository", "createdAt" AS "createdAt"
+     SELECT nodes.id,
+            nodes.name,
+            nodes.slug,
+            nodes."parentOrganizationId" AS "parentOrganizationId",
+            nodes."tenantId" AS "tenantId",
+            nodes."domainId" AS "domainId",
+            nodes."sourceRepository" AS "sourceRepository",
+            nodes."createdAt" AS "createdAt",
+            registration.id AS "registrationId",
+            registration.state AS "registrationState",
+            encode(registration.build_digest, 'hex') AS "buildDigest",
+            encode(registration.manifest_digest, 'hex') AS "manifestDigest"
        FROM nodes
+       LEFT JOIN LATERAL (
+         SELECT r.id, r.state, r.build_digest, r.manifest_digest
+           FROM subplatform_registrations r
+          WHERE r.slug = nodes.slug
+            AND r.tenant_id::text = nodes."tenantId"
+          ORDER BY r.version DESC
+          LIMIT 1
+       ) registration ON true
       ORDER BY "createdAt" ASC`,
     [parentId || null],
   );
@@ -272,6 +290,7 @@ function validateManifest(value: unknown, slug: string | undefined, packageId: s
   if (!Array.isArray(manifest.capabilities) || manifest.capabilities.some((item) => !stringMatches(item, /^[a-z0-9_:-]+$/))) return { ok: false, error: "manifest.capabilities 无效" };
   if (!Array.isArray(manifest.requiredScopes) || manifest.requiredScopes.some((item) => !allowedScopes.has(item))) return { ok: false, error: "manifest.requiredScopes 无效" };
   if (!manifest.assets || typeof manifest.assets !== "object" || !stringMatches(manifest.assets.staticDirectory, /^(?!\/)(?!.*\.\.).+$/) || !stringMatches(manifest.assets.buildCommand, /^.{1,500}$/u)) return { ok: false, error: "manifest.assets 无效" };
+  if (manifest.agent && !validateAgentManifest(manifest.agent)) return { ok: false, error: "manifest.agent 无效" };
   if (manifest.retrieval && (manifest.retrieval.protocol !== "matchplane.retrieval/v1" || manifest.retrieval.owner !== "subplatform")) return { ok: false, error: "manifest.retrieval 必须声明 subplatform-owned v1" };
   return { ok: true, value: manifest as Manifest };
 }
@@ -301,6 +320,17 @@ function validateManifestEmail(value: unknown): boolean {
   return true;
 }
 
+function validateAgentManifest(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const agent = value as { protocol?: unknown; stages?: unknown; skills?: unknown; mcpTools?: unknown };
+  if (Object.keys(agent).some((key) => !new Set(["protocol", "stages", "skills", "mcpTools"]).has(key))) return false;
+  if (agent.protocol !== "matchplane.agent/v1") return false;
+  if (!Array.isArray(agent.stages) || agent.stages.length > 8 || agent.stages.some((stage) => stage !== "merchant" && stage !== "inventory")) return false;
+  if (!Array.isArray(agent.skills) || agent.skills.length > 32 || agent.skills.some((skill) => !stringMatches(skill, /^[a-z0-9][a-z0-9._:-]{1,127}$/))) return false;
+  if (!Array.isArray(agent.mcpTools) || agent.mcpTools.length > 64 || agent.mcpTools.some((tool) => !stringMatches(tool, /^[a-z0-9][a-z0-9._:-]{1,127}$/))) return false;
+  return true;
+}
+
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -326,6 +356,12 @@ interface Manifest {
   capabilities: string[];
   requiredScopes: string[];
   assets: { staticDirectory: string; buildCommand: string };
+  agent?: {
+    protocol: "matchplane.agent/v1";
+    stages: Array<"merchant" | "inventory">;
+    skills: string[];
+    mcpTools: string[];
+  };
   retrieval?: { protocol: "matchplane.retrieval/v1"; owner: "subplatform" };
   [key: string]: unknown;
 }
@@ -343,5 +379,6 @@ const manifestKeys = new Set([
   "capabilities",
   "requiredScopes",
   "assets",
+  "agent",
   "retrieval",
 ]);

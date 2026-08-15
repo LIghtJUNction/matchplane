@@ -24,6 +24,11 @@ web:
   existingSecret: matchplane-web-secrets
   betterAuthUrl: https://matx.tech
   trustedOrigins: ''
+  rootTenantId: ''
+  # The router provider is optional. Keep its API key in existingWebSecret under router-ai-key.
+  routerAiUrl: ''
+  routerAiModel: ''
+  routerAiMaxTokens: 512
   resources:
     requests:
       cpu: 100m

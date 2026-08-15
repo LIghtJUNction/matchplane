@@ -78,13 +78,21 @@ Every package must contain `matchplane.subplatform.json` at its repository or ar
   "routes": ["/auto"],
   "capabilities": ["demand", "supply", "explainable_matching"],
   "requiredScopes": ["marketplace:read", "marketplace:write"],
+  "agent": {
+    "protocol": "matchplane.agent/v1",
+    "stages": ["merchant", "inventory"],
+    "skills": ["matchplane.matching.v1"],
+    "mcpTools": ["catalog.search", "merchant.search"]
+  },
   "assets": { "staticDirectory": "src", "buildCommand": "bun run build" }
 }
 ```
 
 The root validates the manifest against the schema before registration. `id` is globally stable;
 `slug` is unique within a root tenant and becomes the URL path. `rootApiVersion` and capabilities
-are negotiated before the package is enabled.
+are negotiated before the package is enabled. The optional `agent` block advertises protocol,
+workflow stages and MCP tool names only; it contains no endpoints, credentials or vector-store
+configuration.
 
 The built-in registration intake is `POST /api/platform/subplatforms`. It requires a Better Auth
 root/parent administrator session, an existing `tenantId`/`domainId`, a pinned Git commit or
@@ -107,6 +115,39 @@ child may then create its own domain-scoped buyer request through the stable mar
 Unactivated, disabled or missing registrations are not called, and the root returns an explicit
 accepted/degraded state instead of silently dropping the request.
 
+### Agent-driven staged matching
+
+The chat is a funnel, not a single global vector search. The decision chain is:
+
+1. **商城/子平台** — the current node gives the routing Agent only its direct, activated child
+   registrations. The Agent may select zero or more of those public slugs; it cannot invent a slug,
+   query a sibling, skip an ancestor, or see credentials.
+2. **商家** — the selected subplatform Agent uses its own Skill and authorized MCP tools to inspect
+   seller labels, verification, promotion/exposure policy and merchant candidates. The root does not
+   copy those fields into its schema.
+3. **货柜/商品** — the subplatform Agent calls its inventory MCP tools to rank canonical assets
+   (vehicle, product, service or another domain object) and returns bounded references, scores and
+   reasons. The root verifies active inventory, seller authorization, price/budget and promotion
+   billing before allowing an introduction.
+
+MCP servers are the extension boundary for search, seller systems, catalogues, CRM, payments or
+other tools. Skills describe the multi-step workflow and its safety policy; they do not become a
+second identity or data store. A subplatform may connect pgvector, Qdrant, Milvus, Elasticsearch
+or no vector database at all behind an MCP tool. The root only persists the protocol envelope,
+selected canonical references, provider metadata and degraded state. AI ranking is advisory: it
+cannot grant contact, release phone/WeChat details, authorize payment, mark a transaction
+complete, or bypass seller exposure/commission policy.
+
+The deployment platform is the token-cost bearer for its Agent calls. Provider credentials stay on
+the server, requests carry a bounded token budget, and the routing audit records the selected model
+and provider-reported usage when available. A subplatform may still control its own MCP service
+costs, but it cannot shift an unbounded model call to a browser or silently use a root credential.
+
+The stable envelope for stages two and three is
+[`docs/platform-routing-protocol-v1.json`](platform-routing-protocol-v1.json). It carries a
+`stage`, bounded intent, canonical candidate references, selected references, provider metadata
+and a `degraded` flag. It intentionally contains no vehicle-specific keys.
+
 Vector retrieval is an optional subplatform-owned adapter. A manifest that owns retrieval declares:
 
 ```json
@@ -120,6 +161,11 @@ The root does not require a particular vector database, embedding model, dimensi
 metric, or indexing strategy. The adapter may use pgvector, Qdrant, Milvus, Elasticsearch, a local
 index, or a hosted service. The provider endpoint and its credential reference are deployment
 configuration, not untrusted package manifest data.
+
+Retrieval accuracy is the responsibility of each subplatform. The root does not prescribe a
+vector store, embedding model, prompt, ranking formula or catalogue schema. Agents may use those
+through their own Skill and MCP tools, while the root only checks authorization and the stable
+result envelope.
 
 The stable boundary carries canonical IDs and scores, never vectors:
 

@@ -16,6 +16,12 @@
     "seller_promotion"
   ],
   "requiredScopes": ["marketplace:read", "marketplace:write"],
+  "agent": {
+    "protocol": "matchplane.agent/v1",
+    "stages": ["merchant", "inventory"],
+    "skills": ["matchplane.matching.v1"],
+    "mcpTools": ["merchant.search", "inventory.search", "catalog.explain"]
+  },
   "retrieval": {
     "protocol": "matchplane.retrieval/v1",
     "owner": "subplatform"

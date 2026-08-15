@@ -181,6 +181,20 @@ spec:
                 secretKeyRef:
                   name: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
                   key: root-admin-email
+            - name: MATCHPLANE_ROOT_TENANT_ID
+              value: {{ $root.Values.web.rootTenantId | quote }}
+            - name: MATCHPLANE_ROUTER_AI_URL
+              value: {{ $root.Values.web.routerAiUrl | quote }}
+            - name: MATCHPLANE_ROUTER_AI_MODEL
+              value: {{ $root.Values.web.routerAiModel | quote }}
+            - name: MATCHPLANE_ROUTER_AI_MAX_TOKENS
+              value: {{ $root.Values.web.routerAiMaxTokens | quote }}
+            - name: MATCHPLANE_ROUTER_AI_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
+                  key: router-ai-key
+                  optional: true
             - name: MATCHPLANE_DATABASE_URL
               valueFrom:
                 secretKeyRef:
