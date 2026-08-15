@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { POST as establishAgentSession } from "../marketplace/agent-session/route";
 import { POST as matchPlatform } from "../platform/match/route";
 import { POST as handoffAgent } from "../platform/agent/handoff/route";
 
@@ -87,7 +88,16 @@ async function callMarketplaceTool(
   let path: string;
   let method = "POST";
   let body: string | undefined;
-  if (name === "marketplace.intent.create") {
+  if (name === "marketplace.agent.session") {
+    path = "/api/marketplace/agent-session";
+    body = JSON.stringify({
+      tenantId: args.tenant_id,
+      domainId: args.domain_id,
+      platformPath: args.platform_path,
+      role: args.role,
+      displayName: args.display_name,
+    });
+  } else if (name === "marketplace.intent.create") {
     path = "/v1/marketplace/intents";
     body = JSON.stringify(args);
   } else if (name === "marketplace.offer.create") {
@@ -114,12 +124,24 @@ async function callMarketplaceTool(
   const headers = new Headers({ accept: "application/json" });
   const authorization = request.headers.get("authorization");
   if (authorization) headers.set("authorization", authorization);
+  for (const key of ["x-matchplane-api-key", "x-api-key"]) {
+    const value = request.headers.get(key);
+    if (value) headers.set(key, value);
+  }
   const requestId = request.headers.get("x-request-id");
   if (requestId) headers.set("x-request-id", requestId);
   if (body) headers.set("content-type", "application/json");
   let result: Response;
   try {
-    result = await fetch(`${gateway}${path}`, { method, headers, body, cache: "no-store" });
+    if (name === "marketplace.agent.session") {
+      result = await establishAgentSession(new Request(new URL(path, request.url), {
+        method,
+        headers,
+        body,
+      }));
+    } else {
+      result = await fetch(`${gateway}${path}`, { method, headers, body, cache: "no-store" });
+    }
   } catch {
     return rpcError(id, -32003, "marketplace gateway is unavailable");
   }
@@ -138,6 +160,7 @@ async function callMarketplaceTool(
 function supportedTool(name: unknown): name is string {
   return name === "platform.match"
     || name === "platform.agent.handoff"
+    || name === "marketplace.agent.session"
     || name === "marketplace.intent.create"
     || name === "marketplace.offer.create"
     || name === "marketplace.offer.match"
@@ -214,6 +237,21 @@ function toolList(): Record<string, unknown> {
             },
           },
           selected_refs: { type: "array", maxItems: 100, items: { type: "string", maxLength: 256 } },
+        },
+      },
+    }, {
+      name: "marketplace.agent.session",
+      description: "Exchange a scoped Better Auth organization API key for a caller-funded buyer/seller marketplace capability.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["tenant_id", "domain_id", "platform_path", "role"],
+        properties: {
+          tenant_id: { type: "string", format: "uuid" },
+          domain_id: { type: "string", format: "uuid" },
+          platform_path: { type: "string", pattern: "^/[a-z0-9-]+(?:/[a-z0-9-]+)*$", maxLength: 512 },
+          role: { type: "string", enum: ["buyer", "seller"] },
+          display_name: { type: "string", maxLength: 200 },
         },
       },
     }, {

@@ -12,7 +12,9 @@ Auth; platform-to-platform credentials use Better Auth organization API keys wit
 The packaged `matchplane` CLI is the common backend and operations entrypoint: use
 `matchplane serve <service>` to start a workload, `matchplane doctor/status --json` for bounded
 diagnostics, and `matchplane mcp serve` for read-only MCP tools. The web service's `/api/mcp`
-facade exposes the authenticated `platform.match` tool for buyer/seller Agents.
+facade exposes the authenticated platform and marketplace tools for buyer/seller Agents. The
+dependency-free `integrations/matchplane-agent-client` package provides the same caller-funded
+client shape for both roles.
 
 The repository is a Rust 2024 modular monorepo with independently deployable services. The root
 engine is domain-neutral; automotive, electronics, and any future vertical are mounted adapters

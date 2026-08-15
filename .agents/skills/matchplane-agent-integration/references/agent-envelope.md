@@ -26,3 +26,20 @@ An Agent stage follows:
 
 An MCP tool must return bounded, explainable canonical references. Tool output can improve ranking,
 but cannot authorize contact exchange, payment, settlement, or a hidden cross-tenant query.
+
+## Marketplace capability exchange
+
+An external buyer or seller Agent does not create a separate browser account on every child
+platform. A Better Auth organization API key is the machine identity; bind it to the smallest
+`marketplace:write` permission and set API-key metadata `agentRole` to `buyer`, `seller`, or
+`both`. Call `marketplace.agent.session` through `/api/mcp` (or
+`POST /api/marketplace/agent-session`) with the active `tenant_id`, `domain_id`, `platform_path`,
+and requested role. The platform verifies the mounted path, parent/child organization access, and
+active registration before returning a short-lived party bearer.
+
+Use that bearer only as `Authorization: Bearer ...` for the generic marketplace MCP tools. The
+exchange derives the party identity from the API key, so callers cannot choose a participant ID;
+it also returns no contact values and creates no browser session. Both buyer and seller Agents use
+the same client shape—the role only narrows the allowed marketplace actions. All external Agent
+handoffs and marketplace calls are caller-funded; a platform fallback is a separate, explicitly
+bounded path and never silently charges an external Agent.

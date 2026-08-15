@@ -9,7 +9,7 @@ web-install:
 web-check: web-install
     bun run --cwd web check
 
-check: web-check subplatform-check
+check: web-check agent-check subplatform-check
     cargo fmt --check
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo test --workspace --locked
@@ -19,6 +19,10 @@ compose-config:
 
 web-image-check:
     docker build --file deploy/compose/web.Dockerfile --tag matchplane/web:check .
+
+agent-check:
+    bun test --cwd integrations/matchplane-agent-client
+    web/node_modules/.bin/tsc -p integrations/matchplane-agent-client/tsconfig.json --noEmit
 
 dev:
     docker compose --env-file .env.example -f deploy/compose/compose.yaml up --build -d

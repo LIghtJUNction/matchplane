@@ -186,6 +186,32 @@ payment, invoice, refund or administrator authority. `GET /api/platform/agent/ha
 the status only for the same session or API key subject. Handoffs expire after a bounded interval;
 the caller remains responsible for its own Agent credentials, model calls and token costs.
 
+### Machine Agent capability exchange
+
+The handoff is intentionally separate from a marketplace party capability. A buyer/seller Agent
+that needs to create generic intents, offers, matches, or introductions first creates a Better Auth
+organization API key with the smallest required scopes:
+
+```json
+{
+  "permissions": { "marketplace": ["write"], "agent": ["handoff"] },
+  "agentRole": "buyer"
+}
+```
+
+The `agentRole` value is stored as API-key metadata and must be `buyer`, `seller`, or `both`. The
+Agent then calls `POST /api/marketplace/agent-session` (or the HTTP MCP tool
+`marketplace.agent.session`) with `tenantId`, `domainId`, `platformPath`, and its requested role.
+The server verifies the Better Auth key, active recursive path, organization scope, domain, and
+role before deriving a stable machine principal and exchanging it through the internal gateway
+bridge. The response contains a short-lived party bearer scoped to that tenant and role; it never
+contains a user session, API-key value, contact data, or an administrator capability. Store the
+party bearer server-side and rotate the organization API key to revoke future exchanges.
+
+This gives buyer and seller Agents the same integration shape: the only difference is the
+role-scoped API key and the `side`/resource they submit. A machine Agent cannot choose an
+arbitrary `participant_id` or widen a child path by putting another ID in the request body.
+
 The stable envelope for stages two and three is
 [`docs/platform-routing-protocol-v1.json`](platform-routing-protocol-v1.json). It carries a
 `stage`, bounded intent, canonical candidate references, selected references, provider metadata

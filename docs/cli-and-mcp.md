@@ -39,5 +39,14 @@ idempotent handoff, and returns only the active direct-child capabilities. It ne
 root model: an external buyer/seller Agent keeps its own provider credentials and token bill. Use
 an organization API key with the explicit `agent:handoff` permission for machine calls.
 
+For a machine buyer or seller to continue into the generic marketplace tools, create an
+organization API key with `marketplace:write` and API-key metadata `agentRole: buyer`, `seller`, or
+`both`. Call `marketplace.agent.session` through `/api/mcp` (or
+`POST /api/marketplace/agent-session`) with the active `tenant_id`, `domain_id`, `platform_path`,
+and role. The response is a tenant/role-scoped short-lived party bearer. Pass that bearer as
+`Authorization: Bearer ...` to the `marketplace.intent.*`, `marketplace.offer.*`, and
+`marketplace.introduction.*` tools. The exchange does not create a browser session, accept a
+caller-selected participant ID, or expose contact values.
+
 Exit code is non-zero when a doctor check or any readiness probe fails. This makes the CLI suitable
 for CI, systemd preflight, and an Agent's bounded tool loop.

@@ -58,6 +58,12 @@ export async function POST(request: Request): Promise<Response> {
   if (permissions === null) {
     return NextResponse.json({ error: "permissions contains an unsupported action" }, { status: 400 });
   }
+  if (input.agentRole !== undefined && !isAgentRole(input.agentRole)) {
+    return NextResponse.json({ error: "agentRole must be buyer, seller, or both" }, { status: 400 });
+  }
+  if (input.agentRole !== undefined && !permissions?.marketplace?.includes("write")) {
+    return NextResponse.json({ error: "agentRole requires marketplace:write permission" }, { status: 400 });
+  }
 
   try {
     // Deliberately omit request headers: this is a server-only Better Auth call, so explicit
@@ -75,6 +81,7 @@ export async function POST(request: Request): Promise<Response> {
           audience: "platform",
           issuedBy: session.user.id,
           description: input.description?.trim().slice(0, 500) ?? null,
+          agentRole: input.agentRole ?? null,
         },
       },
     });
@@ -133,6 +140,8 @@ interface ApiKeyRequest {
   description?: string;
   expiresIn?: number;
   permissions?: Record<string, string[]>;
+  /** Optional least-privilege role for the external buyer/seller Agent capability exchange. */
+  agentRole?: "buyer" | "seller" | "both";
 }
 
 async function parseBody(request: Request): Promise<ApiKeyRequest> {
@@ -173,6 +182,10 @@ function normalizePermissions(
     normalized[resource] = unique;
   }
   return normalized;
+}
+
+function isAgentRole(value: unknown): value is NonNullable<ApiKeyRequest["agentRole"]> {
+  return value === "buyer" || value === "seller" || value === "both";
 }
 
 function isUuid(value: string): boolean {

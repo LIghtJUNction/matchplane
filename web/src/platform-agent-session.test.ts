@@ -1,0 +1,44 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  keyCanActAs,
+  parseAgentSessionRequest,
+  stableAgentPrincipalId,
+} from "./platform-agent-session";
+
+const valid = {
+  tenantId: "123e4567-e89b-12d3-a456-426614174000",
+  domainId: "223e4567-e89b-12d3-a456-426614174000",
+  platformPath: "/used-car",
+  role: "buyer",
+};
+
+describe("external Agent marketplace capability exchange", () => {
+  it("accepts a scoped role request without accepting a caller participant id", () => {
+    const result = parseAgentSessionRequest(valid);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.role).toBe("buyer");
+      expect(result.value.displayName).toBe("MatchPlane external Agent");
+    }
+  });
+
+  it("rejects root scope and unsupported fields", () => {
+    expect(parseAgentSessionRequest({ ...valid, platformPath: "/" }).ok).toBe(false);
+    expect(parseAgentSessionRequest({ ...valid, callbackUrl: "https://example.com" }).ok).toBe(false);
+  });
+
+  it("keeps machine principals stable per API key and tenant", () => {
+    const first = stableAgentPrincipalId("key-1", valid.tenantId);
+    expect(first).toBe(stableAgentPrincipalId("key-1", valid.tenantId));
+    expect(first).not.toBe(stableAgentPrincipalId("key-2", valid.tenantId));
+    expect(first).not.toBe(stableAgentPrincipalId("key-1", "323e4567-e89b-12d3-a456-426614174000"));
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it("does not widen a role-scoped API key", () => {
+    expect(keyCanActAs("buyer", "buyer")).toBe(true);
+    expect(keyCanActAs("buyer", "seller")).toBe(false);
+    expect(keyCanActAs("both", "seller")).toBe(true);
+  });
+});
