@@ -29,7 +29,7 @@ fi
 install -d -m 0750 -o root -g matchplane /etc/matchplane/secrets
 install -d -m 0750 -o root -g matchplane-gateway /etc/matchplane/secrets/gateway
 install -d -m 0750 -o root -g matchplane-payment /etc/matchplane/secrets/payment
-install -d -m 0750 -o root -g root /etc/matchplane/services
+install -d -m 0750 -o root -g matchplane /etc/matchplane/services
 
 create_hex_secret() {
   local path=$1

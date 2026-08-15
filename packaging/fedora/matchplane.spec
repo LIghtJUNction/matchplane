@@ -64,7 +64,7 @@ echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.en
 
 %files
 %config(noreplace) %attr(0640,root,matchplane) /etc/matchplane/matchplane.env
-%dir %attr(0750,root,root) /etc/matchplane/services
+%dir %attr(0750,root,matchplane) /etc/matchplane/services
 %{_bindir}/matchplane-event-relay
 %{_bindir}/matchplane-federation-hub
 %{_bindir}/matchplane-gateway
