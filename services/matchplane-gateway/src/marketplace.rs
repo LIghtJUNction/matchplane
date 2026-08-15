@@ -37,6 +37,8 @@ const PARTY_CAPABILITY_TTL: Duration = Duration::minutes(15);
 pub(super) struct CreatePartyRequest {
     party_id: Option<String>,
     tenant_id: String,
+    domain_id: Option<String>,
+    platform_path: Option<String>,
     external_key: String,
     display_name: String,
     role: String,
@@ -48,6 +50,8 @@ pub(super) struct EnsurePartySessionRequest {
     auth_user_id: String,
     party_id: Option<String>,
     tenant_id: String,
+    domain_id: Option<String>,
+    platform_path: Option<String>,
     external_key: String,
     display_name: String,
     role: String,
@@ -153,6 +157,7 @@ pub(super) struct CreateBuyerRequest {
 #[derive(Debug, Deserialize)]
 pub(super) struct RecommendationRequest {
     tenant_id: String,
+    domain_id: String,
     buyer_party_id: String,
     exposure_key: String,
     limit: Option<usize>,
@@ -162,6 +167,7 @@ pub(super) struct RecommendationRequest {
 pub(super) struct CreateDealRequest {
     offline_deal_id: Option<String>,
     tenant_id: String,
+    domain_id: String,
     listing_id: String,
     buyer_request_id: String,
     buyer_party_id: String,
@@ -172,6 +178,7 @@ pub(super) struct CreateDealRequest {
 #[derive(Debug, Deserialize)]
 pub(super) struct ConfirmDealRequest {
     tenant_id: String,
+    domain_id: String,
     party_id: String,
     final_amount: String,
 }
@@ -179,12 +186,14 @@ pub(super) struct ConfirmDealRequest {
 #[derive(Debug, Deserialize)]
 pub(super) struct FinalizeDealRequest {
     tenant_id: String,
+    domain_id: String,
     party_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct AcceptContactRequest {
     tenant_id: String,
+    domain_id: String,
     party_id: String,
 }
 
@@ -192,6 +201,7 @@ pub(super) struct AcceptContactRequest {
 pub(super) struct CreateViewingRequest {
     viewing_id: Option<String>,
     tenant_id: String,
+    domain_id: String,
     proposed_by: String,
     #[serde(with = "time::serde::rfc3339")]
     starts_at: OffsetDateTime,
@@ -203,18 +213,21 @@ pub(super) struct CreateViewingRequest {
 #[derive(Debug, Deserialize)]
 pub(super) struct TransitionViewingRequest {
     tenant_id: String,
+    domain_id: String,
     party_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct PartyQuery {
     tenant_id: String,
+    domain_id: Option<String>,
     party_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ViewingQuery {
     tenant_id: String,
+    domain_id: Option<String>,
     party_id: String,
     /// Number of appointments returned in one page. The storage layer applies the same cap.
     limit: Option<u16>,
@@ -225,6 +238,7 @@ pub(super) struct ViewingQuery {
 #[derive(Debug, Deserialize)]
 pub(super) struct ExposureRequest {
     tenant_id: String,
+    domain_id: Option<String>,
     viewer_party_id: String,
     event_type: String,
 }
@@ -238,6 +252,7 @@ pub(super) struct ExposureResponse {
 pub(super) struct CreatePromotionRequest {
     campaign_id: Option<String>,
     tenant_id: String,
+    domain_id: Option<String>,
     sponsor_party_id: String,
     target_kind: String,
     target_key: String,
@@ -306,6 +321,12 @@ pub(super) async fn create_party(
         .transpose()?
         .unwrap_or_default();
     let tenant_id = parse_id(&request.tenant_id)?;
+    let scope_domain_id = request
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?;
+    let platform_path = normalize_platform_path(request.platform_path.as_deref().unwrap_or("/"))?;
     let global_allowed = state
         .cache
         .lock()
@@ -350,6 +371,8 @@ pub(super) async fn create_party(
         .create_marketplace_party(&CreateMarketplaceParty {
             party_id,
             tenant_id,
+            scope_domain_id,
+            platform_path,
             external_key: request.external_key,
             display_name: request.display_name,
             role: request.role,
@@ -390,12 +413,27 @@ pub(super) async fn ensure_party_session(
         ));
     }
     let tenant_id = parse_id(&request.tenant_id)?;
-    let party_id = request
-        .party_id
+    let platform_path = normalize_platform_path(request.platform_path.as_deref().unwrap_or("/"))?;
+    let scope_domain_id = request
+        .domain_id
         .as_deref()
-        .map(parse_id::<MarketplacePartyId>)
-        .transpose()?
-        .unwrap_or_else(|| MarketplacePartyId::from_uuid(auth_user_id));
+        .map(parse_id::<DomainId>)
+        .transpose()?;
+    if platform_path != "/" && scope_domain_id.is_none() {
+        return Err(ApiError::bad_request(
+            "child platform sessions require domain_id".to_owned(),
+        ));
+    }
+    let party_id = if platform_path == "/" {
+        request
+            .party_id
+            .as_deref()
+            .map(parse_id::<MarketplacePartyId>)
+            .transpose()?
+            .unwrap_or_else(|| MarketplacePartyId::from_uuid(auth_user_id))
+    } else {
+        MarketplacePartyId::from_uuid(scoped_party_uuid(auth_user_id, &platform_path))
+    };
     let contact = normalize_contact(&request.contact)?;
     let contact_bytes = serde_json::to_vec(&contact)
         .map_err(|error| ApiError::bad_request(format!("contact is invalid: {error}")))?;
@@ -411,6 +449,8 @@ pub(super) async fn ensure_party_session(
             auth_user_id,
             party_id,
             tenant_id,
+            scope_domain_id,
+            platform_path,
             external_key: request.external_key,
             display_name: request.display_name,
             role: request.role,
@@ -442,10 +482,11 @@ pub(super) async fn get_subplatform_email_config(
 ) -> Result<Json<SubplatformEmailConfig>, ApiError> {
     let tenant_id = parse_id(&query.tenant_id)?;
     let party_id = parse_id(&query.party_id)?;
-    authenticate(&state, &headers, tenant_id, party_id).await?;
+    let domain_id = parse_id::<DomainId>(&domain_id)?;
+    authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
     state
         .store
-        .subplatform_email_config(tenant_id, parse_id(&domain_id)?, party_id)
+        .subplatform_email_config(tenant_id, domain_id, party_id)
         .await
         .map(Json)
         .map_err(ApiError::from)
@@ -470,12 +511,13 @@ pub(super) async fn upsert_subplatform_email_config(
     validate_text(&request.updated_by, "updated_by", 256)?;
     let tenant_id = parse_id(&request.tenant_id)?;
     let party_id = parse_id(&request.party_id)?;
-    authenticate(&state, &headers, tenant_id, party_id).await?;
+    let domain_id = parse_id::<DomainId>(&domain_id)?;
+    authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
     state
         .store
         .upsert_subplatform_email_config(&UpsertSubplatformEmailConfig {
             tenant_id,
-            domain_id: parse_id(&domain_id)?,
+            domain_id,
             actor_party_id: party_id,
             provider_key: request.provider_key,
             smtp_host: request.smtp_host,
@@ -506,8 +548,9 @@ pub(super) async fn create_listing(
 ) -> Result<(StatusCode, Json<VehicleListing>), ApiError> {
     validate_currency(&request.currency)?;
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let seller_party_id = parse_id(&request.seller_party_id)?;
-    authenticate(&state, &headers, tenant_id, seller_party_id).await?;
+    authenticate_domain(&state, &headers, tenant_id, seller_party_id, domain_id).await?;
     let listing = state
         .store
         .create_vehicle_listing(&CreateVehicleListing {
@@ -518,7 +561,7 @@ pub(super) async fn create_listing(
                 .transpose()?
                 .unwrap_or_default(),
             tenant_id,
-            domain_id: parse_id::<DomainId>(&request.domain_id)?,
+            domain_id,
             asset_id: parse_id::<AssetId>(&request.asset_id)?,
             seller_party_id,
             asking_amount: positive_exact(&request.asking_amount, "asking_amount")?,
@@ -545,8 +588,10 @@ pub(super) async fn create_listing_submission(
     }
     validate_currency(&request.currency)?;
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let seller_party_id = parse_id(&request.seller_party_id)?;
-    let party = authenticate(&state, &headers, tenant_id, seller_party_id).await?;
+    let party =
+        authenticate_domain(&state, &headers, tenant_id, seller_party_id, domain_id).await?;
     require_role(&party, "seller")?;
     let submission = state
         .store
@@ -562,7 +607,7 @@ pub(super) async fn create_listing_submission(
                 .transpose()?
                 .unwrap_or_else(Uuid::new_v4),
             tenant_id,
-            domain_id: parse_id::<DomainId>(&request.domain_id)?,
+            domain_id,
             seller_party_id,
             asset_schema_id: parse_id::<AssetSchemaId>(&request.asset_schema_id)?,
             external_key: request.external_key,
@@ -629,8 +674,9 @@ pub(super) async fn create_buyer_request(
     validate_text(&request.narrative, "narrative", 10_000)?;
     validate_currency(&request.currency)?;
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let buyer_party_id = parse_id(&request.buyer_party_id)?;
-    authenticate(&state, &headers, tenant_id, buyer_party_id).await?;
+    authenticate_domain(&state, &headers, tenant_id, buyer_party_id, domain_id).await?;
     let buyer_request = state
         .store
         .create_buyer_vehicle_request(&CreateBuyerVehicleRequest {
@@ -641,7 +687,7 @@ pub(super) async fn create_buyer_request(
                 .transpose()?
                 .unwrap_or_default(),
             tenant_id,
-            domain_id: parse_id::<DomainId>(&request.domain_id)?,
+            domain_id,
             buyer_party_id,
             narrative: request.narrative,
             requirements: request.requirements,
@@ -669,8 +715,9 @@ pub(super) async fn recommendations(
     Json(request): Json<RecommendationRequest>,
 ) -> Result<Json<Vec<RecommendedListing>>, ApiError> {
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let buyer_party_id = parse_id(&request.buyer_party_id)?;
-    authenticate(&state, &headers, tenant_id, buyer_party_id).await?;
+    authenticate_domain(&state, &headers, tenant_id, buyer_party_id, domain_id).await?;
     state
         .store
         .recommend_vehicle_listings(&RecommendVehicleListings {
@@ -691,8 +738,9 @@ pub(super) async fn create_offline_deal(
     Json(request): Json<CreateDealRequest>,
 ) -> Result<(StatusCode, Json<OfflineDealOutcome>), ApiError> {
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let buyer_party_id = parse_id(&request.buyer_party_id)?;
-    authenticate(&state, &headers, tenant_id, buyer_party_id).await?;
+    authenticate_domain(&state, &headers, tenant_id, buyer_party_id, domain_id).await?;
     let outcome = state
         .store
         .create_offline_deal(&CreateOfflineDeal {
@@ -726,7 +774,16 @@ pub(super) async fn offline_deals(
 ) -> Result<Json<Vec<OfflineDeal>>, ApiError> {
     let tenant_id = parse_id(&query.tenant_id)?;
     let party_id = parse_id(&query.party_id)?;
-    authenticate(&state, &headers, tenant_id, party_id).await?;
+    let scope_domain_id = query
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?;
+    if let Some(domain_id) = scope_domain_id {
+        authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
+    } else {
+        authenticate(&state, &headers, tenant_id, party_id).await?;
+    }
     state
         .store
         .offline_deals_for_party(tenant_id, party_id)
@@ -743,7 +800,16 @@ pub(super) async fn offline_deal(
 ) -> Result<Json<OfflineDeal>, ApiError> {
     let tenant_id = parse_id(&query.tenant_id)?;
     let party_id = parse_id(&query.party_id)?;
-    authenticate(&state, &headers, tenant_id, party_id).await?;
+    let scope_domain_id = query
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?;
+    if let Some(domain_id) = scope_domain_id {
+        authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
+    } else {
+        authenticate(&state, &headers, tenant_id, party_id).await?;
+    }
     let deal = state
         .store
         .offline_deal(parse_id(&offline_deal_id)?)
@@ -763,8 +829,10 @@ pub(super) async fn accept_contact_exchange(
     Json(request): Json<AcceptContactRequest>,
 ) -> Result<Json<OfflineDeal>, ApiError> {
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let seller_party_id = parse_id(&request.party_id)?;
-    let party = authenticate(&state, &headers, tenant_id, seller_party_id).await?;
+    let party =
+        authenticate_domain(&state, &headers, tenant_id, seller_party_id, domain_id).await?;
     require_role(&party, "seller")?;
     state
         .store
@@ -785,8 +853,9 @@ pub(super) async fn confirm_offline_deal(
     Json(request): Json<ConfirmDealRequest>,
 ) -> Result<Json<OfflineDealProgress>, ApiError> {
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let party_id = parse_id(&request.party_id)?;
-    authenticate(&state, &headers, tenant_id, party_id).await?;
+    authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
     state
         .store
         .confirm_offline_deal(&ConfirmOfflineDeal {
@@ -807,8 +876,9 @@ pub(super) async fn finalize_offline_deal(
     Json(request): Json<FinalizeDealRequest>,
 ) -> Result<Json<OfflineDealProgress>, ApiError> {
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let party_id = parse_id(&request.party_id)?;
-    authenticate(&state, &headers, tenant_id, party_id).await?;
+    authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
     state
         .store
         .finalize_offline_deal(&FinalizeOfflineDeal {
@@ -845,9 +915,10 @@ pub(super) async fn create_viewing(
         ));
     }
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let offline_deal_id = parse_id(&offline_deal_id)?;
     let proposed_by = parse_id(&request.proposed_by)?;
-    authenticate(&state, &headers, tenant_id, proposed_by).await?;
+    authenticate_domain(&state, &headers, tenant_id, proposed_by, domain_id).await?;
     let viewing_id = request
         .viewing_id
         .as_deref()
@@ -901,7 +972,16 @@ pub(super) async fn viewings(
             "viewing offset must be between 0 and 32".to_owned(),
         ));
     }
-    authenticate(&state, &headers, tenant_id, party_id).await?;
+    if let Some(domain_id) = query
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?
+    {
+        authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
+    } else {
+        authenticate(&state, &headers, tenant_id, party_id).await?;
+    }
     let viewings = state
         .store
         .viewing_appointments(
@@ -931,8 +1011,9 @@ pub(super) async fn transition_viewing(
         ));
     }
     let tenant_id = parse_id(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let party_id = parse_id(&request.party_id)?;
-    authenticate(&state, &headers, tenant_id, party_id).await?;
+    authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
     let viewing = state
         .store
         .transition_viewing_appointment(&TransitionViewingAppointment {
@@ -953,7 +1034,16 @@ pub(super) async fn contact(
 ) -> Result<Json<ContactResponse>, ApiError> {
     let tenant_id = parse_id(&query.tenant_id)?;
     let actor_party_id = parse_id(&query.party_id)?;
-    authenticate(&state, &headers, tenant_id, actor_party_id).await?;
+    if let Some(domain_id) = query
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?
+    {
+        authenticate_domain(&state, &headers, tenant_id, actor_party_id, domain_id).await?;
+    } else {
+        authenticate(&state, &headers, tenant_id, actor_party_id).await?;
+    }
     let fingerprint = request_fingerprint(&headers);
     let envelope = state
         .store
@@ -1000,7 +1090,16 @@ pub(super) async fn record_exposure(
     }
     let tenant_id = parse_id(&request.tenant_id)?;
     let viewer_party_id = parse_id(&request.viewer_party_id)?;
-    let party = authenticate(&state, &headers, tenant_id, viewer_party_id).await?;
+    let party = if let Some(domain_id) = request
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?
+    {
+        authenticate_domain(&state, &headers, tenant_id, viewer_party_id, domain_id).await?
+    } else {
+        authenticate(&state, &headers, tenant_id, viewer_party_id).await?
+    };
     require_role(&party, "buyer")?;
     let listing_id = parse_id(&listing_id)?;
     let occurred_at = OffsetDateTime::now_utc();
@@ -1063,7 +1162,16 @@ pub(super) async fn create_seller_promotion(
     validate_currency(&request.currency)?;
     let tenant_id = parse_id(&request.tenant_id)?;
     let sponsor_party_id = parse_id(&request.sponsor_party_id)?;
-    let party = authenticate(&state, &headers, tenant_id, sponsor_party_id).await?;
+    let party = if let Some(domain_id) = request
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?
+    {
+        authenticate_domain(&state, &headers, tenant_id, sponsor_party_id, domain_id).await?
+    } else {
+        authenticate(&state, &headers, tenant_id, sponsor_party_id).await?
+    };
     require_role(&party, "seller")?;
     let settings = if request.settings.is_null() {
         serde_json::json!({})
@@ -1110,7 +1218,16 @@ pub(super) async fn seller_promotion(
 ) -> Result<Json<SellerPromotionCampaign>, ApiError> {
     let tenant_id = parse_id(&query.tenant_id)?;
     let party_id = parse_id(&query.party_id)?;
-    let party = authenticate(&state, &headers, tenant_id, party_id).await?;
+    let party = if let Some(domain_id) = query
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?
+    {
+        authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?
+    } else {
+        authenticate(&state, &headers, tenant_id, party_id).await?
+    };
     require_role(&party, "seller")?;
     state
         .store
@@ -1137,7 +1254,35 @@ pub(super) async fn authenticate(
     let token_hash = Sha256::digest(token.as_bytes());
     state
         .store
-        .authenticate_marketplace_party(tenant_id, party_id, token_hash.as_slice())
+        .authenticate_marketplace_party(tenant_id, party_id, token_hash.as_slice(), None)
+        .await
+        .map_err(|error| match error {
+            matchplane_storage::StorageError::Forbidden(_) => {
+                ApiError::unauthorized("party bearer token is invalid")
+            }
+            other => ApiError::from(other),
+        })
+}
+
+pub(super) async fn authenticate_domain(
+    state: &AppState,
+    headers: &HeaderMap,
+    tenant_id: TenantId,
+    party_id: MarketplacePartyId,
+    domain_id: DomainId,
+) -> Result<AuthenticatedParty, ApiError> {
+    let authorization = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| ApiError::unauthorized("party bearer token is required"))?;
+    let token = authorization
+        .strip_prefix("Bearer ")
+        .filter(|token| token.len() >= 64)
+        .ok_or_else(|| ApiError::unauthorized("party bearer token is invalid"))?;
+    let token_hash = Sha256::digest(token.as_bytes());
+    state
+        .store
+        .authenticate_marketplace_party(tenant_id, party_id, token_hash.as_slice(), Some(domain_id))
         .await
         .map_err(|error| match error {
             matchplane_storage::StorageError::Forbidden(_) => {
@@ -1161,6 +1306,50 @@ fn default_promotion_policy() -> String {
 
 fn contact_aad(tenant_id: TenantId, party_id: MarketplacePartyId) -> Vec<u8> {
     format!("matchplane:party-contact:v1:{tenant_id}:{party_id}").into_bytes()
+}
+
+fn normalize_platform_path(value: &str) -> Result<String, ApiError> {
+    if value.len() > 512 {
+        return Err(ApiError::bad_request(
+            "platform_path is too long".to_owned(),
+        ));
+    }
+    let normalized = format!(
+        "/{}",
+        value
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("/")
+    );
+    if normalized == "/"
+        || normalized.strip_prefix('/').is_some_and(|path| {
+            !path.is_empty()
+                && path.split('/').all(|segment| {
+                    !segment.is_empty()
+                        && segment.bytes().all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                        })
+                })
+        })
+    {
+        Ok(normalized)
+    } else {
+        Err(ApiError::bad_request("platform_path is invalid".to_owned()))
+    }
+}
+
+fn scoped_party_uuid(auth_user_id: Uuid, platform_path: &str) -> Uuid {
+    let digest = Sha256::digest(
+        format!("matchplane:party-scope:v1:{auth_user_id}:{platform_path}").as_bytes(),
+    );
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    // UUIDv5-shaped deterministic identifiers avoid one Better Auth user colliding with another
+    // platform-scoped party while keeping the bridge idempotent across logins.
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
 }
 
 fn viewing_aad(

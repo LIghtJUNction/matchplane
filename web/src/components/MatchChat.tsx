@@ -85,6 +85,7 @@ export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchCha
             });
             const recommendations = await getBuyerRecommendations({
               session,
+              domainId: subplatform.domainId,
               requestId: buyerRequest.request_id,
               exposureKey: `chat-${requestId}`,
             });

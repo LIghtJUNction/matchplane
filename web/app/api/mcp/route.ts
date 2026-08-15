@@ -114,11 +114,12 @@ async function callMarketplaceTool(
   } else {
     method = "GET";
     const tenantId = stringArgument(args, "tenant_id");
+    const domainId = stringArgument(args, "domain_id");
     const participantId = stringArgument(args, "participant_id");
-    if (!tenantId || !participantId) {
-      return rpcError(id, -32602, "marketplace.introductions.list requires tenant_id and participant_id");
+    if (!tenantId || !domainId || !participantId) {
+      return rpcError(id, -32602, "marketplace.introductions.list requires tenant_id, domain_id, and participant_id");
     }
-    path = `/v1/marketplace/introductions?tenant_id=${encodeURIComponent(tenantId)}&participant_id=${encodeURIComponent(participantId)}`;
+    path = `/v1/marketplace/introductions?tenant_id=${encodeURIComponent(tenantId)}&domain_id=${encodeURIComponent(domainId)}&participant_id=${encodeURIComponent(participantId)}`;
   }
 
   const headers = new Headers({ accept: "application/json" });
@@ -268,10 +269,11 @@ function toolList(): Record<string, unknown> {
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["intent_id", "tenant_id", "participant_id"],
+        required: ["intent_id", "tenant_id", "domain_id", "participant_id"],
         properties: {
           intent_id: { type: "string", format: "uuid" },
           tenant_id: { type: "string", format: "uuid" },
+          domain_id: { type: "string", format: "uuid" },
           participant_id: { type: "string", format: "uuid" },
           limit: { type: "integer", minimum: 1, maximum: 100 },
         },
@@ -282,10 +284,11 @@ function toolList(): Record<string, unknown> {
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["tenant_id", "intent_id", "offer_id", "participant_id", "score", "idempotency_key", "expires_at"],
+        required: ["tenant_id", "domain_id", "intent_id", "offer_id", "participant_id", "score", "idempotency_key", "expires_at"],
         properties: {
           introduction_id: { type: "string", format: "uuid" },
           tenant_id: { type: "string", format: "uuid" },
+          domain_id: { type: "string", format: "uuid" },
           intent_id: { type: "string", format: "uuid" },
           offer_id: { type: "string", format: "uuid" },
           participant_id: { type: "string", format: "uuid" },
@@ -301,9 +304,10 @@ function toolList(): Record<string, unknown> {
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["tenant_id", "participant_id"],
+        required: ["tenant_id", "domain_id", "participant_id"],
         properties: {
           tenant_id: { type: "string", format: "uuid" },
+          domain_id: { type: "string", format: "uuid" },
           participant_id: { type: "string", format: "uuid" },
         },
       },

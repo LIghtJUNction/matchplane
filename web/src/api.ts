@@ -5,6 +5,8 @@ const apiBase = (process.env.NEXT_PUBLIC_MATCHPLANE_API_BASE_URL ?? "/api").repl
 export interface PartySession {
   tenantId: string;
   partyId: string;
+  /** Recursive node scope used to isolate browser capability caches. */
+  platformPath?: string;
   role: "buyer" | "seller" | "both";
   accessToken: string;
   accessTokenExpiresAt: string;
@@ -270,12 +272,17 @@ export function switchPaymentMode(input: {
   );
 }
 
-export function readPartySession(role: PartySession["role"] | "admin", subplatform = "root"): PartySession | null {
+export function readPartySession(
+  role: PartySession["role"] | "admin",
+  subplatform = "root",
+  platformPath?: string,
+): PartySession | null {
   try {
     const storageRoles = role === "admin" ? ["admin", "both"] : [role];
+    const scopedKey = platformPath ? encodeURIComponent(platformPath) : subplatform;
     const keys = [
-      ...storageRoles.map((storageRole) => `matchplane.party.${subplatform}.${storageRole}`),
-      ...(role === "admin" ? [] : [`matchplane.party.${role}`]),
+      ...storageRoles.map((storageRole) => `matchplane.party.${scopedKey}.${storageRole}`),
+      ...(!platformPath && role !== "admin" ? [`matchplane.party.${role}`] : []),
     ];
     for (const key of [...new Set(keys)]) {
       const raw = window.localStorage.getItem(key);
@@ -294,6 +301,10 @@ export function readPartySession(role: PartySession["role"] | "admin", subplatfo
           window.localStorage.removeItem(key);
           continue;
         }
+        if (platformPath && parsed.platformPath !== platformPath) {
+          window.localStorage.removeItem(key);
+          continue;
+        }
         return parsed;
       } catch {
         window.localStorage.removeItem(key);
@@ -305,8 +316,14 @@ export function readPartySession(role: PartySession["role"] | "admin", subplatfo
   }
 }
 
-export function savePartySession(session: PartySession, subplatform = "root", storageRole: string = session.role): void {
-  window.localStorage.setItem(`matchplane.party.${subplatform}.${storageRole}`, JSON.stringify(session));
+export function savePartySession(
+  session: PartySession,
+  subplatform = "root",
+  storageRole: string = session.role,
+  platformPath?: string,
+): void {
+  const scopedKey = platformPath ? encodeURIComponent(platformPath) : subplatform;
+  window.localStorage.setItem(`matchplane.party.${scopedKey}.${storageRole}`, JSON.stringify(session));
 }
 
 /**
@@ -353,11 +370,12 @@ export async function establishMarketplaceSession(input: {
   const session: PartySession = {
     tenantId: result.tenant_id,
     partyId: result.party_id,
+    platformPath: input.platformPath,
     role: result.role,
     accessToken: result.access_token,
     accessTokenExpiresAt: result.access_token_expires_at,
   };
-  savePartySession(session, input.subplatform, input.role === "subplatform_admin" ? "admin" : input.role);
+  savePartySession(session, input.subplatform, input.role === "subplatform_admin" ? "admin" : input.role, input.platformPath);
   return session;
 }
 
@@ -398,6 +416,7 @@ export function createBuyerRequest(input: {
 
 export function getBuyerRecommendations(input: {
   session: PartySession;
+  domainId: string;
   requestId: string;
   exposureKey: string;
   limit?: number;
@@ -408,6 +427,7 @@ export function getBuyerRecommendations(input: {
       method: "POST",
       body: JSON.stringify({
         tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
         buyer_party_id: input.session.partyId,
         exposure_key: input.exposureKey,
         limit: input.limit ?? 20,
@@ -533,6 +553,7 @@ export async function createBuyerIntroduction(input: {
   );
   const recommendations = await getBuyerRecommendations({
     session: input.session,
+    domainId: input.domainId,
     requestId: requestResult.request_id,
     exposureKey: input.exposureKey,
     limit: 20,
@@ -546,6 +567,7 @@ export async function createBuyerIntroduction(input: {
       method: "POST",
       body: JSON.stringify({
         tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
         listing_id: input.listingId,
         buyer_request_id: requestResult.request_id,
         buyer_party_id: input.session.partyId,
@@ -554,15 +576,15 @@ export async function createBuyerIntroduction(input: {
     input.session,
   );
   return request<OfflineDeal>(
-    `/v1/marketplace/offline-deals/${outcome.offline_deal_id}?tenant_id=${input.session.tenantId}&party_id=${input.session.partyId}`,
+    `/v1/marketplace/offline-deals/${outcome.offline_deal_id}?tenant_id=${input.session.tenantId}&domain_id=${encodeURIComponent(input.domainId)}&party_id=${input.session.partyId}`,
     {},
     input.session,
   );
 }
 
-export function listOfflineDeals(session: PartySession): Promise<OfflineDeal[]> {
+export function listOfflineDeals(session: PartySession, domainId?: string): Promise<OfflineDeal[]> {
   return request<OfflineDeal[]>(
-    `/v1/marketplace/offline-deals?tenant_id=${session.tenantId}&party_id=${session.partyId}`,
+    `/v1/marketplace/offline-deals?tenant_id=${session.tenantId}&party_id=${session.partyId}${domainId ? `&domain_id=${encodeURIComponent(domainId)}` : ""}`,
     {},
     session,
   );
@@ -571,12 +593,13 @@ export function listOfflineDeals(session: PartySession): Promise<OfflineDeal[]> 
 export function acceptContactExchange(
   session: PartySession,
   offlineDealId: string,
+  domainId: string,
 ): Promise<OfflineDeal> {
   return request<OfflineDeal>(
     `/v1/marketplace/offline-deals/${offlineDealId}/contact/accept`,
     {
       method: "POST",
-      body: JSON.stringify({ tenant_id: session.tenantId, party_id: session.partyId }),
+      body: JSON.stringify({ tenant_id: session.tenantId, domain_id: domainId, party_id: session.partyId }),
     },
     session,
   );
@@ -585,9 +608,10 @@ export function acceptContactExchange(
 export function retrieveContact(
   session: PartySession,
   offlineDealId: string,
+  domainId?: string,
 ): Promise<ContactResponse> {
   return request<ContactResponse>(
-    `/v1/marketplace/offline-deals/${offlineDealId}/contact?tenant_id=${session.tenantId}&party_id=${session.partyId}`,
+    `/v1/marketplace/offline-deals/${offlineDealId}/contact?tenant_id=${session.tenantId}&party_id=${session.partyId}${domainId ? `&domain_id=${encodeURIComponent(domainId)}` : ""}`,
     {},
     session,
   );

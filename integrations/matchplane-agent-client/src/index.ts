@@ -90,6 +90,7 @@ export interface MarketplaceOfferInput {
 
 export interface MarketplaceIntroductionInput {
   tenant_id: string;
+  domain_id: string;
   intent_id: string;
   offer_id: string;
   participant_id: string;
@@ -158,6 +159,7 @@ export class MatchPlaneAgentClient {
   async matchOffers(capability: PartyCapability, input: {
     intent_id: string;
     tenant_id: string;
+    domain_id: string;
     participant_id: string;
     limit?: number;
   }): Promise<unknown> {
@@ -170,6 +172,7 @@ export class MatchPlaneAgentClient {
 
   async listIntroductions(capability: PartyCapability, input: {
     tenant_id: string;
+    domain_id: string;
     participant_id: string;
   }): Promise<unknown> {
     return this.callTool("marketplace.introductions.list", input, capability.access_token);

@@ -315,8 +315,9 @@ release; it creates a new immutable version and requires an explicit activation.
   organization membership projection; the claim adds only a scoped `member` role, and the Rust
   marketplace projection adds labels such as `seller`, `dealer`, or `verified` without creating
   another account. Admin labels require an invitation or an owner/admin action.
-- Every subplatform command carries `tenant_id`, `domain_id`, and the root capability token. The
-  gateway checks an active membership for role-sensitive actions.
+- Every subplatform command carries `tenant_id`, `domain_id`, and a capability minted for that
+  `platform_path`. The gateway checks the capability's exact domain scope before role-sensitive
+  actions; a token minted for `/a` cannot be replayed against `/b` in the same tenant.
 - Plugins are static frontend adapters. They cannot ship a second database, issue tokens, bypass
   contact consent, or call payment providers directly. Provider credentials remain root/payment
   service secrets. After the isolated builder attaches an artifact locator, the active manifest

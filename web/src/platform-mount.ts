@@ -1,5 +1,11 @@
 import { authDatabase } from "./lib/auth";
 
+export interface MountedPlatformScope {
+  tenantId: string;
+  domainId: string;
+  slug: string;
+}
+
 /**
  * Production UI routes are controlled by the same immutable registration tree
  * that drives Agent delegation. Test/development profiles may render a static
@@ -58,6 +64,67 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
   } catch (error) {
     console.error("platform mount lookup failed", error);
     return false;
+  }
+}
+
+/**
+ * Resolves the active node from the immutable organization tree.  Callers must use this result
+ * instead of trusting a browser-supplied tenant/domain pair for a child capability exchange.
+ */
+export async function readActivePlatformScope(
+  platformPath: string,
+): Promise<MountedPlatformScope | null> {
+  if (process.env.MATCHPLANE_ENVIRONMENT !== "production" || platformPath === "/") return null;
+  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath)) return null;
+  try {
+    const result = await authDatabase.query<MountedPlatformScope>(
+      `WITH RECURSIVE platform_tree AS (
+         SELECT o.id,
+                o.slug,
+                o."parentOrganizationId",
+                o."tenantId" AS tenant_id,
+                o."domainId" AS domain_id,
+                '/' || o.slug AS platform_path,
+                true AS path_active
+           FROM "organization" o
+          WHERE o."tenantId" = $1::text
+            AND o."parentOrganizationId" IS NULL
+         UNION ALL
+         SELECT child.id,
+                child.slug,
+                child."parentOrganizationId",
+                child."tenantId",
+                child."domainId",
+                platform_tree.platform_path || '/' || child.slug,
+                platform_tree.path_active
+                  AND EXISTS (
+                    SELECT 1
+                      FROM subplatform_registrations registration
+                     WHERE registration.tenant_id = $1::uuid
+                       AND registration.domain_id = NULLIF(child."domainId", '')::uuid
+                       AND registration.slug = child.slug
+                       AND registration.state = 'active'
+                  )
+           FROM "organization" child
+           JOIN platform_tree ON child."parentOrganizationId" = platform_tree.id
+          WHERE length(platform_tree.platform_path) < 4_096
+       )
+       SELECT tenant_id AS "tenantId", domain_id AS "domainId", slug
+         FROM platform_tree
+        WHERE platform_path = $2
+          AND path_active
+          AND NULLIF(domain_id, '') IS NOT NULL
+        LIMIT 1`,
+      [rootTenantId, platformPath],
+    );
+    const row = result.rows[0];
+    return row && isUuid(row.tenantId) && isUuid(row.domainId)
+      ? row
+      : null;
+  } catch (error) {
+    console.error("active platform scope lookup failed", error);
+    return null;
   }
 }
 

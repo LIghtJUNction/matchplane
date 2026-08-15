@@ -33,6 +33,10 @@ pub struct CreateMarketplaceParty {
     pub party_id: MarketplacePartyId,
     /// Tenant authority scope.
     pub tenant_id: TenantId,
+    /// Optional platform node scope. `None` is reserved for root/legacy API parties.
+    pub scope_domain_id: Option<DomainId>,
+    /// Recursive platform path represented by this capability.
+    pub platform_path: String,
     /// Tenant-local identity key.
     pub external_key: String,
     /// Public display name.
@@ -56,6 +60,10 @@ pub struct EnsureMarketplaceParty {
     pub party_id: MarketplacePartyId,
     /// Tenant authority scope.
     pub tenant_id: TenantId,
+    /// Child domain represented by this capability; root sessions use `None`.
+    pub scope_domain_id: Option<DomainId>,
+    /// Recursive platform path represented by this capability.
+    pub platform_path: String,
     /// Stable tenant-local identity key.
     pub external_key: String,
     /// Public display name.
@@ -99,6 +107,10 @@ pub struct AuthenticatedParty {
     pub party_id: MarketplacePartyId,
     /// Tenant authority scope.
     pub tenant_id: TenantId,
+    /// The domain scope bound to this bearer. Root/legacy parties have no child scope.
+    pub scope_domain_id: Option<DomainId>,
+    /// Recursive platform path bound to this bearer.
+    pub platform_path: String,
     /// Marketplace role.
     pub role: String,
 }
@@ -787,15 +799,18 @@ impl PgStore {
                 "party credential or contact envelope is malformed".to_owned(),
             ));
         }
+        validate_platform_scope(command.scope_domain_id, &command.platform_path)?;
         let row = sqlx::query(
             "INSERT INTO marketplace_parties \
-             (id, tenant_id, external_key, display_name, role, access_token_hash, \
+             (id, tenant_id, scope_domain_id, platform_path, external_key, display_name, role, access_token_hash, \
               access_token_expires_at, contact_ciphertext, contact_nonce, contact_key_version) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
              RETURNING id, tenant_id, external_key, display_name, role, status, version, created_at",
         )
         .bind(command.party_id.into_uuid())
         .bind(command.tenant_id.into_uuid())
+        .bind(command.scope_domain_id.map(DomainId::into_uuid))
+        .bind(&command.platform_path)
         .bind(&command.external_key)
         .bind(&command.display_name)
         .bind(&command.role)
@@ -828,22 +843,25 @@ impl PgStore {
                 "Better Auth party bridge credential or identity is malformed".to_owned(),
             ));
         }
+        validate_platform_scope(command.scope_domain_id, &command.platform_path)?;
         let mut transaction = self.pool().begin().await?;
         let existing: Option<Uuid> = sqlx::query_scalar(
             "SELECT party_id FROM marketplace_party_auth_links \
-             WHERE tenant_id = $1 AND auth_user_id = $2 FOR UPDATE",
+             WHERE tenant_id = $1 AND auth_user_id = $2 AND platform_path = $3 FOR UPDATE",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(command.auth_user_id)
+        .bind(&command.platform_path)
         .fetch_optional(&mut *transaction)
         .await?;
         let party_id = existing.unwrap_or_else(|| command.party_id.into_uuid());
         let row = sqlx::query(
             "INSERT INTO marketplace_parties \
-             (id, tenant_id, external_key, display_name, role, access_token_hash, \
+             (id, tenant_id, scope_domain_id, platform_path, external_key, display_name, role, access_token_hash, \
               access_token_expires_at, contact_ciphertext, contact_nonce, contact_key_version) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
              ON CONFLICT (tenant_id, id) DO UPDATE SET \
+               scope_domain_id = EXCLUDED.scope_domain_id, platform_path = EXCLUDED.platform_path, \
                external_key = EXCLUDED.external_key, display_name = EXCLUDED.display_name, \
                role = EXCLUDED.role, access_token_hash = EXCLUDED.access_token_hash, \
                access_token_expires_at = EXCLUDED.access_token_expires_at, \
@@ -853,6 +871,8 @@ impl PgStore {
         )
         .bind(party_id)
         .bind(command.tenant_id.into_uuid())
+        .bind(command.scope_domain_id.map(DomainId::into_uuid))
+        .bind(&command.platform_path)
         .bind(&command.external_key)
         .bind(&command.display_name)
         .bind(&command.role)
@@ -864,14 +884,15 @@ impl PgStore {
         .fetch_one(&mut *transaction)
         .await?;
         sqlx::query(
-            "INSERT INTO marketplace_party_auth_links (tenant_id, auth_user_id, party_id) \
-             VALUES ($1, $2, $3) \
-             ON CONFLICT (tenant_id, auth_user_id) DO UPDATE SET \
+            "INSERT INTO marketplace_party_auth_links (tenant_id, auth_user_id, party_id, platform_path) \
+             VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (tenant_id, auth_user_id, platform_path) DO UPDATE SET \
                party_id = EXCLUDED.party_id, updated_at = clock_timestamp()",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(command.auth_user_id)
         .bind(party_id)
+        .bind(&command.platform_path)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
@@ -961,6 +982,7 @@ impl PgStore {
         tenant_id: TenantId,
         party_id: MarketplacePartyId,
         access_token_hash: &[u8],
+        scope_domain_id: Option<DomainId>,
     ) -> Result<AuthenticatedParty, StorageError> {
         if access_token_hash.len() != 32 {
             return Err(StorageError::Forbidden(
@@ -968,19 +990,25 @@ impl PgStore {
             ));
         }
         let row = sqlx::query(
-            "SELECT id, tenant_id, role FROM marketplace_parties \
+            "SELECT id, tenant_id, scope_domain_id, platform_path, role FROM marketplace_parties \
              WHERE tenant_id = $1 AND id = $2 AND access_token_hash = $3 \
+               AND scope_domain_id IS NOT DISTINCT FROM $4::uuid \
                AND status = 'active' AND access_token_expires_at > clock_timestamp()",
         )
         .bind(tenant_id.into_uuid())
         .bind(party_id.into_uuid())
         .bind(access_token_hash)
+        .bind(scope_domain_id.map(DomainId::into_uuid))
         .fetch_optional(self.pool())
         .await?
         .ok_or_else(|| StorageError::Forbidden("invalid party credential".to_owned()))?;
         Ok(AuthenticatedParty {
             party_id: MarketplacePartyId::from_uuid(row.try_get("id")?),
             tenant_id: TenantId::from_uuid(row.try_get("tenant_id")?),
+            scope_domain_id: row
+                .try_get::<Option<Uuid>, _>("scope_domain_id")?
+                .map(DomainId::from_uuid),
+            platform_path: row.try_get("platform_path")?,
             role: row.try_get("role")?,
         })
     }
@@ -3279,6 +3307,34 @@ fn validate_role(role: &str) -> Result<(), StorageError> {
             "role must be buyer, seller, or both".to_owned(),
         ))
     }
+}
+
+fn validate_platform_scope(
+    scope_domain_id: Option<DomainId>,
+    platform_path: &str,
+) -> Result<(), StorageError> {
+    let valid_path = platform_path == "/"
+        || (platform_path.len() <= 512
+            && platform_path.strip_prefix('/').is_some_and(|value| {
+                !value.is_empty()
+                    && value.split('/').all(|segment| {
+                        !segment.is_empty()
+                            && segment.bytes().all(|byte| {
+                                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                            })
+                    })
+            }));
+    if !valid_path || (platform_path == "/" && scope_domain_id.is_some()) {
+        return Err(StorageError::InvalidData(
+            "platform path and domain scope do not match".to_owned(),
+        ));
+    }
+    if platform_path != "/" && scope_domain_id.is_none() {
+        return Err(StorageError::InvalidData(
+            "child platform capabilities require a domain scope".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_exposure(command: &RecordExposure) -> Result<(), StorageError> {

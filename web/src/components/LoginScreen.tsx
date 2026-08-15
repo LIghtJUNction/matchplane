@@ -275,6 +275,11 @@ function isEmail(value: string): boolean {
 }
 
 function safeNext(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
-  return value;
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\u0000-\u001f\u007f]/.test(value)) return "/";
+  try {
+    const resolved = new URL(value, window.location.origin);
+    return resolved.origin === window.location.origin ? `${resolved.pathname}${resolved.search}${resolved.hash}` : "/";
+  } catch {
+    return "/";
+  }
 }

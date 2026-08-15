@@ -46,12 +46,14 @@ pub(super) struct CreateIntentRequest {
 #[derive(Debug, Deserialize)]
 pub(super) struct PartyQuery {
     tenant_id: String,
+    domain_id: Option<String>,
     participant_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct MatchOffersRequest {
     tenant_id: String,
+    domain_id: String,
     participant_id: String,
     limit: Option<usize>,
 }
@@ -82,6 +84,7 @@ pub(super) struct ActivateOfferRequest {
 pub(super) struct CreateIntroductionRequest {
     introduction_id: Option<String>,
     tenant_id: String,
+    domain_id: String,
     intent_id: String,
     offer_id: String,
     participant_id: String,
@@ -118,8 +121,14 @@ pub(super) async fn create_intent(
     let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
     let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
-    let party =
-        super::marketplace::authenticate(&state, &headers, tenant_id, participant_id).await?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        participant_id,
+        domain_id,
+    )
+    .await?;
     match request.side.as_str() {
         "demand" => super::marketplace::require_role(&party, "buyer")?,
         "supply" => super::marketplace::require_role(&party, "seller")?,
@@ -167,7 +176,23 @@ pub(super) async fn intent(
 ) -> Result<Json<MarketplaceIntent>, ApiError> {
     let tenant_id = parse_id::<TenantId>(&query.tenant_id)?;
     let participant_id = parse_id::<MarketplacePartyId>(&query.participant_id)?;
-    super::marketplace::authenticate(&state, &headers, tenant_id, participant_id).await?;
+    if let Some(domain_id) = query
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?
+    {
+        super::marketplace::authenticate_domain(
+            &state,
+            &headers,
+            tenant_id,
+            participant_id,
+            domain_id,
+        )
+        .await?;
+    } else {
+        super::marketplace::authenticate(&state, &headers, tenant_id, participant_id).await?;
+    }
     let intent_id = parse_id::<MarketplaceIntentId>(&intent_id)?;
     let intent = state
         .store
@@ -189,9 +214,16 @@ pub(super) async fn matches(
     Json(request): Json<MatchOffersRequest>,
 ) -> Result<Json<MatchOffersResponse>, ApiError> {
     let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
-    let party =
-        super::marketplace::authenticate(&state, &headers, tenant_id, participant_id).await?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        participant_id,
+        domain_id,
+    )
+    .await?;
     super::marketplace::require_role(&party, "buyer")?;
     let intent_id = parse_id::<MarketplaceIntentId>(&intent_id)?;
     let candidates = state
@@ -218,8 +250,14 @@ pub(super) async fn create_offer(
     let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
     let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let supply_party_id = parse_id::<MarketplacePartyId>(&request.supply_party_id)?;
-    let party =
-        super::marketplace::authenticate(&state, &headers, tenant_id, supply_party_id).await?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        supply_party_id,
+        domain_id,
+    )
+    .await?;
     super::marketplace::require_role(&party, "seller")?;
     let command = CreateMarketplaceOffer {
         offer_id: request
@@ -279,9 +317,16 @@ pub(super) async fn create_introduction(
     Json(request): Json<CreateIntroductionRequest>,
 ) -> Result<(StatusCode, Json<MarketplaceIntroductionOutcome>), ApiError> {
     let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
     let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
-    let party =
-        super::marketplace::authenticate(&state, &headers, tenant_id, participant_id).await?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        participant_id,
+        domain_id,
+    )
+    .await?;
     super::marketplace::require_role(&party, "buyer")?;
     let command = CreateMarketplaceIntroduction {
         introduction_id: request
@@ -319,7 +364,23 @@ pub(super) async fn introductions(
 ) -> Result<Json<IntroductionsResponse>, ApiError> {
     let tenant_id = parse_id::<TenantId>(&query.tenant_id)?;
     let participant_id = parse_id::<MarketplacePartyId>(&query.participant_id)?;
-    super::marketplace::authenticate(&state, &headers, tenant_id, participant_id).await?;
+    if let Some(domain_id) = query
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?
+    {
+        super::marketplace::authenticate_domain(
+            &state,
+            &headers,
+            tenant_id,
+            participant_id,
+            domain_id,
+        )
+        .await?;
+    } else {
+        super::marketplace::authenticate(&state, &headers, tenant_id, participant_id).await?;
+    }
     let introductions = state
         .store
         .marketplace_introductions_for_party(tenant_id, participant_id)

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
-import { isMountedPlatformPath } from "../../../../src/platform-mount";
+import { isMountedPlatformPath, readActivePlatformScope } from "../../../../src/platform-mount";
 
 export const runtime = "nodejs";
 
@@ -42,6 +42,9 @@ export async function POST(request: Request): Promise<Response> {
   if (input.domainId && !isUuid(input.domainId)) {
     return NextResponse.json({ error: "domainId must be a UUID when provided" }, { status: 400 });
   }
+  if (input.subplatform !== "root" && !input.domainId) {
+    return NextResponse.json({ error: "child platform sessions require domainId" }, { status: 400 });
+  }
 
   const platformPath = normalizePlatformPath(
     input.platformPath ?? (input.subplatform === "root" ? "/" : `/${input.subplatform}`),
@@ -53,8 +56,24 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "当前平台路径尚未激活" }, { status: 404 });
   }
 
+  if (input.subplatform !== "root" && process.env.MATCHPLANE_ENVIRONMENT === "production") {
+    const resolved = await readActivePlatformScope(platformPath);
+    if (!resolved || resolved.slug !== input.subplatform) {
+      return NextResponse.json({ error: "平台路径无法解析为唯一的 active 节点" }, { status: 404 });
+    }
+    if (resolved.tenantId !== input.tenantId || resolved.domainId !== input.domainId) {
+      return NextResponse.json({ error: "tenantId/domainId 与平台路径不匹配" }, { status: 403 });
+    }
+  }
+
   if (input.subplatform === "root") {
     const configuredRootTenant = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+    if (
+      process.env.MATCHPLANE_ENVIRONMENT === "production"
+      && (!configuredRootTenant || !isUuid(configuredRootTenant))
+    ) {
+      return NextResponse.json({ error: "根平台尚未配置 MATCHPLANE_ROOT_TENANT_ID" }, { status: 503 });
+    }
     if (configuredRootTenant && configuredRootTenant !== input.tenantId) {
       return NextResponse.json({ error: "tenantId 不属于根平台" }, { status: 403 });
     }
@@ -76,13 +95,16 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
   } else if (!rootSuperAdmin && !membership && input.subplatform !== "root") {
-    membership = await claimPublicSubplatformMembership(
-      request,
-      input.tenantId,
-      input.domainId,
-      input.subplatform,
-      session.user.id,
-    );
+    const canClaim = await subplatformAllowsPublicClaim(input.tenantId, input.domainId, input.subplatform);
+    if (canClaim) {
+      membership = await claimPublicSubplatformMembership(
+        request,
+        input.tenantId,
+        input.domainId,
+        input.subplatform,
+        session.user.id,
+      );
+    }
   }
   if (!rootSuperAdmin && !membership && input.role !== "subplatform_admin" && input.subplatform !== "root") {
     return NextResponse.json(
@@ -107,9 +129,10 @@ export async function POST(request: Request): Promise<Response> {
         },
         body: JSON.stringify({
           auth_user_id: session.user.id,
-          party_id: session.user.id,
           tenant_id: input.tenantId,
-          external_key: `better-auth:${session.user.id}:${input.tenantId}`,
+          domain_id: input.domainId ?? null,
+          platform_path: platformPath,
+          external_key: `better-auth:${session.user.id}:${input.tenantId}:${platformPath}`,
           display_name: session.user.name,
           role: input.role === "subplatform_admin" ? "both" : input.role,
           contact: { email: session.user.email },
@@ -211,6 +234,25 @@ async function activeSubplatformScope(
         AND slug = $2
         AND ($3::uuid IS NULL OR domain_id = $3::uuid)
         AND state = 'active'
+      LIMIT 1`,
+    [tenantId, slug, domainId ?? null],
+  );
+  return result.rowCount === 1;
+}
+
+async function subplatformAllowsPublicClaim(
+  tenantId: string,
+  domainId: string | undefined,
+  slug: string,
+): Promise<boolean> {
+  const result = await authDatabase.query(
+    `SELECT 1
+       FROM subplatform_registrations
+      WHERE tenant_id = $1::uuid
+        AND slug = $2
+        AND ($3::uuid IS NULL OR domain_id = $3::uuid)
+        AND state = 'active'
+        AND membership_policy = 'public'
       LIMIT 1`,
     [tenantId, slug, domainId ?? null],
   );

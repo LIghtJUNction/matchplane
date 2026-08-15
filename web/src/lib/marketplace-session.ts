@@ -29,6 +29,7 @@ export async function getMarketplaceSession(input: {
   let capability = readPartySession(
     input.role === "subplatform_admin" ? "admin" : input.role,
     input.subplatform,
+    input.platformPath,
   );
   if (isLiveMarketplaceEnabled()) {
     if (!input.tenantId) throw new Error("当前子平台尚未完成 root tenant 注册");
@@ -49,6 +50,7 @@ export async function getMarketplaceSession(input: {
   return capability ?? {
     tenantId: input.tenantId ?? "demo",
     partyId: data.user.id,
+    platformPath: input.platformPath,
     role: input.role === "subplatform_admin" ? "both" : input.role,
     accessToken: "demo-capability-not-for-api",
     accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),

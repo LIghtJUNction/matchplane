@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { authDatabase } from "../../../../src/lib/auth";
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
-import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization } from "../../../../src/platform-mount";
+import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization, readActivePlatformScope } from "../../../../src/platform-mount";
 import { isAgentKeyRole, keyCanActAs, parseAgentSessionRequest, stableAgentPrincipalId } from "../../../../src/platform-agent-session";
 import { verifyPlatformApiKey } from "../../../../src/lib/platform-api-key";
 
@@ -41,7 +41,12 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "API Key 不能访问该平台节点" }, { status: 403 });
   }
 
-  if (!(await isActiveChildScope(input.platformPath, input.tenantId, input.domainId))) {
+  const resolvedScope = await readActivePlatformScope(input.platformPath);
+  if (
+    (process.env.MATCHPLANE_ENVIRONMENT === "production"
+      && (!resolvedScope || resolvedScope.tenantId !== input.tenantId || resolvedScope.domainId !== input.domainId))
+    || !(await isActiveChildScope(input.platformPath, input.tenantId, input.domainId))
+  ) {
     return NextResponse.json({ error: "tenant/domain 与 API Key 的激活平台路径不匹配" }, { status: 403 });
   }
 
@@ -62,9 +67,10 @@ export async function POST(request: Request): Promise<Response> {
         },
         body: JSON.stringify({
           auth_user_id: principalId,
-          party_id: principalId,
           tenant_id: input.tenantId,
-          external_key: `better-auth-api-key:${apiKey.id}:${input.tenantId}`,
+          domain_id: input.domainId,
+          platform_path: input.platformPath,
+          external_key: `better-auth-api-key:${apiKey.id}:${input.tenantId}:${input.platformPath}`,
           display_name: input.displayName,
           role: input.role,
           // Machine Agents do not receive a contact value from the exchange. Contact release
@@ -103,7 +109,7 @@ export async function POST(request: Request): Promise<Response> {
       domain_id: input.domainId,
       cost_bearer: "caller",
       restrictions: [
-        "capability is scoped to one tenant and role",
+        "capability is scoped to one platform path, domain, tenant, and role",
         "contact values are not included",
         "rotate the Better Auth API key to revoke future exchanges",
       ],

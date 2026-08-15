@@ -46,6 +46,10 @@ export async function POST(request: Request): Promise<Response> {
   }
   const requestedScopes = normalizeScopes(input.requestedScopes ?? manifest.value.requiredScopes);
   if (!requestedScopes) return NextResponse.json({ error: "requestedScopes contains an unsupported scope" }, { status: 400 });
+  const membershipPolicy = input.membershipPolicy ?? "public";
+  if (membershipPolicy !== "public" && membershipPolicy !== "invite") {
+    return NextResponse.json({ error: "membershipPolicy must be public or invite" }, { status: 400 });
+  }
 
   const parentId = input.parentOrganizationId ?? null;
   const userRole = (session.user as { role?: string }).role;
@@ -107,9 +111,9 @@ export async function POST(request: Request): Promise<Response> {
       `INSERT INTO subplatform_registrations
         (id, tenant_id, domain_id, package_id, slug, source_kind, source_locator,
          pinned_revision, source_digest, manifest_digest, build_digest, manifest,
-         requested_scopes, state, registered_by)
+         requested_scopes, membership_policy, state, registered_by)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8,
-               decode($9, 'hex'), decode($10, 'hex'), $11, $12::jsonb, $13, 'validated', $14)`,
+               decode($9, 'hex'), decode($10, 'hex'), $11, $12::jsonb, $13, $14, 'validated', $15)`,
       [
         registrationId,
         input.tenantId,
@@ -124,6 +128,7 @@ export async function POST(request: Request): Promise<Response> {
         null,
         JSON.stringify(manifest.value),
         requestedScopes,
+        membershipPolicy,
         session.user.id,
       ],
     );
@@ -210,6 +215,7 @@ interface RegistrationRequest {
   buildDigest?: string;
   manifest?: unknown;
   requestedScopes?: string[];
+  membershipPolicy?: "public" | "invite";
 }
 
 async function parseBody(request: Request): Promise<RegistrationRequest> {
