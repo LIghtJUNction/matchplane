@@ -100,6 +100,11 @@ immutable archive locator, and the manifest JSON. It creates the Better Auth org
 records the recursive parent and immutable digest in `subplatform_registrations`, and returns
 `state: validated`. An isolated builder must attach a signed `build_digest` before a separate
 activation operation is allowed; the web request never clones or executes untrusted package code.
+The registration request cannot self-report `buildDigest`. The builder callback is
+`POST /api/platform/subplatforms/build`, authenticated by a deployment-only
+`MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN`, and is idempotent for the same immutable digest. A root or
+parent administrator still performs the final activation; a builder cannot publish a package by
+itself.
 
 ## Retrieval boundary
 

@@ -199,6 +199,12 @@ spec:
                   name: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
                   key: router-ai-key
                   optional: true
+            - name: MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
+                  key: subplatform-builder-token
+                  optional: true
             - name: MATCHPLANE_DATABASE_URL
               valueFrom:
                 secretKeyRef:

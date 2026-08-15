@@ -36,6 +36,9 @@ export async function POST(request: Request): Promise<Response> {
   if (!isSourceKind(input.sourceKind)) {
     return NextResponse.json({ error: "sourceKind must be git or archive" }, { status: 400 });
   }
+  if (input.buildDigest) {
+    return NextResponse.json({ error: "buildDigest 只能由隔离构建器回写，注册请求不得自报" }, { status: 400 });
+  }
   const sourceError = validateSource(input);
   if (sourceError) return NextResponse.json({ error: sourceError }, { status: 400 });
   if (input.parentOrganizationId && !isUuid(input.parentOrganizationId)) {
@@ -117,7 +120,7 @@ export async function POST(request: Request): Promise<Response> {
         input.pinnedRevision,
         sourceDigest,
         manifestDigest,
-        input.buildDigest ? Buffer.from(input.buildDigest, "hex") : null,
+        null,
         JSON.stringify(manifest.value),
         requestedScopes,
         session.user.id,
@@ -201,6 +204,7 @@ interface RegistrationRequest {
   sourceLocator?: string;
   pinnedRevision?: string;
   sourceDigest?: string;
+  /** Rejected at the public intake; only the isolated builder may set it. */
   buildDigest?: string;
   manifest?: unknown;
   requestedScopes?: string[];
@@ -267,7 +271,6 @@ function validateSource(input: RegistrationRequest): string | null {
     return "archive sourceLocator 必须是 upload:// 或 HTTPS 不可变对象地址";
   }
   if (!input.sourceDigest || !/^[0-9a-f]{64}$/i.test(input.sourceDigest)) return "sourceDigest 必须是已验证来源的 SHA-256";
-  if (input.buildDigest && !/^[0-9a-f]{64}$/i.test(input.buildDigest)) return "buildDigest 必须是 SHA-256";
   return null;
 }
 

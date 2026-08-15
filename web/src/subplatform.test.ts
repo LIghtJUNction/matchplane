@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveSubplatform } from "./subplatform";
+import { hasValidSubplatformBuilderToken } from "./subplatform-builder";
 
 describe("nested subplatform paths", () => {
   it("keeps the complete canonical path while using the leaf slug for labels", () => {
@@ -24,5 +25,11 @@ describe("nested subplatform paths", () => {
 
     expect(config.path).toBe("/used-car");
     expect(config.manifestUrl).toBe("/api/platform/manifest?path=%2Fused-car");
+  });
+
+  it("requires the dedicated builder token for digest callbacks", () => {
+    expect(hasValidSubplatformBuilderToken("builder-secret", "builder-secret")).toBe(true);
+    expect(hasValidSubplatformBuilderToken("builder-secret", "wrong-secret")).toBe(false);
+    expect(hasValidSubplatformBuilderToken("builder-secret", null)).toBe(false);
   });
 });

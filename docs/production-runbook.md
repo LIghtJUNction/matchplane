@@ -66,6 +66,14 @@ provider-reported token counts without storing raw prompts or provider credentia
 quota for a public launch after observing provider limits; a missing provider deliberately produces
 an auditable policy fallback rather than billing a user.
 
+The package builder is a separate trust boundary. Configure
+`MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN` only in the web service's restricted secret file (or the
+equivalent Kubernetes `subplatform-builder-token` key). `POST /api/platform/subplatforms` never
+accepts a self-reported build digest. The isolated builder calls
+`POST /api/platform/subplatforms/build` with that token and the SHA-256 digest of the immutable
+static artifact; a root/subplatform administrator must still call the activation endpoint. A
+digest callback is idempotent and cannot replace a different digest on an existing registration.
+
 The production Next.js route is fail-closed against unregistered package assets. A path is rendered
 only when its complete recursive path resolves through the Better Auth organization tree and has an
 active immutable `subplatform_registrations` version. This check also protects the manifest
