@@ -24,6 +24,123 @@ export interface PaymentSetting {
   updated_at: string;
 }
 
+export interface PaymentGatewayRecord {
+  gateway_id: string;
+  tenant_id: string;
+  name: string;
+  kind: "test" | "epay" | "waffo_pancake" | "wechat_pay_v3" | "alipay_openapi" | "custom" | string;
+  mode: "test" | "production" | string;
+  settings: Record<string, unknown>;
+  credential_configured: boolean;
+  enabled: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaymentRouteRecord {
+  route_id: string;
+  tenant_id: string;
+  gateway_id: string;
+  method_code: string;
+  currency: string;
+  priority: number;
+  enabled: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvoiceProviderRecord {
+  provider_id: string;
+  tenant_id: string;
+  name: string;
+  provider_key: string;
+  mode: "test" | "production" | string;
+  settings: Record<string, unknown>;
+  credential_configured: boolean;
+  enabled: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvoiceSetting {
+  tenant_id: string;
+  active_mode: "test" | "production";
+  provider_id: string | null;
+  updated_by: string;
+  version: number;
+  updated_at: string;
+}
+
+export interface PaymentAdminRecord {
+  payment_id: string;
+  tenant_id: string;
+  gateway_id: string;
+  merchant_order_id: string;
+  transaction_channel: string;
+  purpose: string;
+  gateway_kind: string;
+  gateway_mode: string;
+  payment_method: string;
+  amount: string;
+  captured_amount: string;
+  refunded_amount: string;
+  commission_amount: string;
+  commission_refunded_amount: string;
+  currency: string;
+  currency_scale: number;
+  status: string;
+  provider_reference?: string | null;
+  provider_status: string;
+  created_at: string;
+  updated_at: string;
+  [key: string]: unknown;
+}
+
+export interface RefundAdminRecord {
+  refund_id: string;
+  tenant_id: string;
+  payment_id: string;
+  amount: string;
+  commission_reversal_amount: string;
+  currency: string;
+  currency_scale: number;
+  reason: string;
+  status: string;
+  provider_reference?: string | null;
+  provider_status?: string | null;
+  created_at: string;
+  updated_at: string;
+  [key: string]: unknown;
+}
+
+export interface InvoiceAdminRecord {
+  invoice_id: string;
+  tenant_id: string;
+  payment_id?: string | null;
+  offline_deal_id?: string | null;
+  correction_of_invoice_id?: string | null;
+  kind: string;
+  amount: string;
+  currency: string;
+  currency_scale: number;
+  description: string;
+  status: string;
+  provider_key: string;
+  provider_mode: string;
+  provider_reference?: string | null;
+  invoice_number?: string | null;
+  failure_reason?: string | null;
+  requested_by: string;
+  reviewed_by?: string | null;
+  requested_at: string;
+  issued_at?: string | null;
+  updated_at: string;
+  [key: string]: unknown;
+}
+
 export interface PlatformSetupStatus {
   status: "ok" | "degraded";
   root: {
@@ -220,10 +337,14 @@ async function paymentRequest<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  return paymentAdminRequest<T>(`payment-mode${path.includes("?") ? path.slice(path.indexOf("?")) : ""}`, init);
+}
+
+async function paymentAdminRequest<T>(resource: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("accept", "application/json");
   if (init.body) headers.set("content-type", "application/json");
-  const response = await fetch(`/api/admin/payment-mode${path.includes("?") ? path.slice(path.indexOf("?")) : ""}`, { ...init, headers, credentials: "include" });
+  const response = await fetch(`/api/admin/${resource}`, { ...init, headers, credentials: "include" });
   if (!response.ok) {
     let message = `支付服务请求失败（${response.status}）`;
     try {
@@ -284,14 +405,14 @@ export async function routePlatformIntent(input: {
   return (await response.json()) as PlatformIntentRoute;
 }
 
-export function getPaymentSetting(tenantId: string): Promise<PaymentSetting> {
+export function getPaymentSetting(tenantId?: string): Promise<PaymentSetting> {
   return paymentRequest<PaymentSetting>(
-    `?tenant_id=${encodeURIComponent(tenantId)}`,
+    tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "",
   );
 }
 
 export function switchPaymentMode(input: {
-  tenantId: string;
+  tenantId?: string;
   mode: "test" | "production";
   expectedVersion: number;
   reason: string;
@@ -309,6 +430,152 @@ export function switchPaymentMode(input: {
       }),
     },
   );
+}
+
+export function getPaymentGateways(tenantId?: string): Promise<PaymentGatewayRecord[]> {
+  return paymentAdminRequest<PaymentGatewayRecord[]>(
+    `payment-gateways${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+  );
+}
+
+export function savePaymentGateway(input: {
+  tenantId?: string;
+  gatewayId?: string;
+  name: string;
+  kind: PaymentGatewayRecord["kind"];
+  mode: "test" | "production";
+  settings: Record<string, unknown>;
+  credentialSecretRef?: string;
+  enabled: boolean;
+  expectedVersion?: number;
+  reason: string;
+}): Promise<PaymentGatewayRecord> {
+  return paymentAdminRequest<PaymentGatewayRecord>("payment-gateways", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: input.tenantId,
+      gateway_id: input.gatewayId,
+      name: input.name,
+      kind: input.kind,
+      mode: input.mode,
+      settings: input.settings,
+      credential_secret_ref: input.credentialSecretRef || null,
+      enabled: input.enabled,
+      expected_version: input.expectedVersion,
+      reason: input.reason,
+    }),
+  });
+}
+
+export function getPaymentRoutes(tenantId?: string): Promise<PaymentRouteRecord[]> {
+  return paymentAdminRequest<PaymentRouteRecord[]>(
+    `payment-routes${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+  );
+}
+
+export function savePaymentRoute(input: {
+  tenantId?: string;
+  routeId?: string;
+  gatewayId: string;
+  methodCode: string;
+  currency: string;
+  priority: number;
+  enabled: boolean;
+  expectedVersion?: number;
+  reason: string;
+}): Promise<PaymentRouteRecord> {
+  return paymentAdminRequest<PaymentRouteRecord>("payment-routes", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: input.tenantId,
+      route_id: input.routeId,
+      gateway_id: input.gatewayId,
+      method_code: input.methodCode,
+      currency: input.currency,
+      priority: input.priority,
+      enabled: input.enabled,
+      expected_version: input.expectedVersion,
+      reason: input.reason,
+    }),
+  });
+}
+
+export function getInvoiceProviders(tenantId?: string): Promise<InvoiceProviderRecord[]> {
+  return paymentAdminRequest<InvoiceProviderRecord[]>(
+    `invoice-providers${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+  );
+}
+
+export function saveInvoiceProvider(input: {
+  tenantId?: string;
+  providerId?: string;
+  name: string;
+  providerKey: string;
+  mode: "test" | "production";
+  settings: Record<string, unknown>;
+  credentialSecretRef?: string;
+  enabled: boolean;
+  expectedVersion?: number;
+  reason: string;
+}): Promise<InvoiceProviderRecord> {
+  return paymentAdminRequest<InvoiceProviderRecord>("invoice-providers", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: input.tenantId,
+      provider_id: input.providerId,
+      name: input.name,
+      provider_key: input.providerKey,
+      mode: input.mode,
+      settings: input.settings,
+      credential_secret_ref: input.credentialSecretRef || null,
+      enabled: input.enabled,
+      expected_version: input.expectedVersion,
+      reason: input.reason,
+    }),
+  });
+}
+
+export function getInvoiceSetting(tenantId?: string): Promise<InvoiceSetting> {
+  return paymentAdminRequest<InvoiceSetting>(
+    `invoice-mode${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+  );
+}
+
+export function getPaymentAdminRecords(tenantId?: string, limit = 25): Promise<PaymentAdminRecord[]> {
+  return paymentAdminRequest<PaymentAdminRecord[]>(
+    `payments?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+  );
+}
+
+export function getRefundAdminRecords(tenantId?: string, limit = 25): Promise<RefundAdminRecord[]> {
+  return paymentAdminRequest<RefundAdminRecord[]>(
+    `refunds?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+  );
+}
+
+export function getInvoiceAdminRecords(tenantId?: string, limit = 25): Promise<InvoiceAdminRecord[]> {
+  return paymentAdminRequest<InvoiceAdminRecord[]>(
+    `invoices?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+  );
+}
+
+export function switchInvoiceMode(input: {
+  tenantId?: string;
+  mode: "test" | "production";
+  providerId?: string;
+  expectedVersion: number;
+  reason: string;
+}): Promise<InvoiceSetting> {
+  return paymentAdminRequest<InvoiceSetting>("invoice-mode", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: input.tenantId,
+      mode: input.mode,
+      provider_id: input.providerId ?? null,
+      expected_version: input.expectedVersion,
+      reason: input.reason,
+    }),
+  });
 }
 
 export function readPartySession(

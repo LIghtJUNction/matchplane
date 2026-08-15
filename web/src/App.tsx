@@ -88,10 +88,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   useEffect(() => {
     if (!hydrated || role !== "platform" || !isLiveMarketplaceEnabled()) return;
-    if (!subplatform.tenantId) {
-      setNotice("当前根平台尚未配置 tenant，暂时不能读取真实支付模式");
-      return;
-    }
     void getPaymentSetting(subplatform.tenantId)
       .then((setting) => {
         setPaymentMode(setting.active_mode);
@@ -105,11 +101,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const confirmModeChange = () => {
     const nextMode = paymentMode === "test" ? "production" : "test";
     if (isLiveMarketplaceEnabled()) {
-      if (!subplatform.tenantId) {
-        setModeDialogOpen(false);
-        setNotice("当前根平台尚未配置 tenant，无法修改真实支付模式");
-        return;
-      }
       void switchPaymentMode({
         tenantId: subplatform.tenantId,
         mode: nextMode,

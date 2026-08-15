@@ -19,8 +19,9 @@ web:
   service:
     type: ClusterIP
     port: 4173
-  # This secret must provide better-auth-secret and root-admin-email. The optional
-  # trusted-origins key can contain a comma-separated allowlist of extra origins.
+  # This secret must provide better-auth-secret and root-admin-email; it may also provide
+  # root-smtp-credential-ref. The payment-admin.token/gateway-admin.token keys are projected
+  # separately from the payment/gateway secrets into the web BFF.
   existingSecret: matchplane-web-secrets
   betterAuthUrl: https://matx.tech
   trustedOrigins: ''
@@ -36,6 +37,18 @@ web:
   routerAiMaxTokens: 512
   routerAiMaxSteps: 8
   routerAiRequestsPerHour: 120
+  # Root SMTP is needed only for first-run/admin auth. The credential itself stays in the
+  # existing web secret under root-smtp-credential-ref (file:// or env:// reference).
+  rootSmtp:
+    providerKey: root-smtp
+    host: ''
+    port: 587
+    tlsMode: starttls
+    username: ''
+    fromAddress: ''
+    replyTo: ''
+    mode: production
+    enabled: true
   resources:
     requests:
       cpu: 100m

@@ -18,6 +18,11 @@ Environment=HOSTNAME=127.0.0.1
 Environment=PORT=4173
 WorkingDirectory=/usr/share/matchplane/web
 Environment=MATCHPLANE_WEB_NODE=/usr/local/bin/node
+# The web BFF needs only the two administrator bearer files, not the payment invoice key or
+# gateway contact-data key. The bootstrap/deployment flow mirrors these tokens into the web-only
+# secret directory with matchplane-web ownership.
+Environment=MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/web/payment-admin.token
+Environment=MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/web/gateway-admin.token
 ExecStart=/usr/bin/matchplane serve web
 Restart=on-failure
 RestartSec=3s

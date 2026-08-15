@@ -252,6 +252,27 @@ impl InvoiceStore {
         invoice_from_row(&row)
     }
 
+    /// Returns a bounded, newest-first invoice page without exposing encrypted billing details.
+    pub async fn invoices(
+        &self,
+        tenant_id: TenantId,
+        limit: u16,
+        offset: u32,
+    ) -> Result<Vec<InvoiceRecord>, StoreError> {
+        let statement = INVOICE_SELECT.replacen(
+            "WHERE id = $1",
+            "WHERE tenant_id = $1 ORDER BY requested_at DESC, id DESC LIMIT $2 OFFSET $3",
+            1,
+        );
+        let rows = sqlx::query(sqlx::AssertSqlSafe(statement))
+            .bind(tenant_id.into_uuid())
+            .bind(i64::from(limit))
+            .bind(i64::from(offset))
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(invoice_from_row).collect()
+    }
+
     pub async fn provider_config(
         &self,
         invoice: &InvoiceRecord,

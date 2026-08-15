@@ -29,6 +29,7 @@ fi
 install -d -m 0750 -o root -g matchplane /etc/matchplane/secrets
 install -d -m 0750 -o root -g matchplane-gateway /etc/matchplane/secrets/gateway
 install -d -m 0750 -o root -g matchplane-payment /etc/matchplane/secrets/payment
+install -d -m 0750 -o root -g matchplane-web /etc/matchplane/secrets/web
 install -d -m 0750 -o root -g matchplane /etc/matchplane/services
 
 create_hex_secret() {
@@ -48,6 +49,14 @@ create_hex_secret /etc/matchplane/secrets/gateway/contact-data.key 32 matchplane
 create_hex_secret /etc/matchplane/secrets/payment/invoice-data.key 32 matchplane-payment
 create_hex_secret /etc/matchplane/secrets/payment/payment-admin.token 32 matchplane-payment
 create_hex_secret /etc/matchplane/secrets/gateway/gateway-admin.token 32 matchplane-gateway
+# The Next.js BFF needs the same administrator bearers, but must not gain access to the payment
+# invoice key or gateway contact-data key. Keep a dedicated web-readable copy of each token.
+install -m 0640 -o root -g matchplane-web \
+  /etc/matchplane/secrets/payment/payment-admin.token \
+  /etc/matchplane/secrets/web/payment-admin.token
+install -m 0640 -o root -g matchplane-web \
+  /etc/matchplane/secrets/gateway/gateway-admin.token \
+  /etc/matchplane/secrets/web/gateway-admin.token
 
 database_password=$(tr -d '\r\n' </etc/matchplane/secrets/database.password)
 if [[ ! $database_password =~ ^[0-9a-f]{48}$ ]]; then

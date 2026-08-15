@@ -54,6 +54,23 @@ secret at runtime, and only the explicitly configured `BETTER_AUTH_URL` plus
 web unit loads that file after the shared environment file so gateway/payment workers cannot read
 the signing secret.
 
+Before creating the first administrator, configure the deployment-owned root SMTP route in the
+same web-only secret/environment file. Set `MATCHPLANE_ROOT_SMTP_HOST`, `_PORT`, `_TLS_MODE`,
+`_USERNAME`, `_CREDENTIAL_SECRET_REF`, and `_FROM_ADDRESS`; the credential reference must be
+`file://...` or `env://...`, never a plaintext password. This route is deliberately separate from
+`subplatform_email_configs`: a root administrator must be able to receive the first verification
+email before any child platform or child SMTP configuration exists. After the root account is
+verified, each child administrator can configure its own SMTP route from the scoped subplatform
+workspace.
+
+The web administrator BFF also needs a narrowly projected copy of the gateway and payment admin
+bearers. On systemd, keep them at `/etc/matchplane/secrets/web/payment-admin.token` and
+`/etc/matchplane/secrets/web/gateway-admin.token` (mode `0640`, group `matchplane-web`) while the
+payment/gateway services retain their own copies. On Helm, put the matching `payment-admin.token`
+and `gateway-admin.token` keys in the existing payment/gateway secrets; the web Deployment mounts
+only those two keys under `/run/matchplane/admin-secrets`. Do not mount the complete payment secret
+or gateway contact-data/invoice-key directories into the web container.
+
 If AI routing is enabled, configure `MATCHPLANE_ROUTER_AI_URL`,
 `MATCHPLANE_ROUTER_AI_MODEL`, and `MATCHPLANE_ROUTER_AI_KEY` only in the web service's restricted
 environment/secret file. The browser must never receive the provider key. The platform is the

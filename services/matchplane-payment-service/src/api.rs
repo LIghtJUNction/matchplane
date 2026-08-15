@@ -105,6 +105,13 @@ pub struct TenantQuery {
     tenant_id: matchplane_domain::TenantId,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PageQuery {
+    tenant_id: matchplane_domain::TenantId,
+    limit: Option<u16>,
+    offset: Option<u32>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PaymentResponse {
     #[serde(flatten)]
@@ -1108,6 +1115,60 @@ pub async fn admin_gateways(
         .map_err(ApiError::from)
 }
 
+pub async fn admin_payments(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PageQuery>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<PaymentRecord>>, ApiError> {
+    require_admin(&state, &headers)?;
+    state
+        .store
+        .payments(
+            query.tenant_id,
+            page_limit(query.limit),
+            page_offset(query.offset),
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+pub async fn admin_refunds(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PageQuery>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<RefundRecord>>, ApiError> {
+    require_admin(&state, &headers)?;
+    state
+        .store
+        .refunds(
+            query.tenant_id,
+            page_limit(query.limit),
+            page_offset(query.offset),
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+pub async fn admin_invoices(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PageQuery>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<InvoiceRecord>>, ApiError> {
+    require_admin(&state, &headers)?;
+    state
+        .invoices
+        .invoices(
+            query.tenant_id,
+            page_limit(query.limit),
+            page_offset(query.offset),
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
 pub async fn mutate_gateway(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1397,6 +1458,14 @@ fn validate_actor(actor: &str) -> Result<(), ApiError> {
     } else {
         Ok(())
     }
+}
+
+fn page_limit(value: Option<u16>) -> u16 {
+    value.unwrap_or(25).clamp(1, 100)
+}
+
+fn page_offset(value: Option<u32>) -> u32 {
+    value.unwrap_or(0).min(100_000)
 }
 
 async fn invoice_provider(

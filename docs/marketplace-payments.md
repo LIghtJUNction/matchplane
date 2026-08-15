@@ -168,6 +168,12 @@ providers in production, and refuses to switch while invoices are outstanding. T
 systemd deployment binds the payment API to `127.0.0.1:8081`; Compose publishes it on configurable
 host port `MATCHPLANE_PAYMENT_HOST_PORT` (default `8081`).
 
+The administrator list endpoints are bounded and newest-first: `GET /v1/admin/payments`,
+`GET /v1/admin/refunds`, and `GET /v1/admin/invoices` accept `tenant_id`, `limit` (1–100), and
+`offset` (capped at 100,000). They return operational metadata only; invoice billing details and
+encrypted artifacts remain server-side. The web workspace exposes these lists through same-origin
+server BFF routes, so the payment bearer never reaches the browser.
+
 Invoice administration endpoints are:
 
 - `GET|POST /v1/admin/invoice-providers?tenant_id=...` to list or version-update providers;

@@ -876,6 +876,27 @@ impl PaymentStore {
         payment_from_pool(&self.pool, payment_id).await
     }
 
+    /// Returns a bounded, newest-first payment page for the administrator workspace.
+    pub async fn payments(
+        &self,
+        tenant_id: TenantId,
+        limit: u16,
+        offset: u32,
+    ) -> Result<Vec<PaymentRecord>, StoreError> {
+        let statement = PAYMENT_SELECT.replacen(
+            "WHERE id = $1",
+            "WHERE tenant_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
+            1,
+        );
+        let rows = sqlx::query(sqlx::AssertSqlSafe(statement))
+            .bind(tenant_id.into_uuid())
+            .bind(i64::from(limit))
+            .bind(i64::from(offset))
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(payment_from_row).collect()
+    }
+
     pub async fn prepare_query(
         &self,
         tenant_id: TenantId,
@@ -1520,6 +1541,27 @@ impl PaymentStore {
             .await?
             .ok_or(StoreError::NotFound("refund"))?;
         refund_from_row(&row)
+    }
+
+    /// Returns a bounded, newest-first refund page for the administrator workspace.
+    pub async fn refunds(
+        &self,
+        tenant_id: TenantId,
+        limit: u16,
+        offset: u32,
+    ) -> Result<Vec<RefundRecord>, StoreError> {
+        let statement = REFUND_SELECT.replacen(
+            "WHERE id = $1",
+            "WHERE tenant_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3",
+            1,
+        );
+        let rows = sqlx::query(sqlx::AssertSqlSafe(statement))
+            .bind(tenant_id.into_uuid())
+            .bind(i64::from(limit))
+            .bind(i64::from(offset))
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(refund_from_row).collect()
     }
 }
 

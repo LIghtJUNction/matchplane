@@ -189,6 +189,30 @@ spec:
               value: {{ $root.Values.web.artifactRoot | quote }}
             - name: MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID
               value: {{ $root.Values.web.rootOrganizationId | quote }}
+            - name: MATCHPLANE_ROOT_SMTP_PROVIDER_KEY
+              value: {{ $root.Values.web.rootSmtp.providerKey | quote }}
+            - name: MATCHPLANE_ROOT_SMTP_HOST
+              value: {{ $root.Values.web.rootSmtp.host | quote }}
+            - name: MATCHPLANE_ROOT_SMTP_PORT
+              value: {{ $root.Values.web.rootSmtp.port | quote }}
+            - name: MATCHPLANE_ROOT_SMTP_TLS_MODE
+              value: {{ $root.Values.web.rootSmtp.tlsMode | quote }}
+            - name: MATCHPLANE_ROOT_SMTP_USERNAME
+              value: {{ $root.Values.web.rootSmtp.username | quote }}
+            - name: MATCHPLANE_ROOT_SMTP_CREDENTIAL_SECRET_REF
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
+                  key: root-smtp-credential-ref
+                  optional: true
+            - name: MATCHPLANE_ROOT_SMTP_FROM_ADDRESS
+              value: {{ $root.Values.web.rootSmtp.fromAddress | quote }}
+            - name: MATCHPLANE_ROOT_SMTP_REPLY_TO
+              value: {{ $root.Values.web.rootSmtp.replyTo | quote }}
+            - name: MATCHPLANE_ROOT_SMTP_MODE
+              value: {{ $root.Values.web.rootSmtp.mode | quote }}
+            - name: MATCHPLANE_ROOT_SMTP_ENABLED
+              value: {{ $root.Values.web.rootSmtp.enabled | quote }}
             - name: MATCHPLANE_ROUTER_AI_URL
               value: {{ $root.Values.web.routerAiUrl | quote }}
             - name: MATCHPLANE_ROUTER_AI_MODEL
@@ -220,6 +244,10 @@ spec:
               value: {{ printf "http://%s-gateway:%v" (include "matchplane.fullname" $root) $root.Values.gateway.service.port | quote }}
             - name: MATCHPLANE_PAYMENT_INTERNAL_URL
               value: {{ printf "http://%s-payment-service:%v" (include "matchplane.fullname" $root) $root.Values.paymentService.service.port | quote }}
+            - name: MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE
+              value: /run/matchplane/admin-secrets/payment-admin.token
+            - name: MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE
+              value: /run/matchplane/admin-secrets/gateway-admin.token
           ports:
             - name: http
               containerPort: 4173
@@ -242,16 +270,37 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-          {{- if $root.Values.web.artifactPvc }}
           volumeMounts:
+            - name: admin-bearer-secrets
+              mountPath: /run/matchplane/admin-secrets
+              readOnly: true
+          {{- if $root.Values.web.artifactPvc }}
             - name: subplatform-artifacts
               mountPath: {{ $root.Values.web.artifactRoot | quote }}
               readOnly: true
           {{- end }}
           resources:
             {{- toYaml (default $root.Values.resources $root.Values.web.resources) | nindent 12 }}
-      {{- if $root.Values.web.artifactPvc }}
       volumes:
+        - name: admin-bearer-secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ required "runtime.existingPaymentSecret is required" $root.Values.runtime.existingPaymentSecret }}
+                  optional: true
+                  items:
+                    - key: payment-admin.token
+                      path: payment-admin.token
+                      mode: 0440
+              - secret:
+                  name: {{ required "runtime.existingGatewaySecret is required" $root.Values.runtime.existingGatewaySecret }}
+                  optional: true
+                  items:
+                    - key: gateway-admin.token
+                      path: gateway-admin.token
+                      mode: 0440
+      {{- if $root.Values.web.artifactPvc }}
         - name: subplatform-artifacts
           persistentVolumeClaim:
             claimName: {{ $root.Values.web.artifactPvc | quote }}
