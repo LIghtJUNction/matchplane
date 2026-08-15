@@ -34,10 +34,12 @@ async fn initialize() -> anyhow::Result<()> {
         .context("initialization configuration is invalid")?
         .environment;
     migrate().await?;
-    if environment == Environment::Production {
+    if environment == Environment::Production
+        || std::env::var("MATCHPLANE_ALLOW_DEMO_BOOTSTRAP").as_deref() != Ok("true")
+    {
         // Production initialization must never seed deterministic test payment
-        // or invoice providers. The packaged unit can safely run this command
-        // on a fresh database because production is migration-only.
+        // or invoice providers. Development/test installations also remain
+        // migration-only unless the operator explicitly opts into demo data.
         return Ok(());
     }
     bootstrap().await
