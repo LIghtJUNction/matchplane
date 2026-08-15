@@ -26,7 +26,10 @@ and client CA), a platform-owned HTTPS payment callback origin, an HTTPS `BETTER
 high-entropy `BETTER_AUTH_SECRET` (at least 32 characters), and an operator-owned
 `MATCHPLANE_ROOT_ADMIN_EMAIL`. The authentication service rejects the example email and placeholder
 secret at runtime, and only the explicitly configured `BETTER_AUTH_URL` plus
-`BETTER_AUTH_TRUSTED_ORIGINS` are accepted as browser origins.
+`BETTER_AUTH_TRUSTED_ORIGINS` are accepted as browser origins. Put the actual Better Auth values in
+`/etc/matchplane/secrets/web/better-auth.env` (owned by `root:matchplane-web`, mode `0640`); the
+web unit loads that file after the shared environment file so gateway/payment workers cannot read
+the signing secret.
 
 ## 2. Install the event broker
 
