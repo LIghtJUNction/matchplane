@@ -13,12 +13,18 @@ rpmbuild_root=$(mktemp -d)
 trap 'rm -rf "$rpmbuild_root"' EXIT
 
 if ! command -v bun >/dev/null 2>&1; then
-  bun_version=${BUN_VERSION:-1.3.14}
+  bun_version=1.3.14
+  if [[ -n ${BUN_VERSION:-} && ${BUN_VERSION} != "$bun_version" ]]; then
+    echo "BUN_VERSION overrides are not supported; update the pinned Bun checksum first" >&2
+    exit 2
+  fi
+  bun_sha256=951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f
   bun_directory=$(mktemp -d)
   trap 'rm -rf "$rpmbuild_root" "$bun_directory"' EXIT
   curl --fail --silent --show-error --location \
     "https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}/bun-linux-x64.zip" \
     --output "$bun_directory/bun.zip"
+  printf '%s  %s\n' "$bun_sha256" "$bun_directory/bun.zip" | sha256sum --check --status
   unzip -q "$bun_directory/bun.zip" -d "$bun_directory"
   export PATH="$bun_directory/bun-linux-x64:$PATH"
 fi

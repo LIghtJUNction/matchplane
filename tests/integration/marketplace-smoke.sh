@@ -167,6 +167,9 @@ viewing=$(jq -nc --arg tenant "$tenant_id" --arg buyer "$buyer_id" --arg start "
       "$base_url/v1/marketplace/offline-deals/$deal_id/viewings")
 viewing_id=$(jq -er '.viewing_id' <<<"$viewing")
 test "$(jq -r '.location.address' <<<"$viewing")" = 'CI inspection center'
+viewing_page=$(curl --fail-with-body --silent --header "authorization: Bearer $buyer_token" \
+  "$base_url/v1/marketplace/offline-deals/$deal_id/viewings?tenant_id=$tenant_id&party_id=$buyer_id&limit=1&offset=0")
+test "$(jq 'length' <<<"$viewing_page")" -eq 1
 
 jq -nc --arg tenant "$tenant_id" --arg seller "$seller_id" '{tenant_id:$tenant,party_id:$seller}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \

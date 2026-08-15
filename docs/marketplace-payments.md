@@ -87,6 +87,10 @@ Key gateway endpoints are:
 - `POST /v1/marketplace/promotions`
 - `GET /v1/marketplace/promotions/{id}`
 - `POST /v1/admin/marketplace/asset-authorizations`
+
+Viewing appointment reads accept `limit` (default 50, maximum 50) and `offset` (default 0,
+maximum 32). Each offline introduction accepts at most 32 appointment proposals; the deal row is
+locked while the quota is checked so concurrent proposals cannot exceed the cap.
 - Public detail/favorite telemetry is server-timestamped, deduplicated to one event per
   buyer/listing/day, and recorded as non-billable. Seller-funded campaign billing is derived
   only from server-observed recommendation, inquiry, match, and contact-exchange records.

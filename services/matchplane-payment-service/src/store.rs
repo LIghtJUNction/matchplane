@@ -511,8 +511,14 @@ impl PaymentStore {
         transaction.commit().await?;
 
         let result = match event {
-            WebhookEvent::Payment(value) => self.apply_payment_webhook(gateway_id, value).await,
-            WebhookEvent::Refund(value) => self.apply_refund_webhook(gateway_id, value).await,
+            WebhookEvent::Payment(value) => {
+                self.apply_payment_webhook(gateway_id, provider_event_id, processing_token, value)
+                    .await
+            }
+            WebhookEvent::Refund(value) => {
+                self.apply_refund_webhook(gateway_id, provider_event_id, processing_token, value)
+                    .await
+            }
         };
         match result {
             Ok(true) => {
@@ -588,12 +594,47 @@ impl PaymentStore {
         Ok(())
     }
 
+    /// Lock the inbox row while applying provider side effects. Rechecking the claim in the same
+    /// transaction prevents a stale worker from mutating a payment or refund after another
+    /// delivery has reclaimed the event.
+    async fn ensure_webhook_claim(
+        transaction: &mut Transaction<'_, Postgres>,
+        gateway_id: PaymentGatewayId,
+        provider_event_id: &str,
+        processing_token: Uuid,
+    ) -> Result<(), StoreError> {
+        let token = sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT processing_token FROM payment_webhook_inbox \
+             WHERE gateway_id = $1 AND provider_event_id = $2 AND status = 'processing' \
+             FOR UPDATE",
+        )
+        .bind(gateway_id.into_uuid())
+        .bind(provider_event_id)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        if token != Some(Some(processing_token)) {
+            return Err(StoreError::Conflict(
+                "webhook claim is no longer owned by this worker".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     async fn apply_payment_webhook(
         &self,
         gateway_id: PaymentGatewayId,
+        provider_event_id: &str,
+        processing_token: Uuid,
         event: &PaymentWebhook,
     ) -> Result<bool, StoreError> {
         let mut transaction = self.pool.begin().await?;
+        Self::ensure_webhook_claim(
+            &mut transaction,
+            gateway_id,
+            provider_event_id,
+            processing_token,
+        )
+        .await?;
         let row = sqlx::query(
             "SELECT id, tenant_id, gateway_id, offline_deal_id, payer_party_id, merchant_order_id, \
                     transaction_channel, purpose, gateway_kind, gateway_mode, payment_method, \
@@ -716,6 +757,8 @@ impl PaymentStore {
     async fn apply_refund_webhook(
         &self,
         gateway_id: PaymentGatewayId,
+        provider_event_id: &str,
+        processing_token: Uuid,
         event: &RefundWebhook,
     ) -> Result<bool, StoreError> {
         let row = sqlx::query(
@@ -784,7 +827,12 @@ impl PaymentStore {
             status: event.status,
             provider_status: event.provider_status.clone(),
         };
-        self.complete_refund(refund_id, Ok(&outcome)).await?;
+        self.complete_refund_claimed(
+            refund_id,
+            Ok(&outcome),
+            Some((gateway_id, provider_event_id, processing_token)),
+        )
+        .await?;
         Ok(true)
     }
 
@@ -1310,7 +1358,25 @@ impl PaymentStore {
         refund_id: RefundId,
         outcome: Result<&RefundOutcome, &PaymentError>,
     ) -> Result<RefundRecord, StoreError> {
+        self.complete_refund_claimed(refund_id, outcome, None).await
+    }
+
+    async fn complete_refund_claimed(
+        &self,
+        refund_id: RefundId,
+        outcome: Result<&RefundOutcome, &PaymentError>,
+        claim: Option<(PaymentGatewayId, &str, Uuid)>,
+    ) -> Result<RefundRecord, StoreError> {
         let mut transaction = self.pool.begin().await?;
+        if let Some((gateway_id, provider_event_id, processing_token)) = claim {
+            Self::ensure_webhook_claim(
+                &mut transaction,
+                gateway_id,
+                provider_event_id,
+                processing_token,
+            )
+            .await?;
+        }
         let refund = refund_in_for_update(&mut transaction, refund_id).await?;
         let (status, provider_reference, provider_status) = match outcome {
             Ok(value) => (

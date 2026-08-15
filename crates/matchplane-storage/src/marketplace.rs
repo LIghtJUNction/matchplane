@@ -13,6 +13,8 @@ use uuid::Uuid;
 
 use crate::{PgStore, StorageError};
 
+const MAX_VIEWING_APPOINTMENTS_PER_DEAL: i64 = 32;
+
 /// Encrypted contact data supplied when a marketplace identity is registered.
 #[derive(Debug, Clone)]
 pub struct EncryptedContact {
@@ -1541,6 +1543,19 @@ impl PgStore {
                 "viewing must end before the offline introduction expires".to_owned(),
             ));
         }
+        let appointment_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM viewing_appointments \
+             WHERE tenant_id = $1 AND offline_deal_id = $2",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.offline_deal_id.into_uuid())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if appointment_count >= MAX_VIEWING_APPOINTMENTS_PER_DEAL {
+            return Err(StorageError::Conflict(
+                "offline introduction has reached its viewing appointment limit".to_owned(),
+            ));
+        }
         sqlx::query(
             "INSERT INTO viewing_appointments \
              (id, tenant_id, offline_deal_id, proposed_by, starts_at, ends_at, \
@@ -1590,7 +1605,16 @@ impl PgStore {
         tenant_id: TenantId,
         offline_deal_id: OfflineDealId,
         actor_party_id: MarketplacePartyId,
+        limit: i64,
+        offset: i64,
     ) -> Result<Vec<ViewingAppointment>, StorageError> {
+        if !(1..=50).contains(&limit) || !(0..=MAX_VIEWING_APPOINTMENTS_PER_DEAL).contains(&offset)
+        {
+            return Err(StorageError::InvalidData(
+                "viewing page must use a limit between 1 and 50 and an offset between 0 and 32"
+                    .to_owned(),
+            ));
+        }
         let mut transaction = self.pool().begin().await?;
         let deal = offline_deal_in(&mut transaction, offline_deal_id, false).await?;
         validate_deal_participant(&mut transaction, &deal, tenant_id, actor_party_id).await?;
@@ -1604,10 +1628,13 @@ impl PgStore {
             "SELECT id, tenant_id, offline_deal_id, proposed_by, starts_at, ends_at, \
                     location_ciphertext, location_nonce, encryption_key_version, status, \
                     version, created_at, updated_at FROM viewing_appointments \
-             WHERE tenant_id = $1 AND offline_deal_id = $2 ORDER BY starts_at, id",
+             WHERE tenant_id = $1 AND offline_deal_id = $2 ORDER BY starts_at, id \
+             LIMIT $3 OFFSET $4",
         )
         .bind(tenant_id.into_uuid())
         .bind(offline_deal_id.into_uuid())
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&mut *transaction)
         .await?;
         let viewings = rows

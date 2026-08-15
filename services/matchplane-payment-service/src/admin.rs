@@ -185,7 +185,16 @@ impl AdminStore {
         &self,
         mutation: &InvoiceProviderMutation,
     ) -> Result<InvoiceProviderRecord, StoreError> {
-        validate_invoice_provider(mutation)?;
+        let validation = mutation.clone();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio::task::spawn_blocking(move || validate_invoice_provider(&validation)),
+        )
+        .await
+        .map_err(|_| StoreError::Invalid("invoice provider validation timed out".to_owned()))?
+        .map_err(|error| {
+            StoreError::Invalid(format!("invoice provider validation task failed: {error}"))
+        })??;
         if self.environment == Environment::Production && mutation.mode == GatewayMode::Test {
             return Err(StoreError::Invalid(
                 "test invoice providers cannot be configured in production".to_owned(),
@@ -366,7 +375,19 @@ impl AdminStore {
             "{} mode has no enabled invoice provider",
             command.mode.as_str()
         )))?;
-        validate_invoice_provider_row(&provider)?;
+        let provider_key: String = provider.try_get("provider_key")?;
+        let provider_mode = GatewayMode::from_str(&provider.try_get::<String, _>("mode")?)?;
+        let provider_settings: Value = provider.try_get("settings")?;
+        let credential_secret_ref: Option<String> = provider.try_get("credential_secret_ref")?;
+        let credential_digest: Option<Vec<u8>> = provider.try_get("credential_secret_digest")?;
+        validate_invoice_provider_configuration(
+            provider_key,
+            provider_mode,
+            provider_settings,
+            credential_secret_ref,
+            credential_digest,
+        )
+        .await?;
         let provider_id: Uuid = provider.try_get("id")?;
         if current.active_mode == command.mode && current.active_provider_id == provider_id {
             transaction.commit().await?;
@@ -749,7 +770,7 @@ impl AdminStore {
                 row.try_get("credential_secret_ref")?,
             )?
             .with_credential_digest(row.try_get("credential_secret_digest")?);
-            GatewayFactory::build(&config)?;
+            validate_gateway_configuration(config).await?;
         }
         let outstanding: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM payment_intents WHERE tenant_id = $1 AND gateway_mode = $2 \
@@ -1007,29 +1028,53 @@ fn validate_invoice_provider(mutation: &InvoiceProviderMutation) -> Result<(), S
     )
 }
 
-fn validate_invoice_provider_row(row: &sqlx::postgres::PgRow) -> Result<(), StoreError> {
-    let mode = GatewayMode::from_str(&row.try_get::<String, _>("mode")?)?;
-    let provider_key: String = row.try_get("provider_key")?;
-    let settings: Value = row.try_get("settings")?;
-    let credential_secret_ref: Option<String> = row.try_get("credential_secret_ref")?;
-    validate_invoice_provider_parts(
-        &provider_key,
-        mode,
-        &settings,
-        credential_secret_ref.as_deref(),
-    )?;
-    if mode == GatewayMode::Production {
-        let expected: Option<Vec<u8>> = row.try_get("credential_secret_digest")?;
-        let actual = resolve_secret_digest(credential_secret_ref.as_deref().ok_or_else(|| {
-            StoreError::Invalid("invoice provider credential is missing".to_owned())
-        })?)?;
-        if expected.as_deref() != Some(actual.as_slice()) {
-            return Err(StoreError::Invalid(
-                "invoice provider credential digest is missing or stale; re-save the provider"
-                    .to_owned(),
-            ));
-        }
-    }
+async fn validate_gateway_configuration(config: GatewayConfig) -> Result<(), StoreError> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || GatewayFactory::build(&config)),
+    )
+    .await
+    .map_err(|_| StoreError::Invalid("gateway validation timed out".to_owned()))?
+    .map_err(|error| StoreError::Invalid(format!("gateway validation task failed: {error}")))??;
+    Ok(())
+}
+
+async fn validate_invoice_provider_configuration(
+    provider_key: String,
+    mode: GatewayMode,
+    settings: Value,
+    credential_secret_ref: Option<String>,
+    credential_digest: Option<Vec<u8>>,
+) -> Result<(), StoreError> {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || {
+            validate_invoice_provider_parts(
+                &provider_key,
+                mode,
+                &settings,
+                credential_secret_ref.as_deref(),
+            )?;
+            if mode == GatewayMode::Production {
+                let reference = credential_secret_ref.as_deref().ok_or_else(|| {
+                    StoreError::Invalid("invoice provider credential is missing".to_owned())
+                })?;
+                let actual = resolve_secret_digest(reference)?;
+                if credential_digest.as_deref() != Some(actual.as_slice()) {
+                    return Err(StoreError::Invalid(
+                        "invoice provider credential digest is missing or stale; re-save the provider"
+                            .to_owned(),
+                    ));
+                }
+            }
+            Ok(())
+        }),
+    )
+    .await
+    .map_err(|_| StoreError::Invalid("invoice provider validation timed out".to_owned()))?
+    .map_err(|error| {
+        StoreError::Invalid(format!("invoice provider validation task failed: {error}"))
+    })??;
     Ok(())
 }
 

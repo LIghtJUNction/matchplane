@@ -8,7 +8,7 @@ bash -n packaging/scripts/stage.sh packaging/scripts/archive.sh
 bash -n packaging/ubuntu/build-deb.sh packaging/ubuntu/postinst packaging/ubuntu/prerm
 bash -n packaging/fedora/build-rpm.sh
 bash -n deploy/scripts/configure-ubuntu-host.sh
-bash -n packaging/aur/matchplane-git/PKGBUILD
+bash -n packaging/aur/matchplane-git/PKGBUILD.in
 bash -n packaging/aur/matchplane-git/matchplane.install
 bash -n packaging/aur/matchplane-bin/PKGBUILD.in
 bash -n packaging/aur/matchplane-bin/matchplane.install

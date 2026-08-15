@@ -12,7 +12,7 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   portable-and-deb:
@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Normalize version
         run: echo "VERSION=${VERSION#v}" >> "$GITHUB_ENV"
       - name: Install native build dependencies
@@ -58,7 +60,8 @@ jobs:
 
   rpm:
     runs-on: ubuntu-latest
-    container: fedora:latest
+    # Pin the current Fedora image digest so package inputs cannot drift between runs.
+    container: fedora@sha256:89f61a124414261868224666aa7fb8df1b78397a53623774bdfb105d1612b48b
     env:
       VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.version }}
     steps:
@@ -66,6 +69,8 @@ jobs:
         run: dnf install --assumeyes cargo cmake curl gcc-c++ git gzip libcurl-devel nodejs protobuf-compiler protobuf-devel rpm-build rust systemd-rpm-macros unzip
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Normalize version
         run: echo "VERSION=${VERSION#v}" >> "$GITHUB_ENV"
       - name: Build Fedora RPM and SRPM
@@ -83,6 +88,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [portable-and-deb, rpm]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download all packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -104,16 +111,17 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: release
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    # Pin the current Arch image digest so the AUR publisher is reproducible.
+    container: archlinux@sha256:f0703c5a076af362f1cb99a01d1d0670fa63f16f5aeb74881b7ded9b63eea0c1
     env:
-      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-      AUR_SSH_KNOWN_HOSTS: ${{ secrets.AUR_SSH_KNOWN_HOSTS }}
       VERSION: ${{ github.ref_name }}
     steps:
       - name: Install current Arch build toolchain
         run: pacman -Syu --noconfirm base-devel bun cargo cmake curl git openssh protobuf rust zstd
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Download portable release asset
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -126,6 +134,8 @@ jobs:
           digest=$(sha256sum "$archive" | cut -d' ' -f1)
           sed -e "s/__VERSION__/${version}/g" -e "s/__SHA256__/${digest}/g" \
             packaging/aur/matchplane-bin/PKGBUILD.in > packaging/aur/matchplane-bin/PKGBUILD
+          sed "s/__COMMIT__/${GITHUB_SHA}/g" \
+            packaging/aur/matchplane-git/PKGBUILD.in > packaging/aur/matchplane-git/PKGBUILD
           useradd --create-home builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
           su builder -c 'cd packaging/aur/matchplane-git && makepkg --syncdeps --noconfirm --cleanbuild'
@@ -133,6 +143,9 @@ jobs:
           su builder -c 'cd packaging/aur/matchplane-bin && makepkg --syncdeps --noconfirm --cleanbuild'
           su builder -c 'cd packaging/aur/matchplane-bin && makepkg --printsrcinfo > .SRCINFO'
       - name: Publish matchplane-git and matchplane-bin to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_SSH_KNOWN_HOSTS: ${{ secrets.AUR_SSH_KNOWN_HOSTS }}
         run: |
           test -n "$AUR_SSH_PRIVATE_KEY"
           test -n "$AUR_SSH_KNOWN_HOSTS"

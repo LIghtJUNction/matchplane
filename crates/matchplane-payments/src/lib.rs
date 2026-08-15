@@ -178,8 +178,7 @@ fn is_forbidden_provider_address(ip: IpAddr) -> bool {
                 || (segments[0] == 0x2001 && segments[1] == 0x0db8) // 2001:db8::/32
                 || (segments[0] == 0x2001
                     && segments[1] == 0x0002
-                    && segments[2] == 0
-                    && segments[3] == 0) // 2001:2::/48 (benchmarking)
+                    && segments[2] == 0) // 2001:2::/48 (benchmarking)
                 || (segments[0] == 0x2001
                     && (segments[1] & 0xfff0) == 0x0010) // 2001:10::/28 (ORCHID)
                 || (segments[0] == 0x2001
@@ -273,6 +272,7 @@ mod endpoint_tests {
             "fc00::8",
             "fe80::8",
             "2001:db8::8",
+            "2001:2:0:1::1",
             "ff02::1",
             "100::",
             "fec0::8",

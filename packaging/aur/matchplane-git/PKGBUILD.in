@@ -15,7 +15,10 @@ conflicts=('matchplane' 'matchplane-bin')
 options=('!lto')
 backup=('etc/matchplane/matchplane.env')
 install=matchplane.install
-source=('matchplane::git+https://github.com/LIghtJUNction/matchplane.git')
+# The release workflow replaces __COMMIT__ with the exact GitHub commit being
+# published. Keeping the VCS source immutable prevents a moving main branch from
+# changing an AUR build after its review.
+source=('matchplane::git+https://github.com/LIghtJUNction/matchplane.git#commit=__COMMIT__')
 sha256sums=('SKIP')
 
 pkgver() {

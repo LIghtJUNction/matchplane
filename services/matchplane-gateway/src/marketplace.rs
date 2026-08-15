@@ -146,6 +146,16 @@ pub(super) struct PartyQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct ViewingQuery {
+    tenant_id: String,
+    party_id: String,
+    /// Number of appointments returned in one page. The storage layer applies the same cap.
+    limit: Option<u16>,
+    /// Number of appointments to skip for the next page.
+    offset: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct ExposureRequest {
     tenant_id: String,
     viewer_party_id: String,
@@ -574,16 +584,34 @@ pub(super) async fn create_viewing(
 pub(super) async fn viewings(
     State(state): State<Arc<AppState>>,
     Path(offline_deal_id): Path<String>,
-    Query(query): Query<PartyQuery>,
+    Query(query): Query<ViewingQuery>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<ViewingResponse>>, ApiError> {
     let tenant_id = parse_id(&query.tenant_id)?;
     let offline_deal_id = parse_id(&offline_deal_id)?;
     let party_id = parse_id(&query.party_id)?;
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=50).contains(&limit) {
+        return Err(ApiError::bad_request(
+            "viewing limit must be between 1 and 50".to_owned(),
+        ));
+    }
+    let offset = query.offset.unwrap_or(0);
+    if offset > 32 {
+        return Err(ApiError::bad_request(
+            "viewing offset must be between 0 and 32".to_owned(),
+        ));
+    }
     authenticate(&state, &headers, tenant_id, party_id).await?;
     let viewings = state
         .store
-        .viewing_appointments(tenant_id, offline_deal_id, party_id)
+        .viewing_appointments(
+            tenant_id,
+            offline_deal_id,
+            party_id,
+            i64::from(limit),
+            i64::from(offset),
+        )
         .await?;
     let viewings = viewings
         .into_iter()
