@@ -190,7 +190,7 @@ function toolList(): Record<string, unknown> {
   return {
     tools: [{
       name: "platform.match",
-      description: "Submit a domain-neutral buyer or seller intent to the authenticated platform tree.",
+      description: "Submit a domain-neutral demand or supply intent to the authenticated platform tree.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -274,7 +274,7 @@ function toolList(): Record<string, unknown> {
       inputSchema: marketplaceIntentSchema(),
     }, {
       name: "marketplace.offer.create",
-      description: "Create a seller-owned draft offer; a platform moderator must activate it before matching.",
+      description: "Create a supply-owned draft offer; a platform moderator must activate it before matching.",
       inputSchema: marketplaceOfferSchema(),
     }, {
       name: "marketplace.offer.match",
