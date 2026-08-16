@@ -110,19 +110,10 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
 
       try {
         const live = isLiveMarketplaceEnabled();
-        if (isSeller) {
-          const message = live
-            ? copy.sellerSuccess
-            : "当前环境未连接真实供给 API，内容没有写入系统。请先启用平台 API 后再发送。";
-          setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-            ? { ...item, text: message }
-            : item));
-          onNotice(message);
-          if (live) window.setTimeout(() => document.getElementById("seller-display-name")?.focus(), 0);
-          return;
-        }
         if (!live) {
-          const message = "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。";
+          const message = isSeller
+            ? "当前环境未连接真实供给 API，内容没有写入系统。请先启用平台 API 后再发送。"
+            : "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。";
           setMessages((current) => current.map((item) => item.id === `${requestId}-assistant` ? { ...item, text: message } : item));
           onNotice(message);
           return;
@@ -133,7 +124,27 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
         if (live) {
           if (subplatform.domainId) {
             if (!session) throw new Error("Better Auth 会话尚未连接到当前子平台");
-            if (usesLegacyMarketplace) {
+            if (isSeller) {
+              await createMarketplaceIntent({
+                session,
+                domainId: subplatform.domainId,
+                side: "supply",
+                narrative: text,
+                attributes: {
+                  source: "conversation",
+                  platform_path: platformPath(subplatform),
+                  delegated_route_count: route?.routePlan.length ?? 0,
+                  routing_source: route?.routing.source ?? null,
+                  routing_degraded: route?.routing.degraded ?? false,
+                },
+                terms: {
+                  pricing_mode: pricing.mode,
+                  ...(pricing.currency ? { currency: pricing.currency } : {}),
+                  ...(pricing.currencyScale !== undefined ? { currency_scale: pricing.currencyScale } : {}),
+                },
+                idempotencyKey: `chat-${requestId}`,
+              });
+            } else if (usesLegacyMarketplace) {
               if (!pricing.currency) throw new Error("当前子平台尚未配置结算币种，暂时不能生成真实推荐");
               const buyerRequest = await createBuyerRequest({
                 session,
@@ -188,18 +199,21 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
         setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
           ? {
               ...item,
-              text: live
-                ? route?.status === "degraded" && route.routePlan.length
-                  ? `AI 路由暂时不可用，已按受控策略把需求交给 ${route.routePlan.map((hop) => hop.displayName).join("、")}；下级平台会继续筛选商家与具体供给。`
-                  : route?.routePlan.length
-                    ? `AI 已从当前节点的候选平台中选出 ${route.routePlan.map((hop) => hop.displayName).join("、")}，接下来由下级平台继续挑选商家与具体供给，并解释匹配理由。`
-                    : route?.routing.source === "ai"
-                      ? "需求已记录在当前平台节点；AI 判断当前候选平台暂时没有合适的匹配。你可以补充目标、预算或限制条件后重试。"
-                      : "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。"
-                : "需求已记录在当前平台节点。",
-            }
+              text: isSeller
+                ? copy.sellerSuccess
+                : live
+                  ? route?.status === "degraded" && route.routePlan.length
+                    ? `AI 路由暂时不可用，已按受控策略把需求交给 ${route.routePlan.map((hop) => hop.displayName).join("、")}；下级平台会继续筛选商家与具体供给。`
+                    : route?.routePlan.length
+                      ? `AI 已从当前节点的候选平台中选出 ${route.routePlan.map((hop) => hop.displayName).join("、")}，接下来由下级平台继续挑选商家与具体供给，并解释匹配理由。`
+                      : route?.routing.source === "ai"
+                        ? "需求已记录在当前平台节点；AI 判断当前候选平台暂时没有合适的匹配。你可以补充目标、预算或限制条件后重试。"
+                        : "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。"
+                  : "需求已记录在当前平台节点。",
+          }
           : item));
-        onNotice(copy.buyerSuccess);
+        onNotice(isSeller ? copy.sellerSuccess : copy.buyerSuccess);
+        if (isSeller) window.setTimeout(() => document.getElementById("seller-display-name")?.focus(), 0);
       } catch (error) {
         setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
           ? { ...item, text: error instanceof Error ? error.message : "需求暂时没有发送成功，请稍后再试。" }
