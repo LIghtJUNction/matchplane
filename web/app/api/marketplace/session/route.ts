@@ -109,9 +109,13 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "当前子平台没有可用的 active registration" }, { status: 404 });
   }
 
-  let membership = identity.federated
-    ? await readOrganizationMembershipByScope(input.tenantId, input.domainId, input.subplatform, identity.user.id)
-    : await readOrganizationMembership(request, input.subplatform, identity.user.id);
+  // Resolve membership from the same tenant/domain registration that authorized the path.  Do
+  // not let a same-origin cookie turn a slug collision or a stale Better Auth organization into
+  // access to a different node.  The request origin is only a transport boundary; the database
+  // scope is the authorization boundary.
+  let membership = input.subplatform === "root"
+    ? await readOrganizationMembership(request, input.subplatform, identity.user.id)
+    : await readOrganizationMembershipByScope(input.tenantId, input.domainId, input.subplatform, identity.user.id);
   const userRole = identity.user.role;
   const rootSuperAdmin = userRole === "rootSuperAdmin";
   if (input.role === "subplatform_admin") {
@@ -128,12 +132,10 @@ export async function POST(request: Request): Promise<Response> {
     const canClaim = await subplatformAllowsPublicClaim(input.tenantId, input.domainId, input.subplatform);
     if (canClaim) {
       membership = await claimPublicSubplatformMembership(
-        request,
         input.tenantId,
         input.domainId,
         input.subplatform,
         identity.user.id,
-        identity.federated,
       );
     }
   }
@@ -437,7 +439,7 @@ async function recordPlatformAuditEvent(input: {
   tenantId: string;
   domainId: string | null;
   platformPath: string;
-  actorAuthUserId: string;
+  actorAuthUserId: string | null;
   actorPartyId: string;
   eventType: string;
   metadata: Record<string, unknown>;
@@ -499,6 +501,8 @@ async function readOrganizationMembershipByScope(
                                             AND r.domain_id = $2::uuid
                                             AND r.state = 'active'
       WHERE o.slug = $3
+        AND o."tenantId" = $1::text
+        AND o."domainId" = $2::text
         AND m."userId" = $4::uuid
       ORDER BY r.version DESC
       LIMIT 1`,
@@ -513,12 +517,10 @@ async function readOrganizationMembershipByScope(
  * require an explicit owner/admin invitation.
  */
 async function claimPublicSubplatformMembership(
-  request: Request,
   tenantId: string,
   domainId: string | undefined,
   slug: string,
   userId: string,
-  federated: boolean,
 ): Promise<{ role: string } | null> {
   if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) return null;
   const result = await authDatabase.query<{ organization_id: string }>(
@@ -528,6 +530,8 @@ async function claimPublicSubplatformMembership(
       WHERE o.slug = $1
         AND r.tenant_id = $2::uuid
         AND ($3::uuid IS NULL OR r.domain_id = $3::uuid)
+        AND o."tenantId" = $2::text
+        AND ($3::uuid IS NULL OR o."domainId" = $3::text)
         AND r.state = 'active'
       ORDER BY r.version DESC
       LIMIT 1`,
@@ -546,9 +550,7 @@ async function claimPublicSubplatformMembership(
     // A concurrent request may have claimed the same membership. Read the authoritative
     // Better Auth projection below instead of treating that race as a failure.
   }
-  return federated
-    ? readOrganizationMembershipByScope(tenantId, domainId, slug, userId)
-    : readOrganizationMembership(request, slug, userId);
+  return readOrganizationMembershipByScope(tenantId, domainId, slug, userId);
 }
 
 async function activeSubplatformScope(

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { authDatabase } from "../../../../src/lib/auth";
@@ -98,6 +99,36 @@ export async function POST(request: Request): Promise<Response> {
     access_token: string;
     access_token_expires_at: string;
   };
+  if (!isUuid(body.party_id) || body.tenant_id !== input.tenantId) {
+    return NextResponse.json({ error: "撮合 Agent 会话服务返回了无效的平台身份" }, { status: 502 });
+  }
+  try {
+    // Keep machine-agent authorization in the same Rust projection as human sessions.  The
+    // Better Auth organization/API-key record remains the identity authority, while this row is
+    // the gateway's revocation/checkpoint for the short-lived party capability.
+    await upsertMachineMembershipProjection({
+      tenantId: input.tenantId,
+      domainId: input.domainId,
+      partyId: body.party_id,
+      approvedBy: `api-key:${apiKey.id}`,
+      role: input.role,
+    });
+    await recordMachineCapabilityAudit({
+      tenantId: input.tenantId,
+      domainId: input.domainId,
+      platformPath: input.platformPath,
+      partyId: body.party_id,
+      apiKeyId: apiKey.id,
+      organizationId: apiKey.referenceId,
+      requestId: request.headers.get("x-request-id"),
+    });
+  } catch (error) {
+    console.error("machine marketplace membership projection/audit failed", error);
+    return NextResponse.json(
+      { error: "Agent 成员授权投影暂时不可用；未返回撮合 capability" },
+      { status: 503 },
+    );
+  }
   return NextResponse.json(
     {
       tenant_id: body.tenant_id,
@@ -115,6 +146,66 @@ export async function POST(request: Request): Promise<Response> {
       ],
     },
     { headers: { "cache-control": "no-store" } },
+  );
+}
+
+async function upsertMachineMembershipProjection(input: {
+  tenantId: string;
+  domainId: string;
+  partyId: string;
+  approvedBy: string;
+  role: "buyer" | "seller";
+}): Promise<void> {
+  await authDatabase.query(
+    `INSERT INTO marketplace_subplatform_memberships
+       (tenant_id, domain_id, party_id, role, labels, status, approved_at, approved_by)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, ARRAY['better-auth:api-key'], 'active', clock_timestamp(), $5)
+     ON CONFLICT (tenant_id, domain_id, party_id) DO UPDATE
+       SET role = CASE
+                    WHEN marketplace_subplatform_memberships.role = 'admin' THEN 'admin'
+                    WHEN marketplace_subplatform_memberships.role = EXCLUDED.role THEN EXCLUDED.role
+                    ELSE 'both'
+                  END,
+           labels = ARRAY['better-auth:api-key'],
+           status = 'active',
+           approved_at = COALESCE(marketplace_subplatform_memberships.approved_at, clock_timestamp()),
+           approved_by = EXCLUDED.approved_by,
+           version = marketplace_subplatform_memberships.version + 1,
+           updated_at = clock_timestamp()`,
+    [input.tenantId, input.domainId, input.partyId, input.role, input.approvedBy],
+  );
+}
+
+async function recordMachineCapabilityAudit(input: {
+  tenantId: string;
+  domainId: string;
+  platformPath: string;
+  partyId: string;
+  apiKeyId: string;
+  organizationId: string;
+  requestId: string | null;
+}): Promise<void> {
+  const requestId = input.requestId?.trim();
+  await authDatabase.query(
+    `INSERT INTO platform_audit_events
+       (id, tenant_id, domain_id, platform_path, actor_auth_user_id, actor_party_id,
+        event_type, outcome, request_id, metadata)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, NULL, $5::uuid,
+             'marketplace.agent_capability.issued', 'success', $6, $7::jsonb)`,
+    [
+      randomUUID(),
+      input.tenantId,
+      input.domainId,
+      input.platformPath,
+      input.partyId,
+      requestId && requestId.length <= 200 ? requestId : null,
+      JSON.stringify({
+        identitySource: "better-auth-api-key",
+        apiKeyId: input.apiKeyId,
+        organizationId: input.organizationId,
+        costBearer: "caller",
+      }),
+    ],
   );
 }
 

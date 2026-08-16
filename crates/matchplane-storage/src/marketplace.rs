@@ -981,6 +981,12 @@ impl PgStore {
     }
 
     /// Authenticates a high-entropy party capability within one tenant.
+    ///
+    /// Child capabilities are checked against the Rust membership projection. When a party is
+    /// linked to a human Better Auth identity, the query also requires the corresponding Better
+    /// Auth member row; removing that member therefore revokes access without waiting for the
+    /// fifteen-minute capability expiry. Legacy/manual child parties without an auth link remain
+    /// usable for the gateway-only integration contract.
     pub async fn authenticate_marketplace_party(
         &self,
         tenant_id: TenantId,
@@ -1006,13 +1012,39 @@ impl PgStore {
                             AND m.domain_id = p.scope_domain_id \
                             AND m.party_id = p.id \
                             AND m.status = 'active' \
+                            AND ( \
+                                NOT EXISTS ( \
+                                    SELECT 1 \
+                                      FROM marketplace_party_auth_links l \
+                                      JOIN \"user\" u ON u.id = l.auth_user_id \
+                                     WHERE l.tenant_id = p.tenant_id \
+                                       AND l.party_id = p.id \
+                                       AND l.platform_path = p.platform_path \
+                                ) \
+                                OR EXISTS ( \
+                                    SELECT 1 \
+                                      FROM marketplace_party_auth_links l \
+                                      JOIN \"member\" member_projection \
+                                        ON member_projection.\"userId\" = l.auth_user_id \
+                                      JOIN \"organization\" organization_projection \
+                                        ON organization_projection.id = member_projection.\"organizationId\" \
+                                     WHERE l.tenant_id = p.tenant_id \
+                                       AND l.party_id = p.id \
+                                       AND l.platform_path = p.platform_path \
+                                       AND organization_projection.\"tenantId\" = p.tenant_id::text \
+                                       AND organization_projection.\"domainId\" = p.scope_domain_id::text \
+                                       AND organization_projection.slug = regexp_replace(p.platform_path, '^.*/', '') \
+                                ) \
+                            ) \
                      ) \
-                     OR NOT EXISTS ( \
-                         SELECT 1 \
-                           FROM marketplace_party_auth_links l \
-                           JOIN \"user\" u ON u.id = l.auth_user_id \
-                          WHERE l.tenant_id = p.tenant_id \
-                            AND l.party_id = p.id \
+                     OR ( \
+                         p.platform_path <> '/' \
+                         AND NOT EXISTS ( \
+                             SELECT 1 \
+                               FROM marketplace_party_auth_links l \
+                              WHERE l.tenant_id = p.tenant_id \
+                                AND l.party_id = p.id \
+                         ) \
                      ))",
         )
         .bind(tenant_id.into_uuid())
