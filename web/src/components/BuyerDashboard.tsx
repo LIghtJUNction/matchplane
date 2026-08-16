@@ -16,6 +16,7 @@ import { motion } from "motion/react";
 
 import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
+import { getPlatformChildren, type PlatformChildSummary } from "../api";
 import { ListingVisual, SectionHeading, spring } from "./Primitives";
 
 interface BuyerDashboardProps {
@@ -30,6 +31,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   const [saved, setSaved] = useState<Set<string>>(() => readSavedItems(`matchplane.saved.${subplatform.path}`));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(() => new Set());
+  const [childPlatforms, setChildPlatforms] = useState<PlatformChildSummary[]>([]);
   const isRoot = subplatform.slug === "root";
   const savedKey = `matchplane.saved.${subplatform.path}`;
   const filterDefinitions = subplatform.ui?.filters ?? [];
@@ -37,6 +39,24 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   useEffect(() => {
     window.localStorage.setItem(savedKey, JSON.stringify([...saved]));
   }, [saved, savedKey]);
+
+  useEffect(() => {
+    if (!isRoot) {
+      setChildPlatforms([]);
+      return;
+    }
+    let active = true;
+    void getPlatformChildren(subplatform.path)
+      .then((children) => {
+        if (active) setChildPlatforms(children);
+      })
+      .catch(() => {
+        if (active) setChildPlatforms([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isRoot, subplatform.path]);
 
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -70,7 +90,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   return (
     <div className="dashboard buyer-dashboard">
       {isRoot ? (
-        <RootFlow subplatform={subplatform} />
+        <RootFlow subplatform={subplatform} childPlatforms={childPlatforms} />
       ) : (
         <section className="buyer-hero" aria-labelledby="buyer-hero-title">
           <div className="hero-copy">
@@ -186,7 +206,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
       ) : null}
 
       <section id="recommendations" className={`content-section${isRoot ? " root-content" : ""}`}>
-        <SectionHeading eyebrow="由供给方提交，审核后展示" title={`${visible.length} 个可用供给`} />
+        <SectionHeading eyebrow={subplatform.ui?.chat?.listingEyebrow} title={`${visible.length} ${subplatform.ui?.chat?.listingLabel || "个可用供给"}`} />
         {visible.length ? (
           <div className="vehicle-grid">
             {visible.map((listing, index) => (
@@ -215,7 +235,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         )}
       </section>
 
-      <section className="offline-section" aria-labelledby="offline-title">
+      {!isRoot ? <section className="offline-section" aria-labelledby="offline-title">
         <div className="offline-intro">
           <span className="eyebrow">线上撮合 · 线下协商</span>
           <h2 id="offline-title">双方在哪完成交易，由双方决定。</h2>
@@ -238,7 +258,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
             <div><small>03</small><strong>确认结果与平台提成</strong><p>成交后按披露规则结算平台服务费。</p></div>
           </li>
         </ol>
-      </section>
+      </section> : null}
     </div>
   );
 }
@@ -255,22 +275,28 @@ function matchesFilter(
   return filter.value === undefined || fact.value === filter.value;
 }
 
-function RootFlow({ subplatform }: { subplatform: SubplatformConfig }) {
+function RootFlow({ subplatform, childPlatforms }: { subplatform: SubplatformConfig; childPlatforms: PlatformChildSummary[] }) {
   return (
     <section className="root-routing-strip" aria-labelledby="root-routing-title">
       <div className="root-routing-copy">
-        <h2 id="root-routing-title">一句话，开始一条匹配路径。</h2>
-        <p>根平台只做理解与路由；具体领域、商家和供给内容由各子平台提供。</p>
+        <h2 id="root-routing-title">从一句话开始。</h2>
+        <p>{subplatform.description || "描述目标，平台会把请求交给已激活的匹配节点。"}</p>
       </div>
-      <ol className="root-routing-steps">
-        <li><span aria-hidden="true" /><div><strong>描述目标</strong><small>预算与约束</small></div></li>
-        <li><span aria-hidden="true" /><div><strong>沿平台树路由</strong><small>只访问已激活节点</small></div></li>
-        <li><span aria-hidden="true" /><div><strong>双方同意后联系</strong><small>保留撮合与审计记录</small></div></li>
-      </ol>
       <a className="button button-quiet root-routing-seller-link" href={`${subplatform.path}?role=seller`}>
         我来提供
         <ArrowRight size={17} aria-hidden="true" />
       </a>
+      {childPlatforms.length ? (
+        <div className="root-platform-links" aria-label="已激活的平台">
+          {childPlatforms.map((child) => (
+            <a className="root-platform-link-card" key={child.path} href={child.path}>
+              <strong>{child.displayName}</strong>
+              {child.description ? <small>{child.description}</small> : null}
+              <ArrowRight size={16} aria-hidden="true" />
+            </a>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -318,7 +344,7 @@ function AssetCard({
         <button className="vehicle-title-button" type="button" onClick={onOpen}>
           <h3>{listing.title}</h3>
         </button>
-        <p className="vehicle-subtitle">{listing.subtitle}</p>
+        {listing.subtitle ? <p className="vehicle-subtitle">{listing.subtitle}</p> : null}
         {listing.facts.length ? (
           <dl className="vehicle-facts">
             {listing.facts.slice(0, 3).map((fact) => <div key={`${fact.label}-${fact.value}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}

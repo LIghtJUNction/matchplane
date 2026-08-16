@@ -15,7 +15,7 @@ use matchplane_domain::{
 };
 use matchplane_observability::{Telemetry, init};
 use matchplane_storage::{
-    CandidateMatch, DemoBootstrap, PgStore, StorageError, StoredOrder, StoredTrade, SubmitOrder,
+    CandidateMatch, PgStore, StorageError, StoredOrder, StoredTrade, SubmitOrder,
     SubmitOrderOutcome, VectorRecord,
 };
 use serde::{Deserialize, Serialize};
@@ -161,7 +161,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
         .route("/metrics", get(metrics))
-        .route("/v1/demo", get(demo))
         .route("/v1/orders", post(place_order))
         .route("/v1/orders/{order_id}", get(order))
         .route("/v1/accounts/{account_id}", get(account))
@@ -329,14 +328,6 @@ async fn ready(State(state): State<Arc<AppState>>) -> (StatusCode, Json<HealthRe
 
 async fn metrics(State(state): State<Arc<AppState>>) -> String {
     state.telemetry.render_metrics()
-}
-
-async fn demo(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Result<Json<DemoBootstrap>, ApiError> {
-    require_operator(&state, &headers)?;
-    DemoBootstrap::local().map(Json).map_err(ApiError::from)
 }
 
 async fn place_order(

@@ -86,7 +86,7 @@ export function PlatformDashboard({
   const [routeCurrency, setRouteCurrency] = useState("");
   const [routePriority, setRoutePriority] = useState("100");
   const [invoiceName, setInvoiceName] = useState("");
-  const [invoiceProviderKey, setInvoiceProviderKey] = useState("local_test");
+  const [invoiceProviderKey, setInvoiceProviderKey] = useState("");
   const [invoiceMode, setInvoiceMode] = useState<"test" | "production">("test");
   const [invoiceSettings, setInvoiceSettings] = useState("{}");
   const [invoiceCredentialRef, setInvoiceCredentialRef] = useState("");
@@ -102,7 +102,7 @@ export function PlatformDashboard({
   // The root platform never ships a sample market manifest. Operators paste or upload the
   // manifest that belongs to the package they are registering; domain data stays in that package.
   const [subplatformManifest, setSubplatformManifest] = useState("");
-  const [subplatformScopes, setSubplatformScopes] = useState("marketplace:read");
+  const [subplatformScopes, setSubplatformScopes] = useState("");
   const [subplatformMembershipPolicy, setSubplatformMembershipPolicy] = useState<"public" | "invite">("public");
   const [subplatformArchive, setSubplatformArchive] = useState<File | null>(null);
   const [subplatformUpload, setSubplatformUpload] = useState<SubplatformArchiveUpload | null>(null);
@@ -177,7 +177,7 @@ export function PlatformDashboard({
     setSubplatformPinnedRevision("");
     setSubplatformSourceDigest("");
     setSubplatformManifest("");
-    setSubplatformScopes("marketplace:read");
+    setSubplatformScopes("");
     setSubplatformMembershipPolicy("public");
     setSubplatformArchive(null);
     setSubplatformUpload(null);
@@ -408,6 +408,10 @@ export function PlatformDashboard({
     }
     if (!invoiceName.trim()) {
       onNotice("请填写发票 provider 名称");
+      return;
+    }
+    if (!invoiceProviderKey.trim()) {
+      onNotice("请选择发票 provider 协议");
       return;
     }
     if (invoiceMode === "production" && !invoiceCredentialRef.trim()) {
@@ -700,7 +704,7 @@ export function PlatformDashboard({
             <div className="admin-editor" aria-label="发票 provider 配置">
               <div className="admin-editor-heading"><strong>新增发票 provider</strong><button type="button" onClick={() => setInvoiceEditorOpen(false)}>关闭</button></div>
               <label><span>名称</span><input value={invoiceName} onChange={(event) => setInvoiceName(event.target.value)} placeholder="例如：电子发票服务" /></label>
-              <label><span>provider</span><select value={invoiceProviderKey} onChange={(event) => setInvoiceProviderKey(event.target.value)}><option value="local_test">测试发票</option><option value="http_json">HTTP JSON</option><option value="fapiao_http">Fapiao HTTP</option></select></label>
+              <label><span>provider</span><select value={invoiceProviderKey} onChange={(event) => setInvoiceProviderKey(event.target.value)}><option value="">选择 provider 协议</option><option value="local_test">测试协议</option><option value="http_json">HTTP JSON</option><option value="fapiao_http">Fapiao HTTP</option></select></label>
               <label><span>模式</span><select value={invoiceMode} onChange={(event) => setInvoiceMode(event.target.value as "test" | "production")}><option value="test">测试</option><option value="production">生产</option></select></label>
               <label><span>secret reference</span><input value={invoiceCredentialRef} onChange={(event) => setInvoiceCredentialRef(event.target.value)} placeholder="file:///run/secrets/invoice/provider.token" /></label>
               <label><span>settings（JSON）</span><textarea value={invoiceSettings} onChange={(event) => setInvoiceSettings(event.target.value)} rows={4} spellCheck={false} /></label>

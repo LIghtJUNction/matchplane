@@ -54,6 +54,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [secureConnection, setSecureConnection] = useState(true);
 
   const closeListing = useCallback(() => setListing(null), []);
   const closeModeDialog = useCallback(() => setModeDialogOpen(false), []);
@@ -66,6 +67,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   useEffect(() => {
     const requestedPath = window.location.pathname;
+    setSecureConnection(window.location.protocol === "https:");
     setSubplatform(resolveSubplatform(requestedPath));
     void loadSubplatform(requestedPath).then(setSubplatform);
     setRole(roleFromLocation());
@@ -193,7 +195,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">{ui.rootPlatform}</a> : null}
             </div>
             <div className="header-actions">
-              <span className="secure-status"><ShieldCheck size={15} aria-hidden="true" />{ui.secure}</span>
+              <span className={`secure-status${secureConnection ? "" : " is-insecure"}`}><ShieldCheck size={15} aria-hidden="true" />{secureConnection ? ui.secure : ui.insecure}</span>
               <IconButton label={ui.notifications} onClick={() => setNotice(ui.noNotifications) }><Bell size={19} aria-hidden="true" /></IconButton>
               <button className="profile-button" type="button" aria-label={authUser ? ui.openAccount : ui.signIn} aria-expanded={authUser ? accountMenuOpen : undefined} onClick={openAccount}>
                 <span><UserRound size={18} aria-hidden="true" /></span>
@@ -350,6 +352,7 @@ function appCopy(locale: "zh" | "en") {
       skipToContent: "Skip to content",
       rootPlatform: "Root platform",
       secure: "Secure",
+      insecure: "Local connection",
       notifications: "Notifications",
       noNotifications: "No new notifications",
       openAccount: "Open account menu",
@@ -369,6 +372,7 @@ function appCopy(locale: "zh" | "en") {
     skipToContent: "跳到主要内容",
     rootPlatform: "根平台",
     secure: "安全连接",
+    insecure: "本地连接",
     notifications: "通知",
     noNotifications: "目前没有新的平台通知",
     openAccount: "打开个人账户菜单",
@@ -400,7 +404,7 @@ function mapRecommendations(items: RecommendedBackendListing[]): AssetListing[] 
       .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
       .slice(0, 4)
       .map(([label, value]) => ({ label, value: String(value) }));
-    const subtitle = facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ") || "来自当前子平台的真实供给";
+    const subtitle = facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ");
     const location = typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined;
     return {
       id: item.listing_id,

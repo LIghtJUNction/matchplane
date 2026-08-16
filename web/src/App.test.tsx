@@ -48,7 +48,7 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "先说说你想解决什么。" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "一句话，开始一条匹配路径。" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "从一句话开始。" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "卖方供给" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "描述需求" })).toBeInTheDocument();
   });

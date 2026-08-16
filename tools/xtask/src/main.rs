@@ -20,10 +20,8 @@ struct Cli {
 enum Command {
     /// Apply all embedded PostgreSQL migrations.
     Migrate,
-    /// Apply migrations and idempotently install the local demo data.
+    /// Apply all embedded PostgreSQL migrations.
     Initialize,
-    /// Idempotently install the local demo data after migration.
-    Bootstrap,
     /// Validate configuration and production safety gates.
     Doctor {
         /// Emit machine-readable JSON (the default output is also JSON for agent stability).
@@ -75,7 +73,6 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Migrate => migrate().await,
         Command::Initialize => initialize().await,
-        Command::Bootstrap => bootstrap().await,
         Command::Doctor { json: _ } => doctor().await,
         Command::Status { json: _ } => status().await,
         Command::Serve { service, args } => serve(service, &args),
@@ -86,43 +83,10 @@ async fn main() -> Result<()> {
 }
 
 async fn initialize() -> Result<()> {
-    let environment = AppConfig::load()
-        .context("initialization configuration is invalid")?
-        .environment;
-    migrate().await?;
-    if environment == Environment::Production
-        || env::var("MATCHPLANE_ALLOW_DEMO_BOOTSTRAP").as_deref() != Ok("true")
-    {
-        // Production initialization must never seed deterministic test payment
-        // or invoice providers. Development/test installations also remain
-        // migration-only unless the operator explicitly opts into demo data.
-        return Ok(());
-    }
-    bootstrap().await
-}
-
-async fn bootstrap() -> Result<()> {
-    let config = AppConfig::load().context("bootstrap configuration is invalid")?;
-    if config.environment == Environment::Production {
-        bail!("demo bootstrap is disabled in production; run `matchplane migrate` instead");
-    }
-    if env::var("MATCHPLANE_ALLOW_DEMO_BOOTSTRAP").as_deref() != Ok("true") {
-        bail!(
-            "demo bootstrap requires MATCHPLANE_ALLOW_DEMO_BOOTSTRAP=true in development or test"
-        );
-    }
-    let store = PgStore::connect(&config.database_url, 2)
-        .await
-        .context("bootstrap runner could not connect to PostgreSQL")?;
-    let ids = store
-        .bootstrap_demo()
-        .await
-        .context("demo bootstrap failed")?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&ids).context("bootstrap result encoding failed")?
-    );
-    Ok(())
+    // Initialization is intentionally migration-only. Tenants, domains, schemas,
+    // payment providers and catalogue records must be supplied by an operator or
+    // a registered subplatform; the core never fabricates marketplace data.
+    migrate().await
 }
 
 async fn migrate() -> Result<()> {

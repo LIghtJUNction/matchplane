@@ -276,6 +276,11 @@ p {
   font-weight: 650;
 }
 
+.secure-status.is-insecure {
+  background: rgba(218, 161, 104, 0.2);
+  color: #8a4f2d;
+}
+
 .icon-button,
 .profile-button {
   min-width: 2.75rem;
@@ -2231,6 +2236,11 @@ body,
   color: #d2eadf;
 }
 
+:root[data-theme="dark"] .secure-status.is-insecure {
+  background: rgba(166, 103, 67, 0.34);
+  color: #f0c4a5;
+}
+
 :root[data-theme="dark"] .mode-summary,
 :root[data-theme="dark"] .readiness-item,
 :root[data-theme="dark"] .subplatform-row,
@@ -2915,6 +2925,12 @@ body,
 .seller-custom-field button { display: grid; place-items: center; width: 2.45rem; height: 2.45rem; border: 1px solid var(--line); border-radius: 0.75rem; background: transparent; color: var(--muted); cursor: pointer; }
 .seller-custom-field button:hover { color: var(--ink); border-color: var(--ink-soft); }
 .root-routing-seller-link { display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.9rem; }
+.root-platform-links { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.55rem; margin-top: 0.35rem; }
+.root-platform-link-card { position: relative; min-height: 4.6rem; padding: 0.85rem 2.3rem 0.8rem 0.9rem; display: grid; align-content: center; gap: 0.2rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--paper); color: var(--ink); text-decoration: none; transition: border-color 160ms ease, transform 160ms ease; }
+.root-platform-link-card:hover { border-color: var(--ink-soft); transform: translateY(-1px); }
+.root-platform-link-card strong { font-size: 0.78rem; }
+.root-platform-link-card small { color: var(--muted); font-size: 0.68rem; line-height: 1.35; }
+.root-platform-link-card > svg { position: absolute; right: 0.85rem; top: 50%; color: var(--muted); transform: translateY(-50%); }
 .seller-upload-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: 0.2rem; }
 .seller-upload-actions p { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.7rem; line-height: 1.45; }
 .seller-submissions { grid-column: 1 / -1; }

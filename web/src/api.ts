@@ -158,6 +158,26 @@ export interface PlatformSetupStatus {
   firstRun: { needsRootAccount: boolean; readyForAdmin: boolean };
 }
 
+export interface PlatformChildSummary {
+  slug: string;
+  path: string;
+  displayName: string;
+  description: string;
+  capabilities: string[];
+  agentStages: string[];
+  agentSkills: string[];
+}
+
+export async function getPlatformChildren(path = "/"): Promise<PlatformChildSummary[]> {
+  const response = await fetch(`/api/platform/children?path=${encodeURIComponent(path)}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as { children?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "平台节点读取失败");
+  return Array.isArray(body?.children) ? body.children as PlatformChildSummary[] : [];
+}
+
 export interface SubplatformOrganizationRecord {
   id: string;
   name: string;
@@ -398,8 +418,8 @@ export function isLiveMarketplaceEnabled(): boolean {
   const configured = process.env.NEXT_PUBLIC_MATCHPLANE_LIVE_MODE;
   if (configured === "false") return false;
   if (configured === "true") return true;
-  // A production build must never silently fall back to the demo-only branch.
-  // Operators can still opt out explicitly for a local/demo deployment.
+  // A production build must never silently fall back to the API-disabled branch.
+  // Operators can still opt out explicitly for a local development deployment.
   return process.env.NODE_ENV === "production";
 }
 

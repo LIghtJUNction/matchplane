@@ -50,7 +50,7 @@ const isProductionRuntime = process.env.NODE_ENV === "production" && process.env
 // before an SMTP route exists. This switch is deliberately explicit and environment-gated:
 // production always keeps Better Auth email verification enabled, even if an operator
 // accidentally carries the development variable into a production deployment.
-const allowDemoBootstrap =
+const allowDevAuthBootstrap =
   (process.env.MATCHPLANE_ENVIRONMENT === "development" || process.env.MATCHPLANE_ENVIRONMENT === "test")
   && process.env.MATCHPLANE_ALLOW_DEMO_BOOTSTRAP === "true";
 const configuredSocialProviders = configuredOAuthProviders();
@@ -95,7 +95,7 @@ export const auth = betterAuth({
   trustedOrigins,
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: !allowDemoBootstrap,
+    requireEmailVerification: !allowDevAuthBootstrap,
     autoSignIn: false,
     minPasswordLength: 8,
     maxPasswordLength: 128,
@@ -108,8 +108,8 @@ export const auth = betterAuth({
       }),
   },
   emailVerification: {
-    sendOnSignUp: !allowDemoBootstrap,
-    sendOnSignIn: !allowDemoBootstrap,
+    sendOnSignUp: !allowDevAuthBootstrap,
+    sendOnSignIn: !allowDevAuthBootstrap,
     autoSignInAfterVerification: true,
     sendVerificationEmail: (data) =>
       sendConfiguredAuthEmail({
@@ -273,7 +273,7 @@ export const auth = betterAuth({
           if (
             !configuredRootAdminEmail ||
             user.email.toLowerCase() !== configuredRootAdminEmail ||
-            (user.emailVerified !== true && !allowDemoBootstrap)
+            (user.emailVerified !== true && !allowDevAuthBootstrap)
           ) {
             return;
           }

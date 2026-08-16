@@ -1,57 +1,10 @@
 use matchplane_domain::{
-    AccountId, AssetId, AssetSchemaId, CorrelationId, DomainId, EmbeddingModelId, EventId,
-    FederationNodeId, MarketId, OrderId, OrderIntent, OrderSide, OrderStatus, PayloadHash,
-    PaymentGatewayId, Quantity, ShardId, TenantId, TradeId,
+    AccountId, AssetId, CorrelationId, DomainId, EmbeddingModelId, EventId, FederationNodeId,
+    MarketId, OrderId, OrderIntent, OrderSide, OrderStatus, PayloadHash, Quantity, ShardId,
+    TenantId, TradeId,
 };
 use serde::Serialize;
 use time::OffsetDateTime;
-
-/// Stable IDs and sample records installed by the development bootstrap.
-#[derive(Debug, Clone, Serialize)]
-pub struct DemoBootstrap {
-    /// Local automotive authority node.
-    pub node_a: FederationNodeId,
-    /// Local electronics authority node.
-    pub node_b: FederationNodeId,
-    /// Federation aggregation node.
-    pub node_c: FederationNodeId,
-    /// Demonstration tenant.
-    pub tenant_id: TenantId,
-    /// Automotive domain.
-    pub automotive_domain_id: DomainId,
-    /// Electronics domain.
-    pub electronics_domain_id: DomainId,
-    /// Automotive schema.
-    pub automotive_schema_id: AssetSchemaId,
-    /// Electronics schema.
-    pub electronics_schema_id: AssetSchemaId,
-    /// Automotive market.
-    pub automotive_market_id: MarketId,
-    /// Electronics market.
-    pub electronics_market_id: MarketId,
-    /// Automotive market shard.
-    pub automotive_shard_id: ShardId,
-    /// Electronics market shard.
-    pub electronics_shard_id: ShardId,
-    /// Buyer quote-currency account.
-    pub buyer_quote_account_id: AccountId,
-    /// Buyer base-asset settlement account.
-    pub buyer_base_account_id: AccountId,
-    /// Seller base-asset account.
-    pub seller_base_account_id: AccountId,
-    /// Seller quote-currency settlement account.
-    pub seller_quote_account_id: AccountId,
-    /// Platform account receiving disclosed transaction commissions.
-    pub platform_quote_account_id: AccountId,
-    /// Demonstration automotive asset.
-    pub automotive_asset_id: AssetId,
-    /// Demonstration electronics asset.
-    pub electronics_asset_id: AssetId,
-    /// Three-dimensional demo embedding model.
-    pub embedding_model_id: EmbeddingModelId,
-    /// Deterministic sandbox payment gateway.
-    pub test_payment_gateway_id: PaymentGatewayId,
-}
 
 /// Validated order data submitted to the authoritative transaction boundary.
 #[derive(Debug, Clone)]

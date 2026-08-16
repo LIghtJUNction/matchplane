@@ -76,7 +76,21 @@ function pathnameOnly(value: string): string {
 /** Load a registered subplatform manifest without embedding vertical data in root. */
 export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig> {
   const base = resolveSubplatform(pathname);
-  if (!base.manifestUrl) return base;
+  if (!base.manifestUrl) {
+    // The root identity comes from the configured tenant. The bundled string is only a
+    // pre-hydration label for the first paint; it is never a marketplace record.
+    try {
+      const response = await fetch("/api/platform/setup", { headers: { accept: "application/json" } });
+      if (!response.ok) return base;
+      const body = await response.json() as { root?: { tenant?: { name?: unknown } | null } };
+      const name = body.root?.tenant?.name;
+      return typeof name === "string" && name.trim()
+        ? { ...base, brandName: name.trim(), label: name.trim() }
+        : base;
+    } catch {
+      return base;
+    }
+  }
   try {
     const response = await fetch(base.manifestUrl, { headers: { accept: "application/json" } });
     if (!response.ok) return base;

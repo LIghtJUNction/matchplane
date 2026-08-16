@@ -1,6 +1,5 @@
 //! PostgreSQL repositories, migrations, transactional outbox, and consumer inbox primitives.
 
-mod bootstrap;
 mod federation;
 mod generic_marketplace;
 mod marketplace;
@@ -34,9 +33,9 @@ pub use marketplace::{
 };
 pub use subplatform::{SubplatformEmailConfig, UpsertSubplatformEmailConfig};
 pub use types::{
-    BookSnapshot, CandidateMatch, DemoBootstrap, FederationReservation, FederationTransition,
-    MatchCommitOutcome, OutboxMessage, ReserveFederated, StoredAccount, StoredOrder, StoredTrade,
-    SubmitOrder, SubmitOrderOutcome, VectorRecord,
+    BookSnapshot, CandidateMatch, FederationReservation, FederationTransition, MatchCommitOutcome,
+    OutboxMessage, ReserveFederated, StoredAccount, StoredOrder, StoredTrade, SubmitOrder,
+    SubmitOrderOutcome, VectorRecord,
 };
 
 /// PostgreSQL storage facade shared by service adapters.
