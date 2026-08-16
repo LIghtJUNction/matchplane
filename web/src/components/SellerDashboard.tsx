@@ -82,6 +82,10 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       return;
     }
 
+    if (!isLiveMarketplaceEnabled()) {
+      onNotice("当前环境未启用真实供给 API，资料没有写入系统");
+      return;
+    }
     const session = await getMarketplaceSession({
       subplatform: subplatform.slug,
       platformPath: subplatform.path,
@@ -94,34 +98,24 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       window.location.assign(`/login?role=seller&next=${encodeURIComponent(next)}`);
       return;
     }
-    if (isLiveMarketplaceEnabled() && (!subplatform.domainId || !subplatform.assetSchemaId)) {
+    if (!subplatform.domainId || !subplatform.assetSchemaId) {
       onNotice("当前子平台还没有配置 domain 或资料 schema，暂时不能提交真实供给");
       return;
     }
 
     setSubmitting(true);
     try {
-      const submission = isLiveMarketplaceEnabled()
-        ? await submitSellerListing({
-            session,
-            domainId: subplatform.domainId!,
-            assetSchemaId: subplatform.assetSchemaId!,
-            externalKey: normalizedKey,
-            displayName: normalizedName,
-            attributes: parsedAttributes,
-            askingAmount: normalizedAmount,
-            currency: normalizedCurrency,
-            currencyScale: subplatform.currencyScale ?? 0,
-          })
-        : demoSubmission({
-            session,
-            externalKey: normalizedKey,
-            displayName: normalizedName,
-            attributes: parsedAttributes,
-            askingAmount: normalizedAmount,
-            currency: normalizedCurrency,
-            currencyScale: subplatform.currencyScale ?? 0,
-          });
+      const submission = await submitSellerListing({
+        session,
+        domainId: subplatform.domainId,
+        assetSchemaId: subplatform.assetSchemaId,
+        externalKey: normalizedKey,
+        displayName: normalizedName,
+        attributes: parsedAttributes,
+        askingAmount: normalizedAmount,
+        currency: normalizedCurrency,
+        currencyScale: subplatform.currencyScale ?? 0,
+      });
       setSubmissions((current) => [submission, ...current]);
       setExternalKey("");
       setDisplayName("");
@@ -131,7 +125,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       setCustomFields([]);
       setAdvancedAttributes("{}");
       setAdvancedOpen(false);
-      onNotice(isLiveMarketplaceEnabled() ? "供给已提交，等待平台审核后展示" : "供给资料已记录（演示模式）");
+      onNotice("供给已提交，等待平台审核后展示");
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "供给提交失败，请稍后重试");
     } finally {
@@ -234,37 +228,6 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       </section>
     </div>
   );
-}
-
-function demoSubmission(input: {
-  session: { tenantId: string; partyId: string };
-  externalKey: string;
-  displayName: string;
-  attributes: Record<string, unknown>;
-  askingAmount: string;
-  currency: string;
-  currencyScale: number;
-}): ListingSubmission {
-  const now = new Date().toISOString();
-  return {
-    submission_id: crypto.randomUUID(),
-    tenant_id: input.session.tenantId,
-    domain_id: crypto.randomUUID(),
-    seller_party_id: input.session.partyId,
-    asset_schema_id: crypto.randomUUID(),
-    external_key: input.externalKey,
-    display_name: input.displayName,
-    attributes: input.attributes,
-    asking_amount: input.askingAmount,
-    currency: input.currency,
-    currency_scale: input.currencyScale,
-    status: "pending_review",
-    reviewed_by: null,
-    review_reason: null,
-    version: 1,
-    created_at: now,
-    updated_at: now,
-  };
 }
 
 function amountPlaceholder(scale: number): string {

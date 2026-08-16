@@ -47,14 +47,7 @@ export async function getMarketplaceSession(input: {
     return capability;
   }
 
-  // Demo mode has no domain API call. It still requires a Better Auth session and uses the
-  // Better Auth user UUID as a display-only identity for local form state.
-  return capability ?? {
-    tenantId: input.tenantId ?? "demo",
-    partyId: data.user.id,
-    platformPath: input.platformPath,
-    role: input.role === "subplatform_admin" ? "both" : input.role,
-    accessToken: "demo-capability-not-for-api",
-    accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-  };
+  // A non-live build never fabricates a marketplace bearer or writes local-only records. The
+  // caller can show a configuration notice and operators can opt into the real API explicitly.
+  return capability ?? null;
 }

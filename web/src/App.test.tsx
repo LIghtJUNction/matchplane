@@ -67,17 +67,10 @@ describe("MatchPlane workspaces", () => {
     expect(window.location.assign).toBeDefined();
   });
 
-  it("accepts a structured upload in demo mode when the seller is signed in", async () => {
+  it("does not fabricate a seller submission when the marketplace API is disabled", async () => {
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/?role=seller");
     window.sessionStorage.setItem("matchplane.test-auth", "true");
-    savePartySession({
-      tenantId: crypto.randomUUID(),
-      partyId: crypto.randomUUID(),
-      role: "seller",
-      accessToken: "demo-session-token",
-      accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-    }, "root", "seller");
     render(<App />);
 
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
@@ -86,8 +79,8 @@ describe("MatchPlane workspaces", () => {
     await user.type(screen.getByLabelText("币种"), "CNY");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
 
-    expect(await screen.findByText("由卖家提交的资料")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("供给资料已记录");
+    expect(screen.getByRole("status")).toHaveTextContent("没有写入系统");
+    expect(screen.queryByText("由卖家提交的资料")).not.toBeInTheDocument();
   });
 
   it("requires an explicit administrator confirmation before changing payment mode", async () => {
@@ -123,7 +116,7 @@ describe("MatchPlane workspaces", () => {
     await user.type(input, "我有一个需要被认真匹配的问题");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
-    expect(await screen.findByText(/需求已记录（演示模式）/)).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent(/未连接真实撮合 API/);
   });
 
   it("keeps visible controls actionable instead of leaving placeholder buttons", async () => {

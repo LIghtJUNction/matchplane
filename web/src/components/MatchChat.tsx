@@ -111,6 +111,12 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
           return;
         }
         const live = isLiveMarketplaceEnabled();
+        if (!live) {
+          const message = "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。";
+          setMessages((current) => current.map((item) => item.id === `${requestId}-assistant` ? { ...item, text: message } : item));
+          onNotice(message);
+          return;
+        }
         const route = live
           ? await routePlatformIntent({ platformPath: platformPath(subplatform), narrative: text })
           : null;
@@ -153,7 +159,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
                     : route?.routing.source === "ai"
                       ? "需求已记录在当前平台节点；AI 判断当前候选平台暂时没有合适的匹配。你可以补充目标、预算或限制条件后重试。"
                       : "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。"
-                : "需求已记录（演示模式）。登录状态有效，下一步会按你的条件给出匹配与理由。",
+                : "需求已记录在当前平台节点。",
             }
           : item));
         onNotice(copy.buyerSuccess);

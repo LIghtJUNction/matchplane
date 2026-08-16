@@ -65,6 +65,10 @@ export function SubplatformAdminDashboard({
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isLiveMarketplaceEnabled()) {
+      onNotice("当前环境未启用真实子平台 API，邮箱配置没有写入系统");
+      return;
+    }
     const session = await getMarketplaceSession({
       subplatform: subplatform.slug,
       platformPath: subplatform.path,
@@ -87,26 +91,24 @@ export function SubplatformAdminDashboard({
     }
     setSaving(true);
     try {
-      if (isLiveMarketplaceEnabled()) {
-        const updated = await saveSubplatformEmailConfig({
-          session,
-          domainId: subplatform.domainId,
-          providerKey: providerKey.trim(),
-          smtpHost: smtpHost.trim(),
-          smtpPort: Number(smtpPort),
-          tlsMode,
-          username: username.trim(),
-          credentialSecretRef: credentialSecretRef.trim(),
-          fromAddress: fromAddress.trim(),
-          replyTo: replyTo.trim() || undefined,
-          mode,
-          enabled,
-          expectedVersion: config?.version,
-          updatedBy: session.partyId,
-        });
-        setConfig(updated);
-      }
-      onNotice(isLiveMarketplaceEnabled() ? "子平台邮箱配置已保存" : "邮箱配置已记录（演示模式）");
+      const updated = await saveSubplatformEmailConfig({
+        session,
+        domainId: subplatform.domainId,
+        providerKey: providerKey.trim(),
+        smtpHost: smtpHost.trim(),
+        smtpPort: Number(smtpPort),
+        tlsMode,
+        username: username.trim(),
+        credentialSecretRef: credentialSecretRef.trim(),
+        fromAddress: fromAddress.trim(),
+        replyTo: replyTo.trim() || undefined,
+        mode,
+        enabled,
+        expectedVersion: config?.version,
+        updatedBy: session.partyId,
+      });
+      setConfig(updated);
+      onNotice("子平台邮箱配置已保存");
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "邮箱配置保存失败");
     } finally {
