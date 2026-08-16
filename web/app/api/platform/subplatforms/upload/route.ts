@@ -111,6 +111,9 @@ export async function POST(request: Request): Promise<Response> {
     }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch (error) {
     if (wrotePath) await fs.unlink(wrotePath).catch(() => undefined);
+    if (error instanceof BodyLimitError) {
+      return NextResponse.json({ error: "子平台压缩包不能超过 64 MiB" }, { status: 413 });
+    }
     console.error("subplatform archive upload failed", error);
     return NextResponse.json({ error: "子平台压缩包保存失败" }, { status: 500 });
   }
