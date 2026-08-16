@@ -31,6 +31,7 @@ install -d -m 0750 -o root -g matchplane-gateway /etc/matchplane/secrets/gateway
 install -d -m 0750 -o root -g matchplane-payment /etc/matchplane/secrets/payment
 install -d -m 0750 -o root -g matchplane-web /etc/matchplane/secrets/web
 install -d -m 0750 -o root -g matchplane /etc/matchplane/services
+install -d -m 0750 -o matchplane-web -g matchplane-web /var/lib/matchplane/subplatform-uploads
 
 create_hex_secret() {
   local path=$1

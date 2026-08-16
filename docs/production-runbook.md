@@ -105,6 +105,10 @@ Archive registration uploads are sent to `POST /api/platform/subplatforms/upload
 `web.uploadPvc`). The web process stores opaque archives only and does not extract them. The
 builder must mount or fetch the same upload object, validate its archive members and manifest in
 an isolated workspace, and remove/expire consumed uploads according to the retention policy.
+The packaged systemd unit grants the web service write access only to
+`/var/lib/matchplane/subplatform-uploads` while keeping `ProtectSystem=strict`; if a deployment
+uses a different absolute root, provide an equivalent `ReadWritePaths` override and ownership
+for `matchplane-web`.
 When a package includes a browser UI, stage its `dist/` directory below the absolute
 `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT` and include the relative `artifactPath` plus HTML
 `artifactEntry` in the builder callback. The root records both paths with the build digest and
