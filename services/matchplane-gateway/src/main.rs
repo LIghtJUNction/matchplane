@@ -157,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
         contact_cipher,
         operator_auth,
     });
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
         .route("/metrics", get(metrics))
@@ -177,78 +177,6 @@ async fn main() -> anyhow::Result<()> {
             "/v1/subplatforms/{domain_id}/email-config",
             get(marketplace::get_subplatform_email_config)
                 .put(marketplace::upsert_subplatform_email_config),
-        )
-        .route(
-            "/v1/admin/marketplace/asset-authorizations",
-            post(marketplace::set_asset_authorization),
-        )
-        .route(
-            "/v1/marketplace/listings",
-            post(marketplace::create_listing),
-        )
-        .route(
-            "/v1/marketplace/listing-submissions",
-            get(marketplace::listing_submissions).post(marketplace::create_listing_submission),
-        )
-        .route(
-            "/v1/admin/marketplace/listing-submissions/{submission_id}/approve",
-            post(marketplace::approve_listing_submission),
-        )
-        .route(
-            "/v1/marketplace/buyer-requests",
-            post(marketplace::create_buyer_request),
-        )
-        .route(
-            "/v1/marketplace/buyer-requests/{request_id}/recommendations",
-            post(marketplace::recommendations),
-        )
-        .route(
-            "/v1/marketplace/offline-deals",
-            get(marketplace::offline_deals).post(marketplace::create_offline_deal),
-        )
-        .route(
-            "/v1/marketplace/offline-deals/{offline_deal_id}",
-            get(marketplace::offline_deal),
-        )
-        .route(
-            "/v1/marketplace/offline-deals/{offline_deal_id}/contact/accept",
-            post(marketplace::accept_contact_exchange),
-        )
-        .route(
-            "/v1/marketplace/offline-deals/{offline_deal_id}/contact",
-            get(marketplace::contact),
-        )
-        .route(
-            "/v1/marketplace/offline-deals/{offline_deal_id}/confirm",
-            post(marketplace::confirm_offline_deal),
-        )
-        .route(
-            "/v1/marketplace/offline-deals/{offline_deal_id}/finalize",
-            post(marketplace::finalize_offline_deal),
-        )
-        .route(
-            "/v1/marketplace/offline-deals/{offline_deal_id}/viewings",
-            get(marketplace::viewings).post(marketplace::create_viewing),
-        )
-        .route(
-            "/v1/marketplace/viewings/{viewing_id}/{action}",
-            post(marketplace::transition_viewing),
-        )
-        .route(
-            "/v1/marketplace/listings/{listing_id}/exposures",
-            post(marketplace::record_exposure),
-        )
-        .route(
-            "/v1/marketplace/listings/{listing_id}/exposure-metrics",
-            get(marketplace::exposure_metrics),
-        )
-        .route(
-            "/v1/marketplace/promotions",
-            post(marketplace::create_seller_promotion),
-        )
-        .route(
-            "/v1/marketplace/promotions/{campaign_id}",
-            get(marketplace::seller_promotion),
         )
         .route(
             "/v1/marketplace/intents",
@@ -285,7 +213,88 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/v1/marketplace/introductions/{introduction_id}/contact",
             get(generic_marketplace::release_contact),
-        )
+        );
+
+    // The old listing/offline-deal surface is a compatibility adapter, not part of the
+    // domain-neutral kernel.  It is never enabled by pricing, schema, or a URL; an operator must
+    // opt in explicitly during a controlled migration window.
+    if legacy_marketplace_adapter_enabled() {
+        app = app
+            .route(
+                "/v1/admin/marketplace/asset-authorizations",
+                post(marketplace::set_asset_authorization),
+            )
+            .route(
+                "/v1/marketplace/listings",
+                post(marketplace::create_listing),
+            )
+            .route(
+                "/v1/marketplace/listing-submissions",
+                get(marketplace::listing_submissions).post(marketplace::create_listing_submission),
+            )
+            .route(
+                "/v1/admin/marketplace/listing-submissions/{submission_id}/approve",
+                post(marketplace::approve_listing_submission),
+            )
+            .route(
+                "/v1/marketplace/buyer-requests",
+                post(marketplace::create_buyer_request),
+            )
+            .route(
+                "/v1/marketplace/buyer-requests/{request_id}/recommendations",
+                post(marketplace::recommendations),
+            )
+            .route(
+                "/v1/marketplace/offline-deals",
+                get(marketplace::offline_deals).post(marketplace::create_offline_deal),
+            )
+            .route(
+                "/v1/marketplace/offline-deals/{offline_deal_id}",
+                get(marketplace::offline_deal),
+            )
+            .route(
+                "/v1/marketplace/offline-deals/{offline_deal_id}/contact/accept",
+                post(marketplace::accept_contact_exchange),
+            )
+            .route(
+                "/v1/marketplace/offline-deals/{offline_deal_id}/contact",
+                get(marketplace::contact),
+            )
+            .route(
+                "/v1/marketplace/offline-deals/{offline_deal_id}/confirm",
+                post(marketplace::confirm_offline_deal),
+            )
+            .route(
+                "/v1/marketplace/offline-deals/{offline_deal_id}/finalize",
+                post(marketplace::finalize_offline_deal),
+            )
+            .route(
+                "/v1/marketplace/offline-deals/{offline_deal_id}/viewings",
+                get(marketplace::viewings).post(marketplace::create_viewing),
+            )
+            .route(
+                "/v1/marketplace/viewings/{viewing_id}/{action}",
+                post(marketplace::transition_viewing),
+            )
+            .route(
+                "/v1/marketplace/listings/{listing_id}/exposures",
+                post(marketplace::record_exposure),
+            )
+            .route(
+                "/v1/marketplace/listings/{listing_id}/exposure-metrics",
+                get(marketplace::exposure_metrics),
+            )
+            .route(
+                "/v1/marketplace/promotions",
+                post(marketplace::create_seller_promotion),
+            )
+            .route(
+                "/v1/marketplace/promotions/{campaign_id}",
+                get(marketplace::seller_promotion),
+            );
+    }
+
+    let app = app
         .with_state(state)
         .layer(CatchPanicLayer::new())
         .layer(CompressionLayer::new())
@@ -510,6 +519,17 @@ async fn search_candidates(
         .await
         .map(Json)
         .map_err(ApiError::from)
+}
+
+/// Legacy listing/offline-deal routes are an explicit migration escape hatch. The generic
+/// marketplace contract is always available and never falls back to this adapter implicitly.
+fn legacy_marketplace_adapter_enabled() -> bool {
+    matches!(
+        std::env::var("MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER")
+            .ok()
+            .as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "on")
+    )
 }
 
 fn require_operator(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {

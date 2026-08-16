@@ -75,7 +75,9 @@ the UI and Better Auth routes.
 The generic marketplace kernel supports seller exposure analytics, explainable recommendations,
 consent-controlled introductions, and offline settlement without assuming what is being matched.
 The package under `subplatforms/auto` is only a compatibility adapter: it supplies its own schema
-and UI and is not seeded into a clean root deployment. See
+and UI and is not seeded into a clean root deployment. Its legacy HTTP routes are disabled unless
+an operator explicitly sets `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true`; new packages
+use the manifest-declared generic contract. See
 [docs/marketplace-payments.md](docs/marketplace-payments.md) for the payment and commission
 boundary.
 

@@ -109,7 +109,8 @@ package may declare `pricing`, `ui.chat`, `ui.copy`, `ui.filters` and `ui.supply
 and passes those values to the generic shell/plugin. The root uses the domain-neutral marketplace
 contract by default. A package that still depends on an older vertical adapter must explicitly
 declare `marketplaceContract: "legacy-v1"`; pricing or the presence of a schema never selects
-that adapter implicitly. The root never ships a sample listing,
+that adapter implicitly. The gateway's legacy HTTP routes are disabled by default and require
+the operator-only `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` migration flag. The root never ships a sample listing,
 vertical trust claim, or default business currency. A seller submits the values defined by the
 active package schema, while the root stores and forwards the resulting structured attributes.
 
