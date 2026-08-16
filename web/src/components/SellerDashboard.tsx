@@ -35,6 +35,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
   const pricing = pricingFor(subplatform);
   const copy = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
   const isFixedPrice = pricing.mode === "fixed";
+  const usesLegacyMarketplace = subplatform.marketplaceContract === "legacy-v1";
   const pricingCurrency = pricing.currency ?? subplatform.currency;
   const pricingScale = pricing.currencyScale ?? subplatform.currencyScale;
   const [currency, setCurrency] = useState(pricingCurrency ?? "");
@@ -76,7 +77,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
         setSubmissionsError("请先登录后查看你的提交记录");
         return;
       }
-      if (isFixedPrice) {
+      if (usesLegacyMarketplace) {
         setSubmissions(await getSellerListingSubmissions({ session, domainId: subplatform.domainId }));
       } else {
         setSubmissions(await getMarketplaceOffers({ session, domainId: subplatform.domainId }));
@@ -89,7 +90,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
     } finally {
       setSubmissionsLoading(false);
     }
-  }, [isFixedPrice, subplatform.domainId, subplatform.path, subplatform.slug, subplatform.tenantId]);
+  }, [subplatform.domainId, subplatform.marketplaceContract, subplatform.path, subplatform.slug, subplatform.tenantId, usesLegacyMarketplace]);
 
   const consent = async (introduction: MarketplaceIntroduction) => {
     if (!subplatform.domainId || consentingIntroductionId) return;
@@ -167,7 +168,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       onNotice("当前子平台尚未完成身份配置");
       return;
     }
-    if (isFixedPrice && (!subplatform.assetSchemaId || !pricingCurrency
+    if (usesLegacyMarketplace && (pricing.mode !== "fixed" || !subplatform.assetSchemaId || !pricingCurrency
       || typeof pricingScale !== "number"
       || !Number.isInteger(pricingScale)
       || pricingScale < 0 || pricingScale > 18)) {
@@ -205,7 +206,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
     }
     setSubmitting(true);
     try {
-      const record: SellerRecord = isFixedPrice
+      const record: SellerRecord = usesLegacyMarketplace
         ? await submitSellerListing({
             session,
             domainId: subplatform.domainId,
@@ -225,6 +226,9 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
             attributes: parsedAttributes,
             terms: {
               pricing_mode: pricing.mode,
+              ...(normalizedAmount ? { amount_minor: normalizedAmount } : {}),
+              ...(normalizedCurrency ? { currency: normalizedCurrency } : {}),
+              ...(pricingScale !== undefined ? { currency_scale: pricingScale } : {}),
               ...(pricing.label ? { pricing_label: pricing.label } : {}),
             },
           });
@@ -319,7 +323,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
           ) : null}
           <div className="seller-upload-actions seller-upload-wide">
             <p><FileUp size={17} aria-hidden="true" /> {copy("reviewNotice", "提交后状态为“待审核”，平台不会自动发布未经确认的资料。")}</p>
-            <motion.button className="button button-dark" type="submit" disabled={submitting || (isLiveMarketplaceEnabled() && (!subplatform.domainId || (isFixedPrice && (!subplatform.assetSchemaId || !pricingCurrency || !Number.isInteger(pricingScale)))))} whileTap={{ scale: 0.97 }} transition={spring}>
+            <motion.button className="button button-dark" type="submit" disabled={submitting || (isLiveMarketplaceEnabled() && (!subplatform.domainId || (usesLegacyMarketplace && (!subplatform.assetSchemaId || !pricingCurrency || !Number.isInteger(pricingScale)))))} whileTap={{ scale: 0.97 }} transition={spring}>
               {submitting ? copy("submittingLabel", "正在提交…") : copy("submitForReviewLabel", "上传并提交审核")}
               {!submitting ? <ArrowRight size={18} aria-hidden="true" /> : null}
             </motion.button>
@@ -390,6 +394,12 @@ function sellerRecordId(record: SellerRecord): string {
 function sellerRecordPrice(record: SellerRecord, pricing: { mode: string }): string {
   if ("asking_amount" in record) {
     return formatMinorUnits(record.asking_amount, record.currency, record.currency_scale);
+  }
+  const amount = record.terms.amount_minor;
+  const currency = record.terms.currency;
+  const scale = record.terms.currency_scale;
+  if (typeof amount === "string" && typeof currency === "string" && typeof scale === "number" && Number.isInteger(scale)) {
+    return formatMinorUnits(amount, currency, scale);
   }
   const display = stringAttribute(record.terms, ["display_price", "price_label", "price"]);
   return display || (pricing.mode === "none" ? "—" : "待补充");

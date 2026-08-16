@@ -80,6 +80,7 @@ Every package must contain `matchplane.subplatform.json` at its repository or ar
   "slug": "auto",
   "displayName": "Example Auto",
   "description": "...",
+  "marketplaceContract": "generic-v1",
   "pricing": { "mode": "fixed", "currency": "XXX", "currencyScale": 2, "label": "Price" },
   "email": { "providerKey": "example-auto", "fromAddress": "no-reply@example.com" },
   "rootApiVersion": "v1",
@@ -105,7 +106,10 @@ configuration.
 
 Domain copy, pricing capabilities, filters and seller fields belong to the package, not the root implementation. A
 package may declare `pricing`, `ui.chat`, `ui.copy`, `ui.filters` and `ui.supplyFields` in its manifest; the root validates
-and passes those values to the generic shell/plugin. The root never ships a sample listing,
+and passes those values to the generic shell/plugin. The root uses the domain-neutral marketplace
+contract by default. A package that still depends on an older vertical adapter must explicitly
+declare `marketplaceContract: "legacy-v1"`; pricing or the presence of a schema never selects
+that adapter implicitly. The root never ships a sample listing,
 vertical trust claim, or default business currency. A seller submits the values defined by the
 active package schema, while the root stores and forwards the resulting structured attributes.
 

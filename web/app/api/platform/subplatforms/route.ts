@@ -316,6 +316,11 @@ function validateManifest(value: unknown, slug: string | undefined, packageId: s
   if (!stringMatches(manifest.slug, /^[a-z0-9][a-z0-9-]{1,62}$/) || manifest.slug === "root" || manifest.slug !== slug) return { ok: false, error: "manifest.slug 与 slug 不一致或使用了保留值" };
   if (!stringMatches(manifest.displayName, /^.{1,200}$/u) || !stringMatches(manifest.entry, /^(?!\/)(?!.*\.\.).+$/)) return { ok: false, error: "manifest displayName/entry 无效" };
   if (manifest.description !== undefined && !stringMatches(manifest.description, /^.{0,2000}$/u)) return { ok: false, error: "manifest.description 无效" };
+  if (manifest.marketplaceContract !== undefined
+    && manifest.marketplaceContract !== "generic-v1"
+    && manifest.marketplaceContract !== "legacy-v1") {
+    return { ok: false, error: "manifest.marketplaceContract 无效" };
+  }
   if (manifest.pricing !== undefined && !validateManifestPricing(manifest.pricing)) return { ok: false, error: "manifest.pricing 无效" };
   if (manifest.email !== undefined && !validateManifestEmail(manifest.email)) return { ok: false, error: "manifest.email 无效" };
   if (manifest.ui !== undefined && !validateManifestUi(manifest.ui)) return { ok: false, error: "manifest.ui 无效" };
@@ -442,6 +447,7 @@ interface Manifest {
   slug: string;
   displayName: string;
   description?: string;
+  marketplaceContract?: "generic-v1" | "legacy-v1";
   pricing?: { mode: "fixed" | "range" | "negotiable" | "none"; currency?: string; currencyScale?: number; label?: string };
   email?: { providerKey?: string; fromAddress?: string };
   ui?: {
@@ -472,6 +478,7 @@ const manifestKeys = new Set([
   "slug",
   "displayName",
   "description",
+  "marketplaceContract",
   "pricing",
   "email",
   "ui",

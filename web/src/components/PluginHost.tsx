@@ -163,12 +163,16 @@ async function submitPluginListing(
     const externalKey = boundedText(supply.externalKey, 256, "内部编号");
     const displayName = boundedText(supply.displayName, 500, "供给名称");
     const pricing = pricingFor(input.subplatform);
+    const usesLegacyMarketplace = input.subplatform.marketplaceContract === "legacy-v1";
     const askingAmount = typeof supply.askingAmount === "string" ? supply.askingAmount.trim() : "";
     const currency = typeof supply.currency === "string" ? supply.currency.trim().toUpperCase() : "";
     if (pricing.mode === "fixed") {
-      if (!input.subplatform.assetSchemaId || !pricing.currency) throw new Error("当前子平台尚未发布完整的资料 schema 与结算配置");
+      if (!pricing.currency) throw new Error("当前子平台尚未发布完整的结算配置");
       if (!/^\d+$/.test(askingAmount)) throw new Error("报价必须是非负整数（最小货币单位）");
       if (!/^[A-Z]{3}$/.test(currency)) throw new Error("币种必须是三位大写 ISO 4217 代码");
+    }
+    if (usesLegacyMarketplace && !input.subplatform.assetSchemaId) {
+      throw new Error("兼容适配器尚未发布完整的资料 schema");
     }
     if (JSON.stringify(attributes).length > 64_000) throw new Error("供给 attributes 不能超过 64KB");
 
@@ -186,7 +190,7 @@ async function submitPluginListing(
       throw new Error("Better Auth 会话尚未建立");
     }
 
-    if (pricing.mode === "fixed") {
+    if (usesLegacyMarketplace) {
       await submitSellerListing({
         session,
         domainId: input.subplatform.domainId,
@@ -205,6 +209,13 @@ async function submitPluginListing(
         externalKey,
         displayName,
         attributes,
+        terms: {
+          pricing_mode: pricing.mode,
+          ...(askingAmount ? { amount_minor: askingAmount } : {}),
+          ...(currency ? { currency } : {}),
+          ...(pricing.currencyScale !== undefined ? { currency_scale: pricing.currencyScale } : {}),
+          ...(pricing.label ? { pricing_label: pricing.label } : {}),
+        },
       });
     }
     input.onNotice(subplatformCopy(input.subplatform, "pluginSubmissionSuccess", "供给已真实提交，等待子平台审核后进入 AI 撮合"));

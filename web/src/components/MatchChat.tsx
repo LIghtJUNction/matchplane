@@ -84,7 +84,9 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
   const isRoot = subplatform.slug === "root";
   const isSeller = role === "seller";
   const pricing = pricingFor(subplatform);
-  const usesLegacyMarketplace = pricing.mode === "fixed" && Boolean(subplatform.assetSchemaId);
+  // Contract selection belongs to the mounted package manifest. Never infer a
+  // vertical adapter from a price mode or the presence of a JSON schema.
+  const usesLegacyMarketplace = subplatform.marketplaceContract === "legacy-v1";
   const copy = resolveChatCopy(subplatform);
   const label = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
 
@@ -161,7 +163,11 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
                 side: "demand",
                 narrative: text,
                 attributes: {},
-                terms: {},
+                terms: {
+                  pricing_mode: pricing.mode,
+                  ...(pricing.currency ? { currency: pricing.currency } : {}),
+                  ...(pricing.currencyScale !== undefined ? { currency_scale: pricing.currencyScale } : {}),
+                },
                 idempotencyKey: `chat-${requestId}`,
               });
               const candidates = await getMarketplaceOfferMatches({

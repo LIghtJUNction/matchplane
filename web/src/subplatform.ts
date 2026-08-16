@@ -7,6 +7,16 @@ export interface PricingConfig {
   label?: string;
 }
 
+/**
+ * Selects the stable marketplace transport owned by the mounted package.
+ *
+ * The generic contract is the default and is intentionally independent of a
+ * vertical's field names, prices, or role labels.  `legacy-v1` is an explicit
+ * compatibility escape hatch for packages that still need the pre-generic
+ * adapter; it must never be inferred from pricing or a schema.
+ */
+export type MarketplaceContract = "generic-v1" | "legacy-v1";
+
 export interface SubplatformConfig {
   slug: string;
   /** Canonical mounted path. The root node is `/`; children may be nested. */
@@ -21,6 +31,7 @@ export interface SubplatformConfig {
   currency?: string;
   /** Pricing is a subplatform capability; absent means the offer is not fixed-price. */
   pricing?: PricingConfig;
+  marketplaceContract?: MarketplaceContract;
   email?: { providerKey?: string; fromAddress?: string };
   /** Optional copy/schema hints owned by the mounted subplatform; root UI remains domain-neutral. */
   ui?: {
@@ -64,6 +75,7 @@ export function resolveSubplatform(pathname = "/"): SubplatformConfig {
         label: "通用 AI 撮合",
         description: "把需求交给合适的供给方。",
         pricing: { mode: "none" },
+        marketplaceContract: "generic-v1",
       }
     : {
         slug,
@@ -118,6 +130,7 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       currencyScale?: number;
       currency?: string;
       pricing?: PricingConfig;
+      marketplaceContract?: MarketplaceContract;
       email?: { providerKey?: string; fromAddress?: string };
       ui?: {
         chat?: Record<string, string>;
@@ -149,6 +162,7 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       currencyScale: Number.isInteger(manifest.currencyScale) ? manifest.currencyScale : undefined,
       currency: manifest.currency?.trim() || undefined,
       pricing,
+      marketplaceContract: manifest.marketplaceContract === "legacy-v1" ? "legacy-v1" : "generic-v1",
       email: manifest.email,
       ui: validUi(manifest.ui),
       assetSchema: validAssetSchema(manifest.assetSchema),

@@ -445,9 +445,16 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
     const location = typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined;
     const terms = item.terms && typeof item.terms === "object" && !Array.isArray(item.terms) ? item.terms : {};
     const currencyScale = item.currency_scale;
+    const termAmount = typeof terms.amount_minor === "string" ? terms.amount_minor : undefined;
+    const termCurrency = typeof terms.currency === "string" ? terms.currency : undefined;
+    const termScale = typeof terms.currency_scale === "number" && Number.isInteger(terms.currency_scale)
+      ? terms.currency_scale
+      : undefined;
     const price = item.asking_amount && item.currency && typeof currencyScale === "number" && Number.isInteger(currencyScale)
       ? formatMoney(item.asking_amount, item.currency, currencyScale)
-      : stringAttribute(terms, ["display_price", "price_label", "price"]) ?? "—";
+      : termAmount && termCurrency && termScale !== undefined
+        ? formatMoney(termAmount, termCurrency, termScale)
+        : stringAttribute(terms, ["display_price", "price_label", "price"]) ?? "—";
     return [{
       id,
       title: item.display_name,

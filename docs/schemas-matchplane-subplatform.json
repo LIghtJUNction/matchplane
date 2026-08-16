@@ -11,6 +11,11 @@
     "slug": { "type": "string", "pattern": "^(?!root$)[a-z0-9][a-z0-9-]{1,62}$" },
     "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
     "description": { "type": "string", "maxLength": 2000 },
+    "marketplaceContract": {
+      "enum": ["generic-v1", "legacy-v1"],
+      "default": "generic-v1",
+      "description": "Stable marketplace transport. Omit for the domain-neutral contract; legacy-v1 is an explicit compatibility adapter only."
+    },
     "pricing": {
       "type": "object",
       "additionalProperties": false,

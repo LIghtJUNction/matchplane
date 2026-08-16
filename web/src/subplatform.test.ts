@@ -17,6 +17,7 @@ describe("nested subplatform paths", () => {
 
     expect(config.path).toBe("/");
     expect(config.slug).toBe("root");
+    expect(config.marketplaceContract).toBe("generic-v1");
     expect(config.manifestUrl).toBeUndefined();
   });
 
