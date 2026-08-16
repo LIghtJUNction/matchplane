@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { ArrowRight, LockKeyhole, Phone, ShieldCheck } from "lucide-react";
+import { ArrowRight, LockKeyhole, ShieldCheck } from "lucide-react";
 import { motion } from "motion/react";
 
 import { type ContactExchange } from "../api";
@@ -65,7 +65,7 @@ export function ContactProfileCard({ subplatform, role, onNotice }: ContactProfi
         return;
       }
       setValues({});
-      onNotice(subplatformCopy(subplatform, "contactProfileSavedNotice", "联系方式已加密保存；双方同意后才会交换"));
+      onNotice(subplatformCopy(subplatform, "contactProfileSavedNotice", "已配置的联系方式已加密保存；双方同意后才会交换"));
     } catch (error) {
       onNotice(error instanceof Error ? error.message : subplatformCopy(subplatform, "contactProfileSaveError", "联系方式保存失败，请稍后重试"));
     } finally {
@@ -82,7 +82,7 @@ export function ContactProfileCard({ subplatform, role, onNotice }: ContactProfi
         <div>
           <p className="eyebrow">{subplatformCopy(subplatform, "contactProfileEyebrow", "联系方式")}</p>
           <h2 id="contact-profile-title">{subplatformCopy(subplatform, "contactProfileTitle", "设置双方同意后交换的渠道")}</h2>
-          <p>{subplatformCopy(subplatform, "contactProfileDescription", "可填写电话、微信、QQ、邮箱或当前子平台配置的其他渠道。平台只保存加密值，不会提前展示给对方。")}</p>
+          <p>{subplatformCopy(subplatform, "contactProfileDescription", "填写当前平台配置的联系方式。平台只保存加密值，不会提前展示给对方。")}</p>
         </div>
       </div>
       <form className="contact-profile-form" onSubmit={save}>
@@ -104,7 +104,7 @@ export function ContactProfileCard({ subplatform, role, onNotice }: ContactProfi
           <span><ShieldCheck size={15} aria-hidden="true" />{subplatformCopy(subplatform, "contactProfileSecurityLabel", "加密保存 · 双方同意后释放")}</span>
           <motion.button className="button button-dark" type="submit" disabled={saving} whileTap={{ scale: 0.97 }} transition={spring}>
             {saving ? subplatformCopy(subplatform, "contactProfileSavingLabel", "保存中…") : subplatformCopy(subplatform, "contactProfileSaveLabel", "保存联系方式")}
-            {!saving ? <ArrowRight size={17} aria-hidden="true" /> : <Phone size={16} aria-hidden="true" />}
+            <ArrowRight size={17} aria-hidden="true" />
           </motion.button>
         </div>
       </form>

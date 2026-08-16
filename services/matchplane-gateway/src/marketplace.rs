@@ -64,8 +64,8 @@ pub(super) struct EnsurePartySessionRequest {
     #[serde(default)]
     marketplace_sides: Option<Vec<String>>,
     contact: Value,
-    /// Normal session refreshes preserve user-configured phone/WeChat channels. Set false only
-    /// when the authenticated user intentionally saves a new contact profile.
+    /// Normal session refreshes preserve user-configured contact channels. Set false only when
+    /// the authenticated user intentionally saves a new contact profile.
     #[serde(default)]
     preserve_contact: bool,
 }
@@ -339,7 +339,7 @@ pub(super) async fn create_party(
     let marketplace_sides =
         resolve_marketplace_sides(request.role.as_deref(), request.marketplace_sides)?;
     let compatibility_role = compatibility_role_for_sides(&marketplace_sides);
-    let contact = normalize_contact(&request.contact)?;
+    let contact = normalize_contact(&request.contact, false)?;
     let contact_bytes = serde_json::to_vec(&contact)
         .map_err(|error| ApiError::bad_request(format!("contact is invalid: {error}")))?;
     if contact_bytes.len() > 16 * 1024 {
@@ -489,7 +489,10 @@ pub(super) async fn ensure_party_session(
     } else {
         MarketplacePartyId::from_uuid(scoped_party_uuid(auth_user_id, &platform_path))
     };
-    let contact = normalize_contact(&request.contact)?;
+    // Session refreshes may create the participant before a platform-owned contact form has
+    // collected any channel.  An empty encrypted object is safer than publishing an implicit
+    // account field; the configured package can save channels explicitly later.
+    let contact = normalize_contact(&request.contact, true)?;
     let contact_bytes = serde_json::to_vec(&contact)
         .map_err(|error| ApiError::bad_request(format!("contact is invalid: {error}")))?;
     let access_token = format!("mp_{}_{}", Uuid::now_v7().simple(), Uuid::now_v7().simple());
@@ -1600,7 +1603,7 @@ fn validate_text(value: &str, field: &str, maximum: usize) -> Result<(), ApiErro
     Ok(())
 }
 
-fn normalize_contact(contact: &Value) -> Result<Value, ApiError> {
+fn normalize_contact(contact: &Value, allow_empty: bool) -> Result<Value, ApiError> {
     let object = contact.as_object().ok_or_else(|| {
         ApiError::bad_request("contact must be an object of channel names and values".to_owned())
     })?;
@@ -1630,34 +1633,9 @@ fn normalize_contact(contact: &Value) -> Result<Value, ApiError> {
                 "contact.{field} must contain 1..=256 printable bytes"
             )));
         }
-        if field == "phone" {
-            let digit_count = value.bytes().filter(u8::is_ascii_digit).count();
-            if !(6..=20).contains(&digit_count)
-                || !value.bytes().all(|byte| {
-                    byte.is_ascii_digit() || matches!(byte, b'+' | b'-' | b' ' | b'(' | b')')
-                })
-            {
-                return Err(ApiError::bad_request(
-                    "contact.phone must be a valid phone number".to_owned(),
-                ));
-            }
-        } else if field == "email"
-            && (value.len() > 320
-                || !value.contains('@')
-                || value.matches('@').count() != 1
-                || value.starts_with('@')
-                || value.ends_with('@')
-                || !value
-                    .rsplit_once('@')
-                    .is_some_and(|(_, domain)| domain.contains('.')))
-        {
-            return Err(ApiError::bad_request(
-                "contact.email must be a valid email address".to_owned(),
-            ));
-        }
         normalized.insert(field.to_owned(), Value::String(value.to_owned()));
     }
-    if normalized.is_empty() {
+    if normalized.is_empty() && !allow_empty {
         return Err(ApiError::bad_request(
             "contact must include at least one channel".to_owned(),
         ));
@@ -1699,37 +1677,39 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn contact_exchange_keeps_supported_channels() {
-        let normalized = normalize_contact(&json!({
-            "phone": " +86 138 0000 0000 ",
-            "wechat": "seller_mp",
-            "email": " Seller@Example.com ",
-            "qq": "seller_qq",
-            "alipay": "seller@example.com",
-        }))
+    fn contact_exchange_keeps_configured_channels() {
+        let normalized = normalize_contact(
+            &json!({
+                "channel_primary": " primary ",
+                "channel_secondary": "secondary",
+                "channel_optional": " optional ",
+            }),
+            false,
+        )
         .expect("contact should be valid");
 
         assert_eq!(
             normalized,
             json!({
-                "phone": "+86 138 0000 0000",
-                "wechat": "seller_mp",
-                "email": "Seller@Example.com",
-                "qq": "seller_qq",
-                "alipay": "seller@example.com",
+                "channel_primary": "primary",
+                "channel_secondary": "secondary",
+                "channel_optional": "optional",
             })
         );
     }
 
     #[test]
-    fn contact_exchange_validates_email() {
-        let normalized = normalize_contact(&json!({"email": "seller@example.invalid"}))
-            .expect("email-only contact should be accepted");
-        assert_eq!(normalized, json!({"email": "seller@example.invalid"}));
+    fn contact_exchange_leaves_channel_validation_to_configuration() {
+        let normalized = normalize_contact(&json!({"channel_primary": "opaque-value"}), false)
+            .expect("configured channel value should be accepted");
+        assert_eq!(normalized, json!({"channel_primary": "opaque-value"}));
 
-        let error = normalize_contact(&json!({"email": "not-an-email"}))
-            .expect_err("malformed email must be rejected");
-        assert!(error.message.contains("contact.email"));
+        let empty = normalize_contact(&json!({}), true).expect("session bridge may be empty");
+        assert_eq!(empty, json!({}));
+
+        let error = normalize_contact(&json!({"channel_primary": 42}), false)
+            .expect_err("channel values must remain strings");
+        assert!(error.message.contains("must be a string"));
     }
 
     #[test]

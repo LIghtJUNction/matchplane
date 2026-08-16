@@ -150,7 +150,10 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const contact = normalizeContactInput(input.contact ?? { email: identity.user.email });
+  // Authentication email is an identity attribute, not an implicit marketplace contact
+  // channel.  A platform or mounted package must explicitly configure and collect any channel
+  // it wants to release after a match.
+  const contact = normalizeContactInput(input.contact ?? {});
   if (!contact.ok) return NextResponse.json({ error: contact.error }, { status: 400 });
   let gatewayResponse: Response;
   try {
@@ -433,8 +436,8 @@ function normalizeContactInput(value: unknown):
     normalized[key] = raw.trim();
     totalBytes += Buffer.byteLength(key) + Buffer.byteLength(raw);
   }
-  if (!Object.keys(normalized).length || totalBytes > 16 * 1024) {
-    return { ok: false, error: "至少填写一种联系方式，且总长度不能超过 16 KiB" };
+  if (totalBytes > 16 * 1024) {
+    return { ok: false, error: "联系方式总长度不能超过 16 KiB" };
   }
   return { ok: true, value: normalized };
 }
