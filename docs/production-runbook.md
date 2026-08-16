@@ -86,6 +86,13 @@ without storing raw prompts or provider credentials. Set a lower quota for a pub
 observing provider limits; a missing provider deliberately produces an auditable policy fallback
 rather than billing a user.
 
+The router sends a bounded `matchplane.platform.select_children` function tool by default
+(`MATCHPLANE_ROUTER_AI_TOOL_MODE=auto`). The tool's enum is generated from the server-side
+allowlisted children, so a provider cannot route to an unregistered slug. Providers that only
+support structured JSON can set `MATCHPLANE_ROUTER_AI_TOOL_MODE=disabled`; `required` is available
+when the provider supports mandatory tool calls. The persisted routing decision records whether
+the result came from the MCP-compatible tool boundary, structured JSON, or policy fallback.
+
 The package builder is a separate trust boundary. Configure
 `MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN` only in the web service's restricted secret file (or the
 equivalent Kubernetes `subplatform-builder-token` key). `POST /api/platform/subplatforms` never
@@ -93,6 +100,11 @@ accepts a self-reported build digest. The isolated builder calls
 `POST /api/platform/subplatforms/build` with that token and the SHA-256 digest of the immutable
 static artifact; a root/subplatform administrator must still call the activation endpoint. A
 digest callback is idempotent and cannot replace a different digest on an existing registration.
+Archive registration uploads are sent to `POST /api/platform/subplatforms/upload`; configure
+`MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT` as a writable, durable staging directory (or Helm's
+`web.uploadPvc`). The web process stores opaque archives only and does not extract them. The
+builder must mount or fetch the same upload object, validate its archive members and manifest in
+an isolated workspace, and remove/expire consumed uploads according to the retention policy.
 When a package includes a browser UI, stage its `dist/` directory below the absolute
 `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT` and include the relative `artifactPath` plus HTML
 `artifactEntry` in the builder callback. The root records both paths with the build digest and

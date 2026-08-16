@@ -187,6 +187,8 @@ spec:
               value: {{ $root.Values.web.rootTenantId | quote }}
             - name: MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT
               value: {{ $root.Values.web.artifactRoot | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT
+              value: {{ $root.Values.web.uploadRoot | quote }}
             - name: MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID
               value: {{ $root.Values.web.rootOrganizationId | quote }}
             - name: MATCHPLANE_ROOT_SMTP_PROVIDER_KEY
@@ -219,6 +221,8 @@ spec:
               value: {{ $root.Values.web.routerAiModel | quote }}
             - name: MATCHPLANE_ROUTER_AI_MAX_TOKENS
               value: {{ $root.Values.web.routerAiMaxTokens | quote }}
+            - name: MATCHPLANE_ROUTER_AI_TOOL_MODE
+              value: {{ $root.Values.web.routerAiToolMode | quote }}
             - name: MATCHPLANE_ROUTER_AI_MAX_STEPS
               value: {{ $root.Values.web.routerAiMaxSteps | quote }}
             - name: MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR
@@ -279,6 +283,11 @@ spec:
               mountPath: {{ $root.Values.web.artifactRoot | quote }}
               readOnly: true
           {{- end }}
+          {{- if $root.Values.web.uploadPvc }}
+            - name: subplatform-uploads
+              mountPath: {{ $root.Values.web.uploadRoot | quote }}
+              readOnly: false
+          {{- end }}
           resources:
             {{- toYaml (default $root.Values.resources $root.Values.web.resources) | nindent 12 }}
       volumes:
@@ -304,4 +313,9 @@ spec:
         - name: subplatform-artifacts
           persistentVolumeClaim:
             claimName: {{ $root.Values.web.artifactPvc | quote }}
+      {{- end }}
+      {{- if $root.Values.web.uploadPvc }}
+        - name: subplatform-uploads
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.web.uploadPvc | quote }}
       {{- end }}

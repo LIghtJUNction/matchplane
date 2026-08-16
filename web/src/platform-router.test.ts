@@ -32,6 +32,7 @@ afterEach(() => {
   delete process.env.MATCHPLANE_ROUTER_AI_KEY;
   delete process.env.MATCHPLANE_ROUTER_AI_MODEL;
   delete process.env.MATCHPLANE_ROUTER_AI_MAX_TOKENS;
+  delete process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE;
 });
 
 describe("platform Agent router", () => {
@@ -57,6 +58,7 @@ describe("platform Agent router", () => {
 
     expect(decision.selectedSlugs).toEqual(["electronics"]);
     expect(decision.source).toBe("ai");
+    expect(decision.routeMechanism).toBe("structured_json");
     expect(decision.costBearer).toBe("platform");
     expect(decision.usage?.totalTokens).toBe(52);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -102,6 +104,75 @@ describe("platform Agent router", () => {
 
     expect(admitCall).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts the bounded MCP-compatible selection tool and still filters its arguments", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        tools?: Array<{ function?: { name?: string; parameters?: { properties?: Record<string, unknown> } } }>;
+        response_format?: unknown;
+      };
+      expect(body.tools?.[0]?.function?.name).toBe("matchplane.platform.select_children");
+      expect(body.tools?.[0]?.function?.parameters?.properties?.selectedSlugs).toBeDefined();
+      expect(body.response_format).toBeUndefined();
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            tool_calls: [{
+              id: "call_1",
+              type: "function",
+              function: {
+                name: "matchplane.platform.select_children",
+                arguments: JSON.stringify({
+                  selectedSlugs: ["electronics", "not-registered"],
+                  rationale: "需求更接近消费电子",
+                  confidence: 0.91,
+                }),
+              },
+            }],
+          },
+        }],
+        usage: { prompt_tokens: 48, completion_tokens: 18, total_tokens: 66 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "我想买一台轻薄笔记本",
+      candidates,
+    });
+
+    expect(decision.selectedSlugs).toEqual(["electronics"]);
+    expect(decision.routeMechanism).toBe("mcp_tool");
+    expect(decision.usage?.totalTokens).toBe(66);
+  });
+
+  it("can disable tool calls for providers that only support JSON mode", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE = "disabled";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { tools?: unknown; response_format?: unknown };
+      expect(body.tools).toBeUndefined();
+      expect(body.response_format).toEqual({ type: "json_object" });
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ selectedSlugs: ["used-car"] }) } }],
+      }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "找一台车",
+      candidates,
+    });
+
+    expect(decision.routeMechanism).toBe("structured_json");
   });
 
   it("does not turn an exhausted platform budget into a provider call", async () => {

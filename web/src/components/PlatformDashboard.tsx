@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
 import {
+  Archive,
   BadgeCheck,
   BanknoteArrowDown,
   CircleDollarSign,
   Clock3,
   CreditCard,
   FileCheck2,
+  GitBranch,
   HandCoins,
   ReceiptText,
   RefreshCcw,
   ShieldCheck,
+  Upload,
   WalletCards,
 } from "lucide-react";
 import { motion } from "motion/react";
@@ -22,12 +25,16 @@ import {
   getPaymentGateways,
   getPaymentRoutes,
   getPlatformSetupStatus,
+  getSubplatformOrganizations,
   getRefundAdminRecords,
   isLiveMarketplaceEnabled,
+  activateSubplatform,
+  registerSubplatform,
   saveInvoiceProvider,
   savePaymentGateway,
   savePaymentRoute,
   switchInvoiceMode,
+  uploadSubplatformArchive,
   type InvoiceProviderRecord,
   type InvoiceAdminRecord,
   type InvoiceSetting,
@@ -36,9 +43,38 @@ import {
   type PaymentRouteRecord,
   type PlatformSetupStatus,
   type RefundAdminRecord,
+  type SubplatformArchiveUpload,
+  type SubplatformOrganizationRecord,
 } from "../api";
 import { ModeDialog } from "./Overlays";
 import { MetricCard, SectionHeading, spring } from "./Primitives";
+
+const DEFAULT_SUBPLATFORM_MANIFEST = `{
+  "apiVersion": "matchplane.subplatform/v1",
+  "id": "example.market",
+  "slug": "example-market",
+  "displayName": "Example Market",
+  "description": "A domain-owned market experience.",
+  "rootApiVersion": "v1",
+  "entry": "index.html",
+  "routes": ["/example-market"],
+  "capabilities": ["demand", "supply"],
+  "requiredScopes": ["marketplace:read"],
+  "assets": {
+    "staticDirectory": "dist",
+    "buildCommand": "bun run build"
+  },
+  "agent": {
+    "protocol": "matchplane.agent/v1",
+    "stages": ["merchant", "inventory"],
+    "skills": [],
+    "mcpTools": []
+  },
+  "retrieval": {
+    "protocol": "matchplane.retrieval/v1",
+    "owner": "subplatform"
+  }
+}`;
 
 interface PlatformDashboardProps {
   paymentMode: "test" | "production";
@@ -53,6 +89,7 @@ export function PlatformDashboard({
 }: PlatformDashboardProps) {
   const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
   const [setupError, setSetupError] = useState(false);
+  const [subplatforms, setSubplatforms] = useState<SubplatformOrganizationRecord[]>([]);
   const [gateways, setGateways] = useState<PaymentGatewayRecord[]>([]);
   const [paymentRoutes, setPaymentRoutes] = useState<PaymentRouteRecord[]>([]);
   const [invoiceProviders, setInvoiceProviders] = useState<InvoiceProviderRecord[]>([]);
@@ -80,6 +117,20 @@ export function PlatformDashboard({
   const [invoiceMode, setInvoiceMode] = useState<"test" | "production">("test");
   const [invoiceSettings, setInvoiceSettings] = useState("{}");
   const [invoiceCredentialRef, setInvoiceCredentialRef] = useState("");
+  const [subplatformEditorOpen, setSubplatformEditorOpen] = useState(false);
+  const [subplatformSourceKind, setSubplatformSourceKind] = useState<"git" | "archive">("git");
+  const [subplatformParentId, setSubplatformParentId] = useState("");
+  const [subplatformDomainId, setSubplatformDomainId] = useState("");
+  const [subplatformPackageId, setSubplatformPackageId] = useState("");
+  const [subplatformSlug, setSubplatformSlug] = useState("");
+  const [subplatformSourceLocator, setSubplatformSourceLocator] = useState("");
+  const [subplatformPinnedRevision, setSubplatformPinnedRevision] = useState("");
+  const [subplatformSourceDigest, setSubplatformSourceDigest] = useState("");
+  const [subplatformManifest, setSubplatformManifest] = useState(DEFAULT_SUBPLATFORM_MANIFEST);
+  const [subplatformScopes, setSubplatformScopes] = useState("marketplace:read");
+  const [subplatformMembershipPolicy, setSubplatformMembershipPolicy] = useState<"public" | "invite">("public");
+  const [subplatformArchive, setSubplatformArchive] = useState<File | null>(null);
+  const [subplatformUpload, setSubplatformUpload] = useState<SubplatformArchiveUpload | null>(null);
 
   useEffect(() => {
     if (!isLiveMarketplaceEnabled()) return;
@@ -93,8 +144,9 @@ export function PlatformDashboard({
       getPaymentAdminRecords(),
       getRefundAdminRecords(),
       getInvoiceAdminRecords(),
+      getSubplatformOrganizations(),
     ])
-      .then(([setupResult, gatewayResult, routeResult, invoiceResult, invoiceSettingResult, paymentResult, refundResult, invoiceRecordResult]) => {
+      .then(([setupResult, gatewayResult, routeResult, invoiceResult, invoiceSettingResult, paymentResult, refundResult, invoiceRecordResult, subplatformResult]) => {
         if (!mounted) return;
         if (setupResult.status === "fulfilled") setSetup(setupResult.value);
         else setSetupError(true);
@@ -107,11 +159,16 @@ export function PlatformDashboard({
         if (paymentResult.status === "fulfilled") setPayments(paymentResult.value);
         if (refundResult.status === "fulfilled") setRefunds(refundResult.value);
         if (invoiceRecordResult.status === "fulfilled") setInvoices(invoiceRecordResult.value);
+        if (subplatformResult.status === "fulfilled") setSubplatforms(subplatformResult.value);
       });
     return () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!subplatformDomainId && setup?.domains[0]) setSubplatformDomainId(setup.domains[0].id);
+  }, [setup, subplatformDomainId]);
 
   const refreshPaymentAdministration = async () => {
     const [nextGateways, nextRoutes, nextInvoiceProviders, nextInvoiceSetting, nextPayments, nextRefunds, nextInvoices] = await Promise.all([
@@ -130,6 +187,131 @@ export function PlatformDashboard({
     setPayments(nextPayments);
     setRefunds(nextRefunds);
     setInvoices(nextInvoices);
+  };
+
+  const refreshSubplatforms = async () => {
+    setSubplatforms(await getSubplatformOrganizations());
+  };
+
+  const resetSubplatformEditor = () => {
+    setSubplatformSourceKind("git");
+    setSubplatformParentId("");
+    setSubplatformPackageId("");
+    setSubplatformSlug("");
+    setSubplatformSourceLocator("");
+    setSubplatformPinnedRevision("");
+    setSubplatformSourceDigest("");
+    setSubplatformManifest(DEFAULT_SUBPLATFORM_MANIFEST);
+    setSubplatformScopes("marketplace:read");
+    setSubplatformMembershipPolicy("public");
+    setSubplatformArchive(null);
+    setSubplatformUpload(null);
+  };
+
+  const submitSubplatform = async () => {
+    if (!setup?.root.tenantId) {
+      onNotice("根平台 tenant 尚未配置，暂时不能注册子平台");
+      return;
+    }
+    if (!subplatformDomainId) {
+      onNotice("请先在根平台配置一个 active domain");
+      return;
+    }
+    const packageId = subplatformPackageId.trim();
+    const slug = subplatformSlug.trim();
+    if (!/^[a-z0-9][a-z0-9._-]{1,127}$/.test(packageId)) {
+      onNotice("package id 只能使用小写字母、数字、点、下划线或短横线");
+      return;
+    }
+    if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) {
+      onNotice("slug 只能使用小写字母、数字和短横线");
+      return;
+    }
+    let manifest: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(subplatformManifest);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      manifest = parsed as Record<string, unknown>;
+    } catch {
+      onNotice("manifest 必须是 JSON 对象");
+      return;
+    }
+    if (manifest.id !== packageId || manifest.slug !== slug) {
+      onNotice("manifest.id 和 manifest.slug 必须分别等于 package id 与 slug");
+      return;
+    }
+    let sourceLocator = subplatformSourceLocator.trim();
+    let sourceDigest = subplatformSourceDigest.trim().toLowerCase();
+    let pinnedRevision = subplatformPinnedRevision.trim().toLowerCase();
+    setSaving(true);
+    try {
+      if (subplatformSourceKind === "archive") {
+        if (!subplatformArchive) {
+          onNotice("请选择 .tar.gz、.tgz、.tar.zst 或 .tzst 子平台压缩包");
+          return;
+        }
+        const uploaded = await uploadSubplatformArchive(subplatformArchive, subplatformParentId || undefined);
+        sourceLocator = uploaded.sourceLocator;
+        sourceDigest = uploaded.sourceDigest;
+        pinnedRevision = pinnedRevision || uploaded.sourceDigest;
+        setSubplatformUpload(uploaded);
+        setSubplatformSourceLocator(sourceLocator);
+        setSubplatformSourceDigest(sourceDigest);
+        setSubplatformPinnedRevision(pinnedRevision);
+      }
+      if (!sourceLocator) {
+        onNotice("请填写 Git HTTPS/SSH 地址或先上传压缩包");
+        return;
+      }
+      if (!/^[0-9a-f]{7,128}$/i.test(pinnedRevision)) {
+        onNotice("pinned revision 必须是不可变的 commit 或 digest");
+        return;
+      }
+      if (!/^[0-9a-f]{64}$/i.test(sourceDigest)) {
+        onNotice("source digest 必须是 64 位 SHA-256；不要提交未经验证的来源");
+        return;
+      }
+      const requestedScopes = [...new Set(subplatformScopes.split(",").map((scope) => scope.trim()).filter(Boolean))];
+      const result = await registerSubplatform({
+        tenantId: setup.root.tenantId,
+        domainId: subplatformDomainId,
+        parentOrganizationId: subplatformParentId || undefined,
+        packageId,
+        slug,
+        sourceKind: subplatformSourceKind,
+        sourceLocator,
+        pinnedRevision,
+        sourceDigest,
+        manifest,
+        requestedScopes,
+        membershipPolicy: subplatformMembershipPolicy,
+      });
+      await refreshSubplatforms();
+      setSubplatformEditorOpen(false);
+      resetSubplatformEditor();
+      onNotice(`子平台 ${result.slug} 已登记，等待隔离构建器附加 build digest`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "子平台注册失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const activateRegisteredSubplatform = async (organization: SubplatformOrganizationRecord) => {
+    if (!organization.registrationId || !organization.buildDigest) {
+      onNotice("该版本还没有隔离构建器签发的 build digest");
+      return;
+    }
+    setSaving(true);
+    try {
+      await activateSubplatform({ registrationId: organization.registrationId, buildDigest: organization.buildDigest });
+      await refreshSubplatforms();
+      onNotice(`${organization.name} 已激活并加入平台路由`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "子平台激活失败");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const submitPaymentRoute = async () => {
@@ -290,9 +472,16 @@ export function PlatformDashboard({
         : "读取部署状态";
   const routingStatus = setupError
     ? "状态接口不可用"
-    : setup
-      ? setup.routing.ready ? `${setup.routing.activeChildren} 个子平台已激活` : "等待子平台激活"
-      : "读取部署状态";
+      : setup
+        ? setup.routing.ready ? `${setup.routing.activeChildren} 个子平台已激活` : "等待子平台激活"
+        : "读取部署状态";
+  const subplatformStateLabel: Record<string, string> = {
+    active: "已激活",
+    ready: "构建完成",
+    building: "构建中",
+    validated: "已登记，待构建",
+    failed: "构建失败",
+  };
 
   return (
     <div className="dashboard platform-dashboard">
@@ -340,6 +529,85 @@ export function PlatformDashboard({
           </div>
           {setup?.firstRun.needsRootAccount ? (
             <a className="button button-dark readiness-action" href="/login?role=platform&next=%2F%3Frole%3Dplatform">去创建或登录根管理员</a>
+          ) : null}
+        </section>
+
+        <section className="surface subplatform-panel" aria-labelledby="subplatform-title">
+          <div className="subplatform-header">
+            <div>
+              <p className="eyebrow">递归平台树</p>
+              <h2 id="subplatform-title">把任意市场接入同一个根平台。</h2>
+              <p className="subplatform-intro">子平台只提交自己的 manifest、不可变来源和能力声明。根平台负责身份、路由与审计；领域数据、Agent 和检索实现仍由子平台拥有。</p>
+            </div>
+            <button className="button button-dark" type="button" onClick={() => setSubplatformEditorOpen((open) => !open)}>
+              {subplatformEditorOpen ? "关闭登记" : "添加子平台"}
+            </button>
+          </div>
+          {subplatforms.length ? (
+            <div className="subplatform-list" aria-label="已登记子平台">
+              {subplatforms.map((organization) => (
+                <div className="subplatform-row" key={organization.id}>
+                  <span className="subplatform-row-icon" aria-hidden="true"><Archive size={18} /></span>
+                  <span className="subplatform-row-copy">
+                    <strong>{organization.name}</strong>
+                    <small>/{organization.slug} · {organization.sourceRepository || "来源待构建器解析"}</small>
+                  </span>
+                  <span className={`subplatform-state state-${organization.registrationState || "unknown"}`}>
+                    {subplatformStateLabel[organization.registrationState || ""] || "未登记"}
+                  </span>
+                  {organization.registrationState === "ready" && organization.buildDigest ? (
+                    <button className="button button-dark subplatform-activate" type="button" disabled={saving} onClick={() => void activateRegisteredSubplatform(organization)}>
+                      激活路由
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="subplatform-empty">
+              <GitBranch size={22} aria-hidden="true" />
+              <p>还没有子平台。登记后会先进入隔离构建，再由管理员显式激活。</p>
+            </div>
+          )}
+          {subplatformEditorOpen ? (
+            <div className="admin-editor subplatform-editor" aria-label="登记子平台">
+              <div className="admin-editor-heading">
+                <div><strong>登记一个平台节点</strong><small>URL 和压缩包都不会在 Web 进程中执行。</small></div>
+                <button type="button" onClick={() => setSubplatformEditorOpen(false)}>关闭</button>
+              </div>
+              <div className="subplatform-form-grid">
+                <label><span>挂载到</span><select value={subplatformParentId} onChange={(event) => setSubplatformParentId(event.target.value)}><option value="">根平台</option>{subplatforms.map((organization) => <option key={organization.id} value={organization.id}>/{organization.slug} · {organization.name}</option>)}</select></label>
+                <label><span>所属 domain</span><select value={subplatformDomainId} onChange={(event) => setSubplatformDomainId(event.target.value)}><option value="">选择 active domain</option>{setup?.domains.map((domain) => <option key={domain.id} value={domain.id}>{domain.name} · {domain.slug}</option>)}</select></label>
+                <label><span>package id</span><input value={subplatformPackageId} onChange={(event) => setSubplatformPackageId(event.target.value)} placeholder="example.market" autoComplete="off" /></label>
+                <label><span>slug / 路径</span><input value={subplatformSlug} onChange={(event) => setSubplatformSlug(event.target.value)} placeholder="example-market" autoComplete="off" /></label>
+              </div>
+              <div className="subplatform-source-switch" role="group" aria-label="子平台来源类型">
+                <button type="button" className={subplatformSourceKind === "git" ? "is-selected" : ""} aria-pressed={subplatformSourceKind === "git"} onClick={() => setSubplatformSourceKind("git")}><GitBranch size={16} aria-hidden="true" />Git 仓库</button>
+                <button type="button" className={subplatformSourceKind === "archive" ? "is-selected" : ""} aria-pressed={subplatformSourceKind === "archive"} onClick={() => setSubplatformSourceKind("archive")}><Upload size={16} aria-hidden="true" />上传压缩包</button>
+              </div>
+              {subplatformSourceKind === "git" ? (
+                <div className="subplatform-form-grid">
+                  <label className="subplatform-form-wide"><span>Git HTTPS / SSH 地址（不含凭据）</span><input value={subplatformSourceLocator} onChange={(event) => setSubplatformSourceLocator(event.target.value)} placeholder="https://github.com/example/market.git" inputMode="url" /></label>
+                  <label><span>pinned revision</span><input value={subplatformPinnedRevision} onChange={(event) => setSubplatformPinnedRevision(event.target.value)} placeholder="40 位 commit SHA" spellCheck={false} /></label>
+                  <label><span>来源 SHA-256</span><input value={subplatformSourceDigest} onChange={(event) => setSubplatformSourceDigest(event.target.value)} placeholder="构建器验证的 64 位 digest" spellCheck={false} /></label>
+                </div>
+              ) : (
+                <div className="subplatform-upload-box">
+                  <label className="file-picker"><Upload size={18} aria-hidden="true" /><span>{subplatformArchive?.name || "选择子平台压缩包"}</span><input type="file" accept=".tar.gz,.tgz,.tar.zst,.tzst" onChange={(event) => setSubplatformArchive(event.target.files?.[0] ?? null)} /></label>
+                  <p>{subplatformUpload ? `已上传 ${subplatformUpload.originalName} · ${(subplatformUpload.size / 1024 / 1024).toFixed(1)} MiB · digest ${subplatformUpload.sourceDigest.slice(0, 12)}…` : "限制 64 MiB；服务端只保存随机 locator，隔离构建器负责解包与验证。"}</p>
+                  <label><span>pinned revision（压缩包可使用 source digest）</span><input value={subplatformPinnedRevision} onChange={(event) => setSubplatformPinnedRevision(event.target.value)} placeholder="上传后自动填入 source digest" spellCheck={false} /></label>
+                </div>
+              )}
+              <div className="subplatform-form-grid">
+                <label><span>请求 scopes（逗号分隔）</span><input value={subplatformScopes} onChange={(event) => setSubplatformScopes(event.target.value)} placeholder="marketplace:read,retrieval:query" /></label>
+                <label><span>成员加入策略</span><select value={subplatformMembershipPolicy} onChange={(event) => setSubplatformMembershipPolicy(event.target.value as "public" | "invite")}><option value="public">公开映射</option><option value="invite">邀请加入</option></select></label>
+              </div>
+              <label><span>manifest（只声明通用能力，不写死业务实体）</span><textarea value={subplatformManifest} onChange={(event) => setSubplatformManifest(event.target.value)} rows={12} spellCheck={false} /></label>
+              <div className="subplatform-editor-footer">
+                <p><ShieldCheck size={16} aria-hidden="true" />登记不会立即进入路由；只有构建器签发 build digest 后才能激活。</p>
+                <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "提交中…" : "登记并进入构建"}</button>
+              </div>
+            </div>
           ) : null}
         </section>
 

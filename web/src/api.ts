@@ -146,6 +146,7 @@ export interface PlatformSetupStatus {
   root: {
     tenantConfigured: boolean;
     tenantExists: boolean;
+    tenantId: string | null;
     tenant: { slug: string; name: string } | null;
     rootAdminConfigured: boolean;
     identityAccounts: number;
@@ -155,6 +156,39 @@ export interface PlatformSetupStatus {
   registrations: Record<string, number>;
   routing: { activeChildren: number; ready: boolean };
   firstRun: { needsRootAccount: boolean; readyForAdmin: boolean };
+}
+
+export interface SubplatformOrganizationRecord {
+  id: string;
+  name: string;
+  slug: string;
+  parentOrganizationId: string | null;
+  tenantId: string;
+  domainId: string;
+  sourceRepository: string | null;
+  createdAt: string;
+  registrationId: string | null;
+  registrationState: string | null;
+  buildDigest: string | null;
+  manifestDigest: string | null;
+}
+
+export interface SubplatformArchiveUpload {
+  sourceKind: "archive";
+  sourceLocator: string;
+  sourceDigest: string;
+  originalName: string;
+  size: number;
+}
+
+export interface SubplatformRegistrationResult {
+  registrationId: string;
+  organizationId: string;
+  slug: string;
+  state: string;
+  manifestDigest: string;
+  sourceDigest: string;
+  next: string;
 }
 
 export interface SubplatformEmailConfig {
@@ -262,6 +296,7 @@ export interface PlatformRouteHop {
 export interface PlatformRouteDecision {
   selectedSlugs: string[];
   source: "ai" | "policy_fallback";
+  routeMechanism?: "mcp_tool" | "structured_json" | "policy_fallback";
   model: string | null;
   rationale: string;
   confidence: number | null;
@@ -377,6 +412,76 @@ export async function getPlatformSetupStatus(): Promise<PlatformSetupStatus> {
     throw new MarketplaceApiError(response.status, "平台初始化状态暂时不可用");
   }
   return body as PlatformSetupStatus;
+}
+
+export async function getSubplatformOrganizations(parentOrganizationId?: string): Promise<SubplatformOrganizationRecord[]> {
+  const query = parentOrganizationId
+    ? `?parentOrganizationId=${encodeURIComponent(parentOrganizationId)}`
+    : "";
+  const response = await fetch(`/api/platform/subplatforms${query}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as { organizations?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "子平台列表读取失败");
+  return Array.isArray(body?.organizations) ? body.organizations as SubplatformOrganizationRecord[] : [];
+}
+
+export async function uploadSubplatformArchive(file: File, parentOrganizationId?: string): Promise<SubplatformArchiveUpload> {
+  const form = new FormData();
+  form.set("archive", file, file.name);
+  const headers = new Headers({ accept: "application/json" });
+  if (parentOrganizationId) headers.set("x-matchplane-parent-organization-id", parentOrganizationId);
+  const response = await fetch("/api/platform/subplatforms/upload", {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: form,
+  });
+  const body = await response.json().catch(() => null) as Partial<SubplatformArchiveUpload> & { error?: string } | null;
+  if (!response.ok || !body?.sourceLocator || !body.sourceDigest) {
+    throw new MarketplaceApiError(response.status, body?.error || "子平台压缩包上传失败");
+  }
+  return body as SubplatformArchiveUpload;
+}
+
+export async function registerSubplatform(input: {
+  tenantId: string;
+  domainId: string;
+  parentOrganizationId?: string;
+  packageId: string;
+  slug: string;
+  sourceKind: "git" | "archive";
+  sourceLocator: string;
+  pinnedRevision: string;
+  sourceDigest: string;
+  manifest: Record<string, unknown>;
+  requestedScopes?: string[];
+  membershipPolicy: "public" | "invite";
+}): Promise<SubplatformRegistrationResult> {
+  const response = await fetch("/api/platform/subplatforms", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as Partial<SubplatformRegistrationResult> & { error?: string } | null;
+  if (!response.ok || !body?.registrationId) {
+    throw new MarketplaceApiError(response.status, body?.error || "子平台注册失败");
+  }
+  return body as SubplatformRegistrationResult;
+}
+
+export async function activateSubplatform(input: { registrationId: string; buildDigest: string }): Promise<Record<string, unknown>> {
+  const response = await fetch("/api/platform/subplatforms/activate", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as Record<string, unknown> & { error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "子平台激活失败");
+  return body ?? {};
 }
 
 export async function routePlatformIntent(input: {

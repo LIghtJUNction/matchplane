@@ -24,6 +24,8 @@ export interface PlatformRouteCandidate {
 export interface PlatformRouteDecision {
   selectedSlugs: string[];
   source: "ai" | "policy_fallback";
+  /** How the bounded router produced this decision; retained for auditability. */
+  routeMechanism?: "mcp_tool" | "structured_json" | "policy_fallback";
   model: string | null;
   rationale: string;
   confidence: number | null;
@@ -61,6 +63,9 @@ const MAX_CANDIDATES = 32;
 const MAX_RATIONALE_LENGTH = 1_000;
 const DEFAULT_TIMEOUT_MS = 4_000;
 const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
+const ROUTER_TOOL_NAME = "matchplane.platform.select_children";
+
+type RouterToolMode = "auto" | "required" | "disabled";
 
 export async function decidePlatformRoutes(input: {
   platformPath: string;
@@ -74,6 +79,7 @@ export async function decidePlatformRoutes(input: {
     return {
       selectedSlugs: [],
       source: "policy_fallback",
+      routeMechanism: "policy_fallback",
       model: null,
       rationale: "当前节点没有可用的已激活子平台。",
       confidence: null,
@@ -93,6 +99,39 @@ export async function decidePlatformRoutes(input: {
 
   try {
     await input.admitCall?.();
+    const toolMode = configuredToolMode();
+    const requestBody: Record<string, unknown> = {
+      model,
+      temperature: 0,
+      max_tokens: configuredMaxTokens(),
+      messages: [
+        {
+          role: "system",
+          content:
+            toolMode === "disabled"
+              ? "你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。返回 JSON：selectedSlugs(string[]), rationale(string), confidence(number 0..1)。如果没有合适候选，selectedSlugs 返回空数组。"
+              : `你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。优先调用 ${ROUTER_TOOL_NAME} 完成选择；不要调用未声明的工具。`,
+        },
+        {
+          role: "user",
+          // Candidate metadata is public routing context, but it is still
+          // bounded before it reaches the provider so a tenant cannot make
+          // the platform pay for an unbounded prompt.
+          content: boundedProviderIntent(input, candidates),
+        },
+      ],
+    };
+    if (toolMode === "disabled") {
+      requestBody.response_format = { type: "json_object" };
+    } else {
+      requestBody.tools = [routerSelectionTool(candidates)];
+      if (toolMode === "required") {
+        requestBody.tool_choice = {
+          type: "function",
+          function: { name: ROUTER_TOOL_NAME },
+        };
+      }
+    }
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -100,36 +139,16 @@ export async function decidePlatformRoutes(input: {
         authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        max_tokens: configuredMaxTokens(),
-        messages: [
-          {
-            role: "system",
-            content:
-              "你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。返回 JSON：selectedSlugs(string[]), rationale(string), confidence(number 0..1)。如果没有合适候选，selectedSlugs 返回空数组。",
-          },
-          {
-            role: "user",
-            // Candidate metadata is public routing context, but it is still
-            // bounded before it reaches the provider so a tenant cannot make
-            // the platform pay for an unbounded prompt.
-            content: boundedProviderIntent(input, candidates),
-          },
-        ],
-      }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`router provider returned ${response.status}`);
     const payload = await response.json() as unknown;
-    const rawContent = readProviderContent(payload);
-    const parsed = JSON.parse(rawContent) as unknown;
-    const decision = normalizeDecision(parsed, candidates);
+    const providerDecision = readProviderDecision(payload, candidates);
     return {
-      ...decision,
+      ...providerDecision.decision,
       source: "ai",
+      routeMechanism: providerDecision.routeMechanism,
       model,
       degraded: false,
       costBearer: "platform",
@@ -159,6 +178,7 @@ function policyFallback(
   return {
     selectedSlugs: candidates.map((candidate) => candidate.slug),
     source: "policy_fallback",
+    routeMechanism: "policy_fallback",
     model,
     rationale: rationale.slice(0, MAX_RATIONALE_LENGTH),
     confidence: null,
@@ -231,6 +251,37 @@ function configuredMaxTokens(): number {
   return Number.isSafeInteger(parsed) ? Math.max(64, Math.min(2_048, parsed)) : 512;
 }
 
+function configuredToolMode(): RouterToolMode {
+  const value = process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE?.trim().toLowerCase();
+  return value === "required" || value === "disabled" ? value : "auto";
+}
+
+function routerSelectionTool(candidates: PlatformRouteCandidate[]): Record<string, unknown> {
+  return {
+    type: "function",
+    function: {
+      name: ROUTER_TOOL_NAME,
+      description: "从当前节点已授权的候选子平台中选择下一跳；不得创造候选之外的 slug。",
+      strict: true,
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["selectedSlugs", "rationale", "confidence"],
+        properties: {
+          selectedSlugs: {
+            type: "array",
+            maxItems: candidates.length,
+            uniqueItems: true,
+            items: { type: "string", enum: candidates.map((candidate) => candidate.slug) },
+          },
+          rationale: { type: "string", maxLength: MAX_RATIONALE_LENGTH },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+      },
+    },
+  };
+}
+
 function normalizeDecision(
   value: unknown,
   candidates: PlatformRouteCandidate[],
@@ -271,6 +322,56 @@ function readProviderContent(value: unknown): string {
     if (text) return text;
   }
   throw new Error("AI 路由响应 content 无效");
+}
+
+function readProviderDecision(
+  value: unknown,
+  candidates: PlatformRouteCandidate[],
+): {
+  decision: Omit<PlatformRouteDecision, "source" | "model" | "degraded" | "costBearer" | "budget" | "usage">;
+  routeMechanism: "mcp_tool" | "structured_json";
+} {
+  const message = readProviderMessage(value);
+  const toolCall = readRouterToolCall(message);
+  if (toolCall) {
+    return {
+      decision: normalizeDecision(JSON.parse(toolCall), candidates),
+      routeMechanism: "mcp_tool",
+    };
+  }
+  return {
+    decision: normalizeDecision(JSON.parse(readProviderContent(value)), candidates),
+    routeMechanism: "structured_json",
+  };
+}
+
+function readProviderMessage(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("AI 路由响应无效");
+  const choices = (value as { choices?: unknown }).choices;
+  if (!Array.isArray(choices) || !choices.length || !choices[0] || typeof choices[0] !== "object") {
+    throw new Error("AI 路由响应缺少 choices");
+  }
+  const message = (choices[0] as { message?: unknown }).message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) throw new Error("AI 路由响应缺少 message");
+  return message as Record<string, unknown>;
+}
+
+function readRouterToolCall(message: Record<string, unknown>): string | null {
+  const calls = message.tool_calls;
+  if (!Array.isArray(calls)) return null;
+  const call = calls.find((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+    const fn = (candidate as { function?: unknown }).function;
+    return Boolean(fn && typeof fn === "object" && !Array.isArray(fn)
+      && (fn as { name?: unknown }).name === ROUTER_TOOL_NAME);
+  });
+  if (!call || typeof call !== "object" || Array.isArray(call)) throw new Error("AI 路由工具调用无效");
+  const args = (call as { function?: unknown }).function;
+  if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("AI 路由工具参数无效");
+  const value = (args as { arguments?: unknown }).arguments;
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && !Array.isArray(value)) return JSON.stringify(value);
+  throw new Error("AI 路由工具参数无效");
 }
 
 function isAllowedEndpoint(value: string): boolean {

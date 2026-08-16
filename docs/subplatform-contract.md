@@ -117,6 +117,16 @@ directory under `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT`) and `artifactEntry` (a r
 defaulting to `index.html`). These values are immutable alongside the build digest and are never
 accepted from the public registration request.
 
+For the built-in archive path, a root or parent-node manager first sends a multipart request with
+an `archive` field to `POST /api/platform/subplatforms/upload` (optionally setting the
+`x-matchplane-parent-organization-id` header). The web process enforces a 64 MiB limit, accepts
+only tar/gzip or tar/zstd suffixes, stores opaque bytes below `MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT`
+with a random locator and mode `0600`, and returns `upload://<id>` plus the SHA-256 digest. It
+never extracts the archive. The isolated builder consumes that locator, rejects traversal,
+symlinks, devices, oversized entries and missing manifests, then attaches the verified build
+digest through the builder callback before activation. Operators must provide a durable writable
+root (or an RWX upload PVC in Helm); leaving it unset fails closed with `503`.
+
 ## Retrieval boundary
 
 ## Recursive platform chat
@@ -133,6 +143,13 @@ its own domain-scoped buyer request through the stable marketplace API. The trav
 `MATCHPLANE_ROUTER_AI_MAX_STEPS` (hard maximum 16), and hitting the cap is recorded as degraded.
 Unactivated, disabled or missing registrations are not called, and the root returns an explicit
 accepted/degraded state instead of silently dropping the request.
+
+When the hosted router is enabled, each node decision exposes only the bounded
+`matchplane.platform.select_children` MCP-compatible tool. Its `selectedSlugs` argument is an enum
+generated from that node's active, authorized children; the server still applies the allowlist after
+the model responds. `MATCHPLANE_ROUTER_AI_TOOL_MODE=auto` enables the tool while retaining the
+structured-JSON compatibility path, `required` requires a provider tool call, and `disabled` uses
+the legacy JSON response format. The decision audit records which mechanism was used.
 
 ### Agent-driven staged matching
 

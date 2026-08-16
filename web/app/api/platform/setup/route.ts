@@ -69,6 +69,7 @@ export async function GET(): Promise<Response> {
         root: {
           tenantConfigured,
           tenantExists: Boolean(tenant),
+          tenantId: tenantConfigured ? configuredTenantId : null,
           tenant: tenant ? { slug: tenant.slug, name: tenant.name } : null,
           rootAdminConfigured,
           identityAccounts,
