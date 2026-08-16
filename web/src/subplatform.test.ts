@@ -27,6 +27,11 @@ describe("nested subplatform paths", () => {
     expect(config.manifestUrl).toBe("/api/platform/manifest?path=%2Fused-car");
   });
 
+  it("ignores query and hash values when resolving a return URL", () => {
+    expect(resolveSubplatform("/?role=buyer#match-chat").slug).toBe("root");
+    expect(resolveSubplatform("/used-car?role=seller").path).toBe("/used-car");
+  });
+
   it("requires the dedicated builder token for digest callbacks", () => {
     expect(hasValidSubplatformBuilderToken("builder-secret", "builder-secret")).toBe(true);
     expect(hasValidSubplatformBuilderToken("builder-secret", "wrong-secret")).toBe(false);

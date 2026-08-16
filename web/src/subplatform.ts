@@ -16,7 +16,11 @@ export interface SubplatformConfig {
 }
 
 export function resolveSubplatform(pathname = "/"): SubplatformConfig {
-  const segments = pathname.split("/").filter(Boolean);
+  // Callers often pass a return URL (for example `/?role=buyer`) rather than a
+  // bare pathname.  Platform identity is path-scoped, so query/hash material
+  // must never become a synthetic child-platform slug.
+  const normalizedPath = pathnameOnly(pathname);
+  const segments = normalizedPath.split("/").filter(Boolean);
   const path = segments.length ? `/${segments.join("/")}` : "/";
   const slug = segments.at(-1) ?? "root";
   return slug === "root"
@@ -35,6 +39,18 @@ export function resolveSubplatform(pathname = "/"): SubplatformConfig {
         description: "",
         manifestUrl: `/api/platform/manifest?path=${encodeURIComponent(path)}`,
       };
+}
+
+function pathnameOnly(value: string): string {
+  const candidate = value.trim() || "/";
+  try {
+    const parsed = new URL(candidate, "https://matchplane.invalid");
+    if (parsed.host !== "matchplane.invalid") return "/";
+    return parsed.pathname || "/";
+  } catch {
+    const withoutQuery = candidate.split(/[?#]/, 1)[0] || "/";
+    return withoutQuery.startsWith("/") ? withoutQuery : `/${withoutQuery}`;
+  }
 }
 
 /** Load a registered subplatform manifest without embedding vertical data in root. */

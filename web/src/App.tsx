@@ -97,7 +97,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       setAccountMenuOpen((open) => !open);
       return;
     }
-    window.location.assign(`/login?role=${role}&next=${encodeURIComponent(window.location.pathname)}`);
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("role", role);
+    const next = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+    window.location.assign(`/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`);
   };
 
   const signOut = async () => {
