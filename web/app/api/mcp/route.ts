@@ -118,6 +118,29 @@ async function callMarketplaceTool(
   } else if (name === "marketplace.introduction.create") {
     path = "/v1/marketplace/introductions";
     body = JSON.stringify(args);
+  } else if (name === "marketplace.introduction.contact.request" || name === "marketplace.introduction.contact.consent") {
+    const introductionId = stringArgument(args, "introduction_id");
+    const tenantId = stringArgument(args, "tenant_id");
+    const domainId = stringArgument(args, "domain_id");
+    const participantId = stringArgument(args, "participant_id");
+    const idempotencyKey = stringArgument(args, "idempotency_key");
+    if (!introductionId || !tenantId || !domainId || !participantId || !idempotencyKey) {
+      return rpcError(id, -32602, `${name} requires introduction_id, tenant_id, domain_id, participant_id, and idempotency_key`);
+    }
+    path = `/v1/marketplace/introductions/${encodeURIComponent(introductionId)}/${name.endsWith("request") ? "contact/request" : "contact/consent"}`;
+    body = JSON.stringify({ tenant_id: tenantId, domain_id: domainId, participant_id: participantId, idempotency_key: idempotencyKey });
+  } else if (name === "marketplace.introduction.contact.release") {
+    const introductionId = stringArgument(args, "introduction_id");
+    const tenantId = stringArgument(args, "tenant_id");
+    const domainId = stringArgument(args, "domain_id");
+    const participantId = stringArgument(args, "participant_id");
+    const idempotencyKey = stringArgument(args, "idempotency_key");
+    if (!introductionId || !tenantId || !domainId || !participantId || !idempotencyKey) {
+      return rpcError(id, -32602, `${name} requires introduction_id, tenant_id, domain_id, participant_id, and idempotency_key`);
+    }
+    method = "POST";
+    path = `/v1/marketplace/introductions/${encodeURIComponent(introductionId)}/contact`;
+    body = JSON.stringify({ tenant_id: tenantId, domain_id: domainId, participant_id: participantId, idempotency_key: idempotencyKey });
   } else {
     method = "GET";
     const tenantId = stringArgument(args, "tenant_id");
@@ -178,7 +201,10 @@ function supportedTool(name: unknown): name is string {
     || name === "marketplace.offer.create"
     || name === "marketplace.offer.match"
     || name === "marketplace.introduction.create"
-    || name === "marketplace.introductions.list";
+    || name === "marketplace.introductions.list"
+    || name === "marketplace.introduction.contact.request"
+    || name === "marketplace.introduction.contact.consent"
+    || name === "marketplace.introduction.contact.release";
 }
 
 function stringArgument(args: Record<string, unknown>, key: string): string | null {
@@ -327,7 +353,35 @@ function toolList(): Record<string, unknown> {
           participant_id: { type: "string", format: "uuid" },
         },
       },
+    }, {
+      name: "marketplace.introduction.contact.request",
+      description: "Open the explicit contact-consent step for a matched demand participant without returning contact values.",
+      inputSchema: contactActionSchema(),
+    }, {
+      name: "marketplace.introduction.contact.consent",
+      description: "Record supply consent for a matched introduction without returning contact values.",
+      inputSchema: contactActionSchema(),
+    }, {
+      name: "marketplace.introduction.contact.release",
+      description: "Return the counterpart's protected contact only after the consent policy permits release.",
+      inputSchema: contactActionSchema(),
     }],
+  };
+}
+
+function contactActionSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["tenant_id", "domain_id", "platform_path", "participant_id", "introduction_id", "idempotency_key"],
+    properties: {
+      tenant_id: { type: "string", format: "uuid" },
+      domain_id: { type: "string", format: "uuid" },
+      platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
+      participant_id: { type: "string", format: "uuid" },
+      introduction_id: { type: "string", format: "uuid" },
+      idempotency_key: { type: "string", minLength: 1, maxLength: 240 },
+    },
   };
 }
 

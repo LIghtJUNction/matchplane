@@ -48,12 +48,13 @@ HTTP MCP facade at `/api/mcp`; its `platform.match` tool forwards the same bound
 the chat API and accepts either a Better Auth session or a scoped organization API key. The
 `platform.agent.handoff` tool accepts the caller-funded `matchplane.agent/v1` envelope, persists an
 idempotent handoff, and returns only the active direct-child capabilities. It never invokes the
-root model: an external buyer/seller Agent keeps its own provider credentials and token bill. Use
+root model: an external demand/supply Agent keeps its own provider credentials and token bill. Use
 an organization API key with the explicit `agent:handoff` permission for machine calls.
 
 For a machine Agent to continue into the generic marketplace tools, create an organization API key
-with `marketplace:write` and API-key metadata `agentRole: buyer`, `seller`, or `both` (the metadata
-name is a legacy adapter). Call `marketplace.agent.session` through `/api/mcp` (or
+with `marketplace:write` and neutral API-key metadata `agentSide: demand`, `supply`, or `both`.
+The old `agentRole` field is accepted only as a compatibility migration alias. Call
+`marketplace.agent.session` through `/api/mcp` (or
 `POST /api/marketplace/agent-session`) with the active `tenant_id`, `domain_id`, `platform_path`,
 and kernel `side` (`demand` or `supply`). The response is a tenant/side-scoped 15-minute party bearer and its
 `access_token_expires_at` deadline. Pass that bearer as

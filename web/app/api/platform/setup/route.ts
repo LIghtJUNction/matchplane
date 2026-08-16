@@ -4,6 +4,14 @@ import { authDatabase } from "../../../../src/lib/auth";
 
 export const runtime = "nodejs";
 
+interface RootContactField {
+  key: string;
+  label: string;
+  type?: "text" | "tel" | "email";
+  required?: boolean;
+  placeholder?: string;
+}
+
 /**
  * Bounded, secret-free first-run status for the root platform workspace.
  *
@@ -62,6 +70,7 @@ export async function GET(): Promise<Response> {
     const identityAccounts = Number.parseInt(accountResult.rows[0]?.count ?? "0", 10) || 0;
     const rootAdminAccounts = Number.parseInt(rootAdminResult.rows[0]?.count ?? "0", 10) || 0;
     const activeChildren = registrations.active ?? 0;
+    const contactFields = readRootContactFields();
 
     return NextResponse.json(
       {
@@ -74,6 +83,7 @@ export async function GET(): Promise<Response> {
           rootAdminConfigured,
           identityAccounts,
           rootAdminAccounts,
+          ...(contactFields ? { ui: { contactFields } } : {}),
         },
         domains: domainsResult.rows,
         registrations,
@@ -91,6 +101,40 @@ export async function GET(): Promise<Response> {
       { status: "degraded", error: "platform setup status unavailable" },
       { status: 503, headers: { "cache-control": "no-store" } },
     );
+  }
+}
+
+/**
+ * Root contact channels are operator configuration, never a kernel default.  Keeping this
+ * bounded and secret-free lets the root UI render the same participant profile form as a child
+ * package without embedding any vertical's field names in the web bundle.
+ */
+function readRootContactFields(): RootContactField[] | undefined {
+  const raw = process.env.MATCHPLANE_ROOT_CONTACT_FIELDS_JSON?.trim();
+  if (!raw || raw.length > 32_768) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return undefined;
+    const fields = parsed.flatMap((value): RootContactField[] => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const field = value as Record<string, unknown>;
+      const key = typeof field.key === "string" ? field.key.trim() : "";
+      const label = typeof field.label === "string" ? field.label.trim() : "";
+      const type = field.type === "text" || field.type === "tel" || field.type === "email" ? field.type : undefined;
+      const placeholder = typeof field.placeholder === "string" ? field.placeholder.trim() : undefined;
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(key) || !label || label.length > 200) return [];
+      if (placeholder !== undefined && placeholder.length > 200) return [];
+      return [{
+        key,
+        label,
+        ...(type ? { type } : {}),
+        ...(field.required === true ? { required: true } : {}),
+        ...(placeholder ? { placeholder } : {}),
+      }];
+    }).slice(0, 32);
+    return fields.length ? fields : undefined;
+  } catch {
+    return undefined;
   }
 }
 

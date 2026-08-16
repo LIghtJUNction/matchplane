@@ -40,6 +40,9 @@ just smoke
 ```
 
 The core does not seed a tenant, domain, catalogue, vehicle, payment provider, or administrator.
+Root contact channels are likewise operator configuration (`MATCHPLANE_ROOT_CONTACT_FIELDS_JSON`);
+mounted packages own their presentation fields in `ui.contactFields`. No vertical fields are
+compiled into the root UI.
 Set `MATCHPLANE_ROOT_ADMIN_EMAIL` to an operator-owned address, then provision only the identities
 you want to mount:
 

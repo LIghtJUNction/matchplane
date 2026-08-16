@@ -1,6 +1,7 @@
 export const MATCHPLANE_MCP_PROTOCOL = "2025-03-26" as const;
 export const MATCHPLANE_AGENT_PROTOCOL = "matchplane.agent/v1" as const;
 
+/** Deprecated vertical alias. New integrations should use AgentSide. */
 export type AgentRole = "buyer" | "seller";
 export type AgentSide = "demand" | "supply";
 export type AgentStage = "platform" | "merchant" | "inventory";
@@ -17,8 +18,10 @@ export interface PartyCapability {
   tenant_id: string;
   domain_id: string;
   party_id: string;
-  role: "buyer" | "seller" | "both";
-  side?: AgentSide;
+  /** Kernel capability side. Vertical labels are not required by the contract. */
+  side: AgentSide;
+  /** Deprecated compatibility projection returned by older gateways. */
+  role?: "buyer" | "seller" | "both";
   access_token: string;
   access_token_expires_at: string;
   platform_path: string;
@@ -108,6 +111,15 @@ export interface MarketplaceIntroductionInput {
   expires_at: string;
 }
 
+export interface MarketplaceContactActionInput {
+  tenant_id: string;
+  domain_id: string;
+  platform_path?: string;
+  introduction_id: string;
+  participant_id: string;
+  idempotency_key: string;
+}
+
 export class MatchPlaneMcpError extends Error {
   readonly code: number;
   readonly details: unknown;
@@ -154,11 +166,16 @@ export class MatchPlaneAgentClient {
     role?: AgentRole;
     display_name?: string;
   }): Promise<PartyCapability> {
-    const side = input.side ?? (input.role === "seller" ? "supply" : "demand");
+    const side = input.side ?? (input.role === "seller" ? "supply" : input.role === "buyer" ? "demand" : undefined);
+    if (!side) throw new Error("MatchPlane marketplace session requires side: demand or supply");
+    if (input.role && ((input.role === "buyer" && side !== "demand") || (input.role === "seller" && side !== "supply"))) {
+      throw new Error("MatchPlane marketplace session side and deprecated role disagree");
+    }
     const result = await this.callTool("marketplace.agent.session", { ...input, side });
     const capability = result as Partial<PartyCapability>;
     return {
       ...capability,
+      side,
       platform_path: typeof capability.platform_path === "string"
         ? capability.platform_path
         : input.platform_path,
@@ -195,6 +212,21 @@ export class MatchPlaneAgentClient {
     participant_id: string;
   }): Promise<unknown> {
     return this.callTool("marketplace.introductions.list", this.scope(capability, input), capability.access_token);
+  }
+
+  /** Open the explicit contact-consent step; this never returns contact values. */
+  async requestContact(capability: PartyCapability, input: MarketplaceContactActionInput): Promise<unknown> {
+    return this.callTool("marketplace.introduction.contact.request", this.scope(capability, input), capability.access_token);
+  }
+
+  /** Record the supply participant's explicit consent; this never returns contact values. */
+  async consentContact(capability: PartyCapability, input: MarketplaceContactActionInput): Promise<unknown> {
+    return this.callTool("marketplace.introduction.contact.consent", this.scope(capability, input), capability.access_token);
+  }
+
+  /** Retrieve the counterpart contact only after the platform consent policy allows release. */
+  async releaseContact(capability: PartyCapability, input: MarketplaceContactActionInput): Promise<unknown> {
+    return this.callTool("marketplace.introduction.contact.release", this.scope(capability, input), capability.access_token);
   }
 
   private scope<T extends { platform_path?: string }>(

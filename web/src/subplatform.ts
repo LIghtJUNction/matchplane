@@ -7,6 +7,14 @@ export interface PricingConfig {
   label?: string;
 }
 
+export interface ContactField {
+  key: string;
+  label: string;
+  type?: "text" | "tel" | "email";
+  required?: boolean;
+  placeholder?: string;
+}
+
 /**
  * Selects the stable marketplace transport owned by the mounted package.
  *
@@ -53,6 +61,7 @@ export interface SubplatformConfig {
       placeholder?: string;
       options?: string[];
     }>;
+    contactFields?: ContactField[];
   };
   assetSchema?: Record<string, unknown>;
   pluginArtifact?: { entry: string; url: string; digest: string };
@@ -108,11 +117,25 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
     try {
       const response = await fetch("/api/platform/setup", { headers: { accept: "application/json" } });
       if (!response.ok) return base;
-      const body = await response.json() as { root?: { tenant?: { name?: unknown } | null } };
+      const body = await response.json() as {
+        root?: {
+          tenantId?: unknown;
+          tenant?: { name?: unknown } | null;
+          ui?: { contactFields?: unknown };
+        };
+        domains?: Array<{ id?: unknown }>;
+      };
       const name = body.root?.tenant?.name;
+      const tenantId = typeof body.root?.tenantId === "string" ? body.root.tenantId : undefined;
+      const domainId = typeof body.domains?.[0]?.id === "string" ? body.domains[0].id : undefined;
+      const rootUi = validUi({
+        contactFields: Array.isArray(body.root?.ui?.contactFields)
+          ? body.root.ui.contactFields as ContactField[]
+          : undefined,
+      });
       return typeof name === "string" && name.trim()
-        ? { ...base, brandName: name.trim(), label: name.trim() }
-        : base;
+        ? { ...base, brandName: name.trim(), label: name.trim(), tenantId, domainId, ...(rootUi ? { ui: rootUi } : {}) }
+        : { ...base, tenantId, domainId, ...(rootUi ? { ui: rootUi } : {}) };
     } catch {
       return base;
     }
@@ -137,6 +160,7 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
         copy?: Record<string, string>;
         filters?: NonNullable<SubplatformConfig["ui"]>["filters"];
         supplyFields?: NonNullable<SubplatformConfig["ui"]>["supplyFields"];
+        contactFields?: NonNullable<SubplatformConfig["ui"]>["contactFields"];
       };
       assetSchema?: Record<string, unknown>;
       assets?: {
@@ -254,12 +278,21 @@ function validUi(value: SubplatformConfig["ui"] | undefined): SubplatformConfig[
       && (!field.options || (Array.isArray(field.options) && field.options.every((option) => typeof option === "string" && option.length <= 200))))
       .slice(0, 64)
     : undefined;
-  if (!chat && !copy && !filters?.length && !supplyFields?.length) return undefined;
+  const contactFields = Array.isArray(value.contactFields)
+    ? value.contactFields.filter((field): field is ContactField => Boolean(field)
+      && typeof field.key === "string" && /^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/.test(field.key)
+      && typeof field.label === "string" && field.label.length <= 200
+      && (!field.type || field.type === "text" || field.type === "tel" || field.type === "email")
+      && (!field.placeholder || typeof field.placeholder === "string" && field.placeholder.length <= 200))
+      .slice(0, 32)
+    : undefined;
+  if (!chat && !copy && !filters?.length && !supplyFields?.length && !contactFields?.length) return undefined;
   return {
     ...(chat ? { chat } : {}),
     ...(copy ? { copy } : {}),
     ...(filters?.length ? { filters } : {}),
     ...(supplyFields?.length ? { supplyFields } : {}),
+    ...(contactFields?.length ? { contactFields } : {}),
   };
 }
 

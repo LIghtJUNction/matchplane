@@ -5,6 +5,7 @@ import {
   isLiveMarketplaceEnabled,
   readPartySession,
   type BetterAuthMarketplaceRole,
+  type ContactExchange,
   type PartySession,
 } from "../api";
 import { authClient, authFetchOptions } from "./auth-client";
@@ -19,6 +20,9 @@ export async function getMarketplaceSession(input: {
   tenantId?: string;
   domainId?: string;
   role: BetterAuthMarketplaceRole;
+  contact?: ContactExchange;
+  preserveContact?: boolean;
+  forceRefresh?: boolean;
 }): Promise<PartySession | null> {
   const { data, error } = await authClient.getSession({
     fetchOptions: authFetchOptions(input.subplatform),
@@ -26,7 +30,7 @@ export async function getMarketplaceSession(input: {
   if (error || !data) return null;
 
   if (input.role === "platform") return null;
-  let capability = readPartySession(
+  let capability = input.forceRefresh ? null : readPartySession(
     input.role === "subplatform_admin" ? "admin" : input.role,
     input.subplatform,
     input.platformPath,
@@ -42,6 +46,8 @@ export async function getMarketplaceSession(input: {
         platformPath: input.platformPath,
         role: input.role,
         authUserId: data.user.id,
+        contact: input.contact,
+        preserveContact: input.preserveContact,
       });
     }
     return capability;

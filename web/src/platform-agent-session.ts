@@ -5,6 +5,7 @@ export type AgentPartyRole = (typeof AGENT_PARTY_ROLES)[number];
 export type AgentKeyRole = AgentPartyRole | "both";
 export const AGENT_PARTY_SIDES = ["demand", "supply"] as const;
 export type AgentPartySide = (typeof AGENT_PARTY_SIDES)[number];
+export type AgentKeySide = AgentPartySide | "both";
 
 /**
  * Validate the small request accepted by the machine-agent capability exchange.
@@ -29,18 +30,18 @@ export function parseAgentSessionRequest(value: unknown):
   if (unknownKey) return { ok: false, error: `agent session contains an unsupported field: ${unknownKey}` };
   if (!isUuid(value.tenantId)) return { ok: false, error: "tenantId must be a UUID" };
   if (!isUuid(value.domainId)) return { ok: false, error: "domainId must be a UUID" };
-  if (!isPlatformPath(value.platformPath) || value.platformPath === "/") {
-    return { ok: false, error: "platformPath must be an active child path" };
+  if (!isPlatformPath(value.platformPath)) {
+    return { ok: false, error: "platformPath must be a canonical platform path" };
   }
-  const side = isAgentPartySide(value.side)
-    ? value.side
-    : isAgentPartyRole(value.role)
-      ? (value.role === "buyer" ? "demand" : "supply")
-      : null;
+  const sideFromRole = isAgentPartyRole(value.role)
+    ? (value.role === "buyer" ? "demand" : "supply")
+    : null;
+  const side = isAgentPartySide(value.side) ? value.side : sideFromRole;
   if (!side) return { ok: false, error: "side must be demand or supply" };
-  const role = isAgentPartyRole(value.role)
-    ? value.role
-    : side === "demand" ? "buyer" : "seller";
+  if (sideFromRole && sideFromRole !== side) {
+    return { ok: false, error: "side and deprecated role must describe the same capability" };
+  }
+  const role = isAgentPartyRole(value.role) ? value.role : side === "demand" ? "buyer" : "seller";
   const displayName = typeof value.displayName === "string" && value.displayName.trim()
     ? value.displayName.trim()
     : "MatchPlane external Agent";
@@ -72,6 +73,15 @@ export function isAgentKeyRole(value: unknown): value is AgentKeyRole {
   return isAgentPartyRole(value) || value === "both";
 }
 
+/** Neutral API-key capability metadata. `agentRole` remains a compatibility alias only. */
+export function isAgentKeySide(value: unknown): value is AgentKeySide {
+  return isAgentPartySide(value) || value === "both";
+}
+
+export function keyCanActAsNeutralSide(role: AgentKeySide, requested: AgentPartySide): boolean {
+  return role === "both" || role === requested;
+}
+
 export function keyCanActAs(role: AgentKeyRole, requested: AgentPartyRole): boolean {
   return role === "both" || role === requested;
 }
@@ -95,7 +105,7 @@ export function stableAgentPrincipalId(apiKeyId: string, tenantId: string): stri
 export function isPlatformPath(value: unknown): value is string {
   return typeof value === "string"
     && value.length <= 512
-    && /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(value);
+    && (value === "/" || /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(value));
 }
 
 export function isUuid(value: unknown): value is string {

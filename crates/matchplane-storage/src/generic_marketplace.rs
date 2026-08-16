@@ -226,6 +226,8 @@ pub struct RequestMarketplaceContact {
     pub introduction_id: MatchIntroductionId,
     /// Authenticated demand participant.
     pub demand_party_id: MarketplacePartyId,
+    /// Caller-stable key used to make the transition and audit event retry-safe.
+    pub idempotency_key: String,
     /// Non-secret request fingerprint used for audit correlation.
     pub request_fingerprint: Option<Vec<u8>>,
 }
@@ -239,6 +241,8 @@ pub struct AcceptMarketplaceContact {
     pub introduction_id: MatchIntroductionId,
     /// Authenticated supply participant.
     pub supply_party_id: MarketplacePartyId,
+    /// Caller-stable key used to make the transition and audit event retry-safe.
+    pub idempotency_key: String,
 }
 
 /// Encrypted counterpart contact returned only after the generic consent checks pass.
@@ -741,6 +745,11 @@ impl PgStore {
         &self,
         command: &RequestMarketplaceContact,
     ) -> Result<MarketplaceIntroduction, StorageError> {
+        validate_text(
+            &command.idempotency_key,
+            MAX_IDEMPOTENCY_KEY_BYTES,
+            "contact request idempotency key",
+        )?;
         let mut transaction = self.pool().begin().await?;
         serializable(&mut transaction).await?;
         let row = sqlx::query(INTRODUCTION_SELECT_BY_ID_FOR_UPDATE)
@@ -767,6 +776,7 @@ impl PgStore {
                 "contact_requested",
                 "denied",
                 command.request_fingerprint.as_deref(),
+                &command.idempotency_key,
             )
             .await?;
             transaction.commit().await?;
@@ -794,6 +804,7 @@ impl PgStore {
             "contact_requested",
             "allowed",
             command.request_fingerprint.as_deref(),
+            &command.idempotency_key,
         )
         .await?;
         let updated = sqlx::query(INTRODUCTION_SELECT_BY_ID)
@@ -811,6 +822,11 @@ impl PgStore {
         &self,
         command: &AcceptMarketplaceContact,
     ) -> Result<MarketplaceIntroduction, StorageError> {
+        validate_text(
+            &command.idempotency_key,
+            MAX_IDEMPOTENCY_KEY_BYTES,
+            "contact consent idempotency key",
+        )?;
         let mut transaction = self.pool().begin().await?;
         serializable(&mut transaction).await?;
         let row = sqlx::query(INTRODUCTION_SELECT_BY_ID_FOR_UPDATE)
@@ -840,6 +856,7 @@ impl PgStore {
                 "contact_consent",
                 "denied",
                 None,
+                &command.idempotency_key,
             )
             .await?;
             transaction.commit().await?;
@@ -869,6 +886,7 @@ impl PgStore {
             "contact_consent",
             "allowed",
             None,
+            &command.idempotency_key,
         )
         .await?;
         let updated = sqlx::query(INTRODUCTION_SELECT_BY_ID)
@@ -887,8 +905,14 @@ impl PgStore {
         tenant_id: TenantId,
         introduction_id: MatchIntroductionId,
         actor_party_id: MarketplacePartyId,
+        idempotency_key: &str,
         request_fingerprint: Option<&[u8]>,
     ) -> Result<MarketplaceContactEnvelope, StorageError> {
+        validate_text(
+            idempotency_key,
+            MAX_IDEMPOTENCY_KEY_BYTES,
+            "contact release idempotency key",
+        )?;
         let mut transaction = self.pool().begin().await?;
         serializable(&mut transaction).await?;
         let row = sqlx::query(INTRODUCTION_SELECT_BY_ID_FOR_UPDATE)
@@ -920,6 +944,7 @@ impl PgStore {
                 "contact_release",
                 "denied",
                 request_fingerprint,
+                idempotency_key,
             )
             .await?;
             transaction.commit().await?;
@@ -930,7 +955,7 @@ impl PgStore {
         sqlx::query(
             "UPDATE marketplace_introductions
                 SET contact_released_at = COALESCE(contact_released_at, clock_timestamp()),
-                    version = version + 1
+                    version = CASE WHEN contact_released_at IS NULL THEN version + 1 ELSE version END
               WHERE tenant_id = $1 AND id = $2",
         )
         .bind(tenant_id.into_uuid())
@@ -946,6 +971,7 @@ impl PgStore {
             "contact_release",
             "allowed",
             request_fingerprint,
+            idempotency_key,
         )
         .await?;
         let contact = sqlx::query(
@@ -1262,12 +1288,15 @@ async fn insert_marketplace_contact_event(
     event_type: &str,
     decision: &str,
     request_fingerprint: Option<&[u8]>,
+    idempotency_key: &str,
 ) -> Result<(), StorageError> {
     sqlx::query(
         "INSERT INTO marketplace_introduction_contact_events
             (id, tenant_id, introduction_id, actor_party_id, target_party_id,
-             event_type, decision, request_fingerprint)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+             event_type, decision, request_fingerprint, idempotency_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (tenant_id, introduction_id, actor_party_id, event_type, idempotency_key)
+         DO NOTHING",
     )
     .bind(Uuid::now_v7())
     .bind(tenant_id.into_uuid())
@@ -1277,6 +1306,7 @@ async fn insert_marketplace_contact_event(
     .bind(event_type)
     .bind(decision)
     .bind(request_fingerprint)
+    .bind(idempotency_key)
     .execute(&mut **transaction)
     .await?;
     Ok(())

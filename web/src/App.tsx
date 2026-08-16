@@ -87,15 +87,20 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         const userRole = user?.role;
         const isRootManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
         if (requestedRole === "platform" && !isRootManager) {
+          if (!user) {
+            const next = `${window.location.pathname}?role=platform`;
+            window.location.assign(`/login?role=platform&next=${encodeURIComponent(next)}`);
+            return;
+          }
           setRole("buyer");
-          setNotice("平台管理仅对根平台管理员开放，请使用管理员入口登录");
+          setNotice("当前账号没有根平台管理员权限");
         }
       })
       .catch(() => {
         setAuthUser(null);
         if (roleFromLocation() === "platform") {
-          setRole("buyer");
-          setNotice("请先使用根平台管理员账号登录");
+          const next = `${window.location.pathname}?role=platform`;
+          window.location.assign(`/login?role=platform&next=${encodeURIComponent(next)}`);
         }
       });
   }, [subplatform.slug]);
@@ -323,6 +328,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 });
               }
               closeListing();
+              window.dispatchEvent(new Event("matchplane.contact.updated"));
               setNotice("联系申请已写入撮合系统，等待供给方明确同意后交换联系方式");
             } catch (error) {
               setNotice(error instanceof Error ? error.message : "联系申请未发送，请稍后重试");

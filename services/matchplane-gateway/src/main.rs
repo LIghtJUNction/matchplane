@@ -218,7 +218,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/v1/marketplace/introductions/{introduction_id}/contact",
-            get(generic_marketplace::release_contact),
+            post(generic_marketplace::release_contact),
         );
 
     // The old listing/offline-deal surface is a compatibility adapter, not part of the

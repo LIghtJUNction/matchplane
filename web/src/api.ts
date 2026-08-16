@@ -825,6 +825,8 @@ export async function establishMarketplaceSession(input: {
   platformPath?: string;
   role: BetterAuthMarketplaceRole;
   authUserId?: string;
+  contact?: ContactExchange;
+  preserveContact?: boolean;
 }): Promise<PartySession> {
   const response = await fetch("/api/marketplace/session", {
     method: "POST",
@@ -1009,6 +1011,7 @@ export function requestMarketplaceContact(input: {
   session: PartySession;
   domainId: string;
   introductionId: string;
+  idempotencyKey?: string;
 }): Promise<MarketplaceIntroduction> {
   return request<MarketplaceIntroduction>(
     `/v1/marketplace/introductions/${encodeURIComponent(input.introductionId)}/contact/request`,
@@ -1018,6 +1021,7 @@ export function requestMarketplaceContact(input: {
         tenant_id: input.session.tenantId,
         domain_id: input.domainId,
         participant_id: input.session.partyId,
+        idempotency_key: input.idempotencyKey ?? `web-contact-request-${input.introductionId}`,
       }),
     },
     input.session,
@@ -1028,6 +1032,7 @@ export function consentMarketplaceContact(input: {
   session: PartySession;
   domainId: string;
   introductionId: string;
+  idempotencyKey?: string;
 }): Promise<MarketplaceIntroduction> {
   return request<MarketplaceIntroduction>(
     `/v1/marketplace/introductions/${encodeURIComponent(input.introductionId)}/contact/consent`,
@@ -1037,6 +1042,7 @@ export function consentMarketplaceContact(input: {
         tenant_id: input.session.tenantId,
         domain_id: input.domainId,
         participant_id: input.session.partyId,
+        idempotency_key: input.idempotencyKey ?? `web-contact-consent-${input.introductionId}`,
       }),
     },
     input.session,
@@ -1045,17 +1051,22 @@ export function consentMarketplaceContact(input: {
 
 export function retrieveMarketplaceContact(input: {
   session: PartySession;
-  domainId?: string;
+  domainId: string;
   introductionId: string;
+  idempotencyKey?: string;
 }): Promise<MarketplaceContactResponse> {
-  const params = new URLSearchParams({
-    tenant_id: input.session.tenantId,
-    participant_id: input.session.partyId,
-  });
-  if (input.domainId) params.set("domain_id", input.domainId);
   return request<MarketplaceContactResponse>(
-    `/v1/marketplace/introductions/${encodeURIComponent(input.introductionId)}/contact?${params.toString()}`,
-    { cache: "no-store" },
+    `/v1/marketplace/introductions/${encodeURIComponent(input.introductionId)}/contact`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        idempotency_key: input.idempotencyKey ?? `web-contact-release-${input.introductionId}`,
+      }),
+      cache: "no-store",
+    },
     input.session,
   );
 }

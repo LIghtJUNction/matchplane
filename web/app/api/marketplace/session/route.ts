@@ -16,6 +16,10 @@ interface SessionRequest {
   subplatform?: string;
   platformPath?: string;
   role?: RequestedRole;
+  /** Optional user-owned contact channels. The gateway encrypts these values at rest. */
+  contact?: Record<string, unknown>;
+  /** Keep existing channels during ordinary capability refreshes. */
+  preserveContact?: boolean;
   /** Server-to-server OIDC exchange for a child hosted on another origin. */
   federated?: {
     accessToken?: string;
@@ -146,6 +150,8 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const contact = normalizeContactInput(input.contact ?? { email: identity.user.email });
+  if (!contact.ok) return NextResponse.json({ error: contact.error }, { status: 400 });
   let gatewayResponse: Response;
   try {
     gatewayResponse = await fetch(
@@ -169,7 +175,8 @@ export async function POST(request: Request): Promise<Response> {
           display_name: identity.user.name,
           role: input.role === "subplatform_admin" ? "both" : input.role,
           marketplace_sides: input.role === "seller" ? ["supply"] : input.role === "buyer" ? ["demand"] : ["demand", "supply"],
-          contact: { email: identity.user.email },
+          contact: contact.value,
+          preserve_contact: input.preserveContact !== false && !input.contact,
         }),
       },
     );
@@ -404,6 +411,32 @@ async function introspectRootAccessToken(
 
 function boundedString(value: unknown, maxLength: number): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength ? value : undefined;
+}
+
+function normalizeContactInput(value: unknown):
+  | { ok: true; value: Record<string, string> }
+  | { ok: false; error: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: "联系方式必须是 JSON 对象" };
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > 32) return { ok: false, error: "联系方式渠道数量不能超过 32 个" };
+  const normalized: Record<string, string> = {};
+  let totalBytes = 0;
+  for (const [key, raw] of entries) {
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(key) || typeof raw !== "string" || !raw.trim() || raw.length > 256) {
+      return { ok: false, error: "联系方式渠道名称或内容格式无效" };
+    }
+    if ([...raw].some((character) => character.codePointAt(0)! < 0x20)) {
+      return { ok: false, error: "联系方式不能包含控制字符" };
+    }
+    normalized[key] = raw.trim();
+    totalBytes += Buffer.byteLength(key) + Buffer.byteLength(raw);
+  }
+  if (!Object.keys(normalized).length || totalBytes > 16 * 1024) {
+    return { ok: false, error: "至少填写一种联系方式，且总长度不能超过 16 KiB" };
+  }
+  return { ok: true, value: normalized };
 }
 
 async function upsertMarketplaceMembershipProjection(input: {

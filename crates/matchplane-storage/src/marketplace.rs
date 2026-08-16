@@ -80,6 +80,8 @@ pub struct EnsureMarketplaceParty {
     pub access_token_expires_at: OffsetDateTime,
     /// Protected contact record.
     pub contact: EncryptedContact,
+    /// Keep the previously stored contact when a normal login only refreshes its capability.
+    pub preserve_contact: bool,
 }
 
 /// Public marketplace identity metadata. Contact details and credentials are never serialized.
@@ -884,8 +886,10 @@ impl PgStore {
                    ) AS side ORDER BY side)\
                ), access_token_hash = EXCLUDED.access_token_hash, \
                access_token_expires_at = EXCLUDED.access_token_expires_at, \
-               contact_ciphertext = EXCLUDED.contact_ciphertext, contact_nonce = EXCLUDED.contact_nonce, \
-               contact_key_version = EXCLUDED.contact_key_version, version = marketplace_parties.version + 1 \
+               contact_ciphertext = CASE WHEN $14 THEN marketplace_parties.contact_ciphertext ELSE EXCLUDED.contact_ciphertext END, \
+               contact_nonce = CASE WHEN $14 THEN marketplace_parties.contact_nonce ELSE EXCLUDED.contact_nonce END, \
+               contact_key_version = CASE WHEN $14 THEN marketplace_parties.contact_key_version ELSE EXCLUDED.contact_key_version END, \
+               version = marketplace_parties.version + 1 \
              RETURNING id, tenant_id, external_key, display_name, role, marketplace_sides, status, version, created_at",
         )
         .bind(party_id)
@@ -901,6 +905,7 @@ impl PgStore {
         .bind(&command.contact.ciphertext)
         .bind(&command.contact.nonce)
         .bind(command.contact.key_version)
+        .bind(command.preserve_contact)
         .fetch_one(&mut *transaction)
         .await?;
         sqlx::query(

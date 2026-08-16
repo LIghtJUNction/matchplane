@@ -4,7 +4,9 @@ set -euo pipefail
 # Primary marketplace smoke test for the neutral kernel contract. It intentionally avoids
 # vertical names, fields, and the legacy compatibility adapter.
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-compose=(docker compose --env-file "$repository_root/.env.example" -f "$repository_root/deploy/compose/compose.yaml")
+env_file="$repository_root/.env.example"
+if [[ -f "$repository_root/.env" ]]; then env_file="$repository_root/.env"; fi
+compose=(docker compose --env-file "$env_file" -f "$repository_root/deploy/compose/compose.yaml")
 base_url=${MATCHPLANE_BASE_URL:-http://127.0.0.1:8080}
 payment_url=${MATCHPLANE_PAYMENT_BASE_URL:-http://127.0.0.1:8081}
 tenant_id=00000000-0000-7000-8000-000000000100
@@ -84,29 +86,32 @@ introduction=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg 
 test "$(jq -r '.introduction_id' <<<"$introduction")" = "$introduction_id"
 
 contact_before_consent=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-  --header "authorization: Bearer $demand_token" --header "$platform_path_header" \
-  "$base_url/v1/marketplace/introductions/$introduction_id/contact?tenant_id=$tenant_id&domain_id=$domain_id&participant_id=$demand_id")
+  --header 'content-type: application/json' --header "authorization: Bearer $demand_token" --header "$platform_path_header" \
+  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"participant_id\":\"$demand_id\",\"idempotency_key\":\"ci-contact-release-before-consent-$introduction_id\"}" \
+  -X POST "$base_url/v1/marketplace/introductions/$introduction_id/contact")
 test "$contact_before_consent" = 409
 
 curl --fail-with-body --silent --header 'content-type: application/json' \
   --header "authorization: Bearer $demand_token" --header "$platform_path_header" \
-  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"participant_id\":\"$demand_id\"}" \
+  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"participant_id\":\"$demand_id\",\"idempotency_key\":\"ci-contact-request-$introduction_id\"}" \
   "$base_url/v1/marketplace/introductions/$introduction_id/contact/request" \
   | jq -e '.status == "contact_requested"' >/dev/null
 
 curl --fail-with-body --silent --header 'content-type: application/json' \
   --header "authorization: Bearer $supply_token" --header "$platform_path_header" \
-  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"participant_id\":\"$supply_id\"}" \
+  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"participant_id\":\"$supply_id\",\"idempotency_key\":\"ci-contact-consent-$introduction_id\"}" \
   "$base_url/v1/marketplace/introductions/$introduction_id/contact/consent" \
   | jq -e '.supply_contact_consent_at != null' >/dev/null
 
-contact=$(curl --fail-with-body --silent --header "authorization: Bearer $demand_token" --header "$platform_path_header" \
-  "$base_url/v1/marketplace/introductions/$introduction_id/contact?tenant_id=$tenant_id&domain_id=$domain_id&participant_id=$demand_id")
+contact=$(curl --fail-with-body --silent --header 'content-type: application/json' --header "authorization: Bearer $demand_token" --header "$platform_path_header" \
+  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"participant_id\":\"$demand_id\",\"idempotency_key\":\"ci-contact-release-demand-$introduction_id\"}" \
+  -X POST "$base_url/v1/marketplace/introductions/$introduction_id/contact")
 test "$(jq -r '.counterpart.party_id' <<<"$contact")" = "$supply_id"
 test "$(jq -r '.counterpart.contact.email' <<<"$contact")" = supply@example.invalid
 
-supply_contact=$(curl --fail-with-body --silent --header "authorization: Bearer $supply_token" --header "$platform_path_header" \
-  "$base_url/v1/marketplace/introductions/$introduction_id/contact?tenant_id=$tenant_id&domain_id=$domain_id&participant_id=$supply_id")
+supply_contact=$(curl --fail-with-body --silent --header 'content-type: application/json' --header "authorization: Bearer $supply_token" --header "$platform_path_header" \
+  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"participant_id\":\"$supply_id\",\"idempotency_key\":\"ci-contact-release-supply-$introduction_id\"}" \
+  -X POST "$base_url/v1/marketplace/introductions/$introduction_id/contact")
 test "$(jq -r '.counterpart.party_id' <<<"$supply_contact")" = "$demand_id"
 test "$(jq -r '.counterpart.contact.email' <<<"$supply_contact")" = demand@example.invalid
 

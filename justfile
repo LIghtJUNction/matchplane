@@ -1,4 +1,5 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set dotenv-load := true
 
 default:
     @just --list
@@ -15,7 +16,7 @@ check: web-check agent-check subplatform-check migration-check
     cargo test --workspace --locked
 
 compose-config:
-    docker compose --env-file .env.example -f deploy/compose/compose.yaml config --quiet
+    env_file=.env.example; if [ -f .env ]; then env_file=.env; fi; docker compose --env-file "$env_file" -f deploy/compose/compose.yaml config --quiet
 
 web-image-check:
     docker build --file deploy/compose/web.Dockerfile --tag matchplane/web:check .
@@ -25,10 +26,10 @@ agent-check:
     web/node_modules/.bin/tsc -p integrations/matchplane-agent-client/tsconfig.json --noEmit
 
 dev:
-    docker compose --env-file .env.example -f deploy/compose/compose.yaml up --build -d
+    env_file=.env.example; if [ -f .env ]; then env_file=.env; fi; docker compose --env-file "$env_file" -f deploy/compose/compose.yaml up --build -d
 
 down:
-    docker compose --env-file .env.example -f deploy/compose/compose.yaml down
+    env_file=.env.example; if [ -f .env ]; then env_file=.env; fi; docker compose --env-file "$env_file" -f deploy/compose/compose.yaml down
 
 migrate:
     cargo run --locked -p xtask -- migrate

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   BadgeCheck,
@@ -16,8 +16,17 @@ import { motion } from "motion/react";
 
 import { subplatformCopy, type SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
-import { getPlatformChildren, type PlatformChildSummary } from "../api";
+import {
+  getMarketplaceIntroductions,
+  getPlatformChildren,
+  retrieveMarketplaceContact,
+  type MarketplaceContactResponse,
+  type MarketplaceIntroduction,
+  type PlatformChildSummary,
+} from "../api";
+import { getMarketplaceSession as getCapability } from "../lib/marketplace-session";
 import { ListingVisual, SectionHeading, spring } from "./Primitives";
+import { ContactProfileCard } from "./ContactProfileCard";
 
 interface BuyerDashboardProps {
   listings: AssetListing[];
@@ -32,6 +41,9 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(() => new Set());
   const [childPlatforms, setChildPlatforms] = useState<PlatformChildSummary[]>([]);
+  const [introductions, setIntroductions] = useState<MarketplaceIntroduction[]>([]);
+  const [contacts, setContacts] = useState<Record<string, MarketplaceContactResponse>>({});
+  const [contactLoading, setContactLoading] = useState<string | null>(null);
   const isRoot = subplatform.slug === "root";
   const savedKey = `matchplane.saved.${subplatform.path}`;
   const filterDefinitions = subplatform.ui?.filters ?? [];
@@ -58,6 +70,59 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
       active = false;
     };
   }, [isRoot, subplatform.path]);
+
+  const loadIntroductions = useCallback(async () => {
+    if (!subplatform.tenantId || !subplatform.domainId) return;
+    const session = await getCapability({
+      subplatform: subplatform.slug,
+      platformPath: subplatform.path,
+      tenantId: subplatform.tenantId,
+      domainId: subplatform.domainId,
+      role: "buyer",
+    });
+    if (!session) return;
+    try {
+      setIntroductions(await getMarketplaceIntroductions({ session, domainId: subplatform.domainId }));
+    } catch {
+      setIntroductions([]);
+    }
+  }, [subplatform.domainId, subplatform.path, subplatform.slug, subplatform.tenantId]);
+
+  useEffect(() => {
+    void loadIntroductions();
+    const refresh = () => void loadIntroductions();
+    window.addEventListener("matchplane.contact.updated", refresh);
+    return () => window.removeEventListener("matchplane.contact.updated", refresh);
+  }, [loadIntroductions]);
+
+  const releaseContact = async (introduction: MarketplaceIntroduction) => {
+    if (!subplatform.tenantId || !subplatform.domainId || contactLoading) return;
+    setContactLoading(introduction.introduction_id);
+    try {
+      const session = await getCapability({
+        subplatform: subplatform.slug,
+        platformPath: subplatform.path,
+        tenantId: subplatform.tenantId,
+        domainId: subplatform.domainId,
+        role: "buyer",
+      });
+      if (!session) {
+        onNotice(copy("contactLoginNotice", "请先登录后查看已同意交换的联系方式"));
+        return;
+      }
+      const response = await retrieveMarketplaceContact({
+        session,
+        domainId: subplatform.domainId,
+        introductionId: introduction.introduction_id,
+      });
+      setContacts((current) => ({ ...current, [introduction.introduction_id]: response }));
+      onNotice(copy("contactReleasedNotice", "联系方式已解锁，请通过对方提供的渠道联系"));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : copy("contactReleaseError", "联系方式暂时无法读取"));
+    } finally {
+      setContactLoading(null);
+    }
+  };
 
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -155,6 +220,8 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         </section>
       )}
 
+      <ContactProfileCard subplatform={subplatform} role="buyer" onNotice={onNotice} />
+
       {listings.length ? (
         <section className="discovery-panel" aria-label={copy("searchOffersLabel", "搜索供给")}>
           <label className="search-field">
@@ -236,6 +303,31 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         )}
       </section>
 
+      {!isRoot && introductions.length ? (
+        <section className="surface buyer-contact-inbox" aria-labelledby="buyer-contact-inbox-title">
+          <SectionHeading eyebrow={copy("contactInboxEyebrow", "撮合进度")} title={copy("contactInboxTitle", "双方同意后，查看联系方式")} />
+          <ol className="submission-list">
+            {introductions.map((introduction) => {
+              const contact = contacts[introduction.introduction_id];
+              return (
+                <li key={introduction.introduction_id}>
+                  <div>
+                    <strong>{copy("contactRequestLabel", "一条撮合联系申请")}</strong>
+                    <small>{buyerIntroductionStatus(introduction.status, copy)}</small>
+                    {contact ? <div className="buyer-contact-values">{Object.entries(contact.counterpart.contact).map(([key, value]) => <span key={key}>{key}: {value}</span>)}</div> : null}
+                  </div>
+                  {contact ? <span className="submission-status">{copy("contactVisibleLabel", "已可联系")}</span> : introduction.supply_contact_consent_at ? (
+                    <button className="text-action" type="button" onClick={() => void releaseContact(introduction)} disabled={contactLoading === introduction.introduction_id}>
+                      {contactLoading === introduction.introduction_id ? copy("contactReadingLabel", "读取中…") : copy("viewContactLabel", "查看联系方式")}
+                    </button>
+                  ) : <span className="submission-status">{copy("contactWaitingLabel", "等待供给方同意")}</span>}
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ) : null}
+
       {!isRoot ? <section className="offline-section" aria-labelledby="offline-title">
         <div className="offline-intro">
           <span className="eyebrow">{copy("offlineEyebrow", "线上撮合 · 线下协商")}</span>
@@ -261,6 +353,17 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
       </section> : null}
     </div>
   );
+}
+
+function buyerIntroductionStatus(status: string, copy: (key: string, fallback: string) => string): string {
+  return {
+    proposed: copy("introductionProposedLabel", "已建立撮合"),
+    contact_requested: copy("introductionRequestedLabel", "已申请联系"),
+    contact_released: copy("introductionReleasedLabel", "对方已同意交换"),
+    completed: copy("introductionCompletedLabel", "已完成"),
+    declined: copy("introductionDeclinedLabel", "已拒绝"),
+    expired: copy("introductionExpiredLabel", "已过期"),
+  }[status] ?? copy("introductionProcessingLabel", "撮合处理中");
 }
 
 function matchesFilter(

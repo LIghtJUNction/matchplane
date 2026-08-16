@@ -2918,6 +2918,19 @@ body,
 .seller-status-summary div { display: grid; gap: 0.14rem; }
 .seller-status-summary strong { color: var(--ink); font-size: 0.78rem; }
 .seller-status-summary small { color: var(--muted); font-size: 0.68rem; }
+.contact-profile-card { display: grid; gap: 1.15rem; margin: 0 0 1.1rem; }
+.contact-profile-heading { display: flex; align-items: flex-start; gap: 0.8rem; max-width: 48rem; }
+.contact-profile-icon { display: grid; flex: 0 0 auto; place-items: center; width: 2.15rem; height: 2.15rem; border-radius: 0.75rem; background: var(--heather); color: var(--ink); }
+.contact-profile-heading h2 { margin: 0.1rem 0 0.35rem; font-size: 1.05rem; letter-spacing: -0.025em; }
+.contact-profile-heading p:last-child { margin: 0; color: var(--muted); font-size: 0.75rem; line-height: 1.55; }
+.contact-profile-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
+.contact-profile-form label { display: grid; gap: 0.38rem; }
+.contact-profile-form label > span { color: var(--ink-soft); font-size: 0.72rem; font-weight: 650; }
+.contact-profile-form input { width: 100%; padding: 0.7rem 0.78rem; border: 1px solid var(--line); border-radius: 0.8rem; outline: 0; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.8rem; }
+.contact-profile-form input:focus { border-color: var(--sky); box-shadow: 0 0 0 0.12rem rgba(106, 155, 204, 0.2); }
+.contact-profile-footer { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 1rem; padding-top: 0.1rem; }
+.contact-profile-footer > span { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--muted); font-size: 0.69rem; }
+.contact-profile-footer .button { display: inline-flex; align-items: center; gap: 0.45rem; }
 .seller-upload-wide { grid-column: 1 / -1; }
 .seller-form-tools { display: flex; flex-wrap: wrap; gap: 0.8rem; }
 .seller-form-tools .text-action { display: inline-flex; align-items: center; gap: 0.3rem; }
@@ -2939,6 +2952,8 @@ body,
 .submission-list li:first-child { border-top: 0; }
 .submission-list strong, .submission-list small { display: block; }
 .submission-list small { margin-top: 0.22rem; color: var(--muted); font-size: 0.68rem; }
+.buyer-contact-values { display: flex; flex-wrap: wrap; gap: 0.35rem 0.65rem; margin-top: 0.45rem; color: var(--ink-soft); font-size: 0.72rem; }
+.buyer-contact-values span { padding: 0.25rem 0.45rem; border-radius: 0.45rem; background: rgba(120, 140, 93, 0.1); }
 .submission-status { padding: 0.35rem 0.55rem; border-radius: 999px; background: rgba(120, 140, 93, 0.14); color: var(--olive); font-size: 0.68rem; white-space: nowrap; }
 .seller-empty-state { min-height: 6rem; display: grid; place-items: center; gap: 0.45rem; color: var(--muted); text-align: center; }
 .seller-empty-state p { font-size: 0.74rem; }
@@ -2953,6 +2968,8 @@ body,
   .seller-upload-form { grid-template-columns: 1fr; }
   .seller-upload-wide { grid-column: auto; }
   .seller-upload-actions { align-items: stretch; flex-direction: column; }
+  .contact-profile-form { grid-template-columns: 1fr; }
+  .contact-profile-footer { align-items: stretch; flex-direction: column; }
 }
 
 @media (max-width: 40rem) {

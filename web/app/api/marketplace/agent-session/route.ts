@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { authDatabase } from "../../../../src/lib/auth";
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
 import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization, readActivePlatformScope } from "../../../../src/platform-mount";
-import { isAgentKeyRole, keyCanActAsSide, parseAgentSessionRequest, stableAgentPrincipalId } from "../../../../src/platform-agent-session";
+import { isAgentKeyRole, isAgentKeySide, keyCanActAsNeutralSide, keyCanActAsSide, parseAgentSessionRequest, stableAgentPrincipalId } from "../../../../src/platform-agent-session";
 import { verifyPlatformApiKey } from "../../../../src/lib/platform-api-key";
 
 export const runtime = "nodejs";
@@ -22,9 +22,15 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const configuredRole = apiKey.metadata?.agentRole;
-  if (!isAgentKeyRole(configuredRole)) {
+  const configuredSide = apiKey.metadata?.agentSide;
+  const keySide = isAgentKeySide(configuredSide)
+    ? configuredSide
+    : isAgentKeyRole(configuredRole)
+      ? (configuredRole === "both" ? "both" : configuredRole === "buyer" ? "demand" : "supply")
+      : null;
+  if (!keySide) {
     return NextResponse.json(
-      { error: "该 API Key 尚未绑定 agentRole；请分别为 buyer/seller Agent 创建最小权限 Key" },
+      { error: "该 API Key 尚未绑定 agentSide；请为 demand/supply Agent 创建最小权限 Key" },
       { status: 403 },
     );
   }
@@ -32,8 +38,8 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = parseAgentSessionRequest(await parseJson(request));
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const input = parsed.value;
-  if (!keyCanActAsSide(configuredRole, input.side)) {
-    return NextResponse.json({ error: "API Key 的 agentRole 不允许当前 marketplace side" }, { status: 403 });
+  if (!(isAgentKeySide(configuredSide) ? keyCanActAsNeutralSide(keySide, input.side) : keyCanActAsSide(configuredRole as "buyer" | "seller" | "both", input.side))) {
+    return NextResponse.json({ error: "API Key 的 agentSide 不允许当前 marketplace side" }, { status: 403 });
   }
   if (!(await isMountedPlatformPath(input.platformPath))) {
     return NextResponse.json({ error: "平台路径尚未激活" }, { status: 404 });
@@ -43,10 +49,14 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const resolvedScope = await readActivePlatformScope(input.platformPath);
+  const scopeMatchesNode = input.platformPath === "/"
+    ? await isActiveRootScope(input.tenantId, input.domainId)
+    : await isActiveChildScope(input.platformPath, input.tenantId, input.domainId);
   if (
     (process.env.MATCHPLANE_ENVIRONMENT === "production"
+      && input.platformPath !== "/"
       && (!resolvedScope || resolvedScope.tenantId !== input.tenantId || resolvedScope.domainId !== input.domainId))
-    || !(await isActiveChildScope(input.platformPath, input.tenantId, input.domainId))
+    || !scopeMatchesNode
   ) {
     return NextResponse.json({ error: "tenant/domain 与 API Key 的激活平台路径不匹配" }, { status: 403 });
   }
@@ -231,6 +241,20 @@ async function isActiveChildScope(
       ORDER BY r.version DESC
       LIMIT 1`,
     [tenantId, domainId, slug],
+  );
+  return result.rowCount === 1;
+}
+
+async function isActiveRootScope(tenantId: string, domainId: string): Promise<boolean> {
+  const configuredRootTenant = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  if (process.env.MATCHPLANE_ENVIRONMENT === "production" && configuredRootTenant !== tenantId) return false;
+  const result = await authDatabase.query(
+    `SELECT 1
+       FROM domains
+      WHERE tenant_id = $1::uuid
+        AND id = $2::uuid
+      LIMIT 1`,
+    [tenantId, domainId],
   );
   return result.rowCount === 1;
 }

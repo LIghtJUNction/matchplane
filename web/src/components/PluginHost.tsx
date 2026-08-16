@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ExternalLink, ShieldCheck } from "lucide-react";
 
-import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing } from "../api";
+import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing, type ContactExchange } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
 import type { WorkspaceRole } from "../types";
@@ -19,7 +19,8 @@ interface PluginHostProps {
 /**
  * Host a verified static subplatform UI in a capability-limited iframe. The
  * plugin receives context through postMessage and can request the shared chat,
- * but it never receives a session token or payment/contact authority.
+ * but it never receives a session token or payment authority. Contact updates are validated by
+ * the host and forwarded through the same Better Auth session bridge as the generic workspace.
  */
 export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHostProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -43,7 +44,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
         pricing: pricingFor(subplatform),
         assetSchema: subplatform.assetSchema,
         ui: subplatform.ui,
-        capabilities: ["chat.open", "listing.select", "listing.submit", "navigation"],
+        capabilities: ["chat.open", "listing.select", "listing.submit", "contact.update", "navigation"],
       },
     }, "*");
   };
@@ -71,6 +72,15 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
         onNotice(copy("pluginSelectionNotice", "插件已提交供给选择，平台会继续按权限撮合"));
       } else if (event.data.type === "listing.submit") {
         void submitPluginListing(event.data, {
+          frame: frameRef.current?.contentWindow,
+          targetOrigin: "*",
+          contextToken: contextTokenRef.current,
+          role,
+          subplatform,
+          onNotice,
+        });
+      } else if (event.data.type === "contact.update") {
+        void updatePluginContact(event.data, {
           frame: frameRef.current?.contentWindow,
           targetOrigin: "*",
           contextToken: contextTokenRef.current,
@@ -121,6 +131,64 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
   );
 }
 
+async function updatePluginContact(
+  message: Record<string, unknown>,
+  input: {
+    frame: Window | null | undefined;
+    targetOrigin: string;
+    contextToken: string | null;
+    role: WorkspaceRole;
+    subplatform: SubplatformConfig;
+    onNotice: (message: string) => void;
+  },
+): Promise<void> {
+  const requestId = typeof message.requestId === "string" ? message.requestId : null;
+  const respond = (ok: boolean, error?: string) => {
+    if (!requestId || !input.frame || !input.contextToken) return;
+    input.frame.postMessage({
+      protocol: "matchplane.plugin/v1",
+      version: 1,
+      type: "contact.update.result",
+      requestId,
+      contextToken: input.contextToken,
+      ok,
+      ...(error ? { error } : {}),
+    }, input.targetOrigin);
+  };
+  try {
+    if (input.role !== "buyer" && input.role !== "seller") throw new Error("只有需求方或供给方可以配置联系方式");
+    if (!isLiveMarketplaceEnabled() || !input.subplatform.tenantId || !input.subplatform.domainId) {
+      throw new Error("当前平台尚未连接真实联系方式服务");
+    }
+    if (!isRecord(message.payload) || !isRecord(message.payload.contact)) throw new Error("联系方式必须是 JSON 对象");
+    const contact: ContactExchange = {};
+    for (const [key, value] of Object.entries(message.payload.contact)) {
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(key) || typeof value !== "string" || !value.trim() || value.length > 256) {
+        throw new Error("联系方式渠道名称或内容格式无效");
+      }
+      contact[key] = value.trim();
+    }
+    if (!Object.keys(contact).length) throw new Error("至少填写一种联系方式");
+    const session = await getMarketplaceSession({
+      subplatform: input.subplatform.slug,
+      platformPath: input.subplatform.path,
+      tenantId: input.subplatform.tenantId,
+      domainId: input.subplatform.domainId,
+      role: input.role,
+      forceRefresh: true,
+      contact,
+      preserveContact: false,
+    });
+    if (!session) throw new Error("请先登录后保存联系方式");
+    input.onNotice(subplatformCopy(input.subplatform, "contactProfileSavedNotice", "联系方式已加密保存；双方同意后才会交换"));
+    respond(true);
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : "联系方式保存失败，请稍后重试";
+    input.onNotice(messageText);
+    respond(false, messageText);
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -160,7 +228,9 @@ async function submitPluginListing(
     const supply = message.payload;
     const attributes = supply.attributes;
     if (!isRecord(attributes)) throw new Error("供给 attributes 必须是 JSON 对象");
-    const externalKey = boundedText(supply.externalKey, 256, "内部编号");
+    const externalKey = typeof supply.externalKey === "string" && supply.externalKey.trim()
+      ? boundedText(supply.externalKey, 256, "内部编号")
+      : `offer-${crypto.randomUUID()}`;
     const displayName = boundedText(supply.displayName, 500, "供给名称");
     const pricing = pricingFor(input.subplatform);
     const usesLegacyMarketplace = input.subplatform.marketplaceContract === "legacy-v1";

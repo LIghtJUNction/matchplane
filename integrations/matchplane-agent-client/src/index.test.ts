@@ -11,7 +11,7 @@ function fakeFetch() {
       return new Response(JSON.stringify({
         jsonrpc: "2.0",
         id: "1",
-        result: { structuredContent: { tenant_id: "t", domain_id: "d", party_id: "p", role: "buyer", access_token: "secret", access_token_expires_at: "2099-01-01T00:00:00Z", cost_bearer: "caller" } },
+        result: { structuredContent: { tenant_id: "t", domain_id: "d", party_id: "p", side: "demand", role: "buyer", access_token: "secret", access_token_expires_at: "2099-01-01T00:00:00Z", cost_bearer: "caller" } },
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", result: { structuredContent: { ok: true } } }), {
@@ -50,6 +50,35 @@ describe("MatchPlane external Agent client", () => {
       params?: { arguments?: { platform_path?: string } };
     };
     expect(secondBody.params?.arguments?.platform_path).toBe("/used-car");
+
+    await client.requestContact(capability, {
+      tenant_id: "tenant",
+      domain_id: "domain",
+      introduction_id: "intro",
+      participant_id: "p",
+      idempotency_key: "contact-request-1",
+    });
+    const contactBody = JSON.parse(String(fake.calls[2]?.init?.body)) as {
+      params?: { name?: string; arguments?: Record<string, unknown> };
+    };
+    expect(contactBody.params?.name).toBe("marketplace.introduction.contact.request");
+    expect(contactBody.params?.arguments?.platform_path).toBe("/used-car");
+
+    await client.consentContact(capability, {
+      tenant_id: "tenant",
+      domain_id: "domain",
+      introduction_id: "intro",
+      participant_id: "p",
+      idempotency_key: "contact-consent-1",
+    });
+    await client.releaseContact(capability, {
+      tenant_id: "tenant",
+      domain_id: "domain",
+      introduction_id: "intro",
+      participant_id: "p",
+      idempotency_key: "contact-release-1",
+    });
+    expect(fake.calls).toHaveLength(5);
   });
 
   it("rejects platform-funded external handoffs before a network call", async () => {

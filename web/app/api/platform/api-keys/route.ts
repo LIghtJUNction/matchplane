@@ -65,11 +65,20 @@ export async function POST(request: Request): Promise<Response> {
   if (permissions === null) {
     return NextResponse.json({ error: "permissions contains an unsupported action" }, { status: 400 });
   }
-  if (input.agentRole !== undefined && !isAgentRole(input.agentRole)) {
-    return NextResponse.json({ error: "agentRole must be buyer, seller, or both" }, { status: 400 });
+  if (input.agentSide !== undefined && !isAgentSide(input.agentSide)) {
+    return NextResponse.json({ error: "agentSide must be demand, supply, or both" }, { status: 400 });
   }
-  if (input.agentRole !== undefined && !permissions?.marketplace?.includes("write")) {
-    return NextResponse.json({ error: "agentRole requires marketplace:write permission" }, { status: 400 });
+  if (input.agentRole !== undefined && !isAgentRole(input.agentRole)) {
+    return NextResponse.json({ error: "agentRole is a deprecated compatibility alias" }, { status: 400 });
+  }
+  if (input.agentSide !== undefined && input.agentRole !== undefined) {
+    const roleSide = roleToSide(input.agentRole);
+    if (roleSide !== input.agentSide) {
+      return NextResponse.json({ error: "agentSide 与兼容字段 agentRole 不一致" }, { status: 400 });
+    }
+  }
+  if ((input.agentSide !== undefined || input.agentRole !== undefined) && !permissions?.marketplace?.includes("write")) {
+    return NextResponse.json({ error: "agentSide requires marketplace:write permission" }, { status: 400 });
   }
 
   try {
@@ -88,7 +97,12 @@ export async function POST(request: Request): Promise<Response> {
           audience: "platform",
           issuedBy: session.user.id,
           description: input.description?.trim().slice(0, 500) ?? null,
-          agentRole: input.agentRole ?? null,
+          ...(input.agentSide || input.agentRole ? {
+            agentSide: input.agentSide ?? roleToSide(input.agentRole),
+          } : {}),
+          // Kept only when explicitly supplied so older capability exchanges can be rotated
+          // without an outage. New keys use the neutral agentSide field as the source of truth.
+          ...(input.agentRole ? { agentRole: input.agentRole } : {}),
         },
       },
     });
@@ -153,7 +167,9 @@ interface ApiKeyRequest {
   description?: string;
   expiresIn?: number;
   permissions?: Record<string, string[]>;
-  /** Optional least-privilege role for the external buyer/seller Agent capability exchange. */
+  /** Neutral least-privilege side for the external Agent capability exchange. */
+  agentSide?: "demand" | "supply" | "both";
+  /** Deprecated compatibility alias; new keys should use agentSide. */
   agentRole?: "buyer" | "seller" | "both";
 }
 
@@ -218,6 +234,14 @@ function normalizePermissions(
 
 function isAgentRole(value: unknown): value is NonNullable<ApiKeyRequest["agentRole"]> {
   return value === "buyer" || value === "seller" || value === "both";
+}
+
+function isAgentSide(value: unknown): value is NonNullable<ApiKeyRequest["agentSide"]> {
+  return value === "demand" || value === "supply" || value === "both";
+}
+
+function roleToSide(value: ApiKeyRequest["agentRole"]): ApiKeyRequest["agentSide"] | undefined {
+  return value === "buyer" ? "demand" : value === "seller" ? "supply" : value === "both" ? "both" : undefined;
 }
 
 function isUuid(value: string): boolean {

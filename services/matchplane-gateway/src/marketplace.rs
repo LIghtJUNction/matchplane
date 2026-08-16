@@ -64,6 +64,10 @@ pub(super) struct EnsurePartySessionRequest {
     #[serde(default)]
     marketplace_sides: Option<Vec<String>>,
     contact: Value,
+    /// Normal session refreshes preserve user-configured phone/WeChat channels. Set false only
+    /// when the authenticated user intentionally saves a new contact profile.
+    #[serde(default)]
+    preserve_contact: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -513,6 +517,7 @@ pub(super) async fn ensure_party_session(
                 nonce: protected.nonce.to_vec(),
                 key_version: protected.key_version,
             },
+            preserve_contact: request.preserve_contact,
         })
         .await?;
     Ok((

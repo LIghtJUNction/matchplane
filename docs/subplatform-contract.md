@@ -105,7 +105,7 @@ workflow stages and MCP tool names only; it contains no endpoints, credentials o
 configuration.
 
 Domain copy, pricing capabilities, filters and seller fields belong to the package, not the root implementation. A
-package may declare `pricing`, `ui.chat`, `ui.copy`, `ui.filters` and `ui.supplyFields` in its manifest; the root validates
+package may declare `pricing`, `ui.chat`, `ui.copy`, `ui.filters`, `ui.supplyFields` and `ui.contactFields` in its manifest; the root validates
 and passes those values to the generic shell/plugin. The root uses the domain-neutral marketplace
 contract by default. A package that still depends on an older vertical adapter must explicitly
 declare `marketplaceContract: "legacy-v1"`; pricing or the presence of a schema never selects
@@ -224,28 +224,29 @@ the caller remains responsible for its own Agent credentials, model calls and to
 
 The handoff is intentionally separate from a marketplace party capability. A buyer/seller Agent
 that needs to create generic intents, offers, matches, or introductions first creates a Better Auth
-organization API key with the smallest required scopes:
+organization API key with the smallest required scopes and a neutral side:
 
 ```json
 {
   "permissions": { "marketplace": ["write"], "agent": ["handoff"] },
-  "agentRole": "buyer"
+  "agentSide": "demand"
 }
 ```
 
-The `agentRole` value is stored as API-key metadata for compatibility and must be `buyer`, `seller`, or
-`both`. The Agent then calls `POST /api/marketplace/agent-session` (or the HTTP MCP tool
+The `agentSide` value is stored as API-key metadata and must be `demand`, `supply`, or `both`. The old
+`agentRole` field is accepted only as a compatibility migration alias. The Agent then calls
+`POST /api/marketplace/agent-session` (or the HTTP MCP tool
 `marketplace.agent.session`) with `tenantId`, `domainId`, `platformPath`, and its requested kernel
 `side` (`demand` or `supply`). `role` is accepted only as a deprecated adapter alias.
 The server verifies the Better Auth key, active recursive path, organization scope, domain, and
-role before deriving a stable machine principal and exchanging it through the internal gateway
+side before deriving a stable machine principal and exchanging it through the internal gateway
 bridge. The response contains a short-lived (15-minute) party bearer plus
 `access_token_expires_at`, scoped to that tenant and role; it never contains a user session,
 API-key value, contact data, or an administrator capability. Store the party bearer server-side,
 discard it at the deadline, and rotate the organization API key to revoke future exchanges.
 
-This gives buyer and seller Agents the same integration shape: the only difference is the
-role-scoped API key and the `side`/resource they submit. A machine Agent cannot choose an
+This gives demand and supply Agents the same integration shape: the only difference is the
+side-scoped API key and the resource they submit. A machine Agent cannot choose an
 arbitrary `participant_id` or widen a child path by putting another ID in the request body.
 
 The stable envelope for stages two and three is

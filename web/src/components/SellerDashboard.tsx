@@ -11,7 +11,9 @@ import {
   getMarketplaceOffers,
   getSellerListingSubmissions,
   isLiveMarketplaceEnabled,
+  retrieveMarketplaceContact,
   type MarketplaceIntroduction,
+  type MarketplaceContactResponse,
   type MarketplaceOffer,
   submitSellerListing,
   type ListingSubmission,
@@ -19,6 +21,7 @@ import {
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
 import { SectionHeading, spring } from "./Primitives";
+import { ContactProfileCard } from "./ContactProfileCard";
 
 interface SellerDashboardProps {
   onNotice: (message: string) => void;
@@ -32,9 +35,14 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
   const [externalKey, setExternalKey] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [askingAmount, setAskingAmount] = useState("");
+  const [askingAmountMin, setAskingAmountMin] = useState("");
+  const [askingAmountMax, setAskingAmountMax] = useState("");
+  const [pricingNote, setPricingNote] = useState("");
   const pricing = pricingFor(subplatform);
   const copy = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
   const isFixedPrice = pricing.mode === "fixed";
+  const isRangePrice = pricing.mode === "range";
+  const isNegotiablePrice = pricing.mode === "negotiable";
   const usesLegacyMarketplace = subplatform.marketplaceContract === "legacy-v1";
   const pricingCurrency = pricing.currency ?? subplatform.currency;
   const pricingScale = pricing.currencyScale ?? subplatform.currencyScale;
@@ -50,6 +58,8 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
   const [introductions, setIntroductions] = useState<MarketplaceIntroduction[]>([]);
   const [introductionsError, setIntroductionsError] = useState<string | null>(null);
   const [consentingIntroductionId, setConsentingIntroductionId] = useState<string | null>(null);
+  const [releasedContacts, setReleasedContacts] = useState<Record<string, MarketplaceContactResponse>>({});
+  const [releasingContactId, setReleasingContactId] = useState<string | null>(null);
 
   const loadSubmissions = useCallback(async () => {
     setSubmissions([]);
@@ -121,6 +131,35 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
     }
   };
 
+  const releaseContact = async (introduction: MarketplaceIntroduction) => {
+    if (!subplatform.domainId || releasingContactId) return;
+    setReleasingContactId(introduction.introduction_id);
+    try {
+      const session = await getMarketplaceSession({
+        subplatform: subplatform.slug,
+        platformPath: subplatform.path,
+        tenantId: subplatform.tenantId,
+        domainId: subplatform.domainId,
+        role: "seller",
+      });
+      if (!session) {
+        onNotice(copy("contactLoginNotice", "请先登录后查看已同意交换的联系方式"));
+        return;
+      }
+      const contact = await retrieveMarketplaceContact({
+        session,
+        domainId: subplatform.domainId,
+        introductionId: introduction.introduction_id,
+      });
+      setReleasedContacts((current) => ({ ...current, [introduction.introduction_id]: contact }));
+      onNotice(copy("contactReleasedNotice", "联系方式已解锁，请通过对方提供的渠道联系"));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : copy("contactReleaseError", "联系方式暂时无法读取"));
+    } finally {
+      setReleasingContactId(null);
+    }
+  };
+
   useEffect(() => {
     void loadSubmissions();
   }, [loadSubmissions]);
@@ -153,11 +192,17 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedName = displayName.trim();
-    const normalizedKey = externalKey.trim();
+    const normalizedKey = externalKey.trim() || `offer-${crypto.randomUUID()}`;
     const normalizedCurrency = currency.trim().toUpperCase();
     const normalizedAmount = isFixedPrice ? toMinorUnits(askingAmount, pricingScale ?? 0) : null;
-    if (!normalizedKey || !normalizedName || (isFixedPrice && (!normalizedAmount || !normalizedCurrency))) {
-      onNotice(isFixedPrice ? "请完整填写名称、编号、报价和结算币种" : "请完整填写供给名称和编号");
+    const normalizedMin = isRangePrice ? toMinorUnits(askingAmountMin, pricingScale ?? 0) : null;
+    const normalizedMax = isRangePrice ? toMinorUnits(askingAmountMax, pricingScale ?? 0) : null;
+    if (!normalizedName || (isFixedPrice && (!normalizedAmount || !normalizedCurrency)) || (isRangePrice && (!normalizedMin || !normalizedMax || !normalizedCurrency))) {
+      onNotice(isFixedPrice ? "请完整填写名称、报价和结算币种" : isRangePrice ? "请完整填写价格区间和结算币种" : "请填写供给名称");
+      return;
+    }
+    if (isRangePrice && BigInt(normalizedMin as string) > BigInt(normalizedMax as string)) {
+      onNotice("价格区间的最低值不能高于最高值");
       return;
     }
     if (!isLiveMarketplaceEnabled()) {
@@ -227,15 +272,21 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
             terms: {
               pricing_mode: pricing.mode,
               ...(normalizedAmount ? { amount_minor: normalizedAmount } : {}),
+              ...(normalizedMin ? { amount_min_minor: normalizedMin } : {}),
+              ...(normalizedMax ? { amount_max_minor: normalizedMax } : {}),
               ...(normalizedCurrency ? { currency: normalizedCurrency } : {}),
               ...(pricingScale !== undefined ? { currency_scale: pricingScale } : {}),
               ...(pricing.label ? { pricing_label: pricing.label } : {}),
+              ...(pricingNote.trim() ? { pricing_note: pricingNote.trim() } : {}),
             },
           });
       setSubmissions((current) => [record, ...current]);
       setExternalKey("");
       setDisplayName("");
       setAskingAmount("");
+      setAskingAmountMin("");
+      setAskingAmountMax("");
+      setPricingNote("");
       setCurrency(pricingCurrency ?? "");
       setFieldValues({});
       setCustomFields([]);
@@ -265,6 +316,8 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
         <div><strong>{submissions.length ? `${copy("submittedPrefix", "已提交")} ${submissions.length} ${copy("submittedSuffix", "份资料")}` : copy("noSubmissionsLabel", "还没有提交资料")}</strong><small>{copy("submissionWorkflowLabel", "提交后会进入当前子平台的审核流程")}</small></div>
       </section>
 
+      <ContactProfileCard subplatform={subplatform} role="seller" onNotice={onNotice} />
+
       <section className="surface seller-upload" aria-labelledby="seller-upload-title">
         <SectionHeading eyebrow={copy("uploadEyebrow", "资料上传")} title={copy("uploadTitle", "提交一份新的供给资料")} />
         <p className="seller-upload-intro">
@@ -277,7 +330,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
           </label>
           <label htmlFor="seller-external-key">
             <span>{copy("externalKeyLabel", "内部编号")}</span>
-            <input id="seller-external-key" value={externalKey} onChange={(event) => setExternalKey(event.target.value)} placeholder={copy("externalKeyPlaceholder", "用于管理这份资料")} maxLength={256} required />
+            <input id="seller-external-key" value={externalKey} onChange={(event) => setExternalKey(event.target.value)} placeholder={copy("externalKeyPlaceholder", "留空则由平台生成")} maxLength={256} />
           </label>
           {isFixedPrice ? (
             <>
@@ -290,6 +343,28 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
                 <input id="seller-currency" value={currency} onChange={(event) => setCurrency(event.target.value.toUpperCase())} placeholder="等待子平台配置" maxLength={3} readOnly={Boolean(pricingCurrency)} required />
               </label>
             </>
+          ) : null}
+          {isRangePrice ? (
+            <>
+              <label htmlFor="seller-asking-amount-min">
+                <span>{copy("priceMinLabel", "最低报价")}{currency ? `（${currency}）` : ""}</span>
+                <input id="seller-asking-amount-min" value={askingAmountMin} onChange={(event) => setAskingAmountMin(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0)} required />
+              </label>
+              <label htmlFor="seller-asking-amount-max">
+                <span>{copy("priceMaxLabel", "最高报价")}{currency ? `（${currency}）` : ""}</span>
+                <input id="seller-asking-amount-max" value={askingAmountMax} onChange={(event) => setAskingAmountMax(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0)} required />
+              </label>
+              <label htmlFor="seller-currency-range">
+                <span>{copy("currencyLabel", "币种")}</span>
+                <input id="seller-currency-range" value={currency} onChange={(event) => setCurrency(event.target.value.toUpperCase())} placeholder={copy("currencyPlaceholder", "等待子平台配置")} maxLength={3} readOnly={Boolean(pricingCurrency)} required />
+              </label>
+            </>
+          ) : null}
+          {isNegotiablePrice ? (
+            <label className="seller-upload-wide" htmlFor="seller-pricing-note">
+              <span>{copy("pricingNoteLabel", "议价条件")}</span>
+              <textarea id="seller-pricing-note" value={pricingNote} onChange={(event) => setPricingNote(event.target.value)} rows={3} maxLength={500} placeholder={copy("pricingNotePlaceholder", "由你说明价格、条件或面议范围")} />
+            </label>
           ) : null}
           {schemaFields.map((field) => (
             <label key={field.key} htmlFor={`seller-attribute-${field.key}`}>
@@ -362,9 +437,18 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
                 <div>
                   <strong>{copy("contactRequestLabel", "一条撮合联系申请")}</strong>
                   <small>{introductionStatusLabel(introduction.status)} · {formatSubmissionDate(introduction.created_at)}</small>
+                  {releasedContacts[introduction.introduction_id] ? (
+                    <div className="buyer-contact-values">
+                      {Object.entries(releasedContacts[introduction.introduction_id].counterpart.contact).map(([key, value]) => <span key={key}>{key}: {value}</span>)}
+                    </div>
+                  ) : null}
                 </div>
-                {introduction.supply_contact_consent_at ? (
-                  <span className="submission-status">已同意</span>
+                {releasedContacts[introduction.introduction_id] ? (
+                  <span className="submission-status">{copy("contactVisibleLabel", "已可联系")}</span>
+                ) : introduction.supply_contact_consent_at ? (
+                  <button className="text-action" type="button" onClick={() => void releaseContact(introduction)} disabled={releasingContactId === introduction.introduction_id}>
+                    {releasingContactId === introduction.introduction_id ? copy("contactReadingLabel", "读取中…") : copy("viewContactLabel", "查看对方联系方式")}
+                  </button>
                 ) : introduction.status === "contact_requested" ? (
                   <button className="text-action" type="button" onClick={() => void consent(introduction)} disabled={consentingIntroductionId === introduction.introduction_id}>
                     {consentingIntroductionId === introduction.introduction_id ? copy("processingLabel", "处理中…") : copy("consentContactLabel", "同意交换")}
@@ -402,6 +486,12 @@ function sellerRecordPrice(record: SellerRecord, pricing: { mode: string }): str
     return formatMinorUnits(amount, currency, scale);
   }
   const display = stringAttribute(record.terms, ["display_price", "price_label", "price"]);
+  const min = record.terms.amount_min_minor;
+  const max = record.terms.amount_max_minor;
+  if (typeof min === "string" && typeof max === "string" && typeof currency === "string" && typeof scale === "number") {
+    return `${formatMinorUnits(min, currency, scale)} – ${formatMinorUnits(max, currency, scale)}`;
+  }
+  if (typeof record.terms.pricing_note === "string" && record.terms.pricing_note.trim()) return record.terms.pricing_note.trim();
   return display || (pricing.mode === "none" ? "—" : "待补充");
 }
 

@@ -86,17 +86,20 @@
       "contactRequest": {
         "method": "POST",
         "path": "/v1/marketplace/introductions/{introduction_id}/contact/request",
-        "required": ["tenant_id", "domain_id", "participant_id"]
+        "required": ["tenant_id", "domain_id", "participant_id", "idempotency_key"],
+        "properties": { "tenant_id": { "type": "string", "format": "uuid" }, "domain_id": { "type": "string", "format": "uuid" }, "participant_id": { "type": "string", "format": "uuid" }, "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 240 } }
       },
       "contactConsent": {
         "method": "POST",
         "path": "/v1/marketplace/introductions/{introduction_id}/contact/consent",
-        "required": ["tenant_id", "domain_id", "participant_id"]
+        "required": ["tenant_id", "domain_id", "participant_id", "idempotency_key"],
+        "properties": { "tenant_id": { "type": "string", "format": "uuid" }, "domain_id": { "type": "string", "format": "uuid" }, "participant_id": { "type": "string", "format": "uuid" }, "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 240 } }
       },
       "contactRelease": {
-        "method": "GET",
+        "method": "POST",
         "path": "/v1/marketplace/introductions/{introduction_id}/contact",
-        "query": ["tenant_id", "domain_id", "participant_id"],
+        "required": ["tenant_id", "domain_id", "participant_id", "idempotency_key"],
+        "properties": { "tenant_id": { "type": "string", "format": "uuid" }, "domain_id": { "type": "string", "format": "uuid" }, "participant_id": { "type": "string", "format": "uuid" }, "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 240 } },
         "returns": "counterpart contact only after supply consent"
       }
     }

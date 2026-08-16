@@ -41,7 +41,8 @@ All later marketplace endpoints require `Authorization: Bearer <party token>` to
 tenant and party IDs. A demand-side introduction is a contact request; the supply participant must
 explicitly consent at `/v1/marketplace/introductions/{id}/contact/consent` before either side can
 retrieve the other side's configured channels. The generic flow is
-`POST .../contact/request`, `POST .../contact/consent`, then `GET .../contact`. A matched participant
+`POST .../contact/request`, `POST .../contact/consent`, then `POST .../contact` with a caller-stable
+`idempotency_key`. A matched participant
 receives only the counterpart contact, and a seller's token is required for legacy offline
 commission payment; merely supplying a party UUID is insufficient.
 

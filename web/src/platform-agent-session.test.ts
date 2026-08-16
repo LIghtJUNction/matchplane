@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  keyCanActAsNeutralSide,
   keyCanActAs,
   parseAgentSessionRequest,
   stableAgentPrincipalId,
@@ -33,9 +34,13 @@ describe("external Agent marketplace capability exchange", () => {
     }
   });
 
-  it("rejects root scope and unsupported fields", () => {
-    expect(parseAgentSessionRequest({ ...valid, platformPath: "/" }).ok).toBe(false);
+  it("accepts root scope and rejects unsupported fields", () => {
+    expect(parseAgentSessionRequest({ ...valid, platformPath: "/" }).ok).toBe(true);
     expect(parseAgentSessionRequest({ ...valid, callbackUrl: "https://example.com" }).ok).toBe(false);
+  });
+
+  it("rejects contradictory neutral and compatibility labels", () => {
+    expect(parseAgentSessionRequest({ ...valid, side: "supply", role: "buyer" }).ok).toBe(false);
   });
 
   it("keeps machine principals stable per API key and tenant", () => {
@@ -50,5 +55,11 @@ describe("external Agent marketplace capability exchange", () => {
     expect(keyCanActAs("buyer", "buyer")).toBe(true);
     expect(keyCanActAs("buyer", "seller")).toBe(false);
     expect(keyCanActAs("both", "seller")).toBe(true);
+  });
+
+  it("keeps neutral side-scoped API keys independent from buyer/seller labels", () => {
+    expect(keyCanActAsNeutralSide("demand", "demand")).toBe(true);
+    expect(keyCanActAsNeutralSide("demand", "supply")).toBe(false);
+    expect(keyCanActAsNeutralSide("both", "supply")).toBe(true);
   });
 });

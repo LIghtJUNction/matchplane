@@ -111,6 +111,7 @@ pub(super) struct ContactActionRequest {
     tenant_id: String,
     domain_id: String,
     participant_id: String,
+    idempotency_key: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -489,6 +490,7 @@ pub(super) async fn request_contact(
             tenant_id,
             introduction_id: parse_id::<MatchIntroductionId>(&introduction_id)?,
             demand_party_id: participant_id,
+            idempotency_key: request.idempotency_key,
             request_fingerprint: super::marketplace::request_fingerprint(&headers),
         })
         .await
@@ -521,6 +523,7 @@ pub(super) async fn consent_contact(
             tenant_id,
             introduction_id: parse_id::<MatchIntroductionId>(&introduction_id)?,
             supply_party_id: participant_id,
+            idempotency_key: request.idempotency_key,
         })
         .await
         .map_err(ApiError::from)?;
@@ -531,34 +534,21 @@ pub(super) async fn consent_contact(
 pub(super) async fn release_contact(
     State(state): State<Arc<AppState>>,
     Path(introduction_id): Path<String>,
-    Query(query): Query<PartyQuery>,
     headers: HeaderMap,
+    Json(request): Json<ContactActionRequest>,
 ) -> Result<Json<MarketplaceContactResponse>, ApiError> {
-    let tenant_id = parse_id::<TenantId>(&query.tenant_id)?;
-    let actor_party_id = parse_id::<MarketplacePartyId>(&query.participant_id)?;
-    if let Some(domain_id) = query
-        .domain_id
-        .as_deref()
-        .map(parse_id::<DomainId>)
-        .transpose()?
-    {
-        super::marketplace::authenticate_domain(
-            &state,
-            &headers,
-            tenant_id,
-            actor_party_id,
-            domain_id,
-        )
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let actor_party_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    super::marketplace::authenticate_domain(&state, &headers, tenant_id, actor_party_id, domain_id)
         .await?;
-    } else {
-        super::marketplace::authenticate(&state, &headers, tenant_id, actor_party_id).await?;
-    }
     let envelope: MarketplaceContactEnvelope = state
         .store
         .release_marketplace_contact(
             tenant_id,
             parse_id::<MatchIntroductionId>(&introduction_id)?,
             actor_party_id,
+            &request.idempotency_key,
             super::marketplace::request_fingerprint(&headers).as_deref(),
         )
         .await

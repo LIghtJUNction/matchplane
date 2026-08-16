@@ -2,7 +2,9 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-compose=(docker compose --env-file "$repository_root/.env.example" -f "$repository_root/deploy/compose/compose.yaml")
+env_file="$repository_root/.env.example"
+if [[ -f "$repository_root/.env" ]]; then env_file="$repository_root/.env"; fi
+compose=(docker compose --env-file "$env_file" -f "$repository_root/deploy/compose/compose.yaml")
 
 "${compose[@]}" up --build --detach --wait
 "${compose[@]}" exec -T postgres psql \
