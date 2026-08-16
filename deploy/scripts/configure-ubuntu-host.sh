@@ -117,7 +117,9 @@ environment_file=$(mktemp /etc/matchplane/matchplane.env.XXXXXX)
 trap 'rm -f "$environment_file"' EXIT
 {
   printf '%s\n' 'MATCHPLANE_ENVIRONMENT=test'
-  printf '%s\n' 'MATCHPLANE_ALLOW_DEMO_BOOTSTRAP=true'
+  # Authentication bootstrap is an explicit operator choice; this test profile does not
+  # fabricate tenants, domains, catalogues, or other marketplace data.
+  printf '%s\n' 'MATCHPLANE_ALLOW_DEMO_BOOTSTRAP=false'
   printf 'MATCHPLANE_NODE_ID=%s\n' "$node_id"
   printf '%s\n' 'MATCHPLANE_GRPC_ADDR=127.0.0.1:50051'
   printf '%s\n' 'MATCHPLANE_KAFKA_BROKERS=127.0.0.1:9092'

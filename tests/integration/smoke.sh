@@ -32,7 +32,8 @@ wait_for() {
 
 wait_for 'gateway readiness' "curl --fail --silent '$base_url/health/ready' | jq -e '.status == \"ready\"'"
 
-unauthenticated_core=$(curl --silent --output /dev/null --write-out '%{http_code}' "$base_url/v1/demo")
+unauthenticated_core=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --request POST --header 'content-type: application/json' --data '{}' "$base_url/v1/embeddings")
 test "$unauthenticated_core" = 401
 
 curl --fail-with-body --silent --request POST "$base_url/v1/embeddings" \
