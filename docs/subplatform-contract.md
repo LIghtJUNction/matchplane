@@ -344,11 +344,13 @@ release; it creates a new immutable version and requires an explicit activation.
   contact consent, or call payment providers directly. Provider credentials remain root/payment
   service secrets. After the isolated builder attaches an artifact locator, the active manifest
   gets a derived `assets.hosted` URL under `/api/platform/plugin-assets/<mount>/...`; the browser
-  hosts that release in a `sandbox="allow-scripts"` iframe. The host sends only a versioned
-  `matchplane.plugin/v1` context message and accepts bounded `chat.open`, `listing.select`,
-  `listing.submit` and `navigation` requests. Each context carries a host-generated, per-iframe
-  `contextToken`; listing submissions include a `requestId` and receive a matching
-  `listing.submit.result`. The host validates the seller role, Better Auth session, active
+  hosts that release in a `sandbox="allow-scripts"` iframe. Because this sandbox intentionally
+  gives the frame an opaque `null` origin, the host uses a wildcard `postMessage` target but
+  accepts messages only from the exact iframe window and its host-generated, per-iframe
+  `contextToken`. The host sends only a versioned `matchplane.plugin/v1` context message and
+  accepts bounded `chat.open`, `listing.select`, `listing.submit` and `navigation` requests.
+  Listing submissions include a `requestId` and receive a matching `listing.submit.result`. The
+  host validates the seller role, Better Auth session, active
   tenant/domain/schema and bounded JSON before calling the marketplace API. The artifact endpoint
   resolves host-local files under
   `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT`, checks the active build digest, rejects traversal and

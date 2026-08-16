@@ -27,12 +27,36 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
   const [failed, setFailed] = useState(false);
   const artifact = subplatform.pluginArtifact;
 
+  const postContext = () => {
+    frameRef.current?.contentWindow?.postMessage({
+      protocol: "matchplane.plugin/v1",
+      type: "platform.context",
+      version: 1,
+      payload: {
+        path: subplatform.path,
+        platform: subplatform.slug,
+        role,
+        contextToken: contextTokenRef.current,
+        capabilities: ["chat.open", "listing.select", "listing.submit", "navigation"],
+      },
+    }, "*");
+  };
+
   useEffect(() => {
     contextTokenRef.current = createContextToken();
-    const targetOrigin = new URL(artifact?.url ?? window.location.href, window.location.href).origin;
+    const artifactOrigin = new URL(artifact?.url ?? window.location.href, window.location.href).origin;
+    // `sandbox="allow-scripts"` deliberately gives the plugin an opaque `null` origin. Keep
+    // that isolation instead of adding `allow-same-origin`; source + contextToken are the
+    // capability boundary for this narrow postMessage protocol.
     const onMessage = (event: MessageEvent<unknown>) => {
-      if (event.origin !== targetOrigin || event.source !== frameRef.current?.contentWindow || !isRecord(event.data)) return;
+      if ((event.origin !== "null" && event.origin !== artifactOrigin)
+        || event.source !== frameRef.current?.contentWindow
+        || !isRecord(event.data)) return;
       if (event.data.protocol !== "matchplane.plugin/v1") return;
+      if (event.data.type === "plugin.ready") {
+        postContext();
+        return;
+      }
       if (event.data.contextToken !== contextTokenRef.current) return;
       if (event.data.type === "chat.open") {
         document.getElementById("match-chat-input")?.focus();
@@ -42,7 +66,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
       } else if (event.data.type === "listing.submit") {
         void submitPluginListing(event.data, {
           frame: frameRef.current?.contentWindow,
-          targetOrigin,
+          targetOrigin: "*",
           contextToken: contextTokenRef.current,
           role,
           subplatform,
@@ -83,21 +107,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
             referrerPolicy="no-referrer"
             loading="lazy"
             onError={() => setFailed(true)}
-            onLoad={() => {
-              const targetOrigin = window.location.origin;
-              frameRef.current?.contentWindow?.postMessage({
-                protocol: "matchplane.plugin/v1",
-                type: "platform.context",
-                version: 1,
-                payload: {
-                  path: subplatform.path,
-                  platform: subplatform.slug,
-                  role,
-                  contextToken: contextTokenRef.current,
-                  capabilities: ["chat.open", "listing.select", "listing.submit", "navigation"],
-                },
-              }, targetOrigin);
-            }}
+            onLoad={postContext}
           />
         )}
       </section>
