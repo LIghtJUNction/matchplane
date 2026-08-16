@@ -37,6 +37,10 @@ export async function POST(request: Request): Promise<Response> {
   if (!input.tenantId || !isUuid(input.tenantId) || !input.domainId || !isUuid(input.domainId)) {
     return NextResponse.json({ error: "tenantId and domainId must be UUIDs" }, { status: 400 });
   }
+  const configuredTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
+  if (!isUuid(configuredTenantId) || input.tenantId !== configuredTenantId) {
+    return NextResponse.json({ error: "tenantId 必须匹配当前部署的 root tenant" }, { status: 400 });
+  }
   if (!isSourceKind(input.sourceKind)) {
     return NextResponse.json({ error: "sourceKind must be git or archive" }, { status: 400 });
   }
@@ -60,7 +64,7 @@ export async function POST(request: Request): Promise<Response> {
   const canManage = await canManageParent(session.user.id, userRole, parentId);
   if (!canManage) return NextResponse.json({ error: "当前账号没有注册该平台节点的权限" }, { status: 403 });
 
-  const parentError = await validateParent(parentId);
+  const parentError = await validateParent(parentId, input.tenantId);
   if (parentError) return NextResponse.json({ error: parentError }, { status: 400 });
   const domainExists = await authDatabase.query(
     "SELECT 1 FROM domains WHERE tenant_id = $1::uuid AND id = $2::uuid LIMIT 1",
@@ -163,6 +167,10 @@ export async function GET(request: Request): Promise<Response> {
   }
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
+  const configuredTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
+  if (!isUuid(configuredTenantId)) {
+    return NextResponse.json({ error: "root tenant 尚未配置" }, { status: 503 });
+  }
   const parentId = new URL(request.url).searchParams.get("parentOrganizationId");
   if (parentId && !isUuid(parentId)) return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
   const userRole = (session.user as { role?: string }).role;
@@ -173,8 +181,9 @@ export async function GET(request: Request): Promise<Response> {
     `WITH RECURSIVE nodes AS (
        SELECT id, name, slug, "parentOrganizationId", "tenantId", "domainId", "sourceRepository", "createdAt"
          FROM "organization"
-        WHERE ($1::uuid IS NULL AND "parentOrganizationId" IS NULL)
-           OR id = $1::uuid
+        WHERE "tenantId" = $2
+          AND (($1::uuid IS NULL AND "parentOrganizationId" IS NULL)
+           OR id = $1::uuid)
        UNION ALL
        SELECT child.id, child.name, child.slug, child."parentOrganizationId", child."tenantId",
               child."domainId", child."sourceRepository", child."createdAt"
@@ -203,7 +212,7 @@ export async function GET(request: Request): Promise<Response> {
           LIMIT 1
        ) registration ON true
       ORDER BY "createdAt" ASC`,
-    [parentId || null],
+    [parentId || null, configuredTenantId],
   );
   return NextResponse.json({ organizations: rows.rows }, { headers: { "cache-control": "no-store" } });
 }
@@ -247,21 +256,25 @@ async function canManageParent(userId: string, role: string | null | undefined, 
   return result.rowCount === 1;
 }
 
-async function validateParent(parentId: string | null): Promise<string | null> {
+async function validateParent(parentId: string | null, tenantId: string): Promise<string | null> {
   if (!parentId) return null;
   const result = await authDatabase.query(
-    `WITH RECURSIVE chain(id, parent_id, depth) AS (
-       SELECT id, "parentOrganizationId", 0 FROM "organization" WHERE id = $1::uuid
+    `WITH RECURSIVE chain(id, parent_id, depth, tenant_id) AS (
+       SELECT id, "parentOrganizationId", 0, "tenantId" FROM "organization" WHERE id = $1::uuid
        UNION ALL
-       SELECT parent.id, parent."parentOrganizationId", chain.depth + 1
+       SELECT parent.id, parent."parentOrganizationId", chain.depth + 1, parent."tenantId"
          FROM "organization" parent JOIN chain ON parent.id = chain.parent_id
         WHERE chain.depth < 64
      )
-     SELECT count(*)::int AS count, coalesce(max(depth), 0)::int AS depth FROM chain`,
-    [parentId],
+     SELECT count(*)::int AS count,
+            coalesce(max(depth), 0)::int AS depth,
+            coalesce(bool_and(tenant_id = $2), false) AS "sameTenant"
+       FROM chain`,
+    [parentId, tenantId],
   );
-  const row = result.rows[0] as { count: number; depth: number } | undefined;
+  const row = result.rows[0] as { count: number; depth: number; sameTenant: boolean } | undefined;
   if (!row || row.count === 0) return "parentOrganizationId 不存在";
+  if (!row.sameTenant) return "parentOrganizationId 与 tenantId 不一致";
   if (row.depth >= 64) return "平台树深度超过 64 层，可能存在循环关系";
   return null;
 }
