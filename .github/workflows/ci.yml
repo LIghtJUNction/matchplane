@@ -65,6 +65,11 @@ jobs:
         with:
           submodules: recursive
       - name: Run complete Compose smoke test
+        env:
+          # The end-to-end fixture still covers the pre-generic payment/offline-deal adapter.
+          # Keep that compatibility surface explicit in CI; the default service configuration
+          # remains generic-only and does not infer a vertical from pricing or schema fields.
+          MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER: "true"
         run: ./tests/integration/compose-smoke.sh
       - name: Collect service logs
         if: always()

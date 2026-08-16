@@ -9,6 +9,10 @@ x-matchplane-service: &matchplane-service
   environment: &matchplane-environment
     MATCHPLANE_ENVIRONMENT: development
     MATCHPLANE_ALLOW_DEMO_BOOTSTRAP: "${MATCHPLANE_ALLOW_DEMO_BOOTSTRAP:-false}"
+    # Compatibility adapters are opt-in. Production and normal development keep the
+    # domain-neutral marketplace contract as the only mounted transport; CI can explicitly
+    # enable the legacy migration surface while it exercises that compatibility test suite.
+    MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER: "${MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER:-false}"
     MATCHPLANE_NODE_ID: 00000000-0000-7000-8000-00000000000a
     MATCHPLANE_HTTP_ADDR: 0.0.0.0:8080
     MATCHPLANE_GRPC_ADDR: 0.0.0.0:50051
