@@ -102,15 +102,18 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
       ]);
 
       try {
+        const live = isLiveMarketplaceEnabled();
         if (isSeller) {
+          const message = live
+            ? copy.sellerSuccess
+            : "当前环境未连接真实供给 API，内容没有写入系统。请先启用平台 API 后再发送。";
           setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-            ? { ...item, text: copy.sellerSuccess }
+            ? { ...item, text: message }
             : item));
-          onNotice(copy.sellerSuccess);
-          window.setTimeout(() => document.getElementById("seller-display-name")?.focus(), 0);
+          onNotice(message);
+          if (live) window.setTimeout(() => document.getElementById("seller-display-name")?.focus(), 0);
           return;
         }
-        const live = isLiveMarketplaceEnabled();
         if (!live) {
           const message = "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。";
           setMessages((current) => current.map((item) => item.id === `${requestId}-assistant` ? { ...item, text: message } : item));
