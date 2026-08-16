@@ -32,6 +32,16 @@ MatchPlane 不要求用户为每个子平台重复注册。Better Auth 是唯一
 完成 OIDC 回调后，仍必须向根平台交换自己的平台 capability，并重新检查成员策略、组织祖先链和
 注册版本。用户撤销根会话或子平台成员关系后，刷新 token、userinfo 和下一次 capability 交换必须失败。
 
+外域子平台的 capability 交换使用根平台的
+`POST /api/marketplace/session`。这是一个仅限子平台服务端的请求，不能从浏览器发起：请求体除
+`tenantId`、`domainId`、`subplatform`、`platformPath` 和 `role` 外，还要带
+`federated: { accessToken, clientId, clientSecret }`。根平台用 Better Auth 的官方
+`/oauth2/introspect` 校验 access token、客户端 secret、`openid` scope 和 token 撤销状态，再确认
+`clientId` 的注册元数据精确绑定到当前 active 子平台，最后才签发当前节点的短期 marketplace
+capability。客户端 secret 不进入浏览器、前端 bundle、日志或 capability；管理员撤销 OIDC 客户端
+后，introspection 与后续 capability 交换都会失败。子平台只需把 `(issuer, sub)` 映射到自己的
+本地 member 投影，不要复制根平台密码或建立第二套凭据。
+
 根平台普通买家/卖家不需要额外组织成员关系。根平台超级管理员是 Better Auth 全局 `rootSuperAdmin`；每个子平台创建者是该组织的 `owner`，即该子平台的超级管理员。子平台 `admin`/`subplatform_admin` 和 `moderator` 只能由组织管理员邀请或由根平台管理员配置。
 
 ## 登录方式

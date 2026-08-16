@@ -16,6 +16,22 @@ interface SessionRequest {
   subplatform?: string;
   platformPath?: string;
   role?: RequestedRole;
+  /** Server-to-server OIDC exchange for a child hosted on another origin. */
+  federated?: {
+    accessToken?: string;
+    clientId?: string;
+    clientSecret?: string;
+  };
+}
+
+interface MarketplaceIdentity {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role?: string | null;
+  };
+  federated: boolean;
 }
 
 /**
@@ -23,15 +39,12 @@ interface SessionRequest {
  * Rust marketplace API. The operator credential never leaves this server route.
  */
 export async function POST(request: Request): Promise<Response> {
-  if (!hasTrustedBrowserOrigin(request)) {
+  const input = await parseBody(request);
+  const isFederatedRequest = Boolean(input.federated);
+  if (!isFederatedRequest && !hasTrustedBrowserOrigin(request)) {
     return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
   }
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) {
-    return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
-  }
 
-  const input = await parseBody(request);
   if (!input.tenantId || !input.role || !input.subplatform) {
     return NextResponse.json(
       { error: "tenantId, subplatform, and role are required" },
@@ -49,6 +62,16 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (input.subplatform !== "root" && !input.domainId) {
     return NextResponse.json({ error: "child platform sessions require domainId" }, { status: 400 });
+  }
+
+  const resolvedIdentity = await resolveMarketplaceIdentity(request, input);
+  if (!resolvedIdentity.ok) return resolvedIdentity.response;
+  const identity = resolvedIdentity.identity;
+  if (identity.federated && input.role === "subplatform_admin") {
+    return NextResponse.json(
+      { error: "跨域 OIDC 登录只可交换买家或卖家 capability；管理员必须在根平台会话中操作" },
+      { status: 403 },
+    );
   }
 
   const platformPath = normalizePlatformPath(
@@ -86,8 +109,10 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "当前子平台没有可用的 active registration" }, { status: 404 });
   }
 
-  let membership = await readOrganizationMembership(request, input.subplatform, session.user.id);
-  const userRole = (session.user as { role?: string }).role;
+  let membership = identity.federated
+    ? await readOrganizationMembershipByScope(input.tenantId, input.domainId, input.subplatform, identity.user.id)
+    : await readOrganizationMembership(request, input.subplatform, identity.user.id);
+  const userRole = identity.user.role;
   const rootSuperAdmin = userRole === "rootSuperAdmin";
   if (input.role === "subplatform_admin") {
     const scopedAdmin = membership?.role
@@ -107,7 +132,8 @@ export async function POST(request: Request): Promise<Response> {
         input.tenantId,
         input.domainId,
         input.subplatform,
-        session.user.id,
+        identity.user.id,
+        identity.federated,
       );
     }
   }
@@ -133,14 +159,14 @@ export async function POST(request: Request): Promise<Response> {
           )}`,
         },
         body: JSON.stringify({
-          auth_user_id: session.user.id,
+          auth_user_id: identity.user.id,
           tenant_id: input.tenantId,
           domain_id: input.domainId ?? null,
           platform_path: platformPath,
-          external_key: `better-auth:${session.user.id}:${input.tenantId}:${platformPath}`,
-          display_name: session.user.name,
+          external_key: `better-auth:${identity.user.id}:${input.tenantId}:${platformPath}`,
+          display_name: identity.user.name,
           role: input.role === "subplatform_admin" ? "both" : input.role,
-          contact: { email: session.user.email },
+          contact: { email: identity.user.email },
         }),
       },
     );
@@ -171,7 +197,7 @@ export async function POST(request: Request): Promise<Response> {
         tenantId: input.tenantId,
         domainId: input.domainId!,
         partyId: body.party_id,
-        authUserId: session.user.id,
+        authUserId: identity.user.id,
         requestedRole: input.role,
       });
     } catch (error) {
@@ -187,11 +213,12 @@ export async function POST(request: Request): Promise<Response> {
       tenantId: input.tenantId,
       domainId: input.domainId ?? null,
       platformPath,
-      actorAuthUserId: session.user.id,
+      actorAuthUserId: identity.user.id,
       actorPartyId: body.party_id,
       eventType: "marketplace.capability.issued",
       metadata: {
         role: input.role,
+        identitySource: identity.federated ? "root-oidc" : "better-auth-session",
         membershipProjection: input.subplatform === "root" ? "root" : "active",
         expiresAt: body.access_token_expires_at,
       },
@@ -207,6 +234,173 @@ export async function POST(request: Request): Promise<Response> {
   return NextResponse.json(body, {
     headers: { "cache-control": "no-store" },
   });
+}
+
+/**
+ * Resolves either the same-origin Better Auth cookie or a server-to-server OIDC access token.
+ * The latter is deliberately not a browser login shortcut: the child must prove possession of
+ * its registered client secret, and the token must be active for that exact child registration.
+ */
+async function resolveMarketplaceIdentity(
+  request: Request,
+  input: SessionRequest,
+): Promise<
+  | { ok: true; identity: MarketplaceIdentity }
+  | { ok: false; response: Response }
+> {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (session && input.federated) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "同一个请求不能同时携带 Better Auth cookie 和跨域 OIDC 凭据" },
+        { status: 400 },
+      ),
+    };
+  }
+  if (session) {
+    return {
+      ok: true,
+      identity: {
+        user: {
+          id: session.user.id,
+          name: session.user.name,
+          email: session.user.email,
+          role: (session.user as { role?: string | null }).role,
+        },
+        federated: false,
+      },
+    };
+  }
+
+  const federated = input.federated;
+  if (!federated) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Better Auth session is required" }, { status: 401 }),
+    };
+  }
+  if (input.subplatform === "root") {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "跨域 OIDC capability 必须绑定到具体子平台" }, { status: 400 }),
+    };
+  }
+  if (!input.domainId || !input.subplatform) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "跨域 OIDC capability 缺少子平台作用域" }, { status: 400 }),
+    };
+  }
+
+  const token = boundedString(federated.accessToken, 4096);
+  const clientId = boundedString(federated.clientId, 256);
+  const clientSecret = boundedString(federated.clientSecret, 512);
+  if (!token || !clientId || !clientSecret) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "跨域 OIDC 交换需要 accessToken、clientId 和 clientSecret" },
+        { status: 400 },
+      ),
+    };
+  }
+
+  const introspection = await introspectRootAccessToken(request, token, clientId, clientSecret);
+  if (!introspection || introspection.active !== true || introspection.client_id !== clientId) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "根平台 OIDC access token 无效或已撤销" }, { status: 401 }),
+    };
+  }
+  const subject = introspection.sub;
+  if (!introspection.scope?.split(" ").includes("openid") || !subject || !isUuid(subject)) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "根平台 OIDC token 缺少有效的 openid 身份" }, { status: 401 }),
+    };
+  }
+
+  const registration = await authDatabase.query(
+    `SELECT 1
+       FROM "oauthClient" c
+       JOIN subplatform_registrations r
+         ON r.id::text = c."metadata"->>'matchplane_subplatform_registration_id'
+      WHERE c."clientId" = $1
+        AND c."referenceId" = 'root-platform'
+        AND c."disabled" IS NOT TRUE
+        AND r.tenant_id = $2::uuid
+        AND r.domain_id = $3::uuid
+        AND r.slug = $4
+        AND r.state = 'active'
+      LIMIT 1`,
+    [clientId, input.tenantId, input.domainId, input.subplatform],
+  );
+  if (registration.rowCount !== 1) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "OIDC 客户端没有绑定当前 active 子平台" }, { status: 403 }),
+    };
+  }
+
+  const userResult = await authDatabase.query<MarketplaceIdentity["user"]>(
+    `SELECT id::text, name, email, role
+       FROM "user"
+      WHERE id = $1::uuid
+        AND banned IS NOT TRUE
+      LIMIT 1`,
+    [subject],
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "根平台身份不存在或已停用" }, { status: 401 }),
+    };
+  }
+  return { ok: true, identity: { user, federated: true } };
+}
+
+async function introspectRootAccessToken(
+  request: Request,
+  accessToken: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<{
+  active?: boolean;
+  client_id?: string;
+  sub?: string;
+  scope?: string;
+} | null> {
+  try {
+    const url = new URL("/api/auth/oauth2/introspect", request.url);
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64");
+    const response = await auth.handler(new Request(url, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Basic ${credentials}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ token: accessToken, token_type_hint: "access_token" }).toString(),
+    }));
+    if (!response.ok) return null;
+    const body = await response.json() as unknown;
+    if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+    return body as {
+      active?: boolean;
+      client_id?: string;
+      sub?: string;
+      scope?: string;
+    };
+  } catch (error) {
+    console.error("root OIDC token introspection failed", error);
+    return null;
+  }
+}
+
+function boundedString(value: unknown, maxLength: number): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength ? value : undefined;
 }
 
 async function upsertMarketplaceMembershipProjection(input: {
@@ -289,6 +483,30 @@ async function readOrganizationMembership(
   }
 }
 
+/** Read the Better Auth member projection without requiring a root-domain cookie. */
+async function readOrganizationMembershipByScope(
+  tenantId: string,
+  domainId: string | undefined,
+  slug: string,
+  userId: string,
+): Promise<{ role: string } | null> {
+  const result = await authDatabase.query<{ role: string }>(
+    `SELECT m.role
+       FROM "member" m
+       JOIN "organization" o ON o.id = m."organizationId"
+       JOIN subplatform_registrations r ON r.slug = o.slug
+                                            AND r.tenant_id = $1::uuid
+                                            AND r.domain_id = $2::uuid
+                                            AND r.state = 'active'
+      WHERE o.slug = $3
+        AND m."userId" = $4::uuid
+      ORDER BY r.version DESC
+      LIMIT 1`,
+    [tenantId, domainId, slug, userId],
+  );
+  return result.rows[0] ?? null;
+}
+
 /**
  * Public buyer/seller access is a one-account SSO flow: the first authenticated visit claims a
  * member projection for the active child platform. Admin roles never use this path and still
@@ -300,6 +518,7 @@ async function claimPublicSubplatformMembership(
   domainId: string | undefined,
   slug: string,
   userId: string,
+  federated: boolean,
 ): Promise<{ role: string } | null> {
   if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) return null;
   const result = await authDatabase.query<{ organization_id: string }>(
@@ -327,7 +546,9 @@ async function claimPublicSubplatformMembership(
     // A concurrent request may have claimed the same membership. Read the authoritative
     // Better Auth projection below instead of treating that race as a failure.
   }
-  return readOrganizationMembership(request, slug, userId);
+  return federated
+    ? readOrganizationMembershipByScope(tenantId, domainId, slug, userId)
+    : readOrganizationMembership(request, slug, userId);
 }
 
 async function activeSubplatformScope(
