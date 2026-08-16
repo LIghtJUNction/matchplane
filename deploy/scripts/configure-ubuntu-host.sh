@@ -158,6 +158,12 @@ write_service_environment() {
     printf 'MATCHPLANE_DATABASE_URL=postgres://matchplane:%s@127.0.0.1:5432/matchplane\n' \
       "$database_password"
     printf '%s\n' 'MATCHPLANE_VALKEY_URL=redis://127.0.0.1:6379/'
+    if [[ $service == web ]]; then
+      # EnvironmentFile entries are applied after Environment= by systemd. Keep the web
+      # workload on its least-privilege token copies instead of the service-owned files.
+      printf '%s\n' 'MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/web/payment-admin.token'
+      printf '%s\n' 'MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/web/gateway-admin.token'
+    fi
   } >"$service_file"
   install -m 0640 -o root -g "$group" "$service_file" \
     "/etc/matchplane/services/${service}.env"
