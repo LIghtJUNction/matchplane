@@ -1383,11 +1383,14 @@ fn validate_source_reference(
         (Some(kind), Some(reference))
             if kind.len() <= 64
                 && !kind.is_empty()
-                && kind.bytes().enumerate().all(|(index, byte)| {
+                && kind
+                    .bytes()
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_lowercase())
+                && kind.bytes().skip(1).all(|byte| {
                     byte.is_ascii_lowercase()
                         || byte.is_ascii_digit()
                         || matches!(byte, b'_' | b'.' | b':' | b'-')
-                        || (index == 0 && byte.is_ascii_lowercase())
                 })
                 && !reference.trim().is_empty()
                 && reference.len() <= 256 =>
