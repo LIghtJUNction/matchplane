@@ -7,7 +7,8 @@ The packaged CLI commands are designed for automation:
 | `matchplane doctor --json` | Validate loaded configuration and dependency gates | none |
 | `matchplane status --json` | Probe gateway, payment, and web readiness endpoints | none |
 | `matchplane migrate` | Apply embedded PostgreSQL migrations | schema |
-| `matchplane initialize` | Migrate; demo data only with explicit opt-in outside production | schema/data |
+| `matchplane initialize` | Apply embedded PostgreSQL migrations; never creates business data | schema |
+| `matchplane provision-root --tenant-slug <slug> --tenant-name <name> --admin-email <email>` | Create or verify operator-supplied root identity and print administrator configuration | tenant/domain rows |
 | `matchplane serve <service>` | Start one named workload under a supervisor | process |
 | `matchplane mcp serve` | Run the read-only stdio MCP operations server | none |
 

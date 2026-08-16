@@ -4,7 +4,9 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ArrowUp, LockKeyhole, Sparkles } from "lucide-react";
 
 import {
+  createMarketplaceIntent,
   createBuyerRequest,
+  getMarketplaceOfferMatches,
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
   type RecommendedBackendListing,
@@ -13,7 +15,7 @@ import {
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { authClient, authFetchOptions } from "../lib/auth-client";
-import type { SubplatformConfig } from "../subplatform";
+import { pricingFor, type SubplatformConfig } from "../subplatform";
 
 const PENDING_CHAT_KEY = "matchplane.pending-chat";
 
@@ -51,13 +53,13 @@ const defaultChatCopy: ChatCopy = {
   buyerTitle: "先说说你想解决什么。",
   sellerTitle: "说说你能提供什么。",
   buyerDescription: "描述目标、预算、时间和不能妥协的条件，平台会把需求交给合适的供给方。",
-  sellerDescription: "描述你能提供的内容、价格和交付条件，平台会把资料交给合适的需求方。",
+  sellerDescription: "描述你能提供的内容、交付条件和限制，平台会把资料交给合适的需求方。",
   buyerPlaceholder: "例如：我想解决一个具体问题，预算、时间和不能妥协的条件是……",
-  sellerPlaceholder: "例如：我能提供什么，价格、地点和交付条件是……",
+  sellerPlaceholder: "例如：我能提供什么，交付条件和限制是……",
   buyerFootnote: "联系方式只在双方同意后交换；线下成交也会保留平台撮合记录。",
   sellerFootnote: "资料审核通过后才会展示；联系方式只在双方同意后交换。",
   buyerPending: "我先把你的目标、限制和优先级整理成一份匹配需求。",
-  sellerPending: "我先把你的供给、价格和交付条件整理成一份资料。",
+  sellerPending: "我先把你的供给、条件和限制整理成一份资料。",
   buyerSuccess: "需求已发送，撮合会围绕你的真实目标展开",
   sellerSuccess: "供给描述已整理；请在下方提交资料，提交后才会写入系统",
 };
@@ -81,6 +83,8 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
   const [signedIn, setSignedIn] = useState(false);
   const isRoot = subplatform.slug === "root";
   const isSeller = role === "seller";
+  const pricing = pricingFor(subplatform);
+  const usesLegacyMarketplace = pricing.mode === "fixed" && Boolean(subplatform.assetSchemaId);
   const copy = resolveChatCopy(subplatform);
 
   const submitMessage = useCallback(
@@ -126,29 +130,52 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
         if (live) {
           if (subplatform.domainId) {
             if (!session) throw new Error("Better Auth 会话尚未连接到当前子平台");
-            if (!subplatform.currency) throw new Error("当前子平台尚未配置结算币种，暂时不能生成真实推荐");
-            const buyerRequest = await createBuyerRequest({
-              session,
-              domainId: subplatform.domainId,
-              narrative: text,
-              requirements: {
-                source: "conversation",
-                intent: "general_match",
-                platform_path: platformPath(subplatform),
-                delegated_route_count: route?.routePlan.length ?? 0,
-                routing_source: route?.routing.source ?? null,
-                routing_degraded: route?.routing.degraded ?? false,
-              },
-              currency: subplatform.currency,
-              currencyScale: subplatform.currencyScale ?? 0,
-            });
-            const recommendations = await getBuyerRecommendations({
-              session,
-              domainId: subplatform.domainId,
-              requestId: buyerRequest.request_id,
-              exposureKey: `chat-${requestId}`,
-            });
-            onRecommendations?.(recommendations);
+            if (usesLegacyMarketplace) {
+              if (!pricing.currency) throw new Error("当前子平台尚未配置结算币种，暂时不能生成真实推荐");
+              const buyerRequest = await createBuyerRequest({
+                session,
+                domainId: subplatform.domainId,
+                narrative: text,
+                requirements: {
+                  source: "conversation",
+                  platform_path: platformPath(subplatform),
+                  delegated_route_count: route?.routePlan.length ?? 0,
+                  routing_source: route?.routing.source ?? null,
+                  routing_degraded: route?.routing.degraded ?? false,
+                },
+                currency: pricing.currency,
+                currencyScale: pricing.currencyScale ?? 0,
+              });
+              const recommendations = await getBuyerRecommendations({
+                session,
+                domainId: subplatform.domainId,
+                requestId: buyerRequest.request_id,
+                exposureKey: `chat-${requestId}`,
+              });
+              onRecommendations?.(recommendations);
+            } else {
+              const intent = await createMarketplaceIntent({
+                session,
+                domainId: subplatform.domainId,
+                side: "demand",
+                narrative: text,
+                attributes: {},
+                terms: {},
+                idempotencyKey: `chat-${requestId}`,
+              });
+              const candidates = await getMarketplaceOfferMatches({
+                session,
+                domainId: subplatform.domainId,
+                intentId: intent.intent_id,
+              });
+              onRecommendations?.(candidates.map((candidate) => ({
+                ...candidate,
+                offer_id: candidate.offer_id,
+                match_score: candidate.score,
+                match_reasons: candidate.reasons,
+                intent_id: intent.intent_id,
+              })));
+            }
           }
         }
         setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
@@ -174,7 +201,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, onNotice, onRecommendations, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, onNotice, onRecommendations, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path, usesLegacyMarketplace, pricing.currency, pricing.currencyScale],
   );
 
   useEffect(() => {

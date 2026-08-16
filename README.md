@@ -17,8 +17,9 @@ dependency-free `integrations/matchplane-agent-client` package provides the same
 client shape for both roles.
 
 The repository is a Rust 2024 modular monorepo with independently deployable services. The root
-engine is domain-neutral; automotive, electronics, and any future vertical are mounted adapters
-that supply their own manifest, UI, Agent Skill, MCP tools, and optional retrieval implementation.
+engine is domain-neutral; every vertical is a mounted adapter that supplies its own manifest, UI,
+Agent Skill, MCP tools, and optional retrieval implementation. The repository includes an
+automotive compatibility adapter only as an example; it is not root-platform data.
 
 ## Prerequisites
 
@@ -38,6 +39,26 @@ just migrate
 just smoke
 ```
 
+The core does not seed a tenant, domain, catalogue, vehicle, payment provider, or administrator.
+Set `MATCHPLANE_ROOT_ADMIN_EMAIL` to an operator-owned address, then provision only the identities
+you want to mount:
+
+```sh
+cargo run --locked -p xtask -- provision-root \
+  --tenant-slug <root-slug> \
+  --tenant-name <root-name> \
+  --domain-slug <first-domain-slug> \
+  --domain-name <first-domain-name> \
+  --admin-email <operator-email>
+```
+
+Copy the returned root tenant and administrator assignments into the web service environment and
+restart it, then open the returned `/login?role=platform` path. Omit the domain flags when the
+root should start without a child; to add a domain later, reuse the exact `--tenant-id` printed by
+the first invocation and pass the new domain flags. Omitting `--tenant-id` creates a new UUID rather
+than implicitly selecting an existing tenant. The command is idempotent for matching values and
+refuses to overwrite an existing identity.
+
 In regions where Alpine's official CDN is slow, set `MATCHPLANE_ALPINE_MIRROR` to a trusted HTTPS
 mirror before building the PostgreSQL image. Alpine package signatures are still verified by
 `apk`; leaving the variable empty keeps the official CDN.
@@ -51,11 +72,12 @@ followed by `bun run --cwd web dev`; the Next.js development server listens on
 `/usr/share/matchplane/web` in every Linux package; the packaged `matchplane-web.service` serves
 the UI and Better Auth routes.
 
-Vehicle discovery supports seller exposure analytics and explainable buyer recommendations. Offline
-introductions release encrypted buyer/seller contact details only to the matched parties, support
-private viewing appointments and dual price confirmation, and keep the vehicle's in-person payment
-separate from the platform's disclosed commission. See
-[docs/marketplace-payments.md](docs/marketplace-payments.md).
+The generic marketplace kernel supports seller exposure analytics, explainable recommendations,
+consent-controlled introductions, and offline settlement without assuming what is being matched.
+The package under `subplatforms/auto` is only a compatibility adapter: it supplies its own schema
+and UI and is not seeded into a clean root deployment. See
+[docs/marketplace-payments.md](docs/marketplace-payments.md) for the payment and commission
+boundary.
 
 ## Quality gates
 

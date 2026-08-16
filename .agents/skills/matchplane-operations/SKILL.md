@@ -13,8 +13,10 @@ explicit, authenticated, and auditable; the MCP surface is read-only by default.
 1. Run `matchplane doctor --json` and fix configuration errors before starting workloads.
 2. Run `matchplane status --json` to check gateway, payment, and web health endpoints. Treat a
    failed readiness check as an operational incident, not as a reason to bypass auth or TLS.
-3. Apply schema changes with `matchplane migrate`; only use `matchplane bootstrap` in a deliberately
-   opted-in development/test environment.
+3. Apply schema changes with `matchplane migrate`. On a clean install, use
+   `matchplane provision-root --tenant-slug <slug> --tenant-name <name>` with operator-owned
+   values; it creates only the explicitly requested tenant/domain identities and never seeds
+   business data.
 4. Start one workload with `matchplane serve <service>` under systemd/container supervision. Do
    not run services as root or pass secrets on the command line.
 5. For an operations agent, start `matchplane mcp serve` over stdio. Expose only

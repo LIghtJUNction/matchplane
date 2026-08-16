@@ -185,6 +185,24 @@ enabling workloads, apply migrations with `matchplane migrate`, and let systemd/
 `matchplane serve <service>` for each workload. `matchplane mcp serve` is the read-only stdio
 operations surface for an on-call Agent.
 
+Provision the root identity before starting the web unit. Use the packaged CLI with operator-owned
+values; omit the domain flags if the root should initially have no child domain:
+
+```sh
+matchplane provision-root \
+  --tenant-slug "$MATCHPLANE_ROOT_TENANT_SLUG" \
+  --tenant-name "$MATCHPLANE_ROOT_TENANT_NAME" \
+  --tenant-id "$MATCHPLANE_ROOT_TENANT_ID" \
+  --admin-email "$MATCHPLANE_ROOT_ADMIN_EMAIL"
+```
+
+The command is idempotent for the exact same values, rejects slug/ID mismatches, and prints the
+root tenant and administrator assignments without creating any catalogue or vertical data. If the
+root was provisioned without a domain, reuse the exact tenant UUID printed by that command as
+`--tenant-id` when adding a domain later; omitting it creates a new tenant identity. Set
+the printed values in the web service environment and restart it before opening the printed login
+path.
+
 After the web unit is reachable, open `GET /api/platform/setup` to inspect the bounded first-run
 state. It reports only whether the configured root tenant exists, whether active domains and child
 registrations are present, and whether any Better Auth identity exists; it never returns credentials

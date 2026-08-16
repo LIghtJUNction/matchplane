@@ -284,6 +284,11 @@ export function LoginScreen() {
             </div>
           </div>
         ) : null}
+        {role === "buyer" ? (
+          <a className="login-mode-toggle" href="/login?role=platform&next=%2F%3Frole%3Dplatform">
+            {copy.adminLogin}
+          </a>
+        ) : null}
       </section>
     </main>
   );
@@ -334,6 +339,7 @@ function loginCopy(locale: "zh" | "en") {
       createAccount: "Create account",
       createAccountLink: "Create an account",
       backToSignIn: "Back to sign in",
+      adminLogin: "Administrator sign-in",
       otherMethods: "Other ways",
       invalidEmail: "Enter a valid email address.",
       passwordTooShort: "Password must be at least 8 characters.",
@@ -373,6 +379,7 @@ function loginCopy(locale: "zh" | "en") {
     createAccount: "创建账号",
     createAccountLink: "创建账号",
     backToSignIn: "返回登录",
+    adminLogin: "管理员登录",
     otherMethods: "其他方式",
     invalidEmail: "请输入有效的邮箱地址。",
     passwordTooShort: "密码至少需要 8 位。",

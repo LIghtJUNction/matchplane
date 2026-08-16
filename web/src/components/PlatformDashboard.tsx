@@ -108,10 +108,19 @@ export function PlatformDashboard({
   const [subplatformUpload, setSubplatformUpload] = useState<SubplatformArchiveUpload | null>(null);
 
   useEffect(() => {
+    let mounted = true;
+    void getPlatformSetupStatus()
+      .then((value) => { if (mounted) setSetup(value); })
+      .catch(() => { if (mounted) setSetupError(true); });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isLiveMarketplaceEnabled()) return;
     let mounted = true;
     void Promise.allSettled([
-      getPlatformSetupStatus(),
       getPaymentGateways(),
       getPaymentRoutes(),
       getInvoiceProviders(),
@@ -121,10 +130,8 @@ export function PlatformDashboard({
       getInvoiceAdminRecords(),
       getSubplatformOrganizations(),
     ])
-      .then(([setupResult, gatewayResult, routeResult, invoiceResult, invoiceSettingResult, paymentResult, refundResult, invoiceRecordResult, subplatformResult]) => {
+      .then(([gatewayResult, routeResult, invoiceResult, invoiceSettingResult, paymentResult, refundResult, invoiceRecordResult, subplatformResult]) => {
         if (!mounted) return;
-        if (setupResult.status === "fulfilled") setSetup(setupResult.value);
-        else setSetupError(true);
         // Payment administration is intentionally allowed to be unavailable while the first
         // Better Auth session is still settling; the setup card remains useful in that state.
         if (gatewayResult.status === "fulfilled") setGateways(gatewayResult.value);

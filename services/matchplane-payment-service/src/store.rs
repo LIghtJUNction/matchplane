@@ -1461,7 +1461,7 @@ impl PaymentStore {
             .await?;
             for invoice in invoices {
                 let kind: String = invoice.try_get("kind")?;
-                let correction_amount = if kind == "vehicle_sale" {
+                let correction_amount = if matches!(kind.as_str(), "sale" | "vehicle_sale") {
                     refund.amount.clone()
                 } else {
                     refund.commission_reversal_amount.clone()

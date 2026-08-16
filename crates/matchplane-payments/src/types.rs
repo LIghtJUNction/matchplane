@@ -610,8 +610,9 @@ pub struct GatewayStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InvoiceKind {
-    /// Vehicle seller issues the sale invoice to the buyer.
-    VehicleSale,
+    /// A participant issues the sale/service invoice defined by the active domain.
+    #[serde(alias = "vehicle_sale")]
+    Sale,
     /// Platform issues a commission/service invoice to the seller.
     PlatformCommission,
 }

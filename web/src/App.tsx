@@ -20,6 +20,8 @@ import { PluginHost } from "./components/PluginHost";
 import { MatchChat } from "./components/MatchChat";
 import { loadSubplatform, resolveSubplatform, type SubplatformConfig } from "./subplatform";
 import {
+  createMarketplaceIntroduction,
+  requestMarketplaceContact,
   createBuyerIntroduction,
   clearPartySessionCache,
   getPaymentSetting,
@@ -267,13 +269,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               setNotice(`${selected.title} 的联系申请已提交`);
               return;
             }
-            const listingId = listingIdFromBackend(selected);
-            if (!listingId) {
+            const isGenericOffer = Boolean(selected.offerId && selected.intentId);
+            const listingId = isGenericOffer ? null : listingIdFromBackend(selected);
+            if (!isGenericOffer && !listingId) {
               setNotice("供给必须来自当前子平台的真实 API；当前未发送申请");
               return;
             }
-            if (!subplatform.domainId || !subplatform.currency) {
-              setNotice("当前子平台尚未完成 domain 与结算币种注册；当前未发送申请");
+            if (!subplatform.domainId || (!isGenericOffer && !subplatform.currency)) {
+              setNotice("当前子平台尚未完成身份与结算配置；当前未发送申请");
               return;
             }
             try {
@@ -288,19 +291,38 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 setNotice("请先使用 Better Auth 邮箱登录，再申请联系");
                 return;
               }
-              await createBuyerIntroduction({
-                session,
-                domainId:
-                  subplatform.domainId,
-                listingId,
-                narrative: "希望与供给方直接沟通并完成后续协商",
-                requirements: {},
-                currency: subplatform.currency,
-                currencyScale: subplatform.currencyScale ?? 0,
-                exposureKey: `web-contact-${Date.now()}`,
-              });
+              if (isGenericOffer && selected.offerId && selected.intentId) {
+                const introduction = await createMarketplaceIntroduction({
+                  session,
+                  domainId: subplatform.domainId,
+                  intentId: selected.intentId,
+                  offerId: selected.offerId,
+                  score: (selected.matchScore ?? 0) / 100,
+                  idempotencyKey: `web-introduction-${Date.now()}`,
+                });
+                const introductionId = typeof introduction.introduction_id === "string"
+                  ? introduction.introduction_id
+                  : null;
+                if (!introductionId) throw new Error("撮合结果缺少介绍编号，未发送联系申请");
+                await requestMarketplaceContact({
+                  session,
+                  domainId: subplatform.domainId,
+                  introductionId,
+                });
+              } else if (listingId && subplatform.currency) {
+                await createBuyerIntroduction({
+                  session,
+                  domainId: subplatform.domainId,
+                  listingId,
+                  narrative: "希望与供给方直接沟通并完成后续协商",
+                  requirements: {},
+                  currency: subplatform.currency,
+                  currencyScale: subplatform.currencyScale ?? 0,
+                  exposureKey: `web-contact-${Date.now()}`,
+                });
+              }
               closeListing();
-              setNotice("联系申请已真实写入撮合系统，等待卖家明确同意后交换电话/微信");
+              setNotice("联系申请已写入撮合系统，等待供给方明确同意后交换联系方式");
             } catch (error) {
               setNotice(error instanceof Error ? error.message : "联系申请未发送，请稍后重试");
             }
@@ -396,7 +418,9 @@ function listingFromLocation(): AssetListing | null {
 }
 
 function mapRecommendations(items: RecommendedBackendListing[]): AssetListing[] {
-  return items.map((item, index) => {
+  return items.flatMap((item, index) => {
+    const id = item.listing_id ?? item.offer_id;
+    if (!id) return [];
     const attributes = item.attributes && typeof item.attributes === "object" && !Array.isArray(item.attributes)
       ? item.attributes
       : {};
@@ -406,19 +430,26 @@ function mapRecommendations(items: RecommendedBackendListing[]): AssetListing[] 
       .map(([label, value]) => ({ label, value: String(value) }));
     const subtitle = facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ");
     const location = typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined;
-    return {
-      id: item.listing_id,
+    const terms = item.terms && typeof item.terms === "object" && !Array.isArray(item.terms) ? item.terms : {};
+    const currencyScale = item.currency_scale;
+    const price = item.asking_amount && item.currency && typeof currencyScale === "number" && Number.isInteger(currencyScale)
+      ? formatMoney(item.asking_amount, item.currency, currencyScale)
+      : stringAttribute(terms, ["display_price", "price_label", "price"]) ?? "—";
+    return [{
+      id,
       title: item.display_name,
       subtitle,
-      price: formatMoney(item.asking_amount, item.currency, item.currency_scale),
+      price,
       location,
-      matchScore: Math.round(Math.max(0, Math.min(1, item.match_score)) * 100),
+      matchScore: Math.round(Math.max(0, Math.min(1, item.match_score ?? 0)) * 100),
       accent: (["cactus", "clay", "heather", "oat"] as const)[index % 4],
       facts,
-      reasons: item.match_reasons,
+      reasons: item.match_reasons ?? (typeof item.reasons === "object" && Array.isArray(item.reasons) ? item.reasons.filter((reason): reason is string => typeof reason === "string") : undefined),
       trust: stringArrayAttribute(item, ["trust", "verification_labels", "verificationLabels"]),
       response: stringAttribute(item, ["response", "seller_response", "sellerResponse"]),
-    };
+      offerId: item.offer_id,
+      intentId: typeof item.intent_id === "string" ? item.intent_id : undefined,
+    }];
   });
 }
 

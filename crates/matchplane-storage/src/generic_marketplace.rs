@@ -11,7 +11,7 @@ use matchplane_domain::{
 };
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{Row, postgres::PgRow};
+use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -217,6 +217,47 @@ pub struct CreateMarketplaceIntroduction {
     pub expires_at: OffsetDateTime,
 }
 
+/// Demand-side request to open the contact-consent step for an introduction.
+#[derive(Debug)]
+pub struct RequestMarketplaceContact {
+    /// Tenant scope.
+    pub tenant_id: TenantId,
+    /// Introduction selected by the demand participant.
+    pub introduction_id: MatchIntroductionId,
+    /// Authenticated demand participant.
+    pub demand_party_id: MarketplacePartyId,
+    /// Non-secret request fingerprint used for audit correlation.
+    pub request_fingerprint: Option<Vec<u8>>,
+}
+
+/// Supply-side consent to exchange the two participants' protected contact records.
+#[derive(Debug)]
+pub struct AcceptMarketplaceContact {
+    /// Tenant scope.
+    pub tenant_id: TenantId,
+    /// Introduction awaiting consent.
+    pub introduction_id: MatchIntroductionId,
+    /// Authenticated supply participant.
+    pub supply_party_id: MarketplacePartyId,
+}
+
+/// Encrypted counterpart contact returned only after the generic consent checks pass.
+#[derive(Debug)]
+pub struct MarketplaceContactEnvelope {
+    /// Counterpart identity.
+    pub target_party_id: MarketplacePartyId,
+    /// Counterpart display name.
+    pub display_name: String,
+    /// Contact ciphertext.
+    pub ciphertext: Vec<u8>,
+    /// Contact nonce.
+    pub nonce: Vec<u8>,
+    /// Contact key version.
+    pub key_version: i32,
+    /// Durable introduction state after the release decision.
+    pub introduction: MarketplaceIntroduction,
+}
+
 /// Persisted introduction plus duplicate status.
 #[derive(Debug, Clone, Serialize)]
 pub struct MarketplaceIntroductionOutcome {
@@ -401,6 +442,42 @@ impl PgStore {
             offer: offer_from_row(&row)?,
             duplicate: false,
         })
+    }
+
+    /// Lists a supply participant's own offers in one tenant/domain scope.
+    ///
+    /// This is intentionally separate from the active matching query: a seller must be able to
+    /// see draft and withdrawn offers before moderation publishes them, without exposing another
+    /// seller's private inventory.
+    pub async fn marketplace_offers_for_party(
+        &self,
+        tenant_id: TenantId,
+        domain_id: DomainId,
+        supply_party_id: MarketplacePartyId,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<MarketplaceOffer>, StorageError> {
+        if !(1..=100).contains(&limit) || !(0..=10_000).contains(&offset) {
+            return Err(StorageError::InvalidData(
+                "marketplace offer page must use limit 1..=100 and offset 0..=10000".to_owned(),
+            ));
+        }
+        let rows = sqlx::query(
+            "SELECT id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
+                    display_name, attributes, terms, status, published_at, expires_at,
+                    version, created_at, updated_at
+             FROM marketplace_offers
+             WHERE tenant_id = $1 AND domain_id = $2 AND supply_party_id = $3
+             ORDER BY updated_at DESC, id DESC LIMIT $4 OFFSET $5",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(domain_id.into_uuid())
+        .bind(supply_party_id.into_uuid())
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(self.pool())
+        .await?;
+        rows.iter().map(offer_from_row).collect()
     }
 
     /// Activates one draft offer after an authenticated operator/moderation decision.
@@ -659,6 +736,247 @@ impl PgStore {
         })
     }
 
+    /// Moves a proposed introduction into the explicit contact-request state.
+    pub async fn request_marketplace_contact(
+        &self,
+        command: &RequestMarketplaceContact,
+    ) -> Result<MarketplaceIntroduction, StorageError> {
+        let mut transaction = self.pool().begin().await?;
+        serializable(&mut transaction).await?;
+        let row = sqlx::query(INTRODUCTION_SELECT_BY_ID_FOR_UPDATE)
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.introduction_id.into_uuid())
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(StorageError::NotFound("marketplace introduction"))?;
+        let current = introduction_from_row(&row)?;
+        if current.demand_party_id != command.demand_party_id {
+            return Err(StorageError::Forbidden(
+                "only the demand participant can request contact".to_owned(),
+            ));
+        }
+        if current.expires_at <= OffsetDateTime::now_utc()
+            || matches!(current.status.as_str(), "declined" | "expired" | "disputed")
+        {
+            insert_marketplace_contact_event(
+                &mut transaction,
+                command.tenant_id,
+                command.introduction_id,
+                command.demand_party_id,
+                current.supply_party_id,
+                "contact_requested",
+                "denied",
+                command.request_fingerprint.as_deref(),
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(StorageError::Conflict(
+                "marketplace introduction is no longer available".to_owned(),
+            ));
+        }
+        if current.status == "proposed" {
+            sqlx::query(
+                "UPDATE marketplace_introductions
+                    SET status = 'contact_requested', version = version + 1
+                  WHERE tenant_id = $1 AND id = $2 AND status = 'proposed'",
+            )
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.introduction_id.into_uuid())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        insert_marketplace_contact_event(
+            &mut transaction,
+            command.tenant_id,
+            command.introduction_id,
+            command.demand_party_id,
+            current.supply_party_id,
+            "contact_requested",
+            "allowed",
+            command.request_fingerprint.as_deref(),
+        )
+        .await?;
+        let updated = sqlx::query(INTRODUCTION_SELECT_BY_ID)
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.introduction_id.into_uuid())
+            .fetch_one(&mut *transaction)
+            .await?;
+        let introduction = introduction_from_row(&updated)?;
+        transaction.commit().await?;
+        Ok(introduction)
+    }
+
+    /// Records supply consent before any counterpart contact value can be released.
+    pub async fn accept_marketplace_contact(
+        &self,
+        command: &AcceptMarketplaceContact,
+    ) -> Result<MarketplaceIntroduction, StorageError> {
+        let mut transaction = self.pool().begin().await?;
+        serializable(&mut transaction).await?;
+        let row = sqlx::query(INTRODUCTION_SELECT_BY_ID_FOR_UPDATE)
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.introduction_id.into_uuid())
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(StorageError::NotFound("marketplace introduction"))?;
+        let current = introduction_from_row(&row)?;
+        if current.supply_party_id != command.supply_party_id {
+            return Err(StorageError::Forbidden(
+                "only the supply participant can consent to contact".to_owned(),
+            ));
+        }
+        if current.expires_at <= OffsetDateTime::now_utc()
+            || !matches!(
+                current.status.as_str(),
+                "contact_requested" | "contact_released"
+            )
+        {
+            insert_marketplace_contact_event(
+                &mut transaction,
+                command.tenant_id,
+                command.introduction_id,
+                command.supply_party_id,
+                current.demand_party_id,
+                "contact_consent",
+                "denied",
+                None,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(StorageError::Conflict(
+                "marketplace introduction is not awaiting supply consent".to_owned(),
+            ));
+        }
+        if current.supply_contact_consent_at.is_none() {
+            sqlx::query(
+                "UPDATE marketplace_introductions
+                    SET supply_contact_consent_at = clock_timestamp(),
+                        status = 'contact_released', version = version + 1
+                  WHERE tenant_id = $1 AND id = $2
+                    AND supply_contact_consent_at IS NULL",
+            )
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.introduction_id.into_uuid())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        insert_marketplace_contact_event(
+            &mut transaction,
+            command.tenant_id,
+            command.introduction_id,
+            command.supply_party_id,
+            current.demand_party_id,
+            "contact_consent",
+            "allowed",
+            None,
+        )
+        .await?;
+        let updated = sqlx::query(INTRODUCTION_SELECT_BY_ID)
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.introduction_id.into_uuid())
+            .fetch_one(&mut *transaction)
+            .await?;
+        let introduction = introduction_from_row(&updated)?;
+        transaction.commit().await?;
+        Ok(introduction)
+    }
+
+    /// Releases only the other participant's encrypted contact after supply consent.
+    pub async fn release_marketplace_contact(
+        &self,
+        tenant_id: TenantId,
+        introduction_id: MatchIntroductionId,
+        actor_party_id: MarketplacePartyId,
+        request_fingerprint: Option<&[u8]>,
+    ) -> Result<MarketplaceContactEnvelope, StorageError> {
+        let mut transaction = self.pool().begin().await?;
+        serializable(&mut transaction).await?;
+        let row = sqlx::query(INTRODUCTION_SELECT_BY_ID_FOR_UPDATE)
+            .bind(tenant_id.into_uuid())
+            .bind(introduction_id.into_uuid())
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(StorageError::NotFound("marketplace introduction"))?;
+        let current = introduction_from_row(&row)?;
+        let target_party_id = if current.demand_party_id == actor_party_id {
+            current.supply_party_id
+        } else if current.supply_party_id == actor_party_id {
+            current.demand_party_id
+        } else {
+            return Err(StorageError::Forbidden(
+                "contact is available only to the matched participants".to_owned(),
+            ));
+        };
+        if current.expires_at <= OffsetDateTime::now_utc()
+            || !matches!(current.status.as_str(), "contact_released" | "completed")
+            || current.supply_contact_consent_at.is_none()
+        {
+            insert_marketplace_contact_event(
+                &mut transaction,
+                tenant_id,
+                introduction_id,
+                actor_party_id,
+                target_party_id,
+                "contact_release",
+                "denied",
+                request_fingerprint,
+            )
+            .await?;
+            transaction.commit().await?;
+            return Err(StorageError::Conflict(
+                "supply consent is required before contact release".to_owned(),
+            ));
+        }
+        sqlx::query(
+            "UPDATE marketplace_introductions
+                SET contact_released_at = COALESCE(contact_released_at, clock_timestamp()),
+                    version = version + 1
+              WHERE tenant_id = $1 AND id = $2",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(introduction_id.into_uuid())
+        .execute(&mut *transaction)
+        .await?;
+        insert_marketplace_contact_event(
+            &mut transaction,
+            tenant_id,
+            introduction_id,
+            actor_party_id,
+            target_party_id,
+            "contact_release",
+            "allowed",
+            request_fingerprint,
+        )
+        .await?;
+        let contact = sqlx::query(
+            "SELECT display_name, contact_ciphertext, contact_nonce, contact_key_version
+               FROM marketplace_parties
+              WHERE tenant_id = $1 AND id = $2 AND status = 'active'
+              FOR SHARE",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(target_party_id.into_uuid())
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(StorageError::NotFound("active counterpart"))?;
+        let updated = sqlx::query(INTRODUCTION_SELECT_BY_ID)
+            .bind(tenant_id.into_uuid())
+            .bind(introduction_id.into_uuid())
+            .fetch_one(&mut *transaction)
+            .await?;
+        let introduction = introduction_from_row(&updated)?;
+        let envelope = MarketplaceContactEnvelope {
+            target_party_id,
+            display_name: contact.try_get("display_name")?,
+            ciphertext: contact.try_get("contact_ciphertext")?,
+            nonce: contact.try_get("contact_nonce")?,
+            key_version: contact.try_get("contact_key_version")?,
+            introduction,
+        };
+        transaction.commit().await?;
+        Ok(envelope)
+    }
+
     /// Lists introductions visible to one participant without exposing contact values.
     pub async fn marketplace_introductions_for_party(
         &self,
@@ -854,6 +1172,17 @@ const INTRODUCTION_SELECT_BY_PAIR: &str = "SELECT id, tenant_id, demand_intent_i
     FROM marketplace_introductions WHERE tenant_id = $1 AND demand_intent_id = $2
       AND supply_offer_id = $3";
 
+const INTRODUCTION_SELECT_BY_ID: &str = "SELECT id, tenant_id, demand_intent_id, supply_offer_id,
+    demand_party_id, supply_party_id, score, reasons, status, supply_contact_consent_at,
+    contact_released_at, idempotency_key, expires_at, version, created_at, updated_at
+    FROM marketplace_introductions WHERE tenant_id = $1 AND id = $2";
+
+const INTRODUCTION_SELECT_BY_ID_FOR_UPDATE: &str = "SELECT id, tenant_id, demand_intent_id,
+    supply_offer_id, demand_party_id, supply_party_id, score, reasons, status,
+    supply_contact_consent_at, contact_released_at, idempotency_key, expires_at, version,
+    created_at, updated_at FROM marketplace_introductions
+    WHERE tenant_id = $1 AND id = $2 FOR UPDATE";
+
 const INTRODUCTION_SELECT_FOR_PARTY: &str = "SELECT id, tenant_id, demand_intent_id,
     supply_offer_id, demand_party_id, supply_party_id, score, reasons, status,
     supply_contact_consent_at, contact_released_at, idempotency_key, expires_at, version,
@@ -921,6 +1250,43 @@ fn introduction_from_row(row: &PgRow) -> Result<MarketplaceIntroduction, Storage
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_marketplace_contact_event(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: TenantId,
+    introduction_id: MatchIntroductionId,
+    actor_party_id: MarketplacePartyId,
+    target_party_id: MarketplacePartyId,
+    event_type: &str,
+    decision: &str,
+    request_fingerprint: Option<&[u8]>,
+) -> Result<(), StorageError> {
+    sqlx::query(
+        "INSERT INTO marketplace_introduction_contact_events
+            (id, tenant_id, introduction_id, actor_party_id, target_party_id,
+             event_type, decision, request_fingerprint)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(tenant_id.into_uuid())
+    .bind(introduction_id.into_uuid())
+    .bind(actor_party_id.into_uuid())
+    .bind(target_party_id.into_uuid())
+    .bind(event_type)
+    .bind(decision)
+    .bind(request_fingerprint)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn serializable(transaction: &mut Transaction<'_, Postgres>) -> Result<(), StorageError> {
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]

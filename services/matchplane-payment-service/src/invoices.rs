@@ -771,18 +771,13 @@ async fn validate_invoice_source(
                 ));
             }
             let purpose: String = row.try_get("purpose")?;
-            if matches!(kind, InvoiceKind::VehicleSale) && purpose != "vehicle_purchase" {
-                return Err(StoreError::Invalid(
-                    "vehicle-sale invoices require a vehicle_purchase payment".to_owned(),
-                ));
-            }
             let captured = exact(&row.try_get::<String, _>("captured_amount")?)?;
             let refunded = exact(&row.try_get::<String, _>("refunded_amount")?)?;
             let commission = exact(&row.try_get::<String, _>("commission_amount")?)?;
             let commission_refunded =
                 exact(&row.try_get::<String, _>("commission_refunded_amount")?)?;
             let expected = match kind {
-                InvoiceKind::VehicleSale => captured.checked_sub(refunded),
+                InvoiceKind::Sale => captured.checked_sub(refunded),
                 InvoiceKind::PlatformCommission if purpose == "platform_commission" => {
                     captured.checked_sub(refunded)
                 }
@@ -798,7 +793,9 @@ async fn validate_invoice_source(
                 ));
             }
         }
-        (None, Some(deal_id), InvoiceKind::VehicleSale) => {
+        // Offline deals are a legacy vertical adapter. Generic domains use a payment source;
+        // this branch remains only for existing offline-deal records.
+        (None, Some(deal_id), InvoiceKind::Sale) => {
             let row = sqlx::query(
                 "SELECT status, final_amount::text AS final_amount, currency, currency_scale \
                  FROM offline_deals WHERE tenant_id = $1 AND id = $2 FOR SHARE",
@@ -814,13 +811,13 @@ async fn validate_invoice_source(
                 || command.currency_scale != row.try_get::<i16, _>("currency_scale")?
             {
                 return Err(StoreError::Invalid(
-                    "offline vehicle invoice must equal the completed deal amount".to_owned(),
+                    "offline sale invoice must equal the completed deal amount".to_owned(),
                 ));
             }
         }
         _ => {
             return Err(StoreError::Invalid(
-                "vehicle invoices require a payment or completed offline deal; commission invoices require a payment"
+                "sale invoices require a payment or completed offline deal; commission invoices require a payment"
                     .to_owned(),
             ));
         }
@@ -894,7 +891,7 @@ async fn serializable(transaction: &mut Transaction<'_, Postgres>) -> Result<(),
 
 const fn invoice_kind_text(kind: InvoiceKind) -> &'static str {
     match kind {
-        InvoiceKind::VehicleSale => "vehicle_sale",
+        InvoiceKind::Sale => "sale",
         InvoiceKind::PlatformCommission => "platform_commission",
     }
 }
@@ -907,7 +904,7 @@ fn exact(value: &str) -> Result<i128, StoreError> {
 
 pub fn invoice_kind(value: &str) -> Result<InvoiceKind, PaymentError> {
     match value {
-        "vehicle_sale" => Ok(InvoiceKind::VehicleSale),
+        "sale" | "vehicle_sale" => Ok(InvoiceKind::Sale),
         "platform_commission" => Ok(InvoiceKind::PlatformCommission),
         _ => Err(PaymentError::Invalid(format!(
             "unknown invoice kind {value}"

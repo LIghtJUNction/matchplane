@@ -1163,6 +1163,42 @@ impl PgStore {
         Ok(submission)
     }
 
+    /// Lists a seller's own moderation submissions in reverse update order.
+    ///
+    /// Authorization is intentionally performed by the gateway before this repository method is
+    /// called.  The query still pins every row to the tenant, domain, and seller party so a caller
+    /// cannot accidentally mix submissions from another recursive platform scope.
+    pub async fn marketplace_listing_submissions(
+        &self,
+        tenant_id: TenantId,
+        domain_id: DomainId,
+        seller_party_id: MarketplacePartyId,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<MarketplaceListingSubmission>, StorageError> {
+        if !(1..=100).contains(&limit) || !(0..=10_000).contains(&offset) {
+            return Err(StorageError::InvalidData(
+                "listing submission page must use limit 1..=100 and offset 0..=10000".to_owned(),
+            ));
+        }
+        let rows = sqlx::query(
+            "SELECT id, tenant_id, domain_id, seller_party_id, asset_schema_id, external_key, \
+                    display_name, attributes, asking_amount::text AS asking_amount, currency, \
+                    currency_scale, status, reviewed_by, review_reason, version, created_at, updated_at \
+             FROM marketplace_listing_submissions \
+             WHERE tenant_id = $1 AND domain_id = $2 AND seller_party_id = $3 \
+             ORDER BY updated_at DESC, id DESC LIMIT $4 OFFSET $5",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(domain_id.into_uuid())
+        .bind(seller_party_id.into_uuid())
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(self.pool())
+        .await?;
+        rows.iter().map(listing_submission_from_row).collect()
+    }
+
     /// Publishes one reviewed submission, creates its asset, and grants the seller authorization
     /// in one serializable transaction.
     pub async fn approve_marketplace_listing_submission(

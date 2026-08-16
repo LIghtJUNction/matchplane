@@ -9,16 +9,17 @@ use std::sync::Arc;
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
 };
 use matchplane_domain::{
     AssetId, DomainId, MarketplaceIntentId, MarketplaceOfferId, MarketplacePartyId,
     MatchIntroductionId, TenantId,
 };
 use matchplane_storage::{
-    CreateMarketplaceIntent, CreateMarketplaceIntroduction, CreateMarketplaceOffer,
-    MarketplaceIntent, MarketplaceIntroduction, MarketplaceIntroductionOutcome,
-    MarketplaceOfferCandidate, MarketplaceOfferOutcome, MatchMarketplaceOffers,
+    AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,
+    CreateMarketplaceOffer, MarketplaceContactEnvelope, MarketplaceIntent, MarketplaceIntroduction,
+    MarketplaceIntroductionOutcome, MarketplaceOfferCandidate, MarketplaceOfferOutcome,
+    MatchMarketplaceOffers, RequestMarketplaceContact,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -48,6 +49,15 @@ pub(super) struct PartyQuery {
     tenant_id: String,
     domain_id: Option<String>,
     participant_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct OfferQuery {
+    tenant_id: String,
+    domain_id: String,
+    supply_party_id: String,
+    limit: Option<u16>,
+    offset: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,6 +106,13 @@ pub(super) struct CreateIntroductionRequest {
     expires_at: OffsetDateTime,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct ContactActionRequest {
+    tenant_id: String,
+    domain_id: String,
+    participant_id: String,
+}
+
 #[derive(Debug, Serialize)]
 pub(super) struct MatchOffersResponse {
     intent_id: MarketplaceIntentId,
@@ -105,6 +122,19 @@ pub(super) struct MatchOffersResponse {
 #[derive(Debug, Serialize)]
 pub(super) struct IntroductionsResponse {
     introductions: Vec<MarketplaceIntroduction>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct MarketplaceContactResponse {
+    counterpart: GenericCounterpartContact,
+    introduction: MarketplaceIntroduction,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct GenericCounterpartContact {
+    party_id: MarketplacePartyId,
+    display_name: String,
+    contact: Value,
 }
 
 pub(super) async fn create_intent(
@@ -130,8 +160,8 @@ pub(super) async fn create_intent(
     )
     .await?;
     match request.side.as_str() {
-        "demand" => super::marketplace::require_role(&party, "buyer")?,
-        "supply" => super::marketplace::require_role(&party, "seller")?,
+        "demand" => super::marketplace::require_marketplace_side(&party, "demand")?,
+        "supply" => super::marketplace::require_marketplace_side(&party, "supply")?,
         _ => {
             return Err(ApiError::bad_request(
                 "side must be demand or supply".to_owned(),
@@ -224,7 +254,7 @@ pub(super) async fn matches(
         domain_id,
     )
     .await?;
-    super::marketplace::require_role(&party, "buyer")?;
+    super::marketplace::require_marketplace_side(&party, "demand")?;
     let intent_id = parse_id::<MarketplaceIntentId>(&intent_id)?;
     let candidates = state
         .store
@@ -258,7 +288,7 @@ pub(super) async fn create_offer(
         domain_id,
     )
     .await?;
-    super::marketplace::require_role(&party, "seller")?;
+    super::marketplace::require_marketplace_side(&party, "supply")?;
     let command = CreateMarketplaceOffer {
         offer_id: request
             .offer_id
@@ -291,6 +321,51 @@ pub(super) async fn create_offer(
         StatusCode::CREATED
     };
     Ok((status, Json(outcome)))
+}
+
+pub(super) async fn offers(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<OfferQuery>,
+) -> Result<(HeaderMap, Json<Vec<matchplane_storage::MarketplaceOffer>>), ApiError> {
+    let tenant_id = parse_id::<TenantId>(&query.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&query.domain_id)?;
+    let supply_party_id = parse_id::<MarketplacePartyId>(&query.supply_party_id)?;
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(ApiError::bad_request(
+            "marketplace offer limit must be between 1 and 100".to_owned(),
+        ));
+    }
+    let offset = query.offset.unwrap_or(0);
+    if offset > 10_000 {
+        return Err(ApiError::bad_request(
+            "marketplace offer offset must be between 0 and 10000".to_owned(),
+        ));
+    }
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        supply_party_id,
+        domain_id,
+    )
+    .await?;
+    super::marketplace::require_marketplace_side(&party, "supply")?;
+    let offers = state
+        .store
+        .marketplace_offers_for_party(
+            tenant_id,
+            domain_id,
+            supply_party_id,
+            i64::from(limit),
+            i64::from(offset),
+        )
+        .await
+        .map_err(ApiError::from)?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((response_headers, Json(offers)))
 }
 
 pub(super) async fn activate_offer(
@@ -327,7 +402,7 @@ pub(super) async fn create_introduction(
         domain_id,
     )
     .await?;
-    super::marketplace::require_role(&party, "buyer")?;
+    super::marketplace::require_marketplace_side(&party, "demand")?;
     let command = CreateMarketplaceIntroduction {
         introduction_id: request
             .introduction_id
@@ -387,6 +462,126 @@ pub(super) async fn introductions(
         .await
         .map_err(ApiError::from)?;
     Ok(Json(IntroductionsResponse { introductions }))
+}
+
+/// Opens the consent step for the demand participant without exposing either contact record.
+pub(super) async fn request_contact(
+    State(state): State<Arc<AppState>>,
+    Path(introduction_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<ContactActionRequest>,
+) -> Result<Json<MarketplaceIntroduction>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        participant_id,
+        domain_id,
+    )
+    .await?;
+    super::marketplace::require_marketplace_side(&party, "demand")?;
+    let introduction = state
+        .store
+        .request_marketplace_contact(&RequestMarketplaceContact {
+            tenant_id,
+            introduction_id: parse_id::<MatchIntroductionId>(&introduction_id)?,
+            demand_party_id: participant_id,
+            request_fingerprint: super::marketplace::request_fingerprint(&headers),
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(introduction))
+}
+
+/// Records supply consent. Contact values remain encrypted until a participant requests release.
+pub(super) async fn consent_contact(
+    State(state): State<Arc<AppState>>,
+    Path(introduction_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<ContactActionRequest>,
+) -> Result<Json<MarketplaceIntroduction>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        participant_id,
+        domain_id,
+    )
+    .await?;
+    super::marketplace::require_marketplace_side(&party, "supply")?;
+    let introduction = state
+        .store
+        .accept_marketplace_contact(&AcceptMarketplaceContact {
+            tenant_id,
+            introduction_id: parse_id::<MatchIntroductionId>(&introduction_id)?,
+            supply_party_id: participant_id,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(introduction))
+}
+
+/// Releases the counterpart's encrypted contact only after supply consent and participant checks.
+pub(super) async fn release_contact(
+    State(state): State<Arc<AppState>>,
+    Path(introduction_id): Path<String>,
+    Query(query): Query<PartyQuery>,
+    headers: HeaderMap,
+) -> Result<Json<MarketplaceContactResponse>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&query.tenant_id)?;
+    let actor_party_id = parse_id::<MarketplacePartyId>(&query.participant_id)?;
+    if let Some(domain_id) = query
+        .domain_id
+        .as_deref()
+        .map(parse_id::<DomainId>)
+        .transpose()?
+    {
+        super::marketplace::authenticate_domain(
+            &state,
+            &headers,
+            tenant_id,
+            actor_party_id,
+            domain_id,
+        )
+        .await?;
+    } else {
+        super::marketplace::authenticate(&state, &headers, tenant_id, actor_party_id).await?;
+    }
+    let envelope: MarketplaceContactEnvelope = state
+        .store
+        .release_marketplace_contact(
+            tenant_id,
+            parse_id::<MatchIntroductionId>(&introduction_id)?,
+            actor_party_id,
+            super::marketplace::request_fingerprint(&headers).as_deref(),
+        )
+        .await
+        .map_err(ApiError::from)?;
+    let plaintext = state
+        .contact_cipher
+        .decrypt(
+            &envelope.ciphertext,
+            &envelope.nonce,
+            envelope.key_version,
+            &super::marketplace::contact_aad(tenant_id, envelope.target_party_id),
+        )
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let contact = serde_json::from_slice(&plaintext)
+        .map_err(|error| ApiError::internal(format!("stored contact is invalid: {error}")))?;
+    Ok(Json(MarketplaceContactResponse {
+        counterpart: GenericCounterpartContact {
+            party_id: envelope.target_party_id,
+            display_name: envelope.display_name,
+            contact,
+        },
+        introduction: envelope.introduction,
+    }))
 }
 
 fn empty_object() -> Value {

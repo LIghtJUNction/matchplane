@@ -124,7 +124,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
                 </div>
                 <div className="contact-options">
                   <span><MessageCircle size={15} aria-hidden="true" />站内沟通</span>
-                  <span><Phone size={15} aria-hidden="true" />电话 / 微信</span>
+                  <span><Phone size={15} aria-hidden="true" />联系方式</span>
                   <span><CalendarDays size={15} aria-hidden="true" />预约协商</span>
                   <span><MapPin size={15} aria-hidden="true" />地点加密</span>
                 </div>

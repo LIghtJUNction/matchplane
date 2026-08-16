@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
 };
 use matchplane_domain::{
     AssetId, AssetSchemaId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId,
@@ -96,6 +96,17 @@ pub(super) struct CreateListingSubmissionRequest {
     asking_amount: String,
     currency: String,
     currency_scale: i16,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ListingSubmissionsQuery {
+    tenant_id: String,
+    domain_id: String,
+    seller_party_id: String,
+    /// Number of submissions returned in one page.
+    limit: Option<u16>,
+    /// Number of submissions to skip.
+    offset: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -279,13 +290,18 @@ pub(super) struct CounterpartContact {
 }
 
 #[derive(Debug, Serialize)]
+pub(super) struct ContactSettlement {
+    /// How the participants settle outside the hosted checkout, when the vertical permits it.
+    mode: &'static str,
+    /// Where the platform fee is settled and audited.
+    platform_fee: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 pub(super) struct ContactResponse {
     counterpart: CounterpartContact,
     deal: OfflineDeal,
-    /// Vehicle funds are exchanged directly by buyer and seller outside the payment service.
-    vehicle_settlement: &'static str,
-    /// The platform fee remains independently auditable and payable through the payment service.
-    platform_commission_settlement: &'static str,
+    settlement: ContactSettlement,
 }
 
 #[derive(Debug, Serialize)]
@@ -619,6 +635,45 @@ pub(super) async fn create_listing_submission(
         })
         .await?;
     Ok((StatusCode::CREATED, Json(submission)))
+}
+
+/// Lists only the authenticated seller's own submissions for the exact child platform scope.
+pub(super) async fn listing_submissions(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<ListingSubmissionsQuery>,
+) -> Result<(HeaderMap, Json<Vec<MarketplaceListingSubmission>>), ApiError> {
+    let tenant_id = parse_id(&query.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&query.domain_id)?;
+    let seller_party_id = parse_id(&query.seller_party_id)?;
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=100).contains(&limit) {
+        return Err(ApiError::bad_request(
+            "listing submission limit must be between 1 and 100".to_owned(),
+        ));
+    }
+    let offset = query.offset.unwrap_or(0);
+    if offset > 10_000 {
+        return Err(ApiError::bad_request(
+            "listing submission offset must be between 0 and 10000".to_owned(),
+        ));
+    }
+    let party =
+        authenticate_domain(&state, &headers, tenant_id, seller_party_id, domain_id).await?;
+    require_role(&party, "seller")?;
+    let submissions = state
+        .store
+        .marketplace_listing_submissions(
+            tenant_id,
+            domain_id,
+            seller_party_id,
+            i64::from(limit),
+            i64::from(offset),
+        )
+        .await?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok((response_headers, Json(submissions)))
 }
 
 /// Publishes a seller submission after operator review.
@@ -1072,8 +1127,10 @@ pub(super) async fn contact(
             contact,
         },
         deal: envelope.deal,
-        vehicle_settlement: "offline_direct_between_buyer_and_seller",
-        platform_commission_settlement: "separate_payment_service",
+        settlement: ContactSettlement {
+            mode: "direct_between_participants",
+            platform_fee: "separate_payment_service",
+        },
     }))
 }
 
@@ -1344,11 +1401,32 @@ pub(super) fn require_role(party: &AuthenticatedParty, role: &str) -> Result<(),
     }
 }
 
+/// Generic marketplace APIs use neutral demand/supply sides. The legacy party projection keeps
+/// buyer/seller role codes for compatibility, so the mapping lives in this adapter boundary and
+/// is not repeated throughout the domain-neutral handlers.
+pub(super) fn require_marketplace_side(
+    party: &AuthenticatedParty,
+    side: &str,
+) -> Result<(), ApiError> {
+    let allowed = match side {
+        "demand" => party.role == "buyer" || party.role == "both",
+        "supply" => party.role == "seller" || party.role == "both",
+        _ => false,
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden(format!(
+            "marketplace {side} capability is required"
+        )))
+    }
+}
+
 fn default_promotion_policy() -> String {
     "seller_promotion".to_owned()
 }
 
-fn contact_aad(tenant_id: TenantId, party_id: MarketplacePartyId) -> Vec<u8> {
+pub(super) fn contact_aad(tenant_id: TenantId, party_id: MarketplacePartyId) -> Vec<u8> {
     format!("matchplane:party-contact:v1:{tenant_id}:{party_id}").into_bytes()
 }
 
@@ -1427,7 +1505,7 @@ fn decrypt_viewing(
     Ok(ViewingResponse { viewing, location })
 }
 
-fn request_fingerprint(headers: &HeaderMap) -> Option<Vec<u8>> {
+pub(super) fn request_fingerprint(headers: &HeaderMap) -> Option<Vec<u8>> {
     let request_id = headers.get("x-request-id")?.to_str().ok()?;
     let user_agent = headers
         .get(header::USER_AGENT)
@@ -1447,21 +1525,32 @@ fn validate_text(value: &str, field: &str, maximum: usize) -> Result<(), ApiErro
 
 fn normalize_contact(contact: &Value) -> Result<Value, ApiError> {
     let object = contact.as_object().ok_or_else(|| {
-        ApiError::bad_request("contact must contain phone and/or wechat".to_owned())
+        ApiError::bad_request("contact must be an object of channel names and values".to_owned())
     })?;
     let mut normalized = serde_json::Map::new();
-    for field in ["phone", "wechat", "email"] {
-        let Some(value) = object.get(field) else {
-            continue;
-        };
+    for (field, raw_value) in object {
+        if field.is_empty()
+            || field.len() > 64
+            || !field
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err(ApiError::bad_request(
+                "contact channel names must contain only letters, digits, '-', '_', or '.'"
+                    .to_owned(),
+            ));
+        }
+        let value = raw_value;
         let value = value
             .as_str()
             .ok_or_else(|| ApiError::bad_request(format!("contact.{field} must be a string")))?;
         let value = value.trim();
-        if value.is_empty() || value.len() > 64 || value.bytes().any(|byte| byte.is_ascii_control())
+        if value.is_empty()
+            || value.len() > 256
+            || value.bytes().any(|byte| byte.is_ascii_control())
         {
             return Err(ApiError::bad_request(format!(
-                "contact.{field} must contain 1..=64 printable bytes"
+                "contact.{field} must contain 1..=256 printable bytes"
             )));
         }
         if field == "phone" {
@@ -1493,7 +1582,7 @@ fn normalize_contact(contact: &Value) -> Result<Value, ApiError> {
     }
     if normalized.is_empty() {
         return Err(ApiError::bad_request(
-            "contact must include at least one of phone, wechat, or email".to_owned(),
+            "contact must include at least one channel".to_owned(),
         ));
     }
     Ok(Value::Object(normalized))
@@ -1538,7 +1627,8 @@ mod tests {
             "phone": " +86 138 0000 0000 ",
             "wechat": "seller_mp",
             "email": " Seller@Example.com ",
-            "private_note": "must not be shared",
+            "qq": "seller_qq",
+            "alipay": "seller@example.com",
         }))
         .expect("contact should be valid");
 
@@ -1548,6 +1638,8 @@ mod tests {
                 "phone": "+86 138 0000 0000",
                 "wechat": "seller_mp",
                 "email": "Seller@Example.com",
+                "qq": "seller_qq",
+                "alipay": "seller@example.com",
             })
         );
     }

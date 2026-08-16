@@ -316,6 +316,7 @@ function validateManifest(value: unknown, slug: string | undefined, packageId: s
   if (!stringMatches(manifest.slug, /^[a-z0-9][a-z0-9-]{1,62}$/) || manifest.slug === "root" || manifest.slug !== slug) return { ok: false, error: "manifest.slug 与 slug 不一致或使用了保留值" };
   if (!stringMatches(manifest.displayName, /^.{1,200}$/u) || !stringMatches(manifest.entry, /^(?!\/)(?!.*\.\.).+$/)) return { ok: false, error: "manifest displayName/entry 无效" };
   if (manifest.description !== undefined && !stringMatches(manifest.description, /^.{0,2000}$/u)) return { ok: false, error: "manifest.description 无效" };
+  if (manifest.pricing !== undefined && !validateManifestPricing(manifest.pricing)) return { ok: false, error: "manifest.pricing 无效" };
   if (manifest.email !== undefined && !validateManifestEmail(manifest.email)) return { ok: false, error: "manifest.email 无效" };
   if (manifest.ui !== undefined && !validateManifestUi(manifest.ui)) return { ok: false, error: "manifest.ui 无效" };
   if (!Array.isArray(manifest.routes)
@@ -354,6 +355,19 @@ function validateManifestEmail(value: unknown): boolean {
   const email = value as { providerKey?: unknown; fromAddress?: unknown };
   if (email.providerKey !== undefined && !stringMatches(email.providerKey, /^[a-z0-9][a-z0-9._-]{1,99}$/)) return false;
   if (email.fromAddress !== undefined && !stringMatches(email.fromAddress, /^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return false;
+  return true;
+}
+
+function validateManifestPricing(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const pricing = value as { mode?: unknown; currency?: unknown; currencyScale?: unknown; label?: unknown };
+  if (Object.keys(pricing).some((key) => !new Set(["mode", "currency", "currencyScale", "label"]).has(key))) return false;
+  if (!["fixed", "range", "negotiable", "none"].includes(String(pricing.mode))) return false;
+  if (pricing.currency !== undefined && !stringMatches(pricing.currency, /^[A-Z]{3}$/)) return false;
+  if (pricing.currencyScale !== undefined && (!Number.isInteger(pricing.currencyScale) || Number(pricing.currencyScale) < 0 || Number(pricing.currencyScale) > 18)) return false;
+  if (pricing.label !== undefined && !stringMatches(pricing.label, /^.{0,120}$/u)) return false;
+  if (pricing.mode === "fixed" && !stringMatches(pricing.currency, /^[A-Z]{3}$/)) return false;
+  if (pricing.mode === "none" && pricing.currencyScale !== undefined) return false;
   return true;
 }
 
@@ -423,6 +437,7 @@ interface Manifest {
   slug: string;
   displayName: string;
   description?: string;
+  pricing?: { mode: "fixed" | "range" | "negotiable" | "none"; currency?: string; currencyScale?: number; label?: string };
   email?: { providerKey?: string; fromAddress?: string };
   ui?: {
     chat?: Record<string, string>;
@@ -451,6 +466,7 @@ const manifestKeys = new Set([
   "slug",
   "displayName",
   "description",
+  "pricing",
   "email",
   "ui",
   "rootApiVersion",

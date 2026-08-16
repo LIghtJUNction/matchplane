@@ -1,3 +1,12 @@
+export type PricingMode = "fixed" | "range" | "negotiable" | "none";
+
+export interface PricingConfig {
+  mode: PricingMode;
+  currency?: string;
+  currencyScale?: number;
+  label?: string;
+}
+
 export interface SubplatformConfig {
   slug: string;
   /** Canonical mounted path. The root node is `/`; children may be nested. */
@@ -10,6 +19,8 @@ export interface SubplatformConfig {
   assetSchemaId?: string;
   currencyScale?: number;
   currency?: string;
+  /** Pricing is a subplatform capability; absent means the offer is not fixed-price. */
+  pricing?: PricingConfig;
   email?: { providerKey?: string; fromAddress?: string };
   /** Optional copy/schema hints owned by the mounted subplatform; root UI remains domain-neutral. */
   ui?: {
@@ -50,6 +61,7 @@ export function resolveSubplatform(pathname = "/"): SubplatformConfig {
         brandName: "MatchPlane",
         label: "通用 AI 撮合",
         description: "把需求交给合适的供给方。",
+        pricing: { mode: "none" },
       }
     : {
         slug,
@@ -103,6 +115,7 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       assetSchemaId?: string;
       currencyScale?: number;
       currency?: string;
+      pricing?: PricingConfig;
       email?: { providerKey?: string; fromAddress?: string };
       ui?: {
         chat?: Record<string, string>;
@@ -114,6 +127,10 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
         hosted?: { entry?: string; url?: string; digest?: string };
       };
     };
+    const pricing = validPricing(manifest.pricing)
+      ?? (manifest.currency?.trim()
+        ? { mode: "fixed" as const, currency: manifest.currency.trim(), currencyScale: manifest.currencyScale }
+        : { mode: "none" as const });
     return {
       ...base,
       // The URL/database registration is the canonical mount. A package manifest may describe
@@ -128,6 +145,7 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       assetSchemaId: manifest.assetSchemaId,
       currencyScale: Number.isInteger(manifest.currencyScale) ? manifest.currencyScale : undefined,
       currency: manifest.currency?.trim() || undefined,
+      pricing,
       email: manifest.email,
       ui: validUi(manifest.ui),
       assetSchema: validAssetSchema(manifest.assetSchema),
@@ -136,6 +154,37 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
   } catch {
     return base;
   }
+}
+
+export function pricingFor(subplatform: SubplatformConfig): PricingConfig {
+  if (subplatform.pricing) return subplatform.pricing;
+  if (subplatform.currency?.trim()) {
+    return {
+      mode: "fixed",
+      currency: subplatform.currency.trim(),
+      currencyScale: subplatform.currencyScale,
+    };
+  }
+  return { mode: "none" };
+}
+
+function validPricing(value: PricingConfig | undefined): PricingConfig | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const mode = value.mode;
+  if (mode !== "fixed" && mode !== "range" && mode !== "negotiable" && mode !== "none") return undefined;
+  const currency = typeof value.currency === "string" && /^[A-Z]{3}$/.test(value.currency.trim().toUpperCase())
+    ? value.currency.trim().toUpperCase()
+    : undefined;
+  const currencyScale = typeof value.currencyScale === "number" && Number.isInteger(value.currencyScale) && value.currencyScale >= 0 && value.currencyScale <= 18
+    ? value.currencyScale
+    : undefined;
+  const label = typeof value.label === "string" && value.label.trim().length <= 120 ? value.label.trim() : undefined;
+  return {
+    mode,
+    ...(currency ? { currency } : {}),
+    ...(currencyScale !== undefined ? { currencyScale } : {}),
+    ...(label ? { label } : {}),
+  };
 }
 
 function validUi(value: SubplatformConfig["ui"] | undefined): SubplatformConfig["ui"] | undefined {

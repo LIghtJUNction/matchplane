@@ -1329,6 +1329,9 @@ fn validate_payment_request(
             "idempotency_key must contain 1..=200 bytes",
         ));
     }
+    if request.purpose.trim().is_empty() || request.purpose.len() > 100 {
+        return Err(ApiError::bad_request("purpose must contain 1..=100 bytes"));
+    }
     validate_callback_url(
         &request.notify_url,
         "notify_url",
@@ -1347,7 +1350,7 @@ fn validate_payment_request(
         request.offline_deal_id.is_some(),
         request.payer_party_id.is_some(),
     ) {
-        ("online_platform", "vehicle_purchase" | "platform_commission", false, false)
+        ("online_platform", _, false, false)
         | ("offline_direct", "platform_commission", true, true) => Ok(()),
         _ => Err(ApiError::bad_request(
             "offline_direct accepts only a platform_commission payment linked to both offline_deal_id and payer_party_id",

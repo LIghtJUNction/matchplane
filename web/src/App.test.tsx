@@ -60,8 +60,6 @@ describe("MatchPlane workspaces", () => {
 
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("内部编号"), "seller-item");
-    await user.type(screen.getByLabelText(/报价/), "100");
-    await user.type(screen.getByLabelText("币种"), "CNY");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
 
     expect(window.location.assign).toBeDefined();
@@ -75,8 +73,6 @@ describe("MatchPlane workspaces", () => {
 
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("内部编号"), "seller-item");
-    await user.type(screen.getByLabelText(/报价/), "100");
-    await user.type(screen.getByLabelText("币种"), "CNY");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
 
     expect(screen.getByRole("status")).toHaveTextContent("没有写入系统");

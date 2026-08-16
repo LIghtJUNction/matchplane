@@ -188,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/v1/marketplace/listing-submissions",
-            post(marketplace::create_listing_submission),
+            get(marketplace::listing_submissions).post(marketplace::create_listing_submission),
         )
         .route(
             "/v1/admin/marketplace/listing-submissions/{submission_id}/approve",
@@ -264,7 +264,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/v1/marketplace/offers",
-            post(generic_marketplace::create_offer),
+            get(generic_marketplace::offers).post(generic_marketplace::create_offer),
         )
         .route(
             "/v1/admin/marketplace/offers/{offer_id}/activate",
@@ -273,6 +273,18 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/v1/marketplace/introductions",
             get(generic_marketplace::introductions).post(generic_marketplace::create_introduction),
+        )
+        .route(
+            "/v1/marketplace/introductions/{introduction_id}/contact/request",
+            post(generic_marketplace::request_contact),
+        )
+        .route(
+            "/v1/marketplace/introductions/{introduction_id}/contact/consent",
+            post(generic_marketplace::consent_contact),
+        )
+        .route(
+            "/v1/marketplace/introductions/{introduction_id}/contact",
+            get(generic_marketplace::release_contact),
         )
         .with_state(state)
         .layer(CatchPanicLayer::new())

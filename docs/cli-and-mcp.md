@@ -8,9 +8,21 @@ entrypoint:
 matchplane doctor --json
 matchplane status --json
 matchplane migrate
+matchplane provision-root --tenant-slug <slug> --tenant-name <name> --admin-email <operator-email>
 matchplane serve gateway
 matchplane mcp serve
 ```
+
+`provision-root` is the clean-install identity step. It requires the operator to provide the
+tenant slug and display name, accepts an optional first-domain slug/name/UUID, and accepts an
+operator-owned `--admin-email` (or `MATCHPLANE_ROOT_ADMIN_EMAIL`) only to print the next
+configuration assignment. The command generates UUIDv7 identifiers only when the operator omits
+them, applies migrations, performs an idempotent create-or-verify transaction, and prints the
+resulting `MATCHPLANE_ROOT_TENANT_ID`, administrator email, and login path. It never creates a
+catalogue, asset schema, listing, payment provider, or other business fixture. A mismatch with an
+existing ID or slug fails rather than overwriting durable configuration. To add a domain later,
+reuse the exact `--tenant-id` printed by the first invocation and pass the new domain flags; omitting
+`--tenant-id` creates a new UUID and is intentionally not an implicit lookup.
 
 `serve` starts only a named packaged workload and forwards its environment and standard streams.
 The web workload uses `MATCHPLANE_WEB_NODE` and `MATCHPLANE_WEB_SERVER` when the defaults (`node`

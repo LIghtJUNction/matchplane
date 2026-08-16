@@ -11,6 +11,27 @@
     "slug": { "type": "string", "pattern": "^(?!root$)[a-z0-9][a-z0-9-]{1,62}$" },
     "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
     "description": { "type": "string", "maxLength": 2000 },
+    "pricing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["fixed", "range", "negotiable", "none"] },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "currencyScale": { "type": "integer", "minimum": 0, "maximum": 18 },
+        "label": { "type": "string", "maxLength": 120 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "fixed" } } },
+          "then": { "required": ["currency"] }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "none" } } },
+          "then": { "not": { "required": ["currencyScale"] } }
+        }
+      ]
+    },
     "email": {
       "type": "object",
       "additionalProperties": false,

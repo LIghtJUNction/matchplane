@@ -3,11 +3,15 @@ use std::{env, process::Command as ProcessCommand, time::Duration};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use matchplane_config::{AppConfig, Environment};
-use matchplane_storage::PgStore;
+use matchplane_domain::{DomainId, TenantId};
+use matchplane_storage::{
+    PgStore, ProvisionRootDomain, ProvisionRootPlatform, ProvisionedRootPlatform,
+};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use uuid::{Uuid, Variant};
 
 #[derive(Debug, Parser)]
 #[command(name = "matchplane", about = "MatchPlane operator and agent CLI")]
@@ -22,6 +26,32 @@ enum Command {
     Migrate,
     /// Apply all embedded PostgreSQL migrations.
     Initialize,
+    /// Create or verify the operator-supplied root tenant and optional first domain.
+    ProvisionRoot {
+        /// Root tenant slug. This value is never chosen by the core.
+        #[arg(long)]
+        tenant_slug: String,
+        /// Root tenant display name. This value is never chosen by the core.
+        #[arg(long)]
+        tenant_name: String,
+        /// Optional stable tenant UUID. A UUIDv7 is generated only when omitted.
+        #[arg(long)]
+        tenant_id: Option<Uuid>,
+        /// Optional first-domain slug. `--domain-slug` and `--domain-name` must be supplied
+        /// together; `--domain-id` is optional and is generated when omitted.
+        #[arg(long)]
+        domain_slug: Option<String>,
+        /// Optional first-domain display name.
+        #[arg(long)]
+        domain_name: Option<String>,
+        /// Optional stable first-domain UUID. A UUIDv7 is generated only when omitted.
+        #[arg(long)]
+        domain_id: Option<Uuid>,
+        /// Operator-owned root administrator email to print in the next-step configuration.
+        /// This is never persisted by the core.
+        #[arg(long, env = "MATCHPLANE_ROOT_ADMIN_EMAIL")]
+        admin_email: Option<String>,
+    },
     /// Validate configuration and production safety gates.
     Doctor {
         /// Emit machine-readable JSON (the default output is also JSON for agent stability).
@@ -73,6 +103,26 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Migrate => migrate().await,
         Command::Initialize => initialize().await,
+        Command::ProvisionRoot {
+            tenant_slug,
+            tenant_name,
+            tenant_id,
+            domain_slug,
+            domain_name,
+            domain_id,
+            admin_email,
+        } => {
+            provision_root(
+                tenant_slug,
+                tenant_name,
+                tenant_id,
+                domain_slug,
+                domain_name,
+                domain_id,
+                admin_email,
+            )
+            .await
+        }
         Command::Doctor { json: _ } => doctor().await,
         Command::Status { json: _ } => status().await,
         Command::Serve { service, args } => serve(service, &args),
@@ -95,6 +145,128 @@ async fn migrate() -> Result<()> {
         .await
         .context("migration runner could not connect to PostgreSQL")?;
     store.migrate().await.context("database migration failed")
+}
+
+async fn provision_root(
+    tenant_slug: String,
+    tenant_name: String,
+    tenant_id: Option<Uuid>,
+    domain_slug: Option<String>,
+    domain_name: Option<String>,
+    domain_id: Option<Uuid>,
+    admin_email: Option<String>,
+) -> Result<()> {
+    let admin_email = admin_email
+        .map(|email| email.trim().to_lowercase())
+        .filter(|email| !email.is_empty());
+    if let Some(email) = &admin_email {
+        validate_operator_email(email)?;
+    }
+    if let Some(id) = tenant_id {
+        validate_operator_uuid(id, "--tenant-id")?;
+    }
+    if let Some(id) = domain_id {
+        validate_operator_uuid(id, "--domain-id")?;
+    }
+    let domain = match (domain_slug, domain_name, domain_id) {
+        (None, None, None) => None,
+        (Some(slug), Some(name), id) => Some(ProvisionRootDomain {
+            domain_id: DomainId::from_uuid(id.unwrap_or_else(Uuid::now_v7)),
+            domain_slug: slug,
+            domain_name: name,
+        }),
+        _ => bail!(
+            "--domain-slug, --domain-name, and --domain-id must be supplied together; omit all three to start without a domain"
+        ),
+    };
+    let config = AppConfig::load().context("root provisioning configuration is invalid")?;
+    let store = PgStore::connect(&config.database_url, 2)
+        .await
+        .context("root provisioning could not connect to PostgreSQL")?;
+    store
+        .migrate()
+        .await
+        .context("root provisioning could not apply database migrations")?;
+    let provisioned = store
+        .provision_root_platform(&ProvisionRootPlatform {
+            tenant_id: TenantId::from_uuid(tenant_id.unwrap_or_else(Uuid::now_v7)),
+            tenant_slug,
+            tenant_name,
+            domain,
+        })
+        .await
+        .context("root identity provisioning failed")?;
+    print_provisioned_root(&provisioned, admin_email.as_deref())?;
+    Ok(())
+}
+
+fn print_provisioned_root(
+    provisioned: &ProvisionedRootPlatform,
+    admin_email: Option<&str>,
+) -> Result<()> {
+    let mut output =
+        serde_json::to_value(provisioned).context("root provisioning result encoding failed")?;
+    if let Some(object) = output.as_object_mut() {
+        object.insert(
+            "next".to_owned(),
+            json!({
+                "setRootTenantId": format!(
+                    "MATCHPLANE_ROOT_TENANT_ID={}",
+                    provisioned.tenant.id
+                ),
+                "setRootAdminEmail": admin_email.map(|email| format!("MATCHPLANE_ROOT_ADMIN_EMAIL={email}")),
+                "loginPath": "/login?role=platform",
+                "restartRequired": true
+            }),
+        );
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).context("root provisioning output failed")?
+    );
+    Ok(())
+}
+
+fn validate_operator_email(email: &str) -> Result<()> {
+    let Some((local, domain)) = email.split_once('@') else {
+        bail!("--admin-email must be an operator-owned email address");
+    };
+    let valid = email.len() <= 320
+        && !local.is_empty()
+        && email.matches('@').count() == 1
+        && local
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._%+-".contains(&byte))
+        && domain
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-')
+        && !local.starts_with('.')
+        && !local.ends_with('.')
+        && !local.contains("..")
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !domain.starts_with('-')
+        && !domain.ends_with('-')
+        && !domain.contains("..")
+        && !email.ends_with("@example.com")
+        && !email.ends_with("@example.org")
+        && !email.ends_with("@example.net");
+    if valid {
+        Ok(())
+    } else {
+        bail!("--admin-email must be an operator-owned email address")
+    }
+}
+
+fn validate_operator_uuid(value: Uuid, flag: &str) -> Result<()> {
+    if value.is_nil()
+        || value.get_variant() != Variant::RFC4122
+        || !(1..=8).contains(&value.get_version_num())
+    {
+        bail!("{flag} must be a non-nil RFC 4122 UUID with version 1 through 8");
+    }
+    Ok(())
 }
 
 async fn doctor() -> Result<()> {
@@ -437,7 +609,8 @@ impl JsonRpcResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{Service, service_command};
+    use super::{Service, service_command, validate_operator_email, validate_operator_uuid};
+    use uuid::Uuid;
 
     #[test]
     fn service_command_maps_gateway_to_the_packaged_binary() {
@@ -447,5 +620,40 @@ mod tests {
     #[test]
     fn service_command_maps_web_to_node() {
         assert_eq!(service_command(Service::Web).0, "node");
+    }
+
+    #[test]
+    fn operator_email_rejects_placeholder_domains() {
+        assert!(validate_operator_email("admin@example.com").is_err());
+    }
+
+    #[test]
+    fn operator_email_accepts_an_owned_domain_shape() {
+        assert!(validate_operator_email("owner@operator.test").is_ok());
+    }
+
+    #[test]
+    fn operator_email_rejects_shell_metacharacters() {
+        assert!(validate_operator_email("owner$(id)@operator.test").is_err());
+        assert!(validate_operator_email("owner@operator.test;echo bad").is_err());
+    }
+
+    #[test]
+    fn operator_uuid_rejects_nil_and_non_rfc_versions() {
+        assert!(validate_operator_uuid(Uuid::nil(), "--tenant-id").is_err());
+        assert!(
+            validate_operator_uuid(
+                Uuid::parse_str("00000000-0000-9000-8000-000000000001").unwrap(),
+                "--tenant-id",
+            )
+            .is_err()
+        );
+        assert!(
+            validate_operator_uuid(
+                Uuid::parse_str("00000000-0000-7000-8000-000000000001").unwrap(),
+                "--tenant-id",
+            )
+            .is_ok()
+        );
     }
 }

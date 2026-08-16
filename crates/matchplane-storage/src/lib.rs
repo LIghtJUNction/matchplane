@@ -6,6 +6,7 @@ mod marketplace;
 mod matching;
 mod orders;
 mod outbox;
+mod platform;
 mod subplatform;
 mod types;
 mod vectors;
@@ -14,10 +15,11 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use thiserror::Error;
 
 pub use generic_marketplace::{
-    CreateMarketplaceIntent, CreateMarketplaceIntroduction, CreateMarketplaceOffer,
-    MarketplaceIntent, MarketplaceIntentOutcome, MarketplaceIntroduction,
-    MarketplaceIntroductionOutcome, MarketplaceOffer, MarketplaceOfferCandidate,
-    MarketplaceOfferOutcome, MatchMarketplaceOffers,
+    AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,
+    CreateMarketplaceOffer, MarketplaceContactEnvelope, MarketplaceIntent,
+    MarketplaceIntentOutcome, MarketplaceIntroduction, MarketplaceIntroductionOutcome,
+    MarketplaceOffer, MarketplaceOfferCandidate, MarketplaceOfferOutcome, MatchMarketplaceOffers,
+    RequestMarketplaceContact,
 };
 pub use marketplace::{
     AcceptContactExchange, ApproveMarketplaceListingSubmission, AuthenticatedParty,
@@ -30,6 +32,10 @@ pub use marketplace::{
     RecordSellerPromotionEvent, ReleaseContact, SellerPromotionCampaign,
     SellerPromotionEventOutcome, SetMarketplaceAssetAuthorization, TransitionViewingAppointment,
     VehicleListing, ViewingAppointment,
+};
+pub use platform::{
+    ProvisionRootDomain, ProvisionRootPlatform, ProvisionedDomain, ProvisionedRootPlatform,
+    ProvisionedTenant,
 };
 pub use subplatform::{SubplatformEmailConfig, UpsertSubplatformEmailConfig};
 pub use types::{

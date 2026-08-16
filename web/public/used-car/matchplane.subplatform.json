@@ -4,6 +4,7 @@
   "slug": "used-car",
   "displayName": "Matx Auto",
   "description": "二手车需求、车源与线下看车撮合 UI",
+  "pricing": { "mode": "fixed", "currency": "CNY", "currencyScale": 2, "label": "售价" },
   "rootApiVersion": "v1",
   "entry": "src/index.ts",
   "routes": ["/used-car"],

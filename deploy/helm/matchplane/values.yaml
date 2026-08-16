@@ -123,7 +123,8 @@ runtime:
   invoiceDataKeyVersion: 1
   paymentAdminTokenPath: /run/secrets/payment-admin.token
   gatewayAdminTokenPath: /run/secrets/gateway-admin.token
-  paymentCallbackOrigin: https://payments.example.com
+  # Required operator input; an empty value intentionally fails production config validation.
+  paymentCallbackOrigin: ''
 
 gateway:
   replicas: 2

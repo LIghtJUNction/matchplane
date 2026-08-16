@@ -230,11 +230,8 @@ export interface SubplatformEmailConfig {
   updated_at: string;
 }
 
-export interface ContactExchange {
-  phone?: string;
-  wechat?: string;
-  email?: string;
-}
+/** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
+export type ContactExchange = Record<string, string>;
 
 export interface OfflineDeal {
   offline_deal_id: string;
@@ -270,22 +267,78 @@ export interface ListingSubmission {
   updated_at: string;
 }
 
-/** Public, contact-free recommendation returned by the domain adapter. */
-export interface RecommendedBackendListing {
-  listing_id: string;
+/** Domain-neutral supply offer returned by the kernel for non-priced or custom verticals. */
+export interface MarketplaceOffer {
+  offer_id: string;
   tenant_id: string;
   domain_id: string;
-  asset_id: string;
+  supply_party_id: string;
+  asset_id?: string | null;
+  external_key: string;
   display_name: string;
   attributes: Record<string, unknown>;
-  asking_amount: string;
-  currency: string;
-  currency_scale: number;
+  terms: Record<string, unknown>;
+  status: "draft" | "active" | "reserved" | "sold" | "withdrawn" | "expired" | string;
+  published_at?: string | null;
+  expires_at?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceOfferCandidate extends MarketplaceOffer {
+  score: number;
+  reasons: string[];
+}
+
+export type MarketplaceOfferOutcome = MarketplaceOffer & { duplicate: boolean };
+
+export interface MarketplaceIntroduction {
+  introduction_id: string;
+  tenant_id: string;
+  intent_id: string;
+  offer_id: string;
+  demand_party_id: string;
+  supply_party_id: string;
+  score: number;
+  reasons: unknown;
+  status: string;
+  supply_contact_consent_at: string | null;
+  contact_released_at: string | null;
+  idempotency_key: string;
+  expires_at: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MarketplaceContactResponse {
+  counterpart: {
+    party_id: string;
+    display_name: string;
+    contact: ContactExchange;
+  };
+  introduction: MarketplaceIntroduction;
+}
+
+/** Public, contact-free recommendation returned by the domain adapter. */
+export interface RecommendedBackendListing {
+  listing_id?: string;
+  offer_id?: string;
+  tenant_id: string;
+  domain_id: string;
+  asset_id?: string | null;
+  display_name: string;
+  attributes: Record<string, unknown>;
+  terms?: Record<string, unknown>;
+  asking_amount?: string;
+  currency?: string;
+  currency_scale?: number;
   commission_bps?: number;
   commission_collection?: string;
   status?: string;
-  match_score: number;
-  match_reasons: string[];
+  match_score?: number;
+  match_reasons?: string[];
   [key: string]: unknown;
 }
 
@@ -296,8 +349,10 @@ export interface ContactResponse {
     contact: ContactExchange;
   };
   deal: OfflineDeal;
-  vehicle_settlement: string;
-  platform_commission_settlement: string;
+  settlement: {
+    mode: string;
+    platform_fee: string;
+  };
 }
 
 export interface PlatformRouteHop {
@@ -855,6 +910,202 @@ export function createBuyerRequest(input: {
   );
 }
 
+export function createMarketplaceIntent(input: {
+  session: PartySession;
+  domainId: string;
+  side: "demand" | "supply";
+  narrative: string;
+  attributes?: Record<string, unknown>;
+  terms?: Record<string, unknown>;
+  idempotencyKey: string;
+}): Promise<{ intent_id: string; [key: string]: unknown }> {
+  return request<{ intent_id: string; [key: string]: unknown }>(
+    "/v1/marketplace/intents",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        side: input.side,
+        narrative: input.narrative,
+        attributes: input.attributes ?? {},
+        terms: input.terms ?? {},
+        idempotency_key: input.idempotencyKey,
+      }),
+    },
+    input.session,
+  );
+}
+
+export function getMarketplaceOfferMatches(input: {
+  session: PartySession;
+  domainId: string;
+  intentId: string;
+  limit?: number;
+}): Promise<MarketplaceOfferCandidate[]> {
+  return request<{ candidates: MarketplaceOfferCandidate[] }>(
+    `/v1/marketplace/intents/${encodeURIComponent(input.intentId)}/matches`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        limit: input.limit ?? 20,
+      }),
+    },
+    input.session,
+  ).then((response) => response.candidates);
+}
+
+export function createMarketplaceIntroduction(input: {
+  session: PartySession;
+  domainId: string;
+  intentId: string;
+  offerId: string;
+  score: number;
+  reasons?: string[];
+  idempotencyKey: string;
+  expiresAt?: string;
+}): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(
+    "/v1/marketplace/introductions",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        intent_id: input.intentId,
+        offer_id: input.offerId,
+        participant_id: input.session.partyId,
+        score: input.score,
+        reasons: input.reasons ?? [],
+        idempotency_key: input.idempotencyKey,
+        expires_at: input.expiresAt ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    },
+    input.session,
+  );
+}
+
+export function getMarketplaceIntroductions(input: {
+  session: PartySession;
+  domainId?: string;
+}): Promise<MarketplaceIntroduction[]> {
+  const params = new URLSearchParams({
+    tenant_id: input.session.tenantId,
+    participant_id: input.session.partyId,
+  });
+  if (input.domainId) params.set("domain_id", input.domainId);
+  return request<{ introductions: MarketplaceIntroduction[] }>(
+    `/v1/marketplace/introductions?${params.toString()}`,
+    { cache: "no-store" },
+    input.session,
+  ).then((response) => response.introductions);
+}
+
+export function requestMarketplaceContact(input: {
+  session: PartySession;
+  domainId: string;
+  introductionId: string;
+}): Promise<MarketplaceIntroduction> {
+  return request<MarketplaceIntroduction>(
+    `/v1/marketplace/introductions/${encodeURIComponent(input.introductionId)}/contact/request`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+      }),
+    },
+    input.session,
+  );
+}
+
+export function consentMarketplaceContact(input: {
+  session: PartySession;
+  domainId: string;
+  introductionId: string;
+}): Promise<MarketplaceIntroduction> {
+  return request<MarketplaceIntroduction>(
+    `/v1/marketplace/introductions/${encodeURIComponent(input.introductionId)}/contact/consent`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+      }),
+    },
+    input.session,
+  );
+}
+
+export function retrieveMarketplaceContact(input: {
+  session: PartySession;
+  domainId?: string;
+  introductionId: string;
+}): Promise<MarketplaceContactResponse> {
+  const params = new URLSearchParams({
+    tenant_id: input.session.tenantId,
+    participant_id: input.session.partyId,
+  });
+  if (input.domainId) params.set("domain_id", input.domainId);
+  return request<MarketplaceContactResponse>(
+    `/v1/marketplace/introductions/${encodeURIComponent(input.introductionId)}/contact?${params.toString()}`,
+    { cache: "no-store" },
+    input.session,
+  );
+}
+
+export function createMarketplaceOffer(input: {
+  session: PartySession;
+  domainId: string;
+  externalKey: string;
+  displayName: string;
+  attributes: Record<string, unknown>;
+  terms?: Record<string, unknown>;
+}): Promise<MarketplaceOfferOutcome> {
+  return request<MarketplaceOfferOutcome>(
+    "/v1/marketplace/offers",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        supply_party_id: input.session.partyId,
+        external_key: input.externalKey,
+        display_name: input.displayName,
+        attributes: input.attributes,
+        terms: input.terms ?? {},
+      }),
+    },
+    input.session,
+  );
+}
+
+export function getMarketplaceOffers(input: {
+  session: PartySession;
+  domainId: string;
+  limit?: number;
+  offset?: number;
+}): Promise<MarketplaceOffer[]> {
+  const params = new URLSearchParams({
+    tenant_id: input.session.tenantId,
+    domain_id: input.domainId,
+    supply_party_id: input.session.partyId,
+    limit: String(input.limit ?? 50),
+    offset: String(input.offset ?? 0),
+  });
+  return request<MarketplaceOffer[]>(
+    `/v1/marketplace/offers?${params.toString()}`,
+    { cache: "no-store" },
+    input.session,
+  );
+}
+
 export function getBuyerRecommendations(input: {
   session: PartySession;
   domainId: string;
@@ -906,6 +1157,26 @@ export function submitSellerListing(input: {
         currency_scale: input.currencyScale,
       }),
     },
+    input.session,
+  );
+}
+
+export function getSellerListingSubmissions(input: {
+  session: PartySession;
+  domainId: string;
+  limit?: number;
+  offset?: number;
+}): Promise<ListingSubmission[]> {
+  const params = new URLSearchParams({
+    tenant_id: input.session.tenantId,
+    domain_id: input.domainId,
+    seller_party_id: input.session.partyId,
+    limit: String(input.limit ?? 50),
+    offset: String(input.offset ?? 0),
+  });
+  return request<ListingSubmission[]>(
+    `/v1/marketplace/listing-submissions?${params.toString()}`,
+    { cache: "no-store" },
     input.session,
   );
 }

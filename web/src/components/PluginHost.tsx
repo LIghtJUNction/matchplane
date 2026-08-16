@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ExternalLink, ShieldCheck } from "lucide-react";
 
-import { isLiveMarketplaceEnabled, submitSellerListing } from "../api";
+import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
-import type { SubplatformConfig } from "../subplatform";
+import { pricingFor, type SubplatformConfig } from "../subplatform";
 import type { WorkspaceRole } from "../types";
 
 interface PluginHostProps {
@@ -39,6 +39,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
         contextToken: contextTokenRef.current,
         currency: subplatform.currency,
         currencyScale: subplatform.currencyScale,
+        pricing: pricingFor(subplatform),
         assetSchema: subplatform.assetSchema,
         ui: subplatform.ui,
         capabilities: ["chat.open", "listing.select", "listing.submit", "navigation"],
@@ -151,8 +152,8 @@ async function submitPluginListing(
   try {
     if (input.role !== "seller") throw new Error("只有供给方可以提交资料");
     if (!isLiveMarketplaceEnabled()) throw new Error("插件供给提交需要连接真实平台 API");
-    if (!input.subplatform.tenantId || !input.subplatform.domainId || !input.subplatform.assetSchemaId || !input.subplatform.currency) {
-      throw new Error("当前子平台尚未发布完整的资料 schema 与结算配置");
+    if (!input.subplatform.tenantId || !input.subplatform.domainId) {
+      throw new Error("当前子平台尚未发布完整的身份配置");
     }
     if (!isRecord(message.payload)) throw new Error("插件供给资料格式无效");
     const supply = message.payload;
@@ -160,10 +161,14 @@ async function submitPluginListing(
     if (!isRecord(attributes)) throw new Error("供给 attributes 必须是 JSON 对象");
     const externalKey = boundedText(supply.externalKey, 256, "内部编号");
     const displayName = boundedText(supply.displayName, 500, "供给名称");
-    const askingAmount = boundedText(supply.askingAmount, 38, "报价");
-    const currency = boundedText(supply.currency, 3, "币种").toUpperCase();
-    if (!/^\d+$/.test(askingAmount)) throw new Error("报价必须是非负整数（最小货币单位）");
-    if (!/^[A-Z]{3}$/.test(currency)) throw new Error("币种必须是三位大写 ISO 4217 代码");
+    const pricing = pricingFor(input.subplatform);
+    const askingAmount = typeof supply.askingAmount === "string" ? supply.askingAmount.trim() : "";
+    const currency = typeof supply.currency === "string" ? supply.currency.trim().toUpperCase() : "";
+    if (pricing.mode === "fixed") {
+      if (!input.subplatform.assetSchemaId || !pricing.currency) throw new Error("当前子平台尚未发布完整的资料 schema 与结算配置");
+      if (!/^\d+$/.test(askingAmount)) throw new Error("报价必须是非负整数（最小货币单位）");
+      if (!/^[A-Z]{3}$/.test(currency)) throw new Error("币种必须是三位大写 ISO 4217 代码");
+    }
     if (JSON.stringify(attributes).length > 64_000) throw new Error("供给 attributes 不能超过 64KB");
 
     const session = await getMarketplaceSession({
@@ -180,17 +185,27 @@ async function submitPluginListing(
       throw new Error("Better Auth 会话尚未建立");
     }
 
-    await submitSellerListing({
-      session,
-      domainId: input.subplatform.domainId,
-      assetSchemaId: input.subplatform.assetSchemaId,
-      externalKey,
-      displayName,
-      attributes,
-      askingAmount,
-      currency,
-      currencyScale: input.subplatform.currencyScale ?? 0,
-    });
+    if (pricing.mode === "fixed") {
+      await submitSellerListing({
+        session,
+        domainId: input.subplatform.domainId,
+        assetSchemaId: input.subplatform.assetSchemaId as string,
+        externalKey,
+        displayName,
+        attributes,
+        askingAmount,
+        currency,
+        currencyScale: pricing.currencyScale ?? input.subplatform.currencyScale ?? 0,
+      });
+    } else {
+      await createMarketplaceOffer({
+        session,
+        domainId: input.subplatform.domainId,
+        externalKey,
+        displayName,
+        attributes,
+      });
+    }
     input.onNotice("供给已真实提交，等待子平台审核后进入 AI 撮合");
     respond(true);
   } catch (error) {
