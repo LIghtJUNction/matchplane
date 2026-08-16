@@ -2,6 +2,7 @@ export const MATCHPLANE_MCP_PROTOCOL = "2025-03-26" as const;
 export const MATCHPLANE_AGENT_PROTOCOL = "matchplane.agent/v1" as const;
 
 export type AgentRole = "buyer" | "seller";
+export type AgentSide = "demand" | "supply";
 export type AgentStage = "platform" | "merchant" | "inventory";
 
 export interface MatchPlaneAgentClientOptions {
@@ -17,6 +18,7 @@ export interface PartyCapability {
   domain_id: string;
   party_id: string;
   role: "buyer" | "seller" | "both";
+  side?: AgentSide;
   access_token: string;
   access_token_expires_at: string;
   platform_path: string;
@@ -147,10 +149,13 @@ export class MatchPlaneAgentClient {
     tenant_id: string;
     domain_id: string;
     platform_path: string;
-    role: AgentRole;
+    side?: AgentSide;
+    /** Deprecated compatibility alias; use side. */
+    role?: AgentRole;
     display_name?: string;
   }): Promise<PartyCapability> {
-    const result = await this.callTool("marketplace.agent.session", input);
+    const side = input.side ?? (input.role === "seller" ? "supply" : "demand");
+    const result = await this.callTool("marketplace.agent.session", { ...input, side });
     const capability = result as Partial<PartyCapability>;
     return {
       ...capability,

@@ -233,9 +233,10 @@ organization API key with the smallest required scopes:
 }
 ```
 
-The `agentRole` value is stored as API-key metadata and must be `buyer`, `seller`, or `both`. The
-Agent then calls `POST /api/marketplace/agent-session` (or the HTTP MCP tool
-`marketplace.agent.session`) with `tenantId`, `domainId`, `platformPath`, and its requested role.
+The `agentRole` value is stored as API-key metadata for compatibility and must be `buyer`, `seller`, or
+`both`. The Agent then calls `POST /api/marketplace/agent-session` (or the HTTP MCP tool
+`marketplace.agent.session`) with `tenantId`, `domainId`, `platformPath`, and its requested kernel
+`side` (`demand` or `supply`). `role` is accepted only as a deprecated adapter alias.
 The server verifies the Better Auth key, active recursive path, organization scope, domain, and
 role before deriving a stable machine principal and exchanging it through the internal gateway
 bridge. The response contains a short-lived (15-minute) party bearer plus

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { authDatabase } from "../../../../src/lib/auth";
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
 import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization, readActivePlatformScope } from "../../../../src/platform-mount";
-import { isAgentKeyRole, keyCanActAs, parseAgentSessionRequest, stableAgentPrincipalId } from "../../../../src/platform-agent-session";
+import { isAgentKeyRole, keyCanActAsSide, parseAgentSessionRequest, stableAgentPrincipalId } from "../../../../src/platform-agent-session";
 import { verifyPlatformApiKey } from "../../../../src/lib/platform-api-key";
 
 export const runtime = "nodejs";
@@ -32,8 +32,8 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = parseAgentSessionRequest(await parseJson(request));
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const input = parsed.value;
-  if (!keyCanActAs(configuredRole, input.role)) {
-    return NextResponse.json({ error: "API Key 的 agentRole 不允许当前 buyer/seller 身份" }, { status: 403 });
+  if (!keyCanActAsSide(configuredRole, input.side)) {
+    return NextResponse.json({ error: "API Key 的 agentRole 不允许当前 marketplace side" }, { status: 403 });
   }
   if (!(await isMountedPlatformPath(input.platformPath))) {
     return NextResponse.json({ error: "平台路径尚未激活" }, { status: 404 });
@@ -74,6 +74,7 @@ export async function POST(request: Request): Promise<Response> {
           external_key: `better-auth-api-key:${apiKey.id}:${input.tenantId}:${input.platformPath}`,
           display_name: input.displayName,
           role: input.role,
+          marketplace_sides: [input.side],
           // Machine Agents do not receive a contact value from the exchange. Contact release
           // remains a separate, human-consented flow and is never inferred from API-key access.
           contact: {},
@@ -134,6 +135,7 @@ export async function POST(request: Request): Promise<Response> {
       tenant_id: body.tenant_id,
       party_id: body.party_id,
       role: body.role,
+      side: input.side,
       access_token: body.access_token,
       access_token_expires_at: body.access_token_expires_at,
       platform_path: input.platformPath,

@@ -16,6 +16,8 @@ pub struct InvoiceRecord {
     pub tenant_id: TenantId,
     pub payment_id: Option<PaymentId>,
     pub offline_deal_id: Option<OfflineDealId>,
+    pub source_type: Option<String>,
+    pub source_ref: Option<String>,
     pub correction_of_invoice_id: Option<InvoiceId>,
     pub kind: String,
     pub amount: String,
@@ -51,6 +53,8 @@ pub struct NewInvoice {
     pub tenant_id: TenantId,
     pub payment_id: Option<PaymentId>,
     pub offline_deal_id: Option<OfflineDealId>,
+    pub source_type: Option<String>,
+    pub source_ref: Option<String>,
     pub kind: InvoiceKind,
     pub idempotency_key: String,
     pub request_hash: Vec<u8>,
@@ -200,15 +204,17 @@ impl InvoiceStore {
         }
         sqlx::query(
             "INSERT INTO invoice_requests \
-             (id, tenant_id, payment_id, offline_deal_id, kind, idempotency_key, request_hash, \
+             (id, tenant_id, payment_id, offline_deal_id, source_type, source_ref, kind, idempotency_key, request_hash, \
               amount, currency, currency_scale, description, billing_details_ciphertext, billing_details_nonce, \
               encryption_key_version, provider_key, provider_mode, provider_credential_digest, requested_by) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)",
         )
         .bind(command.invoice_id.into_uuid())
         .bind(command.tenant_id.into_uuid())
         .bind(command.payment_id.map(PaymentId::into_uuid))
         .bind(command.offline_deal_id.map(OfflineDealId::into_uuid))
+        .bind(&command.source_type)
+        .bind(&command.source_ref)
         .bind(invoice_kind_text(command.kind))
         .bind(&command.idempotency_key)
         .bind(&command.request_hash)
@@ -679,7 +685,7 @@ impl InvoiceStore {
     }
 }
 
-const INVOICE_SELECT: &str = "SELECT id, tenant_id, payment_id, offline_deal_id, correction_of_invoice_id, kind, amount::text AS amount, currency, \
+const INVOICE_SELECT: &str = "SELECT id, tenant_id, payment_id, offline_deal_id, source_type, source_ref, correction_of_invoice_id, kind, amount::text AS amount, currency, \
             currency_scale, description, billing_details_ciphertext, billing_details_nonce, encryption_key_version, \
             status, provider_key, provider_mode, provider_reference, invoice_number, failure_reason, \
             requested_by, reviewed_by, version, requested_at, issued_at, updated_at \
@@ -713,6 +719,8 @@ fn invoice_from_row(row: &sqlx::postgres::PgRow) -> Result<InvoiceRecord, StoreE
         offline_deal_id: row
             .try_get::<Option<Uuid>, _>("offline_deal_id")?
             .map(OfflineDealId::from_uuid),
+        source_type: row.try_get("source_type")?,
+        source_ref: row.try_get("source_ref")?,
         correction_of_invoice_id: row
             .try_get::<Option<Uuid>, _>("correction_of_invoice_id")?
             .map(InvoiceId::from_uuid),
@@ -746,7 +754,7 @@ async fn validate_invoice_source(
     match (command.payment_id, command.offline_deal_id, command.kind) {
         (Some(payment_id), _, kind) => {
             let row = sqlx::query(
-                "SELECT status, purpose, offline_deal_id, captured_amount::text AS captured_amount, \
+                "SELECT status, purpose, offline_deal_id, source_type, source_ref, captured_amount::text AS captured_amount, \
                         refunded_amount::text AS refunded_amount, commission_amount::text AS commission_amount, \
                         commission_refunded_amount::text AS commission_refunded_amount, currency, currency_scale \
                  FROM payment_intents WHERE tenant_id = $1 AND id = $2 FOR SHARE",
@@ -764,6 +772,15 @@ async fn validate_invoice_source(
                     "invoice source deal must match the payment's offline deal".to_owned(),
                 ));
             }
+            if command.source_type.as_deref()
+                != row.try_get::<Option<String>, _>("source_type")?.as_deref()
+                || command.source_ref.as_deref()
+                    != row.try_get::<Option<String>, _>("source_ref")?.as_deref()
+            {
+                return Err(StoreError::Invalid(
+                    "invoice source reference must match the payment source".to_owned(),
+                ));
+            }
             let status: String = row.try_get("status")?;
             if status != "captured" {
                 return Err(StoreError::Conflict(
@@ -777,7 +794,7 @@ async fn validate_invoice_source(
             let commission_refunded =
                 exact(&row.try_get::<String, _>("commission_refunded_amount")?)?;
             let expected = match kind {
-                InvoiceKind::Sale => captured.checked_sub(refunded),
+                InvoiceKind::Sale | InvoiceKind::Service => captured.checked_sub(refunded),
                 InvoiceKind::PlatformCommission if purpose == "platform_commission" => {
                     captured.checked_sub(refunded)
                 }
@@ -892,6 +909,7 @@ async fn serializable(transaction: &mut Transaction<'_, Postgres>) -> Result<(),
 const fn invoice_kind_text(kind: InvoiceKind) -> &'static str {
     match kind {
         InvoiceKind::Sale => "sale",
+        InvoiceKind::Service => "service",
         InvoiceKind::PlatformCommission => "platform_commission",
     }
 }
@@ -905,6 +923,7 @@ fn exact(value: &str) -> Result<i128, StoreError> {
 pub fn invoice_kind(value: &str) -> Result<InvoiceKind, PaymentError> {
     match value {
         "sale" | "vehicle_sale" => Ok(InvoiceKind::Sale),
+        "service" => Ok(InvoiceKind::Service),
         "platform_commission" => Ok(InvoiceKind::PlatformCommission),
         _ => Err(PaymentError::Invalid(format!(
             "unknown invoice kind {value}"

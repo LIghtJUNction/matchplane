@@ -37,6 +37,8 @@ pub struct AuthorizeRequest {
     payment_id: Option<String>,
     tenant_id: String,
     offline_deal_id: Option<String>,
+    source_type: Option<String>,
+    source_ref: Option<String>,
     payer_party_id: Option<String>,
     merchant_order_id: String,
     idempotency_key: String,
@@ -82,6 +84,8 @@ pub struct CreateInvoiceRequest {
     tenant_id: String,
     payment_id: Option<String>,
     offline_deal_id: Option<String>,
+    source_type: Option<String>,
+    source_ref: Option<String>,
     kind: InvoiceKind,
     idempotency_key: String,
     amount: Money,
@@ -273,6 +277,10 @@ pub async fn authorize(
         .unwrap_or_else(PaymentId::new);
     let tenant_id = parse_id(&request.tenant_id)?;
     let offline_deal_id = parse_optional_id(request.offline_deal_id.as_deref())?;
+    validate_source_reference(
+        request.source_type.as_deref(),
+        request.source_ref.as_deref(),
+    )?;
     let payer_party_id =
         parse_optional_id::<MarketplacePartyId>(request.payer_party_id.as_deref())?;
     if let Some(payer_party_id) = payer_party_id {
@@ -298,6 +306,8 @@ pub async fn authorize(
             payment_id,
             tenant_id,
             offline_deal_id,
+            source_type: request.source_type.clone(),
+            source_ref: request.source_ref.clone(),
             payer_party_id,
             merchant_order_id: request.merchant_order_id.clone(),
             idempotency_key: request.idempotency_key.clone(),
@@ -728,6 +738,10 @@ pub async fn create_invoice(
     let tenant_id = parse_id(&request.tenant_id)?;
     let payment_id = parse_optional_id::<PaymentId>(request.payment_id.as_deref())?;
     let offline_deal_id = parse_optional_id::<OfflineDealId>(request.offline_deal_id.as_deref())?;
+    validate_source_reference(
+        request.source_type.as_deref(),
+        request.source_ref.as_deref(),
+    )?;
     let amount = validated_amount(&request.amount)?;
     let billing = serde_json::to_vec(&request.billing_details)
         .map_err(|_| ApiError::bad_request("billing details could not be encoded"))?;
@@ -745,6 +759,8 @@ pub async fn create_invoice(
             tenant_id,
             payment_id,
             offline_deal_id,
+            source_type: request.source_type,
+            source_ref: request.source_ref,
             kind: request.kind,
             idempotency_key: request.idempotency_key,
             request_hash,
@@ -1354,6 +1370,32 @@ fn validate_payment_request(
         | ("offline_direct", "platform_commission", true, true) => Ok(()),
         _ => Err(ApiError::bad_request(
             "offline_direct accepts only a platform_commission payment linked to both offline_deal_id and payer_party_id",
+        )),
+    }
+}
+
+fn validate_source_reference(
+    source_type: Option<&str>,
+    source_ref: Option<&str>,
+) -> Result<(), ApiError> {
+    match (source_type, source_ref) {
+        (None, None) => Ok(()),
+        (Some(kind), Some(reference))
+            if kind.len() <= 64
+                && !kind.is_empty()
+                && kind.bytes().enumerate().all(|(index, byte)| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'_' | b'.' | b':' | b'-')
+                        || (index == 0 && byte.is_ascii_lowercase())
+                })
+                && !reference.trim().is_empty()
+                && reference.len() <= 256 =>
+        {
+            Ok(())
+        }
+        _ => Err(ApiError::bad_request(
+            "source_type and source_ref must be supplied together with bounded values",
         )),
     }
 }

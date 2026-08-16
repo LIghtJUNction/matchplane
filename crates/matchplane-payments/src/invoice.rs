@@ -38,7 +38,7 @@ pub struct IssueInvoice {
     pub invoice_id: InvoiceId,
     /// Tenant boundary.
     pub tenant_id: TenantId,
-    /// Vehicle sale or platform commission.
+    /// Domain sale/service or platform commission.
     pub kind: InvoiceKind,
     /// Exact invoice total.
     pub amount: Money,

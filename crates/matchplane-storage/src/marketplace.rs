@@ -43,6 +43,8 @@ pub struct CreateMarketplaceParty {
     pub display_name: String,
     /// `buyer`, `seller`, or `both`.
     pub role: String,
+    /// Domain-neutral kernel capabilities. Legacy role labels are only an adapter projection.
+    pub marketplace_sides: Vec<String>,
     /// SHA-256 hash of the high-entropy capability token returned at registration.
     pub access_token_hash: Vec<u8>,
     /// Hard expiry for the capability token.
@@ -70,6 +72,8 @@ pub struct EnsureMarketplaceParty {
     pub display_name: String,
     /// `buyer`, `seller`, or `both`.
     pub role: String,
+    /// Domain-neutral kernel capabilities. Legacy role labels are only an adapter projection.
+    pub marketplace_sides: Vec<String>,
     /// SHA-256 hash of the newly issued capability token.
     pub access_token_hash: Vec<u8>,
     /// Hard expiry for the newly issued capability token.
@@ -91,6 +95,8 @@ pub struct MarketplaceParty {
     pub display_name: String,
     /// Marketplace role.
     pub role: String,
+    /// Domain-neutral kernel capabilities used by generic routes.
+    pub marketplace_sides: Vec<String>,
     /// Durable account state.
     pub status: String,
     /// Optimistic version.
@@ -113,6 +119,8 @@ pub struct AuthenticatedParty {
     pub platform_path: String,
     /// Marketplace role.
     pub role: String,
+    /// Domain-neutral kernel capabilities used by generic routes.
+    pub marketplace_sides: Vec<String>,
 }
 
 /// Command to publish a seller-owned vehicle.
@@ -790,6 +798,7 @@ impl PgStore {
         command: &CreateMarketplaceParty,
     ) -> Result<MarketplaceParty, StorageError> {
         validate_role(&command.role)?;
+        validate_marketplace_sides(&command.marketplace_sides)?;
         if command.access_token_hash.len() != 32
             || command.contact.nonce.len() != 12
             || command.contact.key_version <= 0
@@ -802,10 +811,10 @@ impl PgStore {
         validate_platform_scope(command.scope_domain_id, &command.platform_path)?;
         let row = sqlx::query(
             "INSERT INTO marketplace_parties \
-             (id, tenant_id, scope_domain_id, platform_path, external_key, display_name, role, access_token_hash, \
+             (id, tenant_id, scope_domain_id, platform_path, external_key, display_name, role, marketplace_sides, access_token_hash, \
               access_token_expires_at, contact_ciphertext, contact_nonce, contact_key_version) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
-             RETURNING id, tenant_id, external_key, display_name, role, status, version, created_at",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
+             RETURNING id, tenant_id, external_key, display_name, role, marketplace_sides, status, version, created_at",
         )
         .bind(command.party_id.into_uuid())
         .bind(command.tenant_id.into_uuid())
@@ -814,6 +823,7 @@ impl PgStore {
         .bind(&command.external_key)
         .bind(&command.display_name)
         .bind(&command.role)
+        .bind(&command.marketplace_sides)
         .bind(&command.access_token_hash)
         .bind(command.access_token_expires_at)
         .bind(&command.contact.ciphertext)
@@ -833,6 +843,7 @@ impl PgStore {
         command: &EnsureMarketplaceParty,
     ) -> Result<MarketplaceParty, StorageError> {
         validate_role(&command.role)?;
+        validate_marketplace_sides(&command.marketplace_sides)?;
         if command.auth_user_id.is_nil()
             || command.access_token_hash.len() != 32
             || command.contact.nonce.len() != 12
@@ -857,9 +868,9 @@ impl PgStore {
         let party_id = existing.unwrap_or_else(|| command.party_id.into_uuid());
         let row = sqlx::query(
             "INSERT INTO marketplace_parties \
-             (id, tenant_id, scope_domain_id, platform_path, external_key, display_name, role, access_token_hash, \
+             (id, tenant_id, scope_domain_id, platform_path, external_key, display_name, role, marketplace_sides, access_token_hash, \
               access_token_expires_at, contact_ciphertext, contact_nonce, contact_key_version) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
              ON CONFLICT (tenant_id, id) DO UPDATE SET \
                scope_domain_id = EXCLUDED.scope_domain_id, platform_path = EXCLUDED.platform_path, \
                external_key = EXCLUDED.external_key, display_name = EXCLUDED.display_name, \
@@ -867,11 +878,15 @@ impl PgStore {
                    WHEN marketplace_parties.role = 'both' OR EXCLUDED.role = 'both' THEN 'both' \
                    WHEN marketplace_parties.role = EXCLUDED.role THEN EXCLUDED.role \
                    ELSE 'both' \
-               END, access_token_hash = EXCLUDED.access_token_hash, \
+               END, marketplace_sides = (\
+                   SELECT ARRAY(SELECT DISTINCT side FROM unnest(\
+                       marketplace_parties.marketplace_sides || EXCLUDED.marketplace_sides\
+                   ) AS side ORDER BY side)\
+               ), access_token_hash = EXCLUDED.access_token_hash, \
                access_token_expires_at = EXCLUDED.access_token_expires_at, \
                contact_ciphertext = EXCLUDED.contact_ciphertext, contact_nonce = EXCLUDED.contact_nonce, \
                contact_key_version = EXCLUDED.contact_key_version, version = marketplace_parties.version + 1 \
-             RETURNING id, tenant_id, external_key, display_name, role, status, version, created_at",
+             RETURNING id, tenant_id, external_key, display_name, role, marketplace_sides, status, version, created_at",
         )
         .bind(party_id)
         .bind(command.tenant_id.into_uuid())
@@ -880,6 +895,7 @@ impl PgStore {
         .bind(&command.external_key)
         .bind(&command.display_name)
         .bind(&command.role)
+        .bind(&command.marketplace_sides)
         .bind(&command.access_token_hash)
         .bind(command.access_token_expires_at)
         .bind(&command.contact.ciphertext)
@@ -1007,7 +1023,7 @@ impl PgStore {
             ));
         }
         let row = sqlx::query(
-            "SELECT p.id, p.tenant_id, p.scope_domain_id, p.platform_path, p.role \
+            "SELECT p.id, p.tenant_id, p.scope_domain_id, p.platform_path, p.role, p.marketplace_sides \
                FROM marketplace_parties p \
               WHERE p.tenant_id = $1 AND p.id = $2 AND p.access_token_hash = $3 \
                 AND p.scope_domain_id IS NOT DISTINCT FROM $4::uuid \
@@ -1076,6 +1092,7 @@ impl PgStore {
                 .map(DomainId::from_uuid),
             platform_path: row.try_get("platform_path")?,
             role: row.try_get("role")?,
+            marketplace_sides: row.try_get("marketplace_sides")?,
         })
     }
 
@@ -3068,6 +3085,7 @@ fn party_from_row(row: &sqlx::postgres::PgRow) -> Result<MarketplaceParty, Stora
         external_key: row.try_get("external_key")?,
         display_name: row.try_get("display_name")?,
         role: row.try_get("role")?,
+        marketplace_sides: row.try_get("marketplace_sides")?,
         status: row.try_get("status")?,
         version: row.try_get("version")?,
         created_at: row.try_get("created_at")?,
@@ -3409,6 +3427,23 @@ fn validate_role(role: &str) -> Result<(), StorageError> {
             "role must be buyer, seller, or both".to_owned(),
         ))
     }
+}
+
+fn validate_marketplace_sides(sides: &[String]) -> Result<(), StorageError> {
+    if sides.is_empty()
+        || sides.len() > 2
+        || sides
+            .iter()
+            .any(|side| !matches!(side.as_str(), "demand" | "supply"))
+        || sides
+            .iter()
+            .any(|side| sides.iter().filter(|candidate| *candidate == side).count() > 1)
+    {
+        return Err(StorageError::InvalidData(
+            "marketplace_sides must contain one or both unique kernel sides".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_platform_scope(

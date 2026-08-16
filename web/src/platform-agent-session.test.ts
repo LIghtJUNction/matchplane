@@ -19,7 +19,17 @@ describe("external Agent marketplace capability exchange", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.role).toBe("buyer");
+      expect(result.value.side).toBe("demand");
       expect(result.value.displayName).toBe("MatchPlane external Agent");
+    }
+  });
+
+  it("accepts the domain-neutral side without requiring a vertical role label", () => {
+    const result = parseAgentSessionRequest({ ...valid, role: undefined, side: "supply" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.side).toBe("supply");
+      expect(result.value.role).toBe("seller");
     }
   });
 

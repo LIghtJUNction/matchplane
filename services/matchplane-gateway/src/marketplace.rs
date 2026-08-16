@@ -42,6 +42,9 @@ pub(super) struct CreatePartyRequest {
     external_key: String,
     display_name: String,
     role: String,
+    /// Generic kernel capabilities. Omitted only for legacy callers; then derived from `role`.
+    #[serde(default)]
+    marketplace_sides: Option<Vec<String>>,
     contact: Value,
 }
 
@@ -55,6 +58,9 @@ pub(super) struct EnsurePartySessionRequest {
     external_key: String,
     display_name: String,
     role: String,
+    /// Generic kernel capabilities. Omitted only for legacy callers; then derived from `role`.
+    #[serde(default)]
+    marketplace_sides: Option<Vec<String>>,
     contact: Value,
 }
 
@@ -322,6 +328,7 @@ pub(super) async fn create_party(
             "role must be buyer, seller, or both".to_owned(),
         ));
     }
+    let marketplace_sides = resolve_marketplace_sides(&request.role, request.marketplace_sides)?;
     let contact = normalize_contact(&request.contact)?;
     let contact_bytes = serde_json::to_vec(&contact)
         .map_err(|error| ApiError::bad_request(format!("contact is invalid: {error}")))?;
@@ -392,6 +399,7 @@ pub(super) async fn create_party(
             external_key: request.external_key,
             display_name: request.display_name,
             role: request.role,
+            marketplace_sides,
             access_token_hash,
             access_token_expires_at,
             contact: EncryptedContact {
@@ -428,6 +436,7 @@ pub(super) async fn ensure_party_session(
             "role must be buyer, seller, or both".to_owned(),
         ));
     }
+    let marketplace_sides = resolve_marketplace_sides(&request.role, request.marketplace_sides)?;
     let tenant_id = parse_id(&request.tenant_id)?;
     let platform_path = normalize_platform_path(request.platform_path.as_deref().unwrap_or("/"))?;
     let scope_domain_id = request
@@ -470,6 +479,7 @@ pub(super) async fn ensure_party_session(
             external_key: request.external_key,
             display_name: request.display_name,
             role: request.role,
+            marketplace_sides,
             access_token_hash: Sha256::digest(access_token.as_bytes()).to_vec(),
             access_token_expires_at,
             contact: EncryptedContact {
@@ -1408,11 +1418,11 @@ pub(super) fn require_marketplace_side(
     party: &AuthenticatedParty,
     side: &str,
 ) -> Result<(), ApiError> {
-    let allowed = match side {
-        "demand" => party.role == "buyer" || party.role == "both",
-        "supply" => party.role == "seller" || party.role == "both",
-        _ => false,
-    };
+    let allowed = matches!(side, "demand" | "supply")
+        && party
+            .marketplace_sides
+            .iter()
+            .any(|capability| capability == side);
     if allowed {
         Ok(())
     } else {
@@ -1424,6 +1434,31 @@ pub(super) fn require_marketplace_side(
 
 fn default_promotion_policy() -> String {
     "seller_promotion".to_owned()
+}
+
+fn resolve_marketplace_sides(
+    role: &str,
+    requested: Option<Vec<String>>,
+) -> Result<Vec<String>, ApiError> {
+    let sides = requested.unwrap_or_else(|| match role {
+        "buyer" => vec!["demand".to_owned()],
+        "seller" => vec!["supply".to_owned()],
+        _ => vec!["demand".to_owned(), "supply".to_owned()],
+    });
+    if sides.is_empty()
+        || sides.len() > 2
+        || sides
+            .iter()
+            .any(|side| !matches!(side.as_str(), "demand" | "supply"))
+        || sides
+            .iter()
+            .any(|side| sides.iter().filter(|candidate| *candidate == side).count() > 1)
+    {
+        return Err(ApiError::bad_request(
+            "marketplace_sides must contain one or both unique kernel sides".to_owned(),
+        ));
+    }
+    Ok(sides)
 }
 
 pub(super) fn contact_aad(tenant_id: TenantId, party_id: MarketplacePartyId) -> Vec<u8> {

@@ -86,7 +86,7 @@
   },
   "invariants": [
     "Every write is tenant-scoped and domain-scoped; the short-lived marketplace party capability is exchanged for one exact mounted platform path before the request is sent.",
-    "Demand and supply labels are kernel sides; buyer/seller terminology remains a vertical adapter concern.",
+    "Demand and supply capabilities are kernel sides; buyer/seller terminology remains a vertical adapter concern.",
     "Caller IDs and idempotency keys are replay-safe; a changed payload returns a conflict.",
     "Agent scores and reasons are advisory and cannot grant contact, payment, or transaction authority.",
     "A vertical may implement retrieval with its own MCP/Skill and any vector database, or use the deterministic fallback."

@@ -40,6 +40,8 @@ pub struct PaymentRecord {
     pub tenant_id: TenantId,
     pub gateway_id: PaymentGatewayId,
     pub offline_deal_id: Option<OfflineDealId>,
+    pub source_type: Option<String>,
+    pub source_ref: Option<String>,
     pub payer_party_id: Option<MarketplacePartyId>,
     pub merchant_order_id: String,
     pub transaction_channel: String,
@@ -90,6 +92,8 @@ pub struct NewPayment {
     pub payment_id: PaymentId,
     pub tenant_id: TenantId,
     pub offline_deal_id: Option<OfflineDealId>,
+    pub source_type: Option<String>,
+    pub source_ref: Option<String>,
     pub payer_party_id: Option<MarketplacePartyId>,
     pub merchant_order_id: String,
     pub idempotency_key: String,
@@ -318,17 +322,19 @@ impl PaymentStore {
 
         sqlx::query(
             "INSERT INTO payment_intents \
-             (id, tenant_id, gateway_id, offline_deal_id, payer_party_id, merchant_order_id, idempotency_key, \
+             (id, tenant_id, gateway_id, offline_deal_id, source_type, source_ref, payer_party_id, merchant_order_id, idempotency_key, \
              request_hash, transaction_channel, purpose, gateway_kind, gateway_mode, \
              gateway_config_version, gateway_credential_secret_ref, gateway_credential_digest, payment_method, amount, \
              commission_amount, currency, currency_scale, status) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, \
-                     $14, $15, $16, $17::numeric, $18::numeric, $19, $20, 'requested')",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
+                     $17, $18, $19::numeric, $20::numeric, $21, $22, 'requested')",
         )
         .bind(command.payment_id.into_uuid())
         .bind(command.tenant_id.into_uuid())
         .bind(gateway.gateway_id.into_uuid())
         .bind(command.offline_deal_id.map(OfflineDealId::into_uuid))
+        .bind(&command.source_type)
+        .bind(&command.source_ref)
         .bind(command.payer_party_id.map(MarketplacePartyId::into_uuid))
         .bind(&command.merchant_order_id)
         .bind(&command.idempotency_key)
@@ -637,7 +643,7 @@ impl PaymentStore {
         )
         .await?;
         let row = sqlx::query(
-            "SELECT id, tenant_id, gateway_id, offline_deal_id, payer_party_id, merchant_order_id, \
+            "SELECT id, tenant_id, gateway_id, offline_deal_id, source_type, source_ref, payer_party_id, merchant_order_id, \
                     transaction_channel, purpose, gateway_kind, gateway_mode, payment_method, \
                     amount::text AS amount, captured_amount::text AS captured_amount, \
                     refunded_amount::text AS refunded_amount, commission_amount::text AS commission_amount, \
@@ -1450,7 +1456,7 @@ impl PaymentStore {
             .execute(&mut *transaction)
             .await?;
             let invoices = sqlx::query(
-                "SELECT id, tenant_id, offline_deal_id, kind, currency, currency_scale, \
+                "SELECT id, tenant_id, offline_deal_id, source_type, source_ref, kind, currency, currency_scale, \
                         billing_details_ciphertext, billing_details_nonce, encryption_key_version, \
                         provider_key, provider_mode, provider_credential_digest, invoice_number \
                  FROM invoice_requests WHERE payment_id = $1 AND status = 'issued' \
@@ -1461,11 +1467,12 @@ impl PaymentStore {
             .await?;
             for invoice in invoices {
                 let kind: String = invoice.try_get("kind")?;
-                let correction_amount = if matches!(kind.as_str(), "sale" | "vehicle_sale") {
-                    refund.amount.clone()
-                } else {
-                    refund.commission_reversal_amount.clone()
-                };
+                let correction_amount =
+                    if matches!(kind.as_str(), "sale" | "vehicle_sale" | "service") {
+                        refund.amount.clone()
+                    } else {
+                        refund.commission_reversal_amount.clone()
+                    };
                 if exact(&correction_amount)? == 0 {
                     continue;
                 }
@@ -1476,17 +1483,19 @@ impl PaymentStore {
                 let invoice_number: Option<String> = invoice.try_get("invoice_number")?;
                 sqlx::query(
                     "INSERT INTO invoice_requests \
-                     (id, tenant_id, payment_id, offline_deal_id, correction_of_invoice_id, kind, \
+                     (id, tenant_id, payment_id, offline_deal_id, source_type, source_ref, correction_of_invoice_id, kind, \
                       idempotency_key, request_hash, amount, currency, currency_scale, description, \
                       billing_details_ciphertext, billing_details_nonce, encryption_key_version, \
                       status, provider_key, provider_mode, provider_credential_digest, requested_by) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11, $12, \
-                             $13, $14, $15, 'red_letter_pending', $16, $17, $18, 'system:refund')",
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::numeric, $12, \
+                             $13, $14, $15, $16, $17, 'red_letter_pending', $18, $19, $20, 'system:refund')",
                 )
                 .bind(correction_id)
                 .bind(invoice.try_get::<Uuid, _>("tenant_id")?)
                 .bind(refund.payment_id.into_uuid())
                 .bind(invoice.try_get::<Option<Uuid>, _>("offline_deal_id")?)
+                .bind(invoice.try_get::<Option<String>, _>("source_type")?)
+                .bind(invoice.try_get::<Option<String>, _>("source_ref")?)
                 .bind(original_id)
                 .bind(&kind)
                 .bind(&idempotency_key)
@@ -1565,7 +1574,7 @@ impl PaymentStore {
     }
 }
 
-const PAYMENT_SELECT: &str = "SELECT id, tenant_id, gateway_id, offline_deal_id, payer_party_id, merchant_order_id, transaction_channel, \
+const PAYMENT_SELECT: &str = "SELECT id, tenant_id, gateway_id, offline_deal_id, source_type, source_ref, payer_party_id, merchant_order_id, transaction_channel, \
             purpose, gateway_kind, gateway_mode, payment_method, amount::text AS amount, \
             captured_amount::text AS captured_amount, refunded_amount::text AS refunded_amount, \
             commission_amount::text AS commission_amount, \
@@ -1623,6 +1632,8 @@ fn payment_from_row(row: &sqlx::postgres::PgRow) -> Result<PaymentRecord, StoreE
         offline_deal_id: row
             .try_get::<Option<Uuid>, _>("offline_deal_id")?
             .map(OfflineDealId::from_uuid),
+        source_type: row.try_get("source_type")?,
+        source_ref: row.try_get("source_ref")?,
         payer_party_id: row
             .try_get::<Option<Uuid>, _>("payer_party_id")?
             .map(MarketplacePartyId::from_uuid),

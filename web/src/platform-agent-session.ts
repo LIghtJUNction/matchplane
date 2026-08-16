@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 export const AGENT_PARTY_ROLES = ["buyer", "seller"] as const;
 export type AgentPartyRole = (typeof AGENT_PARTY_ROLES)[number];
 export type AgentKeyRole = AgentPartyRole | "both";
+export const AGENT_PARTY_SIDES = ["demand", "supply"] as const;
+export type AgentPartySide = (typeof AGENT_PARTY_SIDES)[number];
 
 /**
  * Validate the small request accepted by the machine-agent capability exchange.
@@ -13,22 +15,32 @@ export interface AgentSessionRequest {
   tenantId?: string;
   domainId?: string;
   platformPath?: string;
+  side?: AgentPartySide;
+  /** Legacy alias. New integrations should send `side`. */
   role?: AgentPartyRole;
   displayName?: string;
 }
 
 export function parseAgentSessionRequest(value: unknown):
-  | { ok: true; value: Required<Pick<AgentSessionRequest, "tenantId" | "domainId" | "platformPath" | "role">> & { displayName: string } }
+  | { ok: true; value: Required<Pick<AgentSessionRequest, "tenantId" | "domainId" | "platformPath" | "role" | "side">> & { displayName: string } }
   | { ok: false; error: string } {
   if (!isRecord(value)) return { ok: false, error: "agent session must be a JSON object" };
-  const unknownKey = Object.keys(value).find((key) => !["tenantId", "domainId", "platformPath", "role", "displayName"].includes(key));
+  const unknownKey = Object.keys(value).find((key) => !["tenantId", "domainId", "platformPath", "side", "role", "displayName"].includes(key));
   if (unknownKey) return { ok: false, error: `agent session contains an unsupported field: ${unknownKey}` };
   if (!isUuid(value.tenantId)) return { ok: false, error: "tenantId must be a UUID" };
   if (!isUuid(value.domainId)) return { ok: false, error: "domainId must be a UUID" };
   if (!isPlatformPath(value.platformPath) || value.platformPath === "/") {
     return { ok: false, error: "platformPath must be an active child path" };
   }
-  if (!isAgentPartyRole(value.role)) return { ok: false, error: "role must be buyer or seller" };
+  const side = isAgentPartySide(value.side)
+    ? value.side
+    : isAgentPartyRole(value.role)
+      ? (value.role === "buyer" ? "demand" : "supply")
+      : null;
+  if (!side) return { ok: false, error: "side must be demand or supply" };
+  const role = isAgentPartyRole(value.role)
+    ? value.role
+    : side === "demand" ? "buyer" : "seller";
   const displayName = typeof value.displayName === "string" && value.displayName.trim()
     ? value.displayName.trim()
     : "MatchPlane external Agent";
@@ -41,7 +53,8 @@ export function parseAgentSessionRequest(value: unknown):
       tenantId: value.tenantId,
       domainId: value.domainId,
       platformPath: value.platformPath,
-      role: value.role,
+      side,
+      role,
       displayName,
     },
   };
@@ -51,12 +64,20 @@ export function isAgentPartyRole(value: unknown): value is AgentPartyRole {
   return value === "buyer" || value === "seller";
 }
 
+export function isAgentPartySide(value: unknown): value is AgentPartySide {
+  return value === "demand" || value === "supply";
+}
+
 export function isAgentKeyRole(value: unknown): value is AgentKeyRole {
   return isAgentPartyRole(value) || value === "both";
 }
 
 export function keyCanActAs(role: AgentKeyRole, requested: AgentPartyRole): boolean {
   return role === "both" || role === requested;
+}
+
+export function keyCanActAsSide(role: AgentKeyRole, requested: AgentPartySide): boolean {
+  return keyCanActAs(role, requested === "demand" ? "buyer" : "seller");
 }
 
 /** Derive a stable UUID for a machine principal without exposing the API-key id to the gateway. */

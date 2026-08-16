@@ -18,6 +18,11 @@ not depend on a later off-platform transaction. An optional `preauthorized` tran
 the matched seller to authorize the disclosed fee before contact; `postpaid` permits contact first
 but still requires captured fee before MatchPlane marks a transaction completed.
 
+Payment and invoice requests may carry `source_type` plus `source_ref` (for example a subplatform's
+`order`, `booking`, or `service` reference). The root payment service treats that pair as opaque,
+tenant-scoped data and never assumes a vehicle or order schema. Historical `offline_deal_id` and
+`vehicle_*` values remain readable only as an explicit compatibility adapter.
+
 Seller promotion campaigns are created with `POST /v1/marketplace/promotions`. They target a
 vertical-owned key (the vehicle adapter uses `vehicle_listing`) and choose `fixed`, `cpm`, `cpc`,
 or `cpl` pricing. Recommendation/detail/inquiry/contact events are deduplicated and accrue spend

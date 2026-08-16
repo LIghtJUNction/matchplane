@@ -168,6 +168,7 @@ export async function POST(request: Request): Promise<Response> {
           external_key: `better-auth:${identity.user.id}:${input.tenantId}:${platformPath}`,
           display_name: identity.user.name,
           role: input.role === "subplatform_admin" ? "both" : input.role,
+          marketplace_sides: input.role === "seller" ? ["supply"] : input.role === "buyer" ? ["demand"] : ["demand", "supply"],
           contact: { email: identity.user.email },
         }),
       },

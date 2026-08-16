@@ -51,11 +51,11 @@ idempotent handoff, and returns only the active direct-child capabilities. It ne
 root model: an external buyer/seller Agent keeps its own provider credentials and token bill. Use
 an organization API key with the explicit `agent:handoff` permission for machine calls.
 
-For a machine buyer or seller to continue into the generic marketplace tools, create an
-organization API key with `marketplace:write` and API-key metadata `agentRole: buyer`, `seller`, or
-`both`. Call `marketplace.agent.session` through `/api/mcp` (or
+For a machine Agent to continue into the generic marketplace tools, create an organization API key
+with `marketplace:write` and API-key metadata `agentRole: buyer`, `seller`, or `both` (the metadata
+name is a legacy adapter). Call `marketplace.agent.session` through `/api/mcp` (or
 `POST /api/marketplace/agent-session`) with the active `tenant_id`, `domain_id`, `platform_path`,
-and role. The response is a tenant/role-scoped 15-minute party bearer and its
+and kernel `side` (`demand` or `supply`). The response is a tenant/side-scoped 15-minute party bearer and its
 `access_token_expires_at` deadline. Pass that bearer as
 `Authorization: Bearer ...` to the `marketplace.intent.*`, `marketplace.offer.*`, and
 `marketplace.introduction.*` tools. The exchange does not create a browser session, accept a

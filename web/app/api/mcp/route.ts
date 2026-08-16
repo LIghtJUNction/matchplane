@@ -100,6 +100,7 @@ async function callMarketplaceTool(
       tenantId: args.tenant_id,
       domainId: args.domain_id,
       platformPath: args.platform_path,
+      side: args.side,
       role: args.role,
       displayName: args.display_name,
     });
@@ -253,16 +254,17 @@ function toolList(): Record<string, unknown> {
       },
     }, {
       name: "marketplace.agent.session",
-      description: "Exchange a scoped Better Auth organization API key for a caller-funded buyer/seller marketplace capability.",
+      description: "Exchange a scoped Better Auth organization API key for a caller-funded demand/supply marketplace capability.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["tenant_id", "domain_id", "platform_path", "role"],
+        required: ["tenant_id", "domain_id", "platform_path", "side"],
         properties: {
           tenant_id: { type: "string", format: "uuid" },
           domain_id: { type: "string", format: "uuid" },
           platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
-          role: { type: "string", enum: ["buyer", "seller"] },
+          side: { type: "string", enum: ["demand", "supply"] },
+          role: { type: "string", enum: ["buyer", "seller"], description: "Deprecated compatibility alias; use side." },
           display_name: { type: "string", maxLength: 200 },
         },
       },

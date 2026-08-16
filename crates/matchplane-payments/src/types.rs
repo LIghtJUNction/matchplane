@@ -613,6 +613,8 @@ pub enum InvoiceKind {
     /// A participant issues the sale/service invoice defined by the active domain.
     #[serde(alias = "vehicle_sale")]
     Sale,
+    /// A domain-defined service, booking, rental, or other non-sale invoice.
+    Service,
     /// Platform issues a commission/service invoice to the seller.
     PlatformCommission,
 }
