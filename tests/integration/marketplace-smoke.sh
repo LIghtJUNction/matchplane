@@ -10,6 +10,8 @@ domain_id=00000000-0000-7000-8000-000000000101
 asset_id=00000000-0000-7000-8000-000000000601
 campaign_id=00000000-0000-7000-8000-000000000901
 admin_authorization='authorization: Bearer matchplane-development-admin'
+platform_path=/used-car
+platform_path_header="x-matchplane-platform-path: $platform_path"
 
 wait_for() {
   local description=$1
@@ -52,7 +54,7 @@ listing=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg asset
   --arg seller "$seller_id" \
   '{tenant_id:$tenant,domain_id:$domain,asset_id:$asset,seller_party_id:$seller,asking_amount:"2500000",currency:"USD",currency_scale:2}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $seller_token" --data-binary @- \
+      --header "authorization: Bearer $seller_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/listings")
 listing_id=$(jq -er '.listing_id' <<<"$listing")
 test "$(jq -r '.commission_bps' <<<"$listing")" = 100
@@ -61,21 +63,21 @@ test "$(jq -r '.commission_collection' <<<"$listing")" = postpaid
 promotion=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg seller "$seller_id" --arg target "$listing_id" \
   '{campaign_id:"00000000-0000-7000-8000-000000000901",tenant_id:$tenant,domain_id:$domain,sponsor_party_id:$seller,target_kind:"vehicle_listing",target_key:$target,policy:"seller_promotion",pricing_model:"cpl",currency:"USD",currency_scale:2,unit_price:"5000",budget_amount:"100000",settings:{surface:"ai_recommendation"}}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $seller_token" --data-binary @- \
+      --header "authorization: Bearer $seller_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/promotions")
 test "$(jq -r '.status' <<<"$promotion")" = active
 
 buyer_request=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg buyer "$buyer_id" \
   '{tenant_id:$tenant,domain_id:$domain,buyer_party_id:$buyer,narrative:"CI buyer requirements",requirements:{make:"MatchPlane",model_year:2026},budget_min:"2000000",budget_max:"3000000",currency:"USD",currency_scale:2}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $buyer_token" --data-binary @- \
+      --header "authorization: Bearer $buyer_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/buyer-requests")
 request_id=$(jq -er '.request_id' <<<"$buyer_request")
 
 recommendations=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg buyer "$buyer_id" \
   '{tenant_id:$tenant,domain_id:$domain,buyer_party_id:$buyer,exposure_key:"ci-page-1",limit:10}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $buyer_token" --data-binary @- \
+      --header "authorization: Bearer $buyer_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/buyer-requests/$request_id/recommendations")
 jq -e --arg listing "$listing_id" \
   'length == 1 and .[0].listing_id == $listing and .[0].match_score == 1' \
@@ -85,38 +87,38 @@ deal=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg listing 
   --arg buyer "$buyer_id" \
   '{tenant_id:$tenant,domain_id:$domain,listing_id:$listing,buyer_request_id:$request,buyer_party_id:$buyer}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $buyer_token" --data-binary @- \
+      --header "authorization: Bearer $buyer_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/offline-deals")
 deal_id=$(jq -er '.offline_deal_id' <<<"$deal")
 
 contact_before_seller_consent=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-  --header "authorization: Bearer $buyer_token" \
+  --header "authorization: Bearer $buyer_token" --header "$platform_path_header" \
   "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&domain_id=$domain_id&party_id=$buyer_id")
 test "$contact_before_seller_consent" = 409
 
-curl --fail-with-body --silent --header "authorization: Bearer $seller_token" \
+curl --fail-with-body --silent --header "authorization: Bearer $seller_token" --header "$platform_path_header" \
   "$base_url/v1/marketplace/offline-deals?tenant_id=$tenant_id&domain_id=$domain_id&party_id=$seller_id" \
   | jq -e --arg deal "$deal_id" 'length == 1 and .[0].offline_deal_id == $deal' >/dev/null
 
 curl --fail-with-body --silent --header 'content-type: application/json' \
-  --header "authorization: Bearer $seller_token" \
+  --header "authorization: Bearer $seller_token" --header "$platform_path_header" \
   --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"party_id\":\"$seller_id\"}" \
   "$base_url/v1/marketplace/offline-deals/$deal_id/contact/accept" \
   | jq -e '.seller_contact_consent_at != null' >/dev/null
 
 contact_after_seller_consent=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-  --header "authorization: Bearer $buyer_token" \
+  --header "authorization: Bearer $buyer_token" --header "$platform_path_header" \
   "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&domain_id=$domain_id&party_id=$buyer_id")
 test "$contact_after_seller_consent" = 200
 
-contact=$(curl --fail-with-body --silent --header "authorization: Bearer $buyer_token" \
+contact=$(curl --fail-with-body --silent --header "authorization: Bearer $buyer_token" --header "$platform_path_header" \
   "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&domain_id=$domain_id&party_id=$buyer_id")
 test "$(jq -r '.counterpart.party_id' <<<"$contact")" = "$seller_id"
 test "$(jq -r '.counterpart.contact.phone' <<<"$contact")" = 13800000001
 test "$(jq -r '.counterpart.contact.wechat' <<<"$contact")" = ci_seller
 test "$(jq -r '.vehicle_settlement' <<<"$contact")" = offline_direct_between_buyer_and_seller
 
-seller_contact=$(curl --fail-with-body --silent --header "authorization: Bearer $seller_token" \
+seller_contact=$(curl --fail-with-body --silent --header "authorization: Bearer $seller_token" --header "$platform_path_header" \
   "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&domain_id=$domain_id&party_id=$seller_id")
 test "$(jq -r '.counterpart.party_id' <<<"$seller_contact")" = "$buyer_id"
 test "$(jq -r '.counterpart.contact.phone' <<<"$seller_contact")" = 13800000002
@@ -128,13 +130,13 @@ unauthenticated_payment=$(curl --silent --output /dev/null --write-out '%{http_c
   --header 'content-type: application/json' --data "$payment_request" \
   "$payment_url/v1/payments/authorize")
 wrong_party_payment=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-  --header 'content-type: application/json' --header "authorization: Bearer $buyer_token" \
+  --header 'content-type: application/json' --header "authorization: Bearer $buyer_token" --header "$platform_path_header" \
   --data "$payment_request" "$payment_url/v1/payments/authorize")
 test "$unauthenticated_payment" = 401
 test "$wrong_party_payment" = 401
 
 payment=$(curl --fail-with-body --silent --header 'content-type: application/json' \
-  --header "authorization: Bearer $seller_token" --data "$payment_request" \
+  --header "authorization: Bearer $seller_token" --header "$platform_path_header" --data "$payment_request" \
   "$payment_url/v1/payments/authorize")
 payment_id=$(jq -er '.payment_id' <<<"$payment")
 test "$(jq -r '.status' <<<"$payment")" = authorized
@@ -150,7 +152,7 @@ curl --fail-with-body --silent --header 'content-type: application/json' \
   --data "$reconciliation_request" "$payment_url/v1/payments/$payment_id/reconcile" \
   | jq -e '.status == "authorized" and .duplicate == true' >/dev/null
 
-contact=$(curl --fail-with-body --silent --header "authorization: Bearer $buyer_token" \
+contact=$(curl --fail-with-body --silent --header "authorization: Bearer $buyer_token" --header "$platform_path_header" \
   "$base_url/v1/marketplace/offline-deals/$deal_id/contact?tenant_id=$tenant_id&domain_id=$domain_id&party_id=$buyer_id")
 test "$(jq -r '.counterpart.party_id' <<<"$contact")" = "$seller_id"
 test "$(jq -r '.counterpart.contact.phone' <<<"$contact")" = 13800000001
@@ -163,31 +165,31 @@ viewing=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg buyer
   --arg end "$ends_at" \
   '{tenant_id:$tenant,domain_id:$domain,proposed_by:$buyer,starts_at:$start,ends_at:$end,location:{address:"CI inspection center",note:"front desk"}}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $buyer_token" --data-binary @- \
+      --header "authorization: Bearer $buyer_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/offline-deals/$deal_id/viewings")
 viewing_id=$(jq -er '.viewing_id' <<<"$viewing")
 test "$(jq -r '.location.address' <<<"$viewing")" = 'CI inspection center'
-viewing_page=$(curl --fail-with-body --silent --header "authorization: Bearer $buyer_token" \
+viewing_page=$(curl --fail-with-body --silent --header "authorization: Bearer $buyer_token" --header "$platform_path_header" \
   "$base_url/v1/marketplace/offline-deals/$deal_id/viewings?tenant_id=$tenant_id&domain_id=$domain_id&party_id=$buyer_id&limit=1&offset=0")
 test "$(jq 'length' <<<"$viewing_page")" -eq 1
 
 jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg seller "$seller_id" '{tenant_id:$tenant,domain_id:$domain,party_id:$seller}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $seller_token" --data-binary @- \
+      --header "authorization: Bearer $seller_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/viewings/$viewing_id/confirm" \
   | jq -e '.status == "confirmed"' >/dev/null
 
 jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg buyer "$buyer_id" \
   '{tenant_id:$tenant,domain_id:$domain,party_id:$buyer,final_amount:"2400000"}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $buyer_token" --data-binary @- \
+      --header "authorization: Bearer $buyer_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/offline-deals/$deal_id/confirm" \
   | jq -e '.next_action == "counterparty_confirmation"' >/dev/null
 
 jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg seller "$seller_id" \
   '{tenant_id:$tenant,domain_id:$domain,party_id:$seller,final_amount:"2400000"}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $seller_token" --data-binary @- \
+      --header "authorization: Bearer $seller_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/offline-deals/$deal_id/confirm" \
   | jq -e '.next_action == "capture_platform_commission" and .commission_amount == "24000"' >/dev/null
 
@@ -205,7 +207,7 @@ printf '%s' "$capture_request" \
 
 jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg buyer "$buyer_id" '{tenant_id:$tenant,domain_id:$domain,party_id:$buyer}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
-      --header "authorization: Bearer $buyer_token" --data-binary @- \
+      --header "authorization: Bearer $buyer_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/offline-deals/$deal_id/finalize" \
   | jq -e '.status == "completed" and .next_action == "completed"' >/dev/null
 
@@ -257,11 +259,11 @@ curl --fail-with-body --silent \
   "$payment_url/v1/invoices/$correction_id/download?artifact=credit_note" \
   | jq -e '.test_mode == true and .kind == "platform_commission" and .amount.amount == "12000"' >/dev/null
 
-curl --fail-with-body --silent --header "authorization: Bearer $seller_token" \
+curl --fail-with-body --silent --header "authorization: Bearer $seller_token" --header "$platform_path_header" \
   "$base_url/v1/marketplace/listings/$listing_id/exposure-metrics?tenant_id=$tenant_id&domain_id=$domain_id&party_id=$seller_id" \
   | jq -e '.impressions == 1 and .inquiries == 1 and .matched_contacts == 1' >/dev/null
 
-promotion_metrics=$(curl --fail-with-body --silent --header "authorization: Bearer $seller_token" \
+promotion_metrics=$(curl --fail-with-body --silent --header "authorization: Bearer $seller_token" --header "$platform_path_header" \
   "$base_url/v1/marketplace/promotions/$campaign_id?tenant_id=$tenant_id&domain_id=$domain_id&party_id=$seller_id")
 jq -e '.status == "active" and .billable_units == 1 and .spent_amount == "5000"' \
   <<<"$promotion_metrics" >/dev/null
