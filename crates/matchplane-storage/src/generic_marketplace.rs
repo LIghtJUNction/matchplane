@@ -109,7 +109,7 @@ pub struct CreateMarketplaceOffer {
     pub asset_id: Option<AssetId>,
     /// Seller-owned idempotency/catalogue key.
     pub external_key: String,
-    /// Public name supplied by the vertical/seller.
+    /// Public name supplied by the vertical/supply participant.
     pub display_name: String,
     /// Schema-validated domain attributes.
     pub attributes: Value,
@@ -142,7 +142,7 @@ pub struct MarketplaceOffer {
     pub supply_party_id: MarketplacePartyId,
     /// Optional catalogue asset.
     pub asset_id: Option<AssetId>,
-    /// Seller-owned key.
+    /// Supply-participant-owned key.
     pub external_key: String,
     /// Public name.
     pub display_name: String,
@@ -374,7 +374,7 @@ impl PgStore {
         intent_from_row(&row)
     }
 
-    /// Creates a seller-owned offer in `draft` state.  Only an operator or a vertical-owned
+    /// Creates a supply-owned offer in `draft` state.  Only an operator or a vertical-owned
     /// moderation workflow may activate it for discovery.
     pub async fn create_marketplace_offer(
         &self,
@@ -412,7 +412,7 @@ impl PgStore {
             .await?;
             if !authorized {
                 return Err(StorageError::Forbidden(
-                    "seller is not authorized to publish this asset".to_owned(),
+                    "supply participant is not authorized to publish this asset".to_owned(),
                 ));
             }
         }
@@ -446,9 +446,9 @@ impl PgStore {
 
     /// Lists a supply participant's own offers in one tenant/domain scope.
     ///
-    /// This is intentionally separate from the active matching query: a seller must be able to
-    /// see draft and withdrawn offers before moderation publishes them, without exposing another
-    /// seller's private inventory.
+    /// This is intentionally separate from the active matching query: a supply participant must
+    /// be able to see draft and withdrawn offers before moderation publishes them, without
+    /// exposing another participant's private inventory.
     pub async fn marketplace_offers_for_party(
         &self,
         tenant_id: TenantId,

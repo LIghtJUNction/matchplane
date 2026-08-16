@@ -63,7 +63,7 @@
           "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 240 },
           "expires_at": { "type": "string", "format": "date-time" }
         },
-        "contactRelease": "separate seller-consent transition; this command never returns contact values"
+        "contactRelease": "separate supply-consent transition; this command never returns contact values"
       },
       "list": { "method": "GET", "path": "/v1/marketplace/introductions" },
       "contactRequest": {
