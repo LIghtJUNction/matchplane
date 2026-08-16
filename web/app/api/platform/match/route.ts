@@ -236,6 +236,7 @@ function summarizeRouting(trace: PlatformRouteTrace[], truncated: boolean): Plat
   const first = trace[0]?.decision ?? {
     selectedSlugs: [],
     source: "policy_fallback" as const,
+    routeMechanism: "policy_fallback" as const,
     model: null,
     rationale: "当前节点没有可用的已激活子平台。",
     confidence: null,
@@ -264,6 +265,7 @@ function summarizeRouting(trace: PlatformRouteTrace[], truncated: boolean): Plat
   return {
     ...first,
     source: hasFallback ? "policy_fallback" : first.source,
+    routeMechanism: hasFallback ? "policy_fallback" : first.routeMechanism,
     model: first.model ?? aiDecisions.find(({ decision }) => decision.model)?.decision.model ?? null,
     rationale: `${first.rationale}${suffix ? ` ${suffix}` : ""}`.slice(0, 1_000),
     degraded: first.degraded || hasFallback || trace.some(({ decision }) => decision.degraded) || truncated,
