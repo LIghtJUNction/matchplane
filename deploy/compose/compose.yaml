@@ -168,6 +168,7 @@ services:
     restart: unless-stopped
     environment:
       MATCHPLANE_ENVIRONMENT: ${MATCHPLANE_ENVIRONMENT:-development}
+      MATCHPLANE_ALLOW_DEMO_BOOTSTRAP: ${MATCHPLANE_ALLOW_DEMO_BOOTSTRAP:-true}
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       PORT: 4173

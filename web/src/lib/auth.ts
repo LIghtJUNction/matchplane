@@ -46,6 +46,13 @@ const isProductionBuild = process.env.NEXT_PHASE === "phase-production-build";
 const secret = configuredSecret ?? (isProductionBuild ? randomBytes(32).toString("base64url") : undefined);
 const trustedOrigins = parseTrustedOrigins(baseURL, process.env.BETTER_AUTH_TRUSTED_ORIGINS);
 const isProductionRuntime = process.env.NODE_ENV === "production" && process.env.MATCHPLANE_ENVIRONMENT === "production";
+// Local Compose and test installations need a way to inspect the administrator workspace
+// before an SMTP route exists. This switch is deliberately explicit and environment-gated:
+// production always keeps Better Auth email verification enabled, even if an operator
+// accidentally carries the development variable into a production deployment.
+const allowDemoBootstrap =
+  (process.env.MATCHPLANE_ENVIRONMENT === "development" || process.env.MATCHPLANE_ENVIRONMENT === "test")
+  && process.env.MATCHPLANE_ALLOW_DEMO_BOOTSTRAP === "true";
 const configuredSocialProviders = configuredOAuthProviders();
 const oidcEnabled = process.env.MATCHPLANE_OIDC_ENABLED !== "false";
 const oidcIssuer = `${baseURL}/api/auth`;
@@ -88,7 +95,7 @@ export const auth = betterAuth({
   trustedOrigins,
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: true,
+    requireEmailVerification: !allowDemoBootstrap,
     autoSignIn: false,
     minPasswordLength: 8,
     maxPasswordLength: 128,
@@ -102,8 +109,8 @@ export const auth = betterAuth({
       }),
   },
   emailVerification: {
-    sendOnSignUp: true,
-    sendOnSignIn: true,
+    sendOnSignUp: !allowDemoBootstrap,
+    sendOnSignIn: !allowDemoBootstrap,
     autoSignInAfterVerification: true,
     sendVerificationEmail: (data, request) =>
       sendConfiguredAuthEmail({
@@ -270,7 +277,7 @@ export const auth = betterAuth({
           if (
             !configuredRootAdminEmail ||
             user.email.toLowerCase() !== configuredRootAdminEmail ||
-            user.emailVerified !== true
+            (user.emailVerified !== true && !allowDemoBootstrap)
           ) {
             return;
           }
