@@ -9,11 +9,12 @@
       "create": {
         "method": "POST",
         "path": "/v1/marketplace/intents",
-        "required": ["tenant_id", "domain_id", "participant_id", "side", "narrative", "idempotency_key"],
+        "required": ["tenant_id", "domain_id", "platform_path", "participant_id", "side", "narrative", "idempotency_key"],
         "properties": {
           "intent_id": { "type": "string", "format": "uuid" },
           "tenant_id": { "type": "string", "format": "uuid" },
           "domain_id": { "type": "string", "format": "uuid" },
+          "platform_path": { "type": "string", "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", "maxLength": 512 },
           "participant_id": { "type": "string", "format": "uuid" },
           "side": { "enum": ["demand", "supply"] },
           "narrative": { "type": "string", "minLength": 1, "maxLength": 10000 },
@@ -29,11 +30,12 @@
       "create": {
         "method": "POST",
         "path": "/v1/marketplace/offers",
-        "required": ["tenant_id", "domain_id", "supply_party_id", "external_key", "display_name"],
+        "required": ["tenant_id", "domain_id", "platform_path", "supply_party_id", "external_key", "display_name"],
         "properties": {
           "offer_id": { "type": "string", "format": "uuid" },
           "tenant_id": { "type": "string", "format": "uuid" },
           "domain_id": { "type": "string", "format": "uuid" },
+          "platform_path": { "type": "string", "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", "maxLength": 512 },
           "supply_party_id": { "type": "string", "format": "uuid" },
           "asset_id": { "type": ["string", "null"], "format": "uuid" },
           "external_key": { "type": "string", "minLength": 1, "maxLength": 256 },
@@ -50,14 +52,27 @@
       "create": {
         "method": "POST",
         "path": "/v1/marketplace/introductions",
-        "required": ["tenant_id", "intent_id", "offer_id", "participant_id", "score", "idempotency_key", "expires_at"],
+        "required": ["tenant_id", "domain_id", "platform_path", "intent_id", "offer_id", "participant_id", "score", "idempotency_key", "expires_at"],
+        "properties": {
+          "introduction_id": { "type": "string", "format": "uuid" },
+          "tenant_id": { "type": "string", "format": "uuid" },
+          "domain_id": { "type": "string", "format": "uuid" },
+          "platform_path": { "type": "string", "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", "maxLength": 512 },
+          "intent_id": { "type": "string", "format": "uuid" },
+          "offer_id": { "type": "string", "format": "uuid" },
+          "participant_id": { "type": "string", "format": "uuid" },
+          "score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "reasons": { "type": "array", "items": { "type": "string", "maxLength": 500 }, "maxItems": 32 },
+          "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "expires_at": { "type": "string", "format": "date-time" }
+        },
         "contactRelease": "separate seller-consent transition; this command never returns contact values"
       },
       "list": { "method": "GET", "path": "/v1/marketplace/introductions" }
     }
   },
   "invariants": [
-    "Every write is tenant-scoped and authenticated with a short-lived marketplace party bearer token.",
+    "Every write is tenant-scoped, domain-scoped, and exact-platform-path-scoped; it is authenticated with a short-lived marketplace party bearer token.",
     "Demand and supply labels are kernel sides; buyer/seller terminology remains a vertical adapter concern.",
     "Caller IDs and idempotency keys are replay-safe; a changed payload returns a conflict.",
     "Agent scores and reasons are advisory and cannot grant contact, payment, or transaction authority.",

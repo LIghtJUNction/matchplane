@@ -67,6 +67,8 @@ export interface AgentHandoffResult {
 export interface MarketplaceIntentInput {
   tenant_id: string;
   domain_id: string;
+  /** Overwritten with the capability's path before the request is sent. */
+  platform_path?: string;
   participant_id: string;
   side: "demand" | "supply";
   narrative: string;
@@ -79,6 +81,8 @@ export interface MarketplaceIntentInput {
 export interface MarketplaceOfferInput {
   tenant_id: string;
   domain_id: string;
+  /** Overwritten with the capability's path before the request is sent. */
+  platform_path?: string;
   supply_party_id: string;
   asset_id?: string | null;
   external_key: string;
@@ -91,6 +95,8 @@ export interface MarketplaceOfferInput {
 export interface MarketplaceIntroductionInput {
   tenant_id: string;
   domain_id: string;
+  /** Overwritten with the capability's path before the request is sent. */
+  platform_path?: string;
   intent_id: string;
   offer_id: string;
   participant_id: string;
@@ -145,37 +151,52 @@ export class MatchPlaneAgentClient {
     display_name?: string;
   }): Promise<PartyCapability> {
     const result = await this.callTool("marketplace.agent.session", input);
-    return result as PartyCapability;
+    const capability = result as Partial<PartyCapability>;
+    return {
+      ...capability,
+      platform_path: typeof capability.platform_path === "string"
+        ? capability.platform_path
+        : input.platform_path,
+    } as PartyCapability;
   }
 
   async createIntent(capability: PartyCapability, input: MarketplaceIntentInput): Promise<unknown> {
-    return this.callTool("marketplace.intent.create", input, capability.access_token);
+    return this.callTool("marketplace.intent.create", this.scope(capability, input), capability.access_token);
   }
 
   async createOffer(capability: PartyCapability, input: MarketplaceOfferInput): Promise<unknown> {
-    return this.callTool("marketplace.offer.create", input, capability.access_token);
+    return this.callTool("marketplace.offer.create", this.scope(capability, input), capability.access_token);
   }
 
   async matchOffers(capability: PartyCapability, input: {
     intent_id: string;
     tenant_id: string;
     domain_id: string;
+    platform_path?: string;
     participant_id: string;
     limit?: number;
   }): Promise<unknown> {
-    return this.callTool("marketplace.offer.match", input, capability.access_token);
+    return this.callTool("marketplace.offer.match", this.scope(capability, input), capability.access_token);
   }
 
   async createIntroduction(capability: PartyCapability, input: MarketplaceIntroductionInput): Promise<unknown> {
-    return this.callTool("marketplace.introduction.create", input, capability.access_token);
+    return this.callTool("marketplace.introduction.create", this.scope(capability, input), capability.access_token);
   }
 
   async listIntroductions(capability: PartyCapability, input: {
     tenant_id: string;
     domain_id: string;
+    platform_path?: string;
     participant_id: string;
   }): Promise<unknown> {
-    return this.callTool("marketplace.introductions.list", input, capability.access_token);
+    return this.callTool("marketplace.introductions.list", this.scope(capability, input), capability.access_token);
+  }
+
+  private scope<T extends { platform_path?: string }>(
+    capability: PartyCapability,
+    input: T,
+  ): T & { platform_path: string } {
+    return { ...input, platform_path: capability.platform_path };
   }
 
   private async callTool(name: string, args: unknown, partyToken?: string): Promise<unknown> {

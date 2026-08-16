@@ -125,6 +125,10 @@ async function callMarketplaceTool(
     }
     path = `/v1/marketplace/introductions?tenant_id=${encodeURIComponent(tenantId)}&domain_id=${encodeURIComponent(domainId)}&participant_id=${encodeURIComponent(participantId)}`;
   }
+  const platformPath = stringArgument(args, "platform_path");
+  if (!platformPath) {
+    return rpcError(id, -32602, `${name} requires platform_path so the capability stays node-scoped`);
+  }
 
   const headers = new Headers({ accept: "application/json" });
   const authorization = request.headers.get("authorization");
@@ -135,6 +139,7 @@ async function callMarketplaceTool(
   }
   const requestId = request.headers.get("x-request-id");
   if (requestId) headers.set("x-request-id", requestId);
+  headers.set("x-matchplane-platform-path", platformPath);
   if (body) headers.set("content-type", "application/json");
   let result: Response;
   try {
@@ -254,7 +259,7 @@ function toolList(): Record<string, unknown> {
         properties: {
           tenant_id: { type: "string", format: "uuid" },
           domain_id: { type: "string", format: "uuid" },
-          platform_path: { type: "string", pattern: "^/[a-z0-9-]+(?:/[a-z0-9-]+)*$", maxLength: 512 },
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
           role: { type: "string", enum: ["buyer", "seller"] },
           display_name: { type: "string", maxLength: 200 },
         },
@@ -273,11 +278,12 @@ function toolList(): Record<string, unknown> {
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["intent_id", "tenant_id", "domain_id", "participant_id"],
+        required: ["intent_id", "tenant_id", "domain_id", "platform_path", "participant_id"],
         properties: {
           intent_id: { type: "string", format: "uuid" },
           tenant_id: { type: "string", format: "uuid" },
           domain_id: { type: "string", format: "uuid" },
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
           participant_id: { type: "string", format: "uuid" },
           limit: { type: "integer", minimum: 1, maximum: 100 },
         },
@@ -288,11 +294,12 @@ function toolList(): Record<string, unknown> {
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["tenant_id", "domain_id", "intent_id", "offer_id", "participant_id", "score", "idempotency_key", "expires_at"],
+        required: ["tenant_id", "domain_id", "platform_path", "intent_id", "offer_id", "participant_id", "score", "idempotency_key", "expires_at"],
         properties: {
           introduction_id: { type: "string", format: "uuid" },
           tenant_id: { type: "string", format: "uuid" },
           domain_id: { type: "string", format: "uuid" },
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
           intent_id: { type: "string", format: "uuid" },
           offer_id: { type: "string", format: "uuid" },
           participant_id: { type: "string", format: "uuid" },
@@ -308,10 +315,11 @@ function toolList(): Record<string, unknown> {
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["tenant_id", "domain_id", "participant_id"],
+        required: ["tenant_id", "domain_id", "platform_path", "participant_id"],
         properties: {
           tenant_id: { type: "string", format: "uuid" },
           domain_id: { type: "string", format: "uuid" },
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
           participant_id: { type: "string", format: "uuid" },
         },
       },
@@ -323,11 +331,12 @@ function marketplaceIntentSchema(): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["tenant_id", "domain_id", "participant_id", "side", "narrative", "idempotency_key"],
+    required: ["tenant_id", "domain_id", "platform_path", "participant_id", "side", "narrative", "idempotency_key"],
     properties: {
       intent_id: { type: "string", format: "uuid" },
       tenant_id: { type: "string", format: "uuid" },
       domain_id: { type: "string", format: "uuid" },
+      platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
       participant_id: { type: "string", format: "uuid" },
       side: { type: "string", enum: ["demand", "supply"] },
       narrative: { type: "string", minLength: 1, maxLength: 10000 },
@@ -343,11 +352,12 @@ function marketplaceOfferSchema(): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["tenant_id", "domain_id", "supply_party_id", "external_key", "display_name"],
+    required: ["tenant_id", "domain_id", "platform_path", "supply_party_id", "external_key", "display_name"],
     properties: {
       offer_id: { type: "string", format: "uuid" },
       tenant_id: { type: "string", format: "uuid" },
       domain_id: { type: "string", format: "uuid" },
+      platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
       supply_party_id: { type: "string", format: "uuid" },
       asset_id: { type: ["string", "null"], format: "uuid" },
       external_key: { type: "string", minLength: 1, maxLength: 256 },

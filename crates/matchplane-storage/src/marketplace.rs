@@ -980,7 +980,8 @@ impl PgStore {
         Ok(authorization)
     }
 
-    /// Authenticates a high-entropy party capability within one tenant.
+    /// Authenticates a high-entropy party capability within one tenant and, for child nodes,
+    /// the exact recursive platform path represented by that capability.
     ///
     /// Child capabilities are checked against the Rust membership projection. When a party is
     /// linked to a human Better Auth identity, the query also requires the corresponding Better
@@ -993,10 +994,16 @@ impl PgStore {
         party_id: MarketplacePartyId,
         access_token_hash: &[u8],
         scope_domain_id: Option<DomainId>,
+        scope_platform_path: Option<&str>,
     ) -> Result<AuthenticatedParty, StorageError> {
         if access_token_hash.len() != 32 {
             return Err(StorageError::Forbidden(
                 "invalid party credential".to_owned(),
+            ));
+        }
+        if scope_platform_path.is_some_and(|path| path.is_empty() || path.len() > 512) {
+            return Err(StorageError::Forbidden(
+                "invalid platform path scope".to_owned(),
             ));
         }
         let row = sqlx::query(
@@ -1004,6 +1011,7 @@ impl PgStore {
                FROM marketplace_parties p \
               WHERE p.tenant_id = $1 AND p.id = $2 AND p.access_token_hash = $3 \
                 AND p.scope_domain_id IS NOT DISTINCT FROM $4::uuid \
+                AND p.platform_path = COALESCE($5::text, p.platform_path) \
                 AND p.status = 'active' AND p.access_token_expires_at > clock_timestamp() \
                 AND (p.platform_path = '/' \
                      OR EXISTS ( \
@@ -1051,6 +1059,7 @@ impl PgStore {
         .bind(party_id.into_uuid())
         .bind(access_token_hash)
         .bind(scope_domain_id.map(DomainId::into_uuid))
+        .bind(scope_platform_path)
         .fetch_optional(self.pool())
         .await?
         .ok_or_else(|| StorageError::Forbidden("invalid party credential".to_owned()))?;

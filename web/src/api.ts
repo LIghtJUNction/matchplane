@@ -353,6 +353,7 @@ async function request<T>(path: string, init: RequestInit = {}, session?: PartyS
   headers.set("accept", "application/json");
   if (init.body) headers.set("content-type", "application/json");
   if (session) headers.set("authorization", authorization(session));
+  if (session?.platformPath) headers.set("x-matchplane-platform-path", session.platformPath);
   const response = await fetch(`${apiBase}${path}`, { ...init, headers });
   if (!response.ok) {
     let message = `请求失败（${response.status}）`;

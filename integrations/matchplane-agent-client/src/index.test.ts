@@ -46,6 +46,10 @@ describe("MatchPlane external Agent client", () => {
       idempotency_key: "intent-1",
     });
     expect(new Headers(fake.calls[1]?.init?.headers).get("authorization")).toBe("Bearer secret");
+    const secondBody = JSON.parse(String(fake.calls[1]?.init?.body)) as {
+      params?: { arguments?: { platform_path?: string } };
+    };
+    expect(secondBody.params?.arguments?.platform_path).toBe("/used-car");
   });
 
   it("rejects platform-funded external handoffs before a network call", async () => {

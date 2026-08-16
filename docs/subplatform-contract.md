@@ -274,11 +274,13 @@ between a platform Agent and a subplatform-owned schema or retrieval adapter:
 | introduction | `POST /v1/marketplace/introductions` | The owning demand party records one Agent-selected offer, score and bounded reasons. This never releases contact data. |
 | introduction | `GET /v1/marketplace/introductions?tenant_id=&participant_id=` | Either participant reads the introduction projection without contact values. |
 
-All writes accept caller-generated IDs and idempotency keys. The gateway checks the short-lived
-party bearer token, tenant/domain scope, demand/supply role, active lifecycle, expiry, and
-cross-party invariant. `attributes` and `terms` must be JSON objects and are never interpreted as
-vehicle fields by the root. Scores and reasons are advisory Agent output; contact release remains
-a separate consented transition in the existing introduction/contact contract.
+All writes accept caller-generated IDs and idempotency keys. Every party-authenticated request must
+also carry `x-matchplane-platform-path` (the canonical path returned by the capability exchange).
+The gateway checks the short-lived party bearer token, exact recursive node path, tenant/domain
+scope, demand/supply role, active lifecycle, expiry, and cross-party invariant. `attributes` and
+`terms` must be JSON objects and are never interpreted as vehicle fields by the root. Scores and
+reasons are advisory Agent output; contact release remains a separate consented transition in the
+existing introduction/contact contract.
 
 The same resources are available to external Agents through the authenticated HTTP MCP facade at
 `/api/mcp` using `marketplace.intent.create`, `marketplace.offer.create`,

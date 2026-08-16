@@ -35,6 +35,10 @@ const intent = await client.createIntent(buyer, {
 });
 ```
 
+The client copies `buyer.platform_path` into every marketplace tool call. This is intentional: a
+capability for `/used-car` cannot be replayed against a sibling or parent node, even when the
+tenant and domain are the same.
+
 Create separate keys for buyer and seller Agents with `marketplace:write` and
 `agentRole: buyer|seller`. Call `handoff()` when the Agent needs the active child capabilities;
 the handoff is caller-funded and never invokes MatchPlane's hosted model. The platform's own
