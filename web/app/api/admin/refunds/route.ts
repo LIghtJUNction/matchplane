@@ -5,3 +5,7 @@ export const runtime = "nodejs";
 export function GET(request: Request): Promise<Response> {
   return forwardPaymentAdmin(request, "/v1/admin/refunds", "GET");
 }
+
+export function POST(request: Request): Promise<Response> {
+  return forwardPaymentAdmin(request, "/v1/admin/refunds", "POST");
+}

@@ -1290,13 +1290,17 @@ async fn insert_marketplace_contact_event(
     request_fingerprint: Option<&[u8]>,
     idempotency_key: &str,
 ) -> Result<(), StorageError> {
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO marketplace_introduction_contact_events
             (id, tenant_id, introduction_id, actor_party_id, target_party_id,
              event_type, decision, request_fingerprint, idempotency_key)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (tenant_id, introduction_id, actor_party_id, event_type, idempotency_key)
-         DO NOTHING",
+         DO UPDATE
+            SET request_fingerprint = marketplace_introduction_contact_events.request_fingerprint
+          WHERE marketplace_introduction_contact_events.request_fingerprint
+                IS NOT DISTINCT FROM EXCLUDED.request_fingerprint
+         RETURNING id",
     )
     .bind(Uuid::now_v7())
     .bind(tenant_id.into_uuid())
@@ -1307,8 +1311,13 @@ async fn insert_marketplace_contact_event(
     .bind(decision)
     .bind(request_fingerprint)
     .bind(idempotency_key)
-    .execute(&mut **transaction)
+    .fetch_optional(&mut **transaction)
     .await?;
+    if inserted.is_none() {
+        return Err(StorageError::Conflict(
+            "contact action idempotency key was reused with a different payload".to_owned(),
+        ));
+    }
     Ok(())
 }
 

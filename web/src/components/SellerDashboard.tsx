@@ -19,7 +19,7 @@ import {
   type ListingSubmission,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
-import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
+import { pricingFor, subplatformContactLabel, subplatformCopy, type SubplatformConfig } from "../subplatform";
 import { SectionHeading, spring } from "./Primitives";
 import { ContactProfileCard } from "./ContactProfileCard";
 
@@ -439,7 +439,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
                   <small>{introductionStatusLabel(introduction.status)} · {formatSubmissionDate(introduction.created_at)}</small>
                   {releasedContacts[introduction.introduction_id] ? (
                     <div className="buyer-contact-values">
-                      {Object.entries(releasedContacts[introduction.introduction_id].counterpart.contact).map(([key, value]) => <span key={key}>{key}: {value}</span>)}
+                      {Object.entries(releasedContacts[introduction.introduction_id].counterpart.contact).map(([key, value]) => <span key={key}>{subplatformContactLabel(subplatform, key)}: {value}</span>)}
                     </div>
                   ) : null}
                 </div>

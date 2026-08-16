@@ -31,43 +31,90 @@ export async function readActiveDirectChildRoutes(
     isRootAdministrator?: boolean;
   },
 ): Promise<PlatformChildRoute[]> {
-  const currentSlug = platformPath === "/" ? null : platformPath.split("/").filter(Boolean).at(-1) ?? null;
   const result = await authDatabase.query(
-    `WITH current_node AS (
-       SELECT o.id
-         FROM "organization" o
-        WHERE $1::text IS NOT NULL
-          AND o.slug = $1::text
-          AND o."tenantId" = $2::text
+    `WITH RECURSIVE platform_tree AS (
+       SELECT root.id,
+              root.slug,
+              root."parentOrganizationId",
+              root."tenantId",
+              '/'::text AS platform_path,
+              true AS path_active,
+              0 AS depth
+         FROM "organization" root
+        WHERE root."tenantId" = $2::text
+          AND root."parentOrganizationId" IS NULL
+          AND root."rootPlatform" = true
+       UNION ALL
+       SELECT child.id,
+              child.slug,
+              child."parentOrganizationId",
+              child."tenantId",
+              CASE WHEN platform_tree.platform_path = '/' THEN '/' || child.slug
+                   ELSE platform_tree.platform_path || '/' || child.slug END,
+              platform_tree.path_active
+                AND EXISTS (
+                  SELECT 1
+                    FROM subplatform_registrations registration
+                   WHERE registration.tenant_id = $2::uuid
+                     AND registration.slug = child.slug
+                     AND registration.domain_id = NULLIF(child."domainId", '')::uuid
+                     AND registration.state = 'active'
+                     AND EXISTS (
+                       SELECT 1
+                         FROM domains domain
+                        WHERE domain.id = registration.domain_id
+                          AND domain.tenant_id = registration.tenant_id
+                          AND domain.status = 'active'
+                     )
+                ),
+              platform_tree.depth + 1
+         FROM "organization" child
+         JOIN platform_tree ON child."parentOrganizationId" = platform_tree.id
+                           AND child."tenantId" = platform_tree."tenantId"
+        WHERE platform_tree.depth < 64
+          AND length(platform_tree.platform_path) < 4_096
+     ), current_node AS (
+       SELECT id, path_active
+         FROM platform_tree
+        WHERE platform_path = $1::text
+          AND path_active
      )
      SELECT r.slug,
             COALESCE(r.manifest ->> 'displayName', r.slug) AS "displayName",
             COALESCE(r.manifest ->> 'description', '') AS description,
             r.tenant_id AS "tenantId",
             r.domain_id AS "domainId",
-            CASE WHEN $3::text = '/' THEN '/' || r.slug
-                 ELSE $3::text || '/' || r.slug
+            CASE WHEN $1::text = '/' THEN '/' || r.slug
+                 ELSE $1::text || '/' || r.slug
             END AS path,
             COALESCE(r.manifest -> 'capabilities', '[]'::jsonb) AS capabilities,
             COALESCE(r.manifest -> 'agent' -> 'stages', '[]'::jsonb) AS "agentStages",
             COALESCE(r.manifest -> 'agent' -> 'skills', '[]'::jsonb) AS "agentSkills",
             COALESCE(r.manifest -> 'agent' -> 'mcpTools', '[]'::jsonb) AS "agentMcpTools"
        FROM subplatform_registrations r
-       JOIN "organization" o ON o.slug = r.slug AND o."tenantId" = r.tenant_id::text
-       LEFT JOIN current_node ON true
+       JOIN "organization" o ON o.slug = r.slug
+                            AND o."tenantId" = r.tenant_id::text
+                            AND o."rootPlatform" = false
+       JOIN platform_tree node ON node.id = o.id
+                              AND node.path_active
+       JOIN platform_tree parent ON parent.id = o."parentOrganizationId"
+                                AND parent.path_active
+       JOIN domains d ON d.id = r.domain_id AND d.tenant_id = r.tenant_id AND d.status = 'active'
+       JOIN current_node ON current_node.id = parent.id
       WHERE r.tenant_id = $2::uuid
         AND r.state = 'active'
+        AND r.domain_id = NULLIF(o."domainId", '')::uuid
         AND (
           r.membership_policy = 'public'
-          OR ($4::uuid IS NOT NULL AND EXISTS (
+          OR ($3::uuid IS NOT NULL AND EXISTS (
             SELECT 1
               FROM "member" m
              WHERE m."organizationId" = o.id
-               AND m."userId" = $4::uuid
+               AND m."userId" = $3::uuid
           ))
-          OR ($5::uuid IS NOT NULL AND EXISTS (
+          OR ($4::uuid IS NOT NULL AND EXISTS (
             WITH RECURSIVE key_scope(id, depth) AS (
-              SELECT $5::uuid, 0
+              SELECT $4::uuid, 0
               UNION ALL
               SELECT child.id, parent.depth + 1
                 FROM "organization" child
@@ -76,16 +123,13 @@ export async function readActiveDirectChildRoutes(
             )
             SELECT 1 FROM key_scope WHERE id = o.id
           ))
-          OR ($6::boolean IS TRUE)
+          OR ($5::boolean IS TRUE)
         )
-        AND (($1::text IS NULL AND o."parentOrganizationId" IS NULL)
-          OR ($1::text IS NOT NULL AND current_node.id IS NOT NULL
-              AND o."parentOrganizationId" = current_node.id))
+        AND o."parentOrganizationId" = parent.id
       ORDER BY r.slug ASC`,
     [
-      currentSlug,
-      rootTenantId,
       platformPath,
+      rootTenantId,
       viewer?.authUserId ?? null,
       viewer?.organizationId ?? null,
       viewer?.isRootAdministrator === true,

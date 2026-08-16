@@ -5,9 +5,10 @@ trades, ledger entries, events, and audit history; Kafka transports durable fact
 only rebuildable low-latency projections. AI retrieval proposes candidates and never commits a
 trade.
 
-Every deployment uses the same recursive platform model: the current root is simply the platform
-node without a parent, and a mounted platform can own its own children. Human accounts use Better
-Auth; platform-to-platform credentials use Better Auth organization API keys with explicit scopes.
+Every deployment uses the same recursive platform model: the configured tenant has one explicit
+`rootPlatform` organization, and a mounted platform can own its own children. Human accounts use
+Better Auth; platform-to-platform credentials use Better Auth organization API keys with explicit
+scopes.
 
 The packaged `matchplane` CLI is the common backend and operations entrypoint: use
 `matchplane serve <service>` to start a workload, `matchplane doctor/status --json` for bounded

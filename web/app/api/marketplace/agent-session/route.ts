@@ -23,11 +23,16 @@ export async function POST(request: Request): Promise<Response> {
 
   const configuredRole = apiKey.metadata?.agentRole;
   const configuredSide = apiKey.metadata?.agentSide;
-  const keySide = isAgentKeySide(configuredSide)
-    ? configuredSide
-    : isAgentKeyRole(configuredRole)
-      ? (configuredRole === "both" ? "both" : configuredRole === "buyer" ? "demand" : "supply")
-      : null;
+  if (configuredSide !== undefined && configuredSide !== null && !isAgentKeySide(configuredSide)) {
+    return NextResponse.json({ error: "API Key 的 agentSide 无效，请重新签发" }, { status: 403 });
+  }
+  const legacySide = isAgentKeyRole(configuredRole)
+    ? (configuredRole === "both" ? "both" : configuredRole === "buyer" ? "demand" : "supply")
+    : null;
+  if (isAgentKeySide(configuredSide) && legacySide && configuredSide !== legacySide) {
+    return NextResponse.json({ error: "API Key 的 agentSide 与兼容字段 agentRole 不一致，请重新签发" }, { status: 403 });
+  }
+  const keySide = isAgentKeySide(configuredSide) ? configuredSide : legacySide;
   if (!keySide) {
     return NextResponse.json(
       { error: "该 API Key 尚未绑定 agentSide；请为 demand/supply Agent 创建最小权限 Key" },
@@ -62,6 +67,10 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const principalId = stableAgentPrincipalId(apiKey.id, input.tenantId);
+  const existingMembership = await readMachineMembershipStatus(input.tenantId, input.domainId, principalId);
+  if (existingMembership && existingMembership !== "active") {
+    return NextResponse.json({ error: "该 Agent 成员已被管理员停用；请重新授权后再交换 capability" }, { status: 403 });
+  }
   let gatewayResponse: Response;
   try {
     gatewayResponse = await fetch(
@@ -179,13 +188,30 @@ async function upsertMachineMembershipProjection(input: {
                     ELSE 'both'
                   END,
            labels = ARRAY['better-auth:api-key'],
-           status = 'active',
+           status = marketplace_subplatform_memberships.status,
            approved_at = COALESCE(marketplace_subplatform_memberships.approved_at, clock_timestamp()),
            approved_by = EXCLUDED.approved_by,
            version = marketplace_subplatform_memberships.version + 1,
            updated_at = clock_timestamp()`,
     [input.tenantId, input.domainId, input.partyId, input.role, input.approvedBy],
   );
+}
+
+async function readMachineMembershipStatus(
+  tenantId: string,
+  domainId: string,
+  partyId: string,
+): Promise<string | null> {
+  const result = await authDatabase.query<{ status: string }>(
+    `SELECT status
+       FROM marketplace_subplatform_memberships
+      WHERE tenant_id = $1::uuid
+        AND domain_id = $2::uuid
+        AND party_id = $3::uuid
+      LIMIT 1`,
+    [tenantId, domainId, partyId],
+  );
+  return result.rows[0]?.status ?? null;
 }
 
 async function recordMachineCapabilityAudit(input: {
@@ -234,6 +260,10 @@ async function isActiveChildScope(
        JOIN "organization" o
          ON o.slug = r.slug
         AND o."tenantId" = r.tenant_id::text
+       JOIN domains d
+         ON d.id = r.domain_id
+        AND d.tenant_id = r.tenant_id
+        AND d.status = 'active'
       WHERE r.tenant_id = $1::uuid
         AND r.domain_id = $2::uuid
         AND r.slug = $3
@@ -253,6 +283,7 @@ async function isActiveRootScope(tenantId: string, domainId: string): Promise<bo
        FROM domains
       WHERE tenant_id = $1::uuid
         AND id = $2::uuid
+        AND status = 'active'
       LIMIT 1`,
     [tenantId, domainId],
   );

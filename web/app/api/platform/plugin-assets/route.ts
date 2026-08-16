@@ -118,7 +118,9 @@ async function readActiveArtifact(platformPath: string, rootTenantId: string): P
          SELECT o.id, o.slug, o."parentOrganizationId", o."tenantId",
                 '/' || o.slug AS platform_path, true AS path_active, 0 AS depth
            FROM "organization" o
-          WHERE o."tenantId" = $1::text AND o."parentOrganizationId" IS NULL
+          WHERE o."tenantId" = $1::text
+            AND o."parentOrganizationId" IS NULL
+            AND o."rootPlatform" = true
          UNION ALL
          SELECT child.id, child.slug, child."parentOrganizationId", child."tenantId",
                 platform_tree.platform_path || '/' || child.slug,
@@ -141,6 +143,10 @@ async function readActiveArtifact(platformPath: string, rootTenantId: string): P
          JOIN LATERAL (
            SELECT artifact_locator, artifact_entry, build_digest
              FROM subplatform_registrations registration
+             JOIN domains domain
+               ON domain.id = registration.domain_id
+              AND domain.tenant_id = registration.tenant_id
+              AND domain.status = 'active'
             WHERE registration.tenant_id = $1::uuid
               AND registration.slug = tree.slug
               AND registration.state = 'active'

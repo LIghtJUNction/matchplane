@@ -27,9 +27,11 @@ import {
   getPlatformSetupStatus,
   getSubplatformOrganizations,
   getRefundAdminRecords,
+  createAdminRefund,
   isLiveMarketplaceEnabled,
   activateSubplatform,
   createPlatformDomain,
+  createRootPlatformOrganization,
   getPlatformDomains,
   registerSubplatform,
   saveInvoiceProvider,
@@ -79,6 +81,10 @@ export function PlatformDashboard({
   const [refunds, setRefunds] = useState<RefundAdminRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceAdminRecord[]>([]);
   const [financeView, setFinanceView] = useState<"invoices" | "refunds">("invoices");
+  const [refundPaymentId, setRefundPaymentId] = useState("");
+  const [refundAmount, setRefundAmount] = useState("");
+  const [refundReason, setRefundReason] = useState("");
+  const [refundSaving, setRefundSaving] = useState(false);
   const [gatewayEditorOpen, setGatewayEditorOpen] = useState(false);
   const [routeEditorOpen, setRouteEditorOpen] = useState(false);
   const [invoiceEditorOpen, setInvoiceEditorOpen] = useState(false);
@@ -207,6 +213,31 @@ export function PlatformDashboard({
     setInvoices(nextInvoices);
   };
 
+  const submitRefund = async () => {
+    const tenantId = setup?.root.tenantId;
+    if (!tenantId || !refundPaymentId || !refundAmount.trim() || !refundReason.trim()) {
+      onNotice("请选择可退款支付单，并填写退款金额和原因");
+      return;
+    }
+    setRefundSaving(true);
+    try {
+      await createAdminRefund({
+        tenantId,
+        paymentId: refundPaymentId,
+        amount: refundAmount.trim(),
+        reason: refundReason.trim(),
+      });
+      await refreshPaymentAdministration();
+      setRefundAmount("");
+      setRefundReason("");
+      onNotice("退款请求已提交；最终状态以支付网关回调和对账为准");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "退款请求提交失败");
+    } finally {
+      setRefundSaving(false);
+    }
+  };
+
   const refreshSubplatforms = async () => {
     setSubplatforms(await getSubplatformOrganizations());
   };
@@ -215,6 +246,19 @@ export function PlatformDashboard({
     const [status, records] = await Promise.all([getPlatformSetupStatus(), getPlatformDomains()]);
     setSetup(status);
     setDomains(records);
+  };
+
+  const initializeRootOrganization = async () => {
+    setSaving(true);
+    try {
+      await createRootPlatformOrganization();
+      await refreshDomains();
+      onNotice("根平台组织已初始化；统一成员、API Key 和 Agent 接入现在可用");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "根平台组织初始化失败");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const submitDomain = async () => {
@@ -597,6 +641,11 @@ export function PlatformDashboard({
           {setup?.firstRun.needsRootAccount ? (
             <a className="button button-dark readiness-action" href="/login?role=platform&next=%2F%3Frole%3Dplatform">去创建或登录根管理员</a>
           ) : null}
+          {setup?.root.tenantExists && !setup.root.organization ? (
+            <button className="button button-light readiness-action" type="button" disabled={saving} onClick={() => void initializeRootOrganization()}>
+              {saving ? "初始化中…" : "初始化根平台组织"}
+            </button>
+          ) : null}
         </section>
 
         <section className="surface domain-panel" aria-labelledby="domain-title">
@@ -836,6 +885,21 @@ export function PlatformDashboard({
               <BanknoteArrowDown size={18} aria-hidden="true" /><span><strong>退款管理</strong><small>选择支付单后执行退款</small></span>
             </button>
           </div>
+          {financeView === "refunds" ? (
+            <div className="admin-editor refund-editor" aria-label="创建退款">
+              <div className="admin-editor-heading"><strong>提交退款</strong><small>支持全额或部分退款；网关能力不足时会明确返回失败</small></div>
+              {payments.some((payment) => payment.status === "captured") ? (
+                <>
+                  <label><span>支付单</span><select value={refundPaymentId} onChange={(event) => setRefundPaymentId(event.target.value)}><option value="">选择已捕获支付</option>{payments.filter((payment) => payment.status === "captured").map((payment) => <option key={payment.payment_id} value={payment.payment_id}>{payment.merchant_order_id || payment.payment_id} · {payment.captured_amount} {payment.currency}</option>)}</select></label>
+                  <div className="subplatform-form-grid">
+                    <label><span>退款金额</span><input value={refundAmount} onChange={(event) => setRefundAmount(event.target.value)} inputMode="decimal" placeholder="按支付单币种填写" /></label>
+                    <label><span>退款原因</span><input value={refundReason} onChange={(event) => setRefundReason(event.target.value)} maxLength={2000} placeholder="说明退款原因" /></label>
+                  </div>
+                  <button className="button button-dark" type="button" disabled={refundSaving} onClick={() => void submitRefund()}>{refundSaving ? "提交中…" : "提交退款"}</button>
+                </>
+              ) : <p className="platform-access-empty">暂无已捕获且可退款的支付单。</p>}
+            </div>
+          ) : null}
         </section>
 
         <section className="operations-strip" aria-label="支付运营状态">

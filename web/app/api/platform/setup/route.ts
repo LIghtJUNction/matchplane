@@ -19,7 +19,8 @@ interface RootContactField {
  * identifiers beyond the configured root tenant and explicitly configured root organization.
  * It gives the administrator UI enough information to distinguish an empty installation from an
  * active platform without seeding demo organizations or pretending that payment/routing data
- * exists.
+ * exists. The root organization is returned only when the operator has created it through the
+ * Better Auth bridge (or pinned its UUID explicitly), never by treating a child package as root.
  */
 export async function GET(): Promise<Response> {
   const configuredTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
@@ -36,15 +37,16 @@ export async function GET(): Promise<Response> {
             [configuredTenantId],
           )
         : Promise.resolve({ rows: [], rowCount: 0 } as { rows: Array<{ slug: string; name: string }>; rowCount: number }),
-      tenantConfigured && rootOrganizationConfigured
+      tenantConfigured
         ? authDatabase.query<{ id: string; slug: string; name: string; tenantId: string; domainId: string | null }>(
             `SELECT id::text, slug, name, "tenantId" AS "tenantId", NULLIF("domainId", '') AS "domainId"
                FROM "organization"
-              WHERE id = $1::uuid
-                AND "tenantId" = $2
+              WHERE "tenantId" = $1
                 AND "parentOrganizationId" IS NULL
+                AND "rootPlatform" = true
+                AND ($2::uuid IS NULL OR id = $2::uuid)
               LIMIT 1`,
-            [configuredRootOrganizationId, configuredTenantId],
+            [configuredTenantId, rootOrganizationConfigured ? configuredRootOrganizationId : null],
           )
         : Promise.resolve({ rows: [], rowCount: 0 } as { rows: Array<{ id: string; slug: string; name: string; tenantId: string; domainId: string | null }>; rowCount: number }),
       tenantConfigured

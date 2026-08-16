@@ -285,8 +285,13 @@ export function LoginScreen() {
           </div>
         ) : null}
         {role === "buyer" ? (
-          <a className="login-mode-toggle" href="/login?role=platform&next=%2F%3Frole%3Dplatform">
-            {copy.adminLogin}
+          <a
+            className="login-mode-toggle"
+            href={subplatform.slug === "root"
+              ? "/login?role=platform&next=%2F%3Frole%3Dplatform"
+              : `/login?role=subplatform_admin&next=${encodeURIComponent(next)}`}
+          >
+            {subplatform.slug === "root" ? copy.adminLogin : copy.childAdmin}
           </a>
         ) : null}
       </section>

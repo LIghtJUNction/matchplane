@@ -15,7 +15,7 @@ import {
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { authClient, authFetchOptions } from "../lib/auth-client";
-import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
+import { loadSubplatform, pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
 
 const PENDING_CHAT_KEY = "matchplane.pending-chat";
 
@@ -83,10 +83,6 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
   const [signedIn, setSignedIn] = useState(false);
   const isRoot = subplatform.slug === "root";
   const isSeller = role === "seller";
-  const pricing = pricingFor(subplatform);
-  // Contract selection belongs to the mounted package manifest. Never infer a
-  // vertical adapter from a price mode or the presence of a JSON schema.
-  const usesLegacyMarketplace = subplatform.marketplaceContract === "legacy-v1";
   const copy = resolveChatCopy(subplatform);
   const label = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
 
@@ -121,73 +117,110 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
         const route = live
           ? await routePlatformIntent({ platformPath: platformPath(subplatform), narrative: text })
           : null;
+        const routedRecommendations: RecommendedBackendListing[] = [];
         if (live) {
-          if (subplatform.domainId) {
-            if (!session) throw new Error("Better Auth 会话尚未连接到当前子平台");
+          // The root and every child use the same generic marketplace transport. A route plan is
+          // an allow-listed set of target nodes chosen by the platform Agent; send the request
+          // to each selected node instead of recording it only at the page the user happened to
+          // open. Each target receives its own Better Auth-derived capability and domain scope.
+          const targets = route?.routePlan.length ? route.routePlan : [null];
+          for (const hop of targets) {
+            const target = hop
+              ? {
+                  ...(await loadSubplatform(hop.path)),
+                  slug: hop.slug,
+                  path: hop.path,
+                  tenantId: hop.tenantId,
+                  domainId: hop.domainId,
+                }
+              : subplatform;
+            if (!target.domainId) continue;
+            const targetDomainId = target.domainId;
+            const targetSession = hop
+              ? await getMarketplaceSession({
+                  subplatform: target.slug,
+                  platformPath: target.path,
+                  tenantId: target.tenantId,
+                  domainId: targetDomainId,
+                  role,
+                })
+              : session;
+            if (!targetSession) throw new Error("Better Auth 会话尚未连接到当前平台节点");
+            const targetPricing = pricingFor(target);
+            const targetUsesLegacy = target.marketplaceContract === "legacy-v1";
+            const targetKey = target.path.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 96) || "root";
             if (isSeller) {
               await createMarketplaceIntent({
-                session,
-                domainId: subplatform.domainId,
+                session: targetSession,
+                domainId: targetDomainId,
                 side: "supply",
                 narrative: text,
                 attributes: {
                   source: "conversation",
-                  platform_path: platformPath(subplatform),
+                  platform_path: target.path,
                   delegated_route_count: route?.routePlan.length ?? 0,
                   routing_source: route?.routing.source ?? null,
                   routing_degraded: route?.routing.degraded ?? false,
                 },
                 terms: {
-                  pricing_mode: pricing.mode,
-                  ...(pricing.currency ? { currency: pricing.currency } : {}),
-                  ...(pricing.currencyScale !== undefined ? { currency_scale: pricing.currencyScale } : {}),
+                  pricing_mode: targetPricing.mode,
+                  ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                  ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
                 },
-                idempotencyKey: `chat-${requestId}`,
+                idempotencyKey: `chat-${requestId}-${targetKey}`,
               });
-            } else if (usesLegacyMarketplace) {
-              if (!pricing.currency) throw new Error("当前子平台尚未配置结算币种，暂时不能生成真实推荐");
+            } else if (targetUsesLegacy) {
+              if (!targetPricing.currency) throw new Error(`${target.label || target.slug} 尚未配置结算币种，暂时不能生成真实推荐`);
               const buyerRequest = await createBuyerRequest({
-                session,
-                domainId: subplatform.domainId,
+                session: targetSession,
+                domainId: targetDomainId,
                 narrative: text,
                 requirements: {
                   source: "conversation",
-                  platform_path: platformPath(subplatform),
+                  platform_path: target.path,
                   delegated_route_count: route?.routePlan.length ?? 0,
                   routing_source: route?.routing.source ?? null,
                   routing_degraded: route?.routing.degraded ?? false,
                 },
-                currency: pricing.currency,
-                currencyScale: pricing.currencyScale ?? 0,
+                currency: targetPricing.currency,
+                currencyScale: targetPricing.currencyScale ?? 0,
               });
               const recommendations = await getBuyerRecommendations({
-                session,
-                domainId: subplatform.domainId,
+                session: targetSession,
+                domainId: targetDomainId,
                 requestId: buyerRequest.request_id,
-                exposureKey: `chat-${requestId}`,
+                exposureKey: `chat-${requestId}-${targetKey}`,
               });
-              onRecommendations?.(recommendations);
+              routedRecommendations.push(...recommendations.map((item) => ({
+                ...item,
+                platform_path: target.path,
+                subplatform: target.slug,
+              })));
             } else {
               const intent = await createMarketplaceIntent({
-                session,
-                domainId: subplatform.domainId,
+                session: targetSession,
+                domainId: targetDomainId,
                 side: "demand",
                 narrative: text,
                 attributes: {},
                 terms: {
-                  pricing_mode: pricing.mode,
-                  ...(pricing.currency ? { currency: pricing.currency } : {}),
-                  ...(pricing.currencyScale !== undefined ? { currency_scale: pricing.currencyScale } : {}),
+                  pricing_mode: targetPricing.mode,
+                  ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                  ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
                 },
-                idempotencyKey: `chat-${requestId}`,
+                idempotencyKey: `chat-${requestId}-${targetKey}`,
               });
               const candidates = await getMarketplaceOfferMatches({
-                session,
-                domainId: subplatform.domainId,
+                session: targetSession,
+                domainId: targetDomainId,
                 intentId: intent.intent_id,
               });
-              onRecommendations?.(candidates.map((candidate) => ({
+              routedRecommendations.push(...candidates.map((candidate) => ({
                 ...candidate,
+                tenant_id: target.tenantId ?? candidate.tenant_id,
+                domain_id: targetDomainId,
+                platform_path: target.path,
+                subplatform: target.slug,
                 offer_id: candidate.offer_id,
                 match_score: candidate.score,
                 match_reasons: candidate.reasons,
@@ -195,6 +228,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
               })));
             }
           }
+          if (routedRecommendations.length) onRecommendations?.(routedRecommendations);
         }
         setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
           ? {
@@ -222,7 +256,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, onNotice, onRecommendations, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path, usesLegacyMarketplace, pricing.currency, pricing.currencyScale],
+    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, onNotice, onRecommendations, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {

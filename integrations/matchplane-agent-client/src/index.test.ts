@@ -30,7 +30,7 @@ describe("MatchPlane external Agent client", () => {
       tenant_id: "tenant",
       domain_id: "domain",
       platform_path: "/used-car",
-      role: "buyer",
+      side: "demand",
     });
     expect(capability.role).toBe("buyer");
     expect(capability.access_token_expires_at).toBe("2099-01-01T00:00:00Z");

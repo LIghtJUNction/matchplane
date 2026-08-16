@@ -241,6 +241,12 @@ export function subplatformFieldLabel(
   return key.replace(/[_.-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+/** Resolve a configured contact channel label without teaching the kernel phone/WeChat names. */
+export function subplatformContactLabel(subplatform: SubplatformConfig, key: string): string {
+  const configured = subplatform.ui?.contactFields?.find((field) => field.key === key)?.label;
+  return configured?.trim() || key;
+}
+
 function validPricing(value: PricingConfig | undefined): PricingConfig | undefined {
   if (!value || typeof value !== "object") return undefined;
   const mode = value.mode;

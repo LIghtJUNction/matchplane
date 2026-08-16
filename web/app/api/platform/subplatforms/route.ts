@@ -59,7 +59,15 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "membershipPolicy must be public or invite" }, { status: 400 });
   }
 
-  const parentId = input.parentOrganizationId ?? null;
+  const requestedParentId = input.parentOrganizationId ?? null;
+  // A child registered without an explicit parent belongs to the deployment's root
+  // organization.  Never leave it as another top-level node: that would make the recursive
+  // router treat a package as a second root.  The root organization is created through the
+  // Better Auth bridge, not inferred from a child package.
+  const parentId = requestedParentId ?? await readRootOrganizationId(input.tenantId);
+  if (!parentId) {
+    return NextResponse.json({ error: "请先初始化根平台组织，再登记子平台" }, { status: 409 });
+  }
   const userRole = (session.user as { role?: string }).role;
   const canManage = await canManageParent(session.user.id, userRole, parentId);
   if (!canManage) return NextResponse.json({ error: "当前账号没有注册该平台节点的权限" }, { status: 403 });
@@ -183,6 +191,7 @@ export async function GET(request: Request): Promise<Response> {
        SELECT id, name, slug, "parentOrganizationId", "tenantId", "domainId", "sourceRepository", "createdAt"
          FROM "organization"
         WHERE "tenantId" = $2
+          AND "rootPlatform" = false
           AND ($3::uuid IS NULL OR id <> $3::uuid)
           AND (($1::uuid IS NULL AND "parentOrganizationId" IS NULL)
            OR id = $1::uuid)
@@ -265,24 +274,41 @@ async function canManageParent(userId: string, role: string | null | undefined, 
 async function validateParent(parentId: string | null, tenantId: string): Promise<string | null> {
   if (!parentId) return null;
   const result = await authDatabase.query(
-    `WITH RECURSIVE chain(id, parent_id, depth, tenant_id) AS (
-       SELECT id, "parentOrganizationId", 0, "tenantId" FROM "organization" WHERE id = $1::uuid
+    `WITH RECURSIVE chain(id, parent_id, depth, tenant_id, root_platform) AS (
+       SELECT id, "parentOrganizationId", 0, "tenantId", "rootPlatform"
+         FROM "organization"
+        WHERE id = $1::uuid
        UNION ALL
-       SELECT parent.id, parent."parentOrganizationId", chain.depth + 1, parent."tenantId"
+       SELECT parent.id, parent."parentOrganizationId", chain.depth + 1, parent."tenantId", parent."rootPlatform"
          FROM "organization" parent JOIN chain ON parent.id = chain.parent_id
         WHERE chain.depth < 64
      )
      SELECT count(*)::int AS count,
             coalesce(max(depth), 0)::int AS depth,
-            coalesce(bool_and(tenant_id = $2), false) AS "sameTenant"
+            coalesce(bool_and(tenant_id = $2), false) AS "sameTenant",
+            coalesce(bool_or(root_platform AND parent_id IS NULL), false) AS "reachesRoot"
        FROM chain`,
     [parentId, tenantId],
   );
-  const row = result.rows[0] as { count: number; depth: number; sameTenant: boolean } | undefined;
+  const row = result.rows[0] as { count: number; depth: number; sameTenant: boolean; reachesRoot: boolean } | undefined;
   if (!row || row.count === 0) return "parentOrganizationId 不存在";
   if (!row.sameTenant) return "parentOrganizationId 与 tenantId 不一致";
   if (row.depth >= 64) return "平台树深度超过 64 层，可能存在循环关系";
+  if (!row.reachesRoot) return "父平台尚未连接到唯一根平台组织";
   return null;
+}
+
+async function readRootOrganizationId(tenantId: string): Promise<string | null> {
+  const result = await authDatabase.query<{ id: string }>(
+    `SELECT id::text
+       FROM "organization"
+      WHERE "tenantId" = $1
+        AND "parentOrganizationId" IS NULL
+        AND "rootPlatform" = true
+      LIMIT 1`,
+    [tenantId],
+  );
+  return result.rows[0]?.id ?? null;
 }
 
 function validateSource(input: RegistrationRequest): string | null {
@@ -384,8 +410,8 @@ function validateManifestPricing(value: unknown): boolean {
 
 function validateManifestUi(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const ui = value as { chat?: unknown; copy?: unknown; filters?: unknown; supplyFields?: unknown };
-  if (Object.keys(ui).some((key) => key !== "chat" && key !== "copy" && key !== "filters" && key !== "supplyFields")) return false;
+  const ui = value as { chat?: unknown; copy?: unknown; filters?: unknown; supplyFields?: unknown; contactFields?: unknown };
+  if (Object.keys(ui).some((key) => key !== "chat" && key !== "copy" && key !== "filters" && key !== "supplyFields" && key !== "contactFields")) return false;
   if (ui.chat !== undefined) {
     if (!ui.chat || typeof ui.chat !== "object" || Array.isArray(ui.chat)) return false;
     if (Object.keys(ui.chat).length > 64 || Object.entries(ui.chat).some(([key, item]) =>
@@ -419,6 +445,18 @@ function validateManifestUi(value: unknown): boolean {
         || (item.required !== undefined && typeof item.required !== "boolean")
         || (item.placeholder !== undefined && !stringMatches(item.placeholder, /^.{0,500}$/u))
         || (item.options !== undefined && (!Array.isArray(item.options) || item.options.length > 64 || item.options.some((option) => !stringMatches(option, /^.{1,200}$/u))));
+    })) return false;
+  }
+  if (ui.contactFields !== undefined) {
+    if (!Array.isArray(ui.contactFields) || ui.contactFields.length > 32) return false;
+    if (ui.contactFields.some((field) => {
+      if (!field || typeof field !== "object" || Array.isArray(field)) return true;
+      const item = field as { key?: unknown; label?: unknown; type?: unknown; required?: unknown; placeholder?: unknown };
+      return !stringMatches(item.key, /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/)
+        || !stringMatches(item.label, /^.{1,200}$/u)
+        || (item.type !== undefined && !["text", "tel", "email"].includes(String(item.type)))
+        || (item.required !== undefined && typeof item.required !== "boolean")
+        || (item.placeholder !== undefined && !stringMatches(item.placeholder, /^.{0,200}$/u));
     })) return false;
   }
   return true;
@@ -461,6 +499,7 @@ interface Manifest {
     copy?: Record<string, string>;
     filters?: Array<{ key: string; label: string; source: "trust" | "price" | "attribute"; attribute?: string; value?: string }>;
     supplyFields?: Array<{ key: string; label: string; type?: string; required?: boolean; placeholder?: string; options?: string[] }>;
+    contactFields?: Array<{ key: string; label: string; type?: "text" | "tel" | "email"; required?: boolean; placeholder?: string }>;
   };
   rootApiVersion: "v1";
   entry: string;

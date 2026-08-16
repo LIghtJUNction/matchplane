@@ -22,25 +22,37 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
                 o.slug,
                 o."parentOrganizationId",
                 o."tenantId",
-                '/' || o.slug AS platform_path,
+                NULL::uuid AS domain_id,
+                '/'::text AS platform_path,
                 true AS path_active,
                 0 AS depth
            FROM "organization" o
           WHERE o."tenantId" = $1::text
             AND o."parentOrganizationId" IS NULL
+            AND o."rootPlatform" = true
          UNION ALL
          SELECT child.id,
                 child.slug,
                 child."parentOrganizationId",
                 child."tenantId",
-                platform_tree.platform_path || '/' || child.slug,
+                NULLIF(child."domainId", '')::uuid AS domain_id,
+                CASE WHEN platform_tree.platform_path = '/' THEN '/' || child.slug
+                     ELSE platform_tree.platform_path || '/' || child.slug END,
                 platform_tree.path_active
                   AND EXISTS (
                     SELECT 1
                       FROM subplatform_registrations registration
                      WHERE registration.tenant_id = $1::uuid
                        AND registration.slug = child.slug
+                       AND registration.domain_id = NULLIF(child."domainId", '')::uuid
                        AND registration.state = 'active'
+                       AND EXISTS (
+                         SELECT 1
+                           FROM domains domain
+                          WHERE domain.id = registration.domain_id
+                            AND domain.tenant_id = registration.tenant_id
+                            AND domain.status = 'active'
+                       )
                   ),
                 platform_tree.depth + 1
            FROM "organization" child
@@ -76,8 +88,13 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
                     r.artifact_entry,
                     r.version
                FROM subplatform_registrations r
+               JOIN domains d
+                 ON d.id = r.domain_id
+                AND d.tenant_id = r.tenant_id
+                AND d.status = 'active'
               WHERE r.tenant_id = $1::uuid
                 AND r.slug = tree.slug
+                AND r.domain_id = tree.domain_id
                 AND r.state = 'active'
               ORDER BY r.version DESC
               LIMIT 1

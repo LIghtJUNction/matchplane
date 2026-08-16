@@ -5,10 +5,11 @@ another platform, or both at the same time. A vertical is a replaceable package 
 path, for example `https://matx.tech/auto`. The package supplies presentation and domain adapters;
 it does not replace root identity, authorization, matching, contact consent, payment or audit.
 
-The deployment root is simply the node with no `parentOrganizationId`. If that node is mounted by
-another operator, it becomes that operator's child without changing its code or data model. Every
-node uses the same API, account, manifest, administrator, API-key and audit mechanisms; “root” and
-“subplatform” describe the current position in the tree, not different product types.
+The deployment root is the single Better Auth organization marked `rootPlatform=true` for the
+configured tenant; a missing parent alone is not enough to become a root. If that node is mounted
+by another operator, it becomes that operator's child without changing its code or data model.
+Every node uses the same API, account, manifest, administrator, API-key and audit mechanisms;
+“root” and “subplatform” describe the current position in the tree, not different product types.
 
 ## Identity and authorization
 

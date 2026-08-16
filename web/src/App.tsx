@@ -227,6 +227,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     <div className="account-menu-links">
                       <a role="menuitem" href={`${window.location.pathname}?role=buyer`}>{ui.buyerWorkspace}</a>
                       <a role="menuitem" href={`${window.location.pathname}?role=seller`}>{ui.sellerWorkspace}</a>
+                      {subplatform.slug !== "root" ? (
+                        <a role="menuitem" href={`${window.location.pathname}?role=subplatform_admin`}>{ui.subplatformAdmin}</a>
+                      ) : null}
                       {authUser.role === "rootSuperAdmin" || authUser.role === "rootAdmin" ? (
                         <a role="menuitem" href="/?role=platform">{ui.platformAdmin}</a>
                       ) : null}
@@ -271,6 +274,18 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           subplatform={subplatform}
           onClose={closeListing}
           onContact={async (selected) => {
+            const selectedPath = selected.platformPath || subplatform.path;
+            const selectedSubplatform = selectedPath !== subplatform.path && selected.subplatform
+              ? {
+                  ...(await loadSubplatform(selectedPath)),
+                  path: selectedPath,
+                  slug: selected.subplatform,
+                  tenantId: selected.tenantId,
+                  domainId: selected.domainId,
+                }
+              : subplatform;
+            const selectedTenantId = selected.tenantId || selectedSubplatform.tenantId;
+            const selectedDomainId = selected.domainId || selectedSubplatform.domainId;
             if (!isLiveMarketplaceEnabled()) {
               closeListing();
               setNotice(`${selected.title} ${subplatformCopy(subplatform, "contactRequestSubmittedSuffix", "的联系申请已提交")}`);
@@ -282,16 +297,16 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               setNotice("供给必须来自当前子平台的真实 API；当前未发送申请");
               return;
             }
-            if (!subplatform.domainId || (!isGenericOffer && !subplatform.currency)) {
+            if (!selectedDomainId || (!isGenericOffer && !selectedSubplatform.currency)) {
               setNotice("当前子平台尚未完成身份与结算配置；当前未发送申请");
               return;
             }
             try {
               const session = await getMarketplaceSession({
-                subplatform: subplatform.slug,
-                platformPath: subplatform.path,
-                tenantId: subplatform.tenantId,
-                domainId: subplatform.domainId,
+                subplatform: selectedSubplatform.slug,
+                platformPath: selectedPath,
+                tenantId: selectedTenantId,
+                domainId: selectedDomainId,
                 role: "buyer",
               });
               if (!session) {
@@ -301,7 +316,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               if (isGenericOffer && selected.offerId && selected.intentId) {
                 const introduction = await createMarketplaceIntroduction({
                   session,
-                  domainId: subplatform.domainId,
+                  domainId: selectedDomainId,
                   intentId: selected.intentId,
                   offerId: selected.offerId,
                   score: (selected.matchScore ?? 0) / 100,
@@ -313,18 +328,18 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 if (!introductionId) throw new Error("撮合结果缺少介绍编号，未发送联系申请");
                 await requestMarketplaceContact({
                   session,
-                  domainId: subplatform.domainId,
+                  domainId: selectedDomainId,
                   introductionId,
                 });
-              } else if (listingId && subplatform.currency) {
+              } else if (listingId && selectedSubplatform.currency) {
                 await createBuyerIntroduction({
                   session,
-                  domainId: subplatform.domainId,
+                  domainId: selectedDomainId,
                   listingId,
-                  narrative: subplatformCopy(subplatform, "contactIntentNarrative", "希望与供给方直接沟通并完成后续协商"),
+                  narrative: subplatformCopy(selectedSubplatform, "contactIntentNarrative", "希望与供给方直接沟通并完成后续协商"),
                   requirements: {},
-                  currency: subplatform.currency,
-                  currencyScale: subplatform.currencyScale ?? 0,
+                  currency: selectedSubplatform.currency,
+                  currencyScale: selectedSubplatform.currencyScale ?? 0,
                   exposureKey: `web-contact-${Date.now()}`,
                 });
               }
@@ -404,6 +419,7 @@ function appCopy(locale: "zh" | "en") {
       unifiedIdentity: "Unified identity",
       buyerWorkspace: "Buyer workspace",
       sellerWorkspace: "Seller workspace",
+      subplatformAdmin: "Platform admin",
       platformAdmin: "Platform admin",
       signOut: "Sign out",
       signedOut: "Signed out",
@@ -424,6 +440,7 @@ function appCopy(locale: "zh" | "en") {
     unifiedIdentity: "已登录的统一身份",
     buyerWorkspace: "买方工作台",
     sellerWorkspace: "卖方工作台",
+    subplatformAdmin: "子平台管理",
     platformAdmin: "根平台管理",
     signOut: "退出登录",
     signedOut: "已退出当前账号",
@@ -453,17 +470,34 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
     const terms = item.terms && typeof item.terms === "object" && !Array.isArray(item.terms) ? item.terms : {};
     const currencyScale = item.currency_scale;
     const termAmount = typeof terms.amount_minor === "string" ? terms.amount_minor : undefined;
+    const termAmountMin = typeof terms.amount_min_minor === "string" ? terms.amount_min_minor : undefined;
+    const termAmountMax = typeof terms.amount_max_minor === "string" ? terms.amount_max_minor : undefined;
     const termCurrency = typeof terms.currency === "string" ? terms.currency : undefined;
     const termScale = typeof terms.currency_scale === "number" && Number.isInteger(terms.currency_scale)
       ? terms.currency_scale
       : undefined;
+    const termPriceRange = termAmountMin && termAmountMax && termCurrency && termScale !== undefined
+      ? `${formatMoney(termAmountMin, termCurrency, termScale)} – ${formatMoney(termAmountMax, termCurrency, termScale)}`
+      : undefined;
+    const pricingMode = typeof terms.pricing_mode === "string" ? terms.pricing_mode : undefined;
+    const pricingNote = stringAttribute(terms, ["pricing_note", "pricing_label"]);
     const price = item.asking_amount && item.currency && typeof currencyScale === "number" && Number.isInteger(currencyScale)
       ? formatMoney(item.asking_amount, item.currency, currencyScale)
       : termAmount && termCurrency && termScale !== undefined
         ? formatMoney(termAmount, termCurrency, termScale)
-        : stringAttribute(terms, ["display_price", "price_label", "price"]) ?? "—";
+        : termPriceRange
+          ? termPriceRange
+          : pricingMode === "negotiable"
+            ? pricingNote ?? "可议价"
+            : pricingMode === "none"
+              ? pricingNote ?? "面议"
+              : stringAttribute(terms, ["display_price", "price_label", "price"]) ?? "—";
     return [{
       id,
+      tenantId: item.tenant_id,
+      domainId: item.domain_id,
+      platformPath: typeof item.platform_path === "string" ? item.platform_path : subplatform.path,
+      subplatform: typeof item.subplatform === "string" ? item.subplatform : subplatform.slug,
       title: item.display_name,
       subtitle,
       price,

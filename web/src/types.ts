@@ -5,6 +5,11 @@ export type Accent = "cactus" | "clay" | "heather" | "oat";
 /** Root-facing listing shape. Subplatforms map their domain fields into this view model. */
 export interface AssetListing {
   id: string;
+  /** Scope returned by the selected platform node; contact actions must use it. */
+  tenantId?: string;
+  domainId?: string;
+  platformPath?: string;
+  subplatform?: string;
   /** Generic marketplace offer identity when this result is not a legacy listing. */
   offerId?: string;
   /** Demand intent identity used to record a generic introduction. */

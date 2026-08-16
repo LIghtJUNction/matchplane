@@ -153,7 +153,10 @@ async fn main() -> anyhow::Result<()> {
             get(api::admin_gateways).post(api::mutate_gateway),
         )
         .route("/v1/admin/payments", get(api::admin_payments))
-        .route("/v1/admin/refunds", get(api::admin_refunds))
+        .route(
+            "/v1/admin/refunds",
+            get(api::admin_refunds).post(api::admin_refund),
+        )
         .route("/v1/admin/invoices", get(api::admin_invoices))
         .route(
             "/v1/admin/payment-routes",

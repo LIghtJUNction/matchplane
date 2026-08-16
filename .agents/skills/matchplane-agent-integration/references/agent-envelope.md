@@ -29,12 +29,12 @@ but cannot authorize contact exchange, payment, settlement, or a hidden cross-te
 
 ## Marketplace capability exchange
 
-An external buyer or seller Agent does not create a separate browser account on every child
+An external demand or supply Agent does not create a separate browser account on every child
 platform. A Better Auth organization API key is the machine identity; bind it to the smallest
-`marketplace:write` permission and set API-key metadata `agentRole` to `buyer`, `seller`, or
+`marketplace:write` permission and set API-key metadata `agentSide` to `demand`, `supply`, or
 `both`. Call `marketplace.agent.session` through `/api/mcp` (or
 `POST /api/marketplace/agent-session`) with the active `tenant_id`, `domain_id`, `platform_path`,
-and requested role. The platform verifies the mounted path, parent/child organization access, and
+and requested side. The platform verifies the mounted path, parent/child organization access, and
 active registration before returning a short-lived (15-minute) party bearer plus its
 `access_token_expires_at` deadline.
 

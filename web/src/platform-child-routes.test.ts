@@ -41,9 +41,8 @@ describe("platform child route visibility", () => {
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining("r.membership_policy = 'public'"),
       [
-        null,
-        "00000000-0000-4000-8000-000000000001",
         "/",
+        "00000000-0000-4000-8000-000000000001",
         "00000000-0000-4000-8000-000000000003",
         "00000000-0000-4000-8000-000000000004",
         false,
@@ -59,9 +58,8 @@ describe("platform child route visibility", () => {
     );
 
     expect(query.mock.calls[0]?.[1]).toEqual([
-      "used-car",
-      "00000000-0000-4000-8000-000000000001",
       "/used-car",
+      "00000000-0000-4000-8000-000000000001",
       null,
       "00000000-0000-4000-8000-000000000004",
       false,

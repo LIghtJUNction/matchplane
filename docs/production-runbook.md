@@ -201,9 +201,12 @@ root tenant and administrator assignments without creating any catalogue or vert
 root was provisioned without a domain, reuse the exact tenant UUID printed by that command as
 `--tenant-id` when adding a domain later; omitting it creates a new tenant identity. Set
 the printed values in the web service environment and restart it before opening the printed login
-path. If the deployment uses root-scoped Better Auth API keys, also set the operator-created root
-organization UUID as `MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID`; the web control plane will not
-infer that scope from a child package.
+path. After the web unit is reachable, sign in through `/login?role=platform` and press
+“初始化根平台组织” in the readiness panel. This calls Better Auth's organization API, marks the
+result as the root organization for this tenant, and adopts only legacy unparented child nodes.
+The operation is idempotent. `MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID` remains an optional
+operator pin for deployments that want to lock root-scoped API keys to one UUID; it is never
+inferred from a child package.
 
 After the web unit is reachable, open `/setup` (or `/admin`) to enter the root administrator
 workspace. If the root administrator email has not been configured yet, the web service remains

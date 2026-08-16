@@ -165,6 +165,31 @@ export interface PlatformSetupStatus {
   firstRun: { needsRootAccount: boolean; readyForAdmin: boolean };
 }
 
+export interface RootPlatformOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  tenantId: string;
+  domainId: string | null;
+}
+
+export async function createRootPlatformOrganization(input?: {
+  name?: string;
+  slug?: string;
+}): Promise<RootPlatformOrganization> {
+  const response = await fetch("/api/platform/root-organization", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input ?? {}),
+  });
+  const body = await response.json().catch(() => null) as { organization?: RootPlatformOrganization; error?: string } | null;
+  if (!response.ok || !body?.organization) {
+    throw new MarketplaceApiError(response.status, body?.error || "根平台组织初始化失败");
+  }
+  return body.organization;
+}
+
 export interface PlatformDomainRecord {
   id: string;
   slug: string;
@@ -597,6 +622,8 @@ export interface RecommendedBackendListing {
   asking_amount?: string;
   currency?: string;
   currency_scale?: number;
+  platform_path?: string;
+  subplatform?: string;
   commission_bps?: number;
   commission_collection?: string;
   status?: string;
@@ -1029,6 +1056,25 @@ export function getRefundAdminRecords(tenantId?: string, limit = 25): Promise<Re
   return paymentAdminRequest<RefundAdminRecord[]>(
     `refunds?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
+}
+
+export function createAdminRefund(input: {
+  tenantId?: string;
+  paymentId: string;
+  amount: string;
+  reason: string;
+  idempotencyKey?: string;
+}): Promise<RefundAdminRecord> {
+  return paymentAdminRequest<RefundAdminRecord>("refunds", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: input.tenantId,
+      payment_id: input.paymentId,
+      amount: input.amount,
+      reason: input.reason,
+      idempotency_key: input.idempotencyKey ?? `web-refund-${crypto.randomUUID()}`,
+    }),
+  });
 }
 
 export function getInvoiceAdminRecords(tenantId?: string, limit = 25): Promise<InvoiceAdminRecord[]> {

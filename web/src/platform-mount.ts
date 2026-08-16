@@ -28,24 +28,34 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
                 o.slug,
                 o."parentOrganizationId",
                 o."tenantId",
-                '/' || o.slug AS platform_path,
+                '/'::text AS platform_path,
                 true AS path_active
            FROM "organization" o
           WHERE o."tenantId" = $1::text
             AND o."parentOrganizationId" IS NULL
+            AND o."rootPlatform" = true
          UNION ALL
          SELECT child.id,
                 child.slug,
                 child."parentOrganizationId",
                 child."tenantId",
-                platform_tree.platform_path || '/' || child.slug,
+                CASE WHEN platform_tree.platform_path = '/' THEN '/' || child.slug
+                     ELSE platform_tree.platform_path || '/' || child.slug END,
                 platform_tree.path_active
                   AND EXISTS (
                     SELECT 1
                       FROM subplatform_registrations registration
                      WHERE registration.tenant_id = $1::uuid
                        AND registration.slug = child.slug
+                       AND registration.domain_id = NULLIF(child."domainId", '')::uuid
                        AND registration.state = 'active'
+                       AND EXISTS (
+                         SELECT 1
+                           FROM domains domain
+                          WHERE domain.id = registration.domain_id
+                            AND domain.tenant_id = registration.tenant_id
+                            AND domain.status = 'active'
+                       )
                   ) AS path_active
            FROM "organization" child
            JOIN platform_tree
@@ -85,18 +95,20 @@ export async function readActivePlatformScope(
                 o."parentOrganizationId",
                 o."tenantId" AS tenant_id,
                 o."domainId" AS domain_id,
-                '/' || o.slug AS platform_path,
+                '/'::text AS platform_path,
                 true AS path_active
            FROM "organization" o
           WHERE o."tenantId" = $1::text
             AND o."parentOrganizationId" IS NULL
+            AND o."rootPlatform" = true
          UNION ALL
          SELECT child.id,
                 child.slug,
                 child."parentOrganizationId",
                 child."tenantId",
                 child."domainId",
-                platform_tree.platform_path || '/' || child.slug,
+                CASE WHEN platform_tree.platform_path = '/' THEN '/' || child.slug
+                     ELSE platform_tree.platform_path || '/' || child.slug END,
                 platform_tree.path_active
                   AND EXISTS (
                     SELECT 1
@@ -105,6 +117,13 @@ export async function readActivePlatformScope(
                        AND registration.domain_id = NULLIF(child."domainId", '')::uuid
                        AND registration.slug = child.slug
                        AND registration.state = 'active'
+                       AND EXISTS (
+                         SELECT 1
+                           FROM domains domain
+                          WHERE domain.id = registration.domain_id
+                            AND domain.tenant_id = registration.tenant_id
+                            AND domain.status = 'active'
+                       )
                   )
            FROM "organization" child
            JOIN platform_tree ON child."parentOrganizationId" = platform_tree.id
@@ -138,7 +157,26 @@ export async function isPlatformPathAccessibleByOrganization(
   organizationId: string,
 ): Promise<boolean> {
   if (platformPath === "/") {
-    return process.env.MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID?.trim() === organizationId;
+    const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+    if (!rootTenantId || !isUuid(rootTenantId) || !isUuid(organizationId)) return false;
+    const configuredRootOrganizationId = process.env.MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID?.trim() ?? "";
+    try {
+      const result = await authDatabase.query(
+        `SELECT 1
+           FROM "organization"
+          WHERE id = $1::uuid
+            AND "tenantId" = $2
+            AND "parentOrganizationId" IS NULL
+            AND "rootPlatform" = true
+            AND ($3::uuid IS NULL OR id = $3::uuid)
+          LIMIT 1`,
+        [organizationId, rootTenantId, isUuid(configuredRootOrganizationId) ? configuredRootOrganizationId : null],
+      );
+      return result.rowCount === 1;
+    } catch (error) {
+      console.error("root platform organization lookup failed", error);
+      return false;
+    }
   }
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!rootTenantId || !isUuid(rootTenantId) || !isUuid(organizationId) || !isPlatformPath(platformPath)) return false;
@@ -149,23 +187,33 @@ export async function isPlatformPathAccessibleByOrganization(
          SELECT o.id,
                 o."parentOrganizationId",
                 o."tenantId",
-                '/' || o.slug AS platform_path,
+                '/'::text AS platform_path,
                 true AS path_active
            FROM "organization" o
           WHERE o."tenantId" = $1::text
             AND o."parentOrganizationId" IS NULL
+            AND o."rootPlatform" = true
          UNION ALL
          SELECT child.id,
                 child."parentOrganizationId",
                 child."tenantId",
-                platform_tree.platform_path || '/' || child.slug,
+                CASE WHEN platform_tree.platform_path = '/' THEN '/' || child.slug
+                     ELSE platform_tree.platform_path || '/' || child.slug END,
                 platform_tree.path_active
                   AND EXISTS (
                     SELECT 1
                       FROM subplatform_registrations registration
                      WHERE registration.tenant_id = $1::uuid
                        AND registration.slug = child.slug
+                       AND registration.domain_id = NULLIF(child."domainId", '')::uuid
                        AND registration.state = 'active'
+                       AND EXISTS (
+                         SELECT 1
+                           FROM domains domain
+                          WHERE domain.id = registration.domain_id
+                            AND domain.tenant_id = registration.tenant_id
+                            AND domain.status = 'active'
+                       )
                   ) AS path_active
            FROM "organization" child
            JOIN platform_tree

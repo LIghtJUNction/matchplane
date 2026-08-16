@@ -374,6 +374,7 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
 
 function roleOptions(canAssignOwner: boolean): Array<{ value: string; label: string }> {
   const roles = [
+    { value: "admin", label: "管理员" },
     { value: "subplatform_admin", label: "平台管理员" },
     { value: "moderator", label: "运营管理员" },
     { value: "member", label: "普通成员" },

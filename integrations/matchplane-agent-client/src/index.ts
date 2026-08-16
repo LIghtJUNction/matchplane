@@ -161,13 +161,13 @@ export class MatchPlaneAgentClient {
     tenant_id: string;
     domain_id: string;
     platform_path: string;
-    side?: AgentSide;
+    /** Canonical kernel capability side. Required for new clients. */
+    side: AgentSide;
     /** Deprecated compatibility alias; use side. */
     role?: AgentRole;
     display_name?: string;
   }): Promise<PartyCapability> {
-    const side = input.side ?? (input.role === "seller" ? "supply" : input.role === "buyer" ? "demand" : undefined);
-    if (!side) throw new Error("MatchPlane marketplace session requires side: demand or supply");
+    const side = input.side;
     if (input.role && ((input.role === "buyer" && side !== "demand") || (input.role === "seller" && side !== "supply"))) {
       throw new Error("MatchPlane marketplace session side and deprecated role disagree");
     }

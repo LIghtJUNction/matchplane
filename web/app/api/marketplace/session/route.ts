@@ -109,6 +109,9 @@ export async function POST(request: Request): Promise<Response> {
     if (configuredRootTenant && configuredRootTenant !== input.tenantId) {
       return NextResponse.json({ error: "tenantId 不属于根平台" }, { status: 403 });
     }
+    if (input.domainId && !(await activeRootDomain(input.tenantId, input.domainId))) {
+      return NextResponse.json({ error: "当前 domain 已停用或不属于根平台" }, { status: 404 });
+    }
   } else if (!(await activeSubplatformScope(input.tenantId, input.domainId, input.subplatform))) {
     return NextResponse.json({ error: "当前子平台没有可用的 active registration" }, { status: 404 });
   }
@@ -118,7 +121,7 @@ export async function POST(request: Request): Promise<Response> {
   // access to a different node.  The request origin is only a transport boundary; the database
   // scope is the authorization boundary.
   let membership = input.subplatform === "root"
-    ? await readOrganizationMembership(request, input.subplatform, identity.user.id)
+    ? await readRootOrganizationMembership(input.tenantId, identity.user.id)
     : await readOrganizationMembershipByScope(input.tenantId, input.domainId, input.subplatform, identity.user.id);
   const userRole = identity.user.role;
   const rootSuperAdmin = userRole === "rootSuperAdmin";
@@ -503,23 +506,29 @@ async function recordPlatformAuditEvent(input: {
   );
 }
 
-async function readOrganizationMembership(
-  request: Request,
-  slug: string,
+/** Root membership is tenant-scoped; its Better Auth slug is operator-configurable. */
+async function readRootOrganizationMembership(
+  tenantId: string,
   userId: string,
 ): Promise<{ role: string } | null> {
-  try {
-    const full = await auth.api.getFullOrganization({
-      query: { organizationSlug: slug },
-      headers: request.headers,
-    });
-    const members = (full as { members?: Array<{ userId: string; role: string }> } | null)?.members;
-    return members?.find((member) => member.userId === userId) ?? null;
-  } catch {
-    // A not-yet-registered subplatform has no Better Auth organization. Root superadmins can
-    // still provision it; ordinary identities must go through the invitation/claim flow.
-    return null;
-  }
+  const result = await authDatabase.query<{ role: string }>(
+    `SELECT m.role
+       FROM "member" m
+       JOIN "organization" o ON o.id = m."organizationId"
+      WHERE o."tenantId" = $1::text
+        AND o."parentOrganizationId" IS NULL
+        AND o."rootPlatform" = true
+        AND m."userId" = $2::uuid
+        AND ($3::uuid IS NULL OR o.id = $3::uuid)
+      LIMIT 1`,
+    [tenantId, userId, configuredRootOrganizationId()],
+  );
+  return result.rows[0] ?? null;
+}
+
+function configuredRootOrganizationId(): string | null {
+  const value = process.env.MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID?.trim();
+  return value && isUuid(value) ? value : null;
 }
 
 /** Read the Better Auth member projection without requiring a root-domain cookie. */
@@ -564,6 +573,9 @@ async function claimPublicSubplatformMembership(
     `SELECT o.id AS organization_id
        FROM "organization" o
        JOIN subplatform_registrations r ON r.slug = o.slug
+       JOIN domains d ON d.id = r.domain_id
+                    AND d.tenant_id = r.tenant_id
+                    AND d.status = 'active'
       WHERE o.slug = $1
         AND r.tenant_id = $2::uuid
         AND ($3::uuid IS NULL OR r.domain_id = $3::uuid)
@@ -599,6 +611,9 @@ async function activeSubplatformScope(
   const result = await authDatabase.query(
     `SELECT 1
        FROM subplatform_registrations
+       JOIN domains ON domains.id = subplatform_registrations.domain_id
+                    AND domains.tenant_id = subplatform_registrations.tenant_id
+                    AND domains.status = 'active'
       WHERE tenant_id = $1::uuid
         AND slug = $2
         AND ($3::uuid IS NULL OR domain_id = $3::uuid)
@@ -617,6 +632,9 @@ async function subplatformAllowsPublicClaim(
   const result = await authDatabase.query(
     `SELECT 1
        FROM subplatform_registrations
+       JOIN domains ON domains.id = subplatform_registrations.domain_id
+                    AND domains.tenant_id = subplatform_registrations.tenant_id
+                    AND domains.status = 'active'
       WHERE tenant_id = $1::uuid
         AND slug = $2
         AND ($3::uuid IS NULL OR domain_id = $3::uuid)
@@ -624,6 +642,19 @@ async function subplatformAllowsPublicClaim(
         AND membership_policy = 'public'
       LIMIT 1`,
     [tenantId, slug, domainId ?? null],
+  );
+  return result.rowCount === 1;
+}
+
+async function activeRootDomain(tenantId: string, domainId: string): Promise<boolean> {
+  const result = await authDatabase.query(
+    `SELECT 1
+       FROM domains
+      WHERE tenant_id = $1::uuid
+        AND id = $2::uuid
+        AND status = 'active'
+      LIMIT 1`,
+    [tenantId, domainId],
   );
   return result.rowCount === 1;
 }

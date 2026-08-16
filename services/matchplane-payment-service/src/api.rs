@@ -78,6 +78,17 @@ pub struct RefundRequest {
     notify_url: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct AdminRefundRequest {
+    payment_id: String,
+    refund_id: Option<String>,
+    tenant_id: String,
+    idempotency_key: String,
+    amount: String,
+    reason: String,
+    notify_url: Option<String>,
+}
+
 #[derive(Deserialize, Serialize)]
 pub struct CreateInvoiceRequest {
     invoice_id: Option<String>,
@@ -607,6 +618,39 @@ pub async fn refund(
 ) -> Result<(StatusCode, Json<RefundResponse>), ApiError> {
     require_admin(&state, &headers)?;
     let payment_id = parse_id(&payment_id)?;
+    refund_payment(state, payment_id, request).await
+}
+
+/// Administrator-facing refund entrypoint. The BFF keeps the payment bearer server-side while
+/// this route accepts the selected payment id and delegates to the same idempotent provider flow
+/// as the payment-scoped endpoint.
+pub async fn admin_refund(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<AdminRefundRequest>,
+) -> Result<(StatusCode, Json<RefundResponse>), ApiError> {
+    require_admin(&state, &headers)?;
+    let payment_id = parse_id(&request.payment_id)?;
+    refund_payment(
+        state,
+        payment_id,
+        RefundRequest {
+            refund_id: request.refund_id,
+            tenant_id: request.tenant_id,
+            idempotency_key: request.idempotency_key,
+            amount: request.amount,
+            reason: request.reason,
+            notify_url: request.notify_url,
+        },
+    )
+    .await
+}
+
+async fn refund_payment(
+    state: Arc<AppState>,
+    payment_id: PaymentId,
+    request: RefundRequest,
+) -> Result<(StatusCode, Json<RefundResponse>), ApiError> {
     let requested_refund_id =
         parse_optional_id::<RefundId>(request.refund_id.as_deref())?.unwrap_or_else(RefundId::new);
     let tenant_id = parse_id(&request.tenant_id)?;

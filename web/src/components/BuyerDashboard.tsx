@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 
-import { subplatformCopy, type SubplatformConfig } from "../subplatform";
+import { subplatformContactLabel, subplatformCopy, type SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 import {
   getMarketplaceIntroductions,
@@ -314,7 +314,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
                   <div>
                     <strong>{copy("contactRequestLabel", "一条撮合联系申请")}</strong>
                     <small>{buyerIntroductionStatus(introduction.status, copy)}</small>
-                    {contact ? <div className="buyer-contact-values">{Object.entries(contact.counterpart.contact).map(([key, value]) => <span key={key}>{key}: {value}</span>)}</div> : null}
+                    {contact ? <div className="buyer-contact-values">{Object.entries(contact.counterpart.contact).map(([key, value]) => <span key={key}>{subplatformContactLabel(subplatform, key)}: {value}</span>)}</div> : null}
                   </div>
                   {contact ? <span className="submission-status">{copy("contactVisibleLabel", "已可联系")}</span> : introduction.supply_contact_consent_at ? (
                     <button className="text-action" type="button" onClick={() => void releaseContact(introduction)} disabled={contactLoading === introduction.introduction_id}>
