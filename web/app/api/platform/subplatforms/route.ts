@@ -249,9 +249,9 @@ async function canManageParent(userId: string, role: string | null | undefined, 
   const result = await authDatabase.query(
     `SELECT 1 FROM member
       WHERE "organizationId" = $1::uuid AND "userId" = $2::uuid
-        AND role LIKE ANY($3::text[])
+        AND role = ANY($3::text[])
       LIMIT 1`,
-    [parentId, userId, ["%owner%", "%admin%", "%subplatform_admin%"]],
+    [parentId, userId, ["owner", "admin", "subplatform_admin"]],
   );
   return result.rowCount === 1;
 }
