@@ -59,7 +59,7 @@ const defaultChatCopy: ChatCopy = {
   buyerPending: "我先把你的目标、限制和优先级整理成一份匹配需求。",
   sellerPending: "我先把你的供给、价格和交付条件整理成一份资料。",
   buyerSuccess: "需求已发送，撮合会围绕你的真实目标展开",
-  sellerSuccess: "供给意图已记录，请在下方填写资料",
+  sellerSuccess: "供给描述已整理；请在下方提交资料，提交后才会写入系统",
 };
 
 function resolveChatCopy(subplatform: SubplatformConfig): ChatCopy {
