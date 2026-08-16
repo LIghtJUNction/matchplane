@@ -373,11 +373,16 @@ function validateManifestPricing(value: unknown): boolean {
 
 function validateManifestUi(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const ui = value as { chat?: unknown; filters?: unknown; supplyFields?: unknown };
-  if (Object.keys(ui).some((key) => key !== "chat" && key !== "filters" && key !== "supplyFields")) return false;
+  const ui = value as { chat?: unknown; copy?: unknown; filters?: unknown; supplyFields?: unknown };
+  if (Object.keys(ui).some((key) => key !== "chat" && key !== "copy" && key !== "filters" && key !== "supplyFields")) return false;
   if (ui.chat !== undefined) {
     if (!ui.chat || typeof ui.chat !== "object" || Array.isArray(ui.chat)) return false;
     if (Object.keys(ui.chat).length > 64 || Object.entries(ui.chat).some(([key, item]) =>
+      !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) || typeof item !== "string" || item.length > 500)) return false;
+  }
+  if (ui.copy !== undefined) {
+    if (!ui.copy || typeof ui.copy !== "object" || Array.isArray(ui.copy)) return false;
+    if (Object.keys(ui.copy).length > 128 || Object.entries(ui.copy).some(([key, item]) =>
       !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) || typeof item !== "string" || item.length > 500)) return false;
   }
   if (ui.filters !== undefined) {
@@ -441,6 +446,7 @@ interface Manifest {
   email?: { providerKey?: string; fromAddress?: string };
   ui?: {
     chat?: Record<string, string>;
+    copy?: Record<string, string>;
     filters?: Array<{ key: string; label: string; source: "trust" | "price" | "attribute"; attribute?: string; value?: string }>;
     supplyFields?: Array<{ key: string; label: string; type?: string; required?: boolean; placeholder?: string; options?: string[] }>;
   };
