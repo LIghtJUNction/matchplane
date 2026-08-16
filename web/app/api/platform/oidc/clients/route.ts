@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { auth, authDatabase } from "../../../../../src/lib/auth";
+import { auth, authDatabase, rootPlatformReferenceId } from "../../../../../src/lib/auth";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ROOT_REFERENCE_ID = "root-platform";
 const OIDC_SCOPES = "openid profile email";
 
 /**
@@ -28,7 +27,7 @@ export async function GET(request: Request): Promise<Response> {
          FROM "oauthClient"
         WHERE "referenceId" = $1
         ORDER BY "createdAt" DESC NULLS LAST, "clientId" ASC`,
-      [ROOT_REFERENCE_ID],
+      [rootPlatformReferenceId()],
     );
     return NextResponse.json(
       { clients: result.rows.map(toPublicClient) },
@@ -147,7 +146,7 @@ export async function PATCH(request: Request): Promise<Response> {
             SET "disabled" = $2, "updatedAt" = clock_timestamp()
           WHERE "clientId" = $1 AND "referenceId" = $3
           RETURNING "clientId", "disabled"`,
-        [clientId, action === "disable", ROOT_REFERENCE_ID],
+        [clientId, action === "disable", rootPlatformReferenceId()],
       );
       if (result.rowCount !== 1) return NextResponse.json({ error: "OIDC 客户端不存在" }, { status: 404 });
       if (action === "disable") {
@@ -213,7 +212,7 @@ export async function DELETE(request: Request): Promise<Response> {
       `UPDATE "oauthClient"
           SET "disabled" = true, "updatedAt" = clock_timestamp()
         WHERE "clientId" = $1 AND "referenceId" = $2`,
-      [clientId, ROOT_REFERENCE_ID],
+      [clientId, rootPlatformReferenceId()],
     );
     if (result.rowCount !== 1) return NextResponse.json({ error: "OIDC 客户端不存在" }, { status: 404 });
     await authDatabase.query(

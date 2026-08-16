@@ -16,23 +16,37 @@ interface RootContactField {
  * Bounded, secret-free first-run status for the root platform workspace.
  *
  * This endpoint intentionally does not expose account addresses, credentials, or database
- * identifiers beyond the configured root tenant id. It gives the administrator UI enough
- * information to distinguish an empty installation from an active platform without seeding
- * demo organizations or pretending that payment/routing data exists.
+ * identifiers beyond the configured root tenant and explicitly configured root organization.
+ * It gives the administrator UI enough information to distinguish an empty installation from an
+ * active platform without seeding demo organizations or pretending that payment/routing data
+ * exists.
  */
 export async function GET(): Promise<Response> {
   const configuredTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
   const tenantConfigured = isUuid(configuredTenantId);
+  const configuredRootOrganizationId = process.env.MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID?.trim() ?? "";
+  const rootOrganizationConfigured = isUuid(configuredRootOrganizationId);
   const rootAdminConfigured = isOperatorEmail(process.env.MATCHPLANE_ROOT_ADMIN_EMAIL);
 
   try {
-    const [tenantResult, domainsResult, registrationResult, accountResult, rootAdminResult] = await Promise.all([
+    const [tenantResult, rootOrganizationResult, domainsResult, registrationResult, accountResult, rootAdminResult] = await Promise.all([
       tenantConfigured
         ? authDatabase.query<{ slug: string; name: string }>(
             "SELECT slug, name FROM tenants WHERE id = $1::uuid LIMIT 1",
             [configuredTenantId],
           )
         : Promise.resolve({ rows: [], rowCount: 0 } as { rows: Array<{ slug: string; name: string }>; rowCount: number }),
+      tenantConfigured && rootOrganizationConfigured
+        ? authDatabase.query<{ id: string; slug: string; name: string; tenantId: string; domainId: string | null }>(
+            `SELECT id::text, slug, name, "tenantId" AS "tenantId", NULLIF("domainId", '') AS "domainId"
+               FROM "organization"
+              WHERE id = $1::uuid
+                AND "tenantId" = $2
+                AND "parentOrganizationId" IS NULL
+              LIMIT 1`,
+            [configuredRootOrganizationId, configuredTenantId],
+          )
+        : Promise.resolve({ rows: [], rowCount: 0 } as { rows: Array<{ id: string; slug: string; name: string; tenantId: string; domainId: string | null }>; rowCount: number }),
       tenantConfigured
         ? authDatabase.query<{ id: string; slug: string; name: string }>(
             `SELECT id, slug, name
@@ -67,6 +81,7 @@ export async function GET(): Promise<Response> {
       registrationResult.rows.map((row) => [row.state, Number.parseInt(row.count, 10) || 0]),
     );
     const tenant = tenantResult.rows[0] ?? null;
+    const rootOrganization = rootOrganizationResult.rows[0] ?? null;
     const identityAccounts = Number.parseInt(accountResult.rows[0]?.count ?? "0", 10) || 0;
     const rootAdminAccounts = Number.parseInt(rootAdminResult.rows[0]?.count ?? "0", 10) || 0;
     const activeChildren = registrations.active ?? 0;
@@ -80,6 +95,7 @@ export async function GET(): Promise<Response> {
           tenantExists: Boolean(tenant),
           tenantId: tenantConfigured ? configuredTenantId : null,
           tenant: tenant ? { slug: tenant.slug, name: tenant.name } : null,
+          organization: rootOrganization,
           rootAdminConfigured,
           identityAccounts,
           rootAdminAccounts,

@@ -24,6 +24,10 @@ existing ID or slug fails rather than overwriting durable configuration. To add 
 reuse the exact `--tenant-id` printed by the first invocation and pass the new domain flags; omitting
 `--tenant-id` creates a new UUID and is intentionally not an implicit lookup.
 
+Root-scoped Better Auth API keys require the operator to provide the corresponding organization UUID
+through `MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID`; the web service does not guess it from a child
+platform or a marketplace record.
+
 `serve` starts only a named packaged workload and forwards its environment and standard streams.
 The web workload uses `MATCHPLANE_WEB_NODE` and `MATCHPLANE_WEB_SERVER` when the defaults (`node`
 and `/usr/share/matchplane/web/server.js`) are not suitable. Supervisors remain responsible for

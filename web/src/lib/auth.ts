@@ -57,6 +57,16 @@ const configuredSocialProviders = configuredOAuthProviders();
 const oidcEnabled = process.env.MATCHPLANE_OIDC_ENABLED !== "false";
 const oidcIssuer = `${baseURL}/api/auth`;
 
+/**
+ * OIDC client ownership is scoped to this deployment's root tenant. The legacy fallback is kept
+ * only for local installations that have not configured a tenant yet; production setup requires
+ * MATCHPLANE_ROOT_TENANT_ID before any root client can be used.
+ */
+export function rootPlatformReferenceId(): string {
+  const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  return tenantId && isUuid(tenantId) ? `root-platform:${tenantId}` : "root-platform";
+}
+
 if (
   isProductionRuntime &&
   !isProductionBuild &&
@@ -72,7 +82,10 @@ if (isProductionRuntime && !isProductionBuild) {
   if (!isHttpsOrigin(baseURL)) {
     throw new Error("BETTER_AUTH_URL must be an HTTPS origin in production");
   }
-  if (!configuredRootAdminEmail || isPlaceholderEmail(configuredRootAdminEmail)) {
+  // A missing address is a safe, observable first-run state: the web service can expose the
+  // bounded setup status and tell the operator what to configure.  A supplied placeholder is
+  // still fatal so a deployment can never accidentally promote an example account.
+  if (configuredRootAdminEmail && isPlaceholderEmail(configuredRootAdminEmail)) {
     throw new Error("MATCHPLANE_ROOT_ADMIN_EMAIL must be an operator-owned address in production");
   }
 }
@@ -172,7 +185,7 @@ export const auth = betterAuth({
       // Cross-origin clients are root-managed confidential applications.  Keep the
       // ownership scope stable across root administrators while rejecting all
       // organization-scoped users from the provider's CRUD surface.
-      clientReference: ({ user }) => isRootPlatformRole(user?.role) ? "root-platform" : undefined,
+      clientReference: ({ user }) => isRootPlatformRole(user?.role) ? rootPlatformReferenceId() : undefined,
       clientPrivileges: ({ action, user }) =>
         isRootPlatformRole(user?.role) && ["create", "read", "update", "delete", "list", "rotate"].includes(action),
     })] : []),
@@ -328,6 +341,10 @@ function isHttpsOrigin(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function isPlaceholderEmail(value: string): boolean {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
-import { auth, authDatabase } from "../../../../src/lib/auth";
+import { auth, authDatabase, rootPlatformReferenceId } from "../../../../src/lib/auth";
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
 import { isMountedPlatformPath, readActivePlatformScope } from "../../../../src/platform-mount";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
@@ -340,14 +340,14 @@ async function resolveMarketplaceIdentity(
        JOIN subplatform_registrations r
          ON r.id::text = c."metadata"->>'matchplane_subplatform_registration_id'
       WHERE c."clientId" = $1
-        AND c."referenceId" = 'root-platform'
+        AND c."referenceId" = $5
         AND c."disabled" IS NOT TRUE
         AND r.tenant_id = $2::uuid
         AND r.domain_id = $3::uuid
         AND r.slug = $4
         AND r.state = 'active'
       LIMIT 1`,
-    [clientId, input.tenantId, input.domainId, input.subplatform],
+    [clientId, input.tenantId, input.domainId, input.subplatform, rootPlatformReferenceId()],
   );
   if (registration.rowCount !== 1) {
     return {

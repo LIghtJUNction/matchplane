@@ -51,6 +51,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
             AND length(platform_tree.platform_path) < 4_096
        ), active_release AS (
          SELECT tree.platform_path,
+                tree.id AS "organizationId",
                 tree.path_active,
                 registration.manifest,
                 registration.tenant_id AS "tenantId",
@@ -100,7 +101,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
               LIMIT 1
            ) market_default ON true
        )
-       SELECT manifest, "tenantId", "domainId", "assetSchemaId", "assetSchema", currency, "currencyScale",
+       SELECT manifest, "organizationId", "tenantId", "domainId", "assetSchemaId", "assetSchema", currency, "currencyScale",
               "manifestDigest", "buildDigest", "artifactLocator", "artifactEntry", version
          FROM active_release
         WHERE platform_path = $2
@@ -110,6 +111,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
     );
     const row = result.rows[0] as {
       manifest?: unknown;
+      organizationId?: unknown;
       tenantId?: unknown;
       domainId?: unknown;
       assetSchemaId?: unknown;
@@ -139,6 +141,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
     const manifest = {
       ...(row.manifest as Record<string, unknown>),
       ...(assets ? { assets } : {}),
+      organizationId: typeof row.organizationId === "string" ? row.organizationId : undefined,
       tenantId: typeof row.tenantId === "string" ? row.tenantId : undefined,
       domainId: typeof row.domainId === "string" ? row.domainId : undefined,
       assetSchemaId: typeof row.assetSchemaId === "string" ? row.assetSchemaId : undefined,

@@ -201,9 +201,15 @@ root tenant and administrator assignments without creating any catalogue or vert
 root was provisioned without a domain, reuse the exact tenant UUID printed by that command as
 `--tenant-id` when adding a domain later; omitting it creates a new tenant identity. Set
 the printed values in the web service environment and restart it before opening the printed login
-path.
+path. If the deployment uses root-scoped Better Auth API keys, also set the operator-created root
+organization UUID as `MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID`; the web control plane will not
+infer that scope from a child package.
 
-After the web unit is reachable, open `GET /api/platform/setup` to inspect the bounded first-run
+After the web unit is reachable, open `/setup` (or `/admin`) to enter the root administrator
+workspace. If the root administrator email has not been configured yet, the web service remains
+available in a locked setup state and exposes only bounded status; it does not grant a fallback
+administrator. Configure the operator-owned `MATCHPLANE_ROOT_ADMIN_EMAIL`, restart the web unit,
+and then complete the verified Better Auth sign-up. You can also open `GET /api/platform/setup` to inspect the bounded first-run
 state. It reports only whether the configured root tenant exists, whether active domains and child
 registrations are present, and whether any Better Auth identity exists; it never returns credentials
 or account addresses. The first production account must be created from `/login?role=platform` with

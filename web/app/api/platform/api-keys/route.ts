@@ -161,9 +161,63 @@ export async function GET(request: Request): Promise<Response> {
   }
 }
 
+export async function PATCH(request: Request): Promise<Response> {
+  const input = await parseBody(request);
+  if (!input.organizationId || !isUuid(input.organizationId)) return NextResponse.json({ error: "organizationId must be a UUID" }, { status: 400 });
+  if (!input.keyId || !isUuid(input.keyId)) return NextResponse.json({ error: "keyId must be a UUID" }, { status: 400 });
+  const guard = await requireKeyManager(request, input.organizationId);
+  if (guard.response) return guard.response;
+  if (input.enabled !== undefined && typeof input.enabled !== "boolean") return NextResponse.json({ error: "enabled must be boolean" }, { status: 400 });
+  if (input.enabled === undefined && input.name === undefined) return NextResponse.json({ error: "enabled or name is required" }, { status: 400 });
+  if (input.name !== undefined && (typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 32)) {
+    return NextResponse.json({ error: "name must contain 1..=32 characters" }, { status: 400 });
+  }
+  if (!(await keyBelongsToOrganization(input.keyId, input.organizationId))) {
+    return NextResponse.json({ error: "API Key 不属于当前平台" }, { status: 404 });
+  }
+  try {
+    const updated = await auth.api.updateApiKey({
+      body: {
+        configId: "platform",
+        keyId: input.keyId,
+        ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+        ...(input.name === undefined ? {} : { name: input.name.trim() }),
+      },
+      headers: request.headers,
+    });
+    return NextResponse.json(updated, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    console.error("platform API key update failed", error);
+    return NextResponse.json({ error: "API Key 更新失败" }, { status: 403 });
+  }
+}
+
+export async function DELETE(request: Request): Promise<Response> {
+  const input = await parseBody(request);
+  if (!input.organizationId || !isUuid(input.organizationId)) return NextResponse.json({ error: "organizationId must be a UUID" }, { status: 400 });
+  if (!input.keyId || !isUuid(input.keyId)) return NextResponse.json({ error: "keyId must be a UUID" }, { status: 400 });
+  const guard = await requireKeyManager(request, input.organizationId);
+  if (guard.response) return guard.response;
+  if (!(await keyBelongsToOrganization(input.keyId, input.organizationId))) {
+    return NextResponse.json({ error: "API Key 不属于当前平台" }, { status: 404 });
+  }
+  try {
+    await auth.api.deleteApiKey({
+      body: { configId: "platform", keyId: input.keyId },
+      headers: request.headers,
+    });
+    return new Response(null, { status: 204 });
+  } catch (error) {
+    console.error("platform API key deletion failed", error);
+    return NextResponse.json({ error: "API Key 撤销失败" }, { status: 403 });
+  }
+}
+
 interface ApiKeyRequest {
   organizationId?: string;
+  keyId?: string;
   name?: string;
+  enabled?: boolean;
   description?: string;
   expiresIn?: number;
   permissions?: Record<string, string[]>;
@@ -195,6 +249,40 @@ async function readOrganization(
   } catch {
     return null;
   }
+}
+
+async function requireKeyManager(request: Request, organizationId: string): Promise<{ response?: Response }> {
+  if (!hasTrustedBrowserOrigin(request)) return { response: NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 }) };
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) return { response: NextResponse.json({ error: "Better Auth session is required" }, { status: 401 }) };
+  if (!(await belongsToConfiguredRootTenant(organizationId))) {
+    return { response: NextResponse.json({ error: "API Key 只能管理当前 root tenant 的平台组织" }, { status: 403 }) };
+  }
+  const userRole = (session.user as { role?: string }).role;
+  const globalManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
+  let organization = await readOrganization(request, organizationId);
+  if (!organization && globalManager) {
+    try {
+      await auth.api.addMember({ body: { organizationId, userId: session.user.id, role: "admin" } });
+      organization = await readOrganization(request, organizationId);
+    } catch {
+      // The authoritative membership read below still decides access.
+    }
+  }
+  const member = organization?.members?.find((candidate) => candidate.userId === session.user.id);
+  const scopedManager = member?.role.split(",").some((role) => role === "owner" || role === "admin" || role === "subplatform_admin");
+  if (!organization || (!globalManager && !scopedManager)) {
+    return { response: NextResponse.json({ error: "平台管理员权限不足" }, { status: 403 }) };
+  }
+  return {};
+}
+
+async function keyBelongsToOrganization(keyId: string, organizationId: string): Promise<boolean> {
+  const result = await authDatabase.query(
+    `SELECT 1 FROM "apikey" WHERE id = $1::uuid AND "configId" = 'platform' AND "referenceId" = $2 LIMIT 1`,
+    [keyId, organizationId],
+  );
+  return result.rowCount === 1;
 }
 
 /**

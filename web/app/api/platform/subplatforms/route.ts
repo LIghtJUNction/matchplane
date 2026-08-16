@@ -173,6 +173,7 @@ export async function GET(request: Request): Promise<Response> {
   }
   const parentId = new URL(request.url).searchParams.get("parentOrganizationId");
   if (parentId && !isUuid(parentId)) return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
+  const configuredRootOrganizationId = process.env.MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID?.trim() ?? null;
   const userRole = (session.user as { role?: string }).role;
   if (!(await canManageParent(session.user.id, userRole, parentId || null))) {
     return NextResponse.json({ error: "平台管理员权限不足" }, { status: 403 });
@@ -182,6 +183,7 @@ export async function GET(request: Request): Promise<Response> {
        SELECT id, name, slug, "parentOrganizationId", "tenantId", "domainId", "sourceRepository", "createdAt"
          FROM "organization"
         WHERE "tenantId" = $2
+          AND ($3::uuid IS NULL OR id <> $3::uuid)
           AND (($1::uuid IS NULL AND "parentOrganizationId" IS NULL)
            OR id = $1::uuid)
        UNION ALL
@@ -212,7 +214,11 @@ export async function GET(request: Request): Promise<Response> {
           LIMIT 1
        ) registration ON true
       ORDER BY "createdAt" ASC`,
-    [parentId || null, configuredTenantId],
+    [
+      parentId || null,
+      configuredTenantId,
+      configuredRootOrganizationId && isUuid(configuredRootOrganizationId) ? configuredRootOrganizationId : null,
+    ],
   );
   return NextResponse.json({ organizations: rows.rows }, { headers: { "cache-control": "no-store" } });
 }

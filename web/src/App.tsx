@@ -183,6 +183,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   ) : (
     <PlatformDashboard
       paymentMode={paymentMode}
+      rootRole={authUser?.role}
       onRequestModeChange={() => setModeDialogOpen(true)}
       onNotice={setNotice}
     />

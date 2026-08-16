@@ -32,6 +32,8 @@ export interface SubplatformConfig {
   brandName: string;
   label: string;
   description: string;
+  /** Better Auth organization id for an active child; supplied by the root manifest endpoint. */
+  organizationId?: string;
   tenantId?: string;
   domainId?: string;
   assetSchemaId?: string;
@@ -149,6 +151,7 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       label?: string;
       tenantId?: string;
       domainId?: string;
+      organizationId?: string;
       assetSchemaId?: string;
       currencyScale?: number;
       currency?: string;
@@ -182,6 +185,7 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       description: manifest.description?.trim() || base.description,
       tenantId: manifest.tenantId,
       domainId: manifest.domainId,
+      organizationId: manifest.organizationId,
       assetSchemaId: manifest.assetSchemaId,
       currencyScale: Number.isInteger(manifest.currencyScale) ? manifest.currencyScale : undefined,
       currency: manifest.currency?.trim() || undefined,

@@ -29,11 +29,14 @@ import {
   getRefundAdminRecords,
   isLiveMarketplaceEnabled,
   activateSubplatform,
+  createPlatformDomain,
+  getPlatformDomains,
   registerSubplatform,
   saveInvoiceProvider,
   savePaymentGateway,
   savePaymentRoute,
   switchInvoiceMode,
+  updatePlatformDomain,
   uploadSubplatformArchive,
   type InvoiceProviderRecord,
   type InvoiceAdminRecord,
@@ -42,26 +45,31 @@ import {
   type PaymentGatewayRecord,
   type PaymentRouteRecord,
   type PlatformSetupStatus,
+  type PlatformDomainRecord,
   type RefundAdminRecord,
   type SubplatformArchiveUpload,
   type SubplatformOrganizationRecord,
 } from "../api";
 import { ModeDialog } from "./Overlays";
+import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { MetricCard, SectionHeading, spring } from "./Primitives";
 
 interface PlatformDashboardProps {
   paymentMode: "test" | "production";
+  rootRole?: string | null;
   onRequestModeChange: () => void;
   onNotice: (message: string) => void;
 }
 
 export function PlatformDashboard({
   paymentMode,
+  rootRole,
   onRequestModeChange,
   onNotice,
 }: PlatformDashboardProps) {
   const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
   const [setupError, setSetupError] = useState(false);
+  const [domains, setDomains] = useState<PlatformDomainRecord[]>([]);
   const [subplatforms, setSubplatforms] = useState<SubplatformOrganizationRecord[]>([]);
   const [gateways, setGateways] = useState<PaymentGatewayRecord[]>([]);
   const [paymentRoutes, setPaymentRoutes] = useState<PaymentRouteRecord[]>([]);
@@ -75,6 +83,7 @@ export function PlatformDashboard({
   const [routeEditorOpen, setRouteEditorOpen] = useState(false);
   const [invoiceEditorOpen, setInvoiceEditorOpen] = useState(false);
   const [invoiceModeDialogOpen, setInvoiceModeDialogOpen] = useState(false);
+  const [domainEditorOpen, setDomainEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [gatewayName, setGatewayName] = useState("");
   const [gatewayKind, setGatewayKind] = useState<PaymentGatewayRecord["kind"]>("test");
@@ -90,6 +99,8 @@ export function PlatformDashboard({
   const [invoiceMode, setInvoiceMode] = useState<"test" | "production">("test");
   const [invoiceSettings, setInvoiceSettings] = useState("{}");
   const [invoiceCredentialRef, setInvoiceCredentialRef] = useState("");
+  const [domainSlug, setDomainSlug] = useState("");
+  const [domainName, setDomainName] = useState("");
   const [subplatformEditorOpen, setSubplatformEditorOpen] = useState(false);
   const [subplatformSourceKind, setSubplatformSourceKind] = useState<"git" | "archive">("git");
   const [subplatformParentId, setSubplatformParentId] = useState("");
@@ -106,19 +117,44 @@ export function PlatformDashboard({
   const [subplatformMembershipPolicy, setSubplatformMembershipPolicy] = useState<"public" | "invite">("public");
   const [subplatformArchive, setSubplatformArchive] = useState<File | null>(null);
   const [subplatformUpload, setSubplatformUpload] = useState<SubplatformArchiveUpload | null>(null);
+  const accessOrganizations: SubplatformOrganizationRecord[] = [
+    ...(setup?.root.organization ? [
+      {
+        id: setup.root.organization.id,
+        isRoot: true,
+        name: setup.root.organization.name,
+        slug: setup.root.organization.slug,
+        parentOrganizationId: null,
+        tenantId: setup.root.organization.tenantId,
+        domainId: setup.root.organization.domainId,
+        sourceRepository: null,
+        createdAt: "",
+        registrationId: null,
+        registrationState: null,
+        buildDigest: null,
+        manifestDigest: null,
+      } satisfies SubplatformOrganizationRecord,
+    ] : []),
+    ...subplatforms.filter((organization) => organization.id !== setup?.root.organization?.id),
+  ];
 
   useEffect(() => {
+    if (!rootRole) return;
     let mounted = true;
-    void getPlatformSetupStatus()
-      .then((value) => { if (mounted) setSetup(value); })
+    void Promise.all([getPlatformSetupStatus(), getPlatformDomains()])
+      .then(([status, records]) => {
+        if (!mounted) return;
+        setSetup(status);
+        setDomains(records);
+      })
       .catch(() => { if (mounted) setSetupError(true); });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [rootRole]);
 
   useEffect(() => {
-    if (!isLiveMarketplaceEnabled()) return;
+    if (!rootRole || !isLiveMarketplaceEnabled()) return;
     let mounted = true;
     void Promise.allSettled([
       getPaymentGateways(),
@@ -146,7 +182,7 @@ export function PlatformDashboard({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [rootRole]);
 
   useEffect(() => {
     if (!subplatformDomainId && setup?.domains[0]) setSubplatformDomainId(setup.domains[0].id);
@@ -173,6 +209,51 @@ export function PlatformDashboard({
 
   const refreshSubplatforms = async () => {
     setSubplatforms(await getSubplatformOrganizations());
+  };
+
+  const refreshDomains = async () => {
+    const [status, records] = await Promise.all([getPlatformSetupStatus(), getPlatformDomains()]);
+    setSetup(status);
+    setDomains(records);
+  };
+
+  const submitDomain = async () => {
+    const slug = domainSlug.trim().toLowerCase();
+    const name = domainName.trim();
+    if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) {
+      onNotice("domain slug 只能使用小写字母、数字和短横线");
+      return;
+    }
+    if (!name || name.length > 200) {
+      onNotice("domain 名称必须为 1..200 个字符");
+      return;
+    }
+    setSaving(true);
+    try {
+      await createPlatformDomain({ slug, name });
+      await refreshDomains();
+      setDomainSlug("");
+      setDomainName("");
+      setDomainEditorOpen(false);
+      onNotice(`domain ${slug} 已创建`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "domain 创建失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleDomain = async (domain: PlatformDomainRecord) => {
+    setSaving(true);
+    try {
+      await updatePlatformDomain({ id: domain.id, status: domain.status === "active" ? "disabled" : "active" });
+      await refreshDomains();
+      onNotice(`domain ${domain.slug} 已${domain.status === "active" ? "停用" : "启用"}`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "domain 状态更新失败");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const resetSubplatformEditor = () => {
@@ -518,6 +599,33 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
+        <section className="surface domain-panel" aria-labelledby="domain-title">
+          <SectionHeading eyebrow="平台范围" title="管理 domain" action={domainEditorOpen ? "关闭" : "新增 domain"} onAction={() => setDomainEditorOpen((open) => !open)} />
+          <p className="subplatform-intro">domain 是平台树挂载和权限隔离的稳定范围；创建后才能把子平台注册到对应路径。</p>
+          {domains.length ? (
+            <div className="subplatform-list" aria-label="根平台 domain 列表">
+              {domains.map((domain) => (
+                <div className="subplatform-row" key={domain.id}>
+                  <span className="subplatform-row-icon" aria-hidden="true"><GitBranch size={18} /></span>
+                  <span className="subplatform-row-copy"><strong>{domain.name}</strong><small>{domain.slug} · v{domain.version}</small></span>
+                  <span className={`subplatform-state state-${domain.status}`}>{domain.status === "active" ? "启用" : "停用"}</span>
+                  <button className="button button-light subplatform-activate" type="button" disabled={saving} onClick={() => void toggleDomain(domain)}>{domain.status === "active" ? "停用" : "启用"}</button>
+                </div>
+              ))}
+            </div>
+          ) : <div className="subplatform-empty"><GitBranch size={22} aria-hidden="true" /><p>还没有 domain；先创建一个平台范围。</p></div>}
+          {domainEditorOpen ? (
+            <div className="admin-editor" aria-label="新增 domain">
+              <div className="admin-editor-heading"><strong>新增平台 domain</strong><button type="button" onClick={() => setDomainEditorOpen(false)}>关闭</button></div>
+              <div className="subplatform-form-grid">
+                <label><span>slug</span><input value={domainSlug} onChange={(event) => setDomainSlug(event.target.value)} placeholder="例如 marketplace" autoComplete="off" /></label>
+                <label><span>名称</span><input value={domainName} onChange={(event) => setDomainName(event.target.value)} placeholder="平台范围名称" /></label>
+              </div>
+              <button className="button button-dark" type="button" disabled={saving} onClick={() => void submitDomain()}>{saving ? "保存中…" : "创建 domain"}</button>
+            </div>
+          ) : null}
+        </section>
+
         <section className="surface subplatform-panel" aria-labelledby="subplatform-title">
           <div className="subplatform-header">
             <div>
@@ -596,6 +704,8 @@ export function PlatformDashboard({
             </div>
           ) : null}
         </section>
+
+        <PlatformAccessPanel organizations={accessOrganizations} rootRole={rootRole} onNotice={onNotice} />
 
         <section className="surface gateway-panel" aria-labelledby="gateway-title">
           <SectionHeading eyebrow="标准化支付接口" title="支付网关" action="配置网关" onAction={() => setGatewayEditorOpen(true)} />

@@ -148,6 +148,13 @@ export interface PlatformSetupStatus {
     tenantExists: boolean;
     tenantId: string | null;
     tenant: { slug: string; name: string } | null;
+    organization: {
+      id: string;
+      slug: string;
+      name: string;
+      tenantId: string;
+      domainId: string | null;
+    } | null;
     rootAdminConfigured: boolean;
     identityAccounts: number;
     rootAdminAccounts: number;
@@ -156,6 +163,261 @@ export interface PlatformSetupStatus {
   registrations: Record<string, number>;
   routing: { activeChildren: number; ready: boolean };
   firstRun: { needsRootAccount: boolean; readyForAdmin: boolean };
+}
+
+export interface PlatformDomainRecord {
+  id: string;
+  slug: string;
+  name: string;
+  status: "active" | "disabled";
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlatformMemberRecord {
+  id: string;
+  userId: string;
+  role: string;
+  createdAt: string;
+  user: { id: string; name: string; email: string; image?: string } | null;
+}
+
+export interface PlatformInvitationRecord {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: string;
+  status: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface PlatformMemberDirectory {
+  organization: {
+    id: string;
+    name: string;
+    slug: string;
+    parentOrganizationId: string | null;
+    tenantId: string;
+    domainId: string | null;
+  };
+  members: PlatformMemberRecord[];
+  invitations: PlatformInvitationRecord[];
+  canAssignOwner: boolean;
+}
+
+export async function getPlatformMembers(organizationId: string): Promise<PlatformMemberDirectory> {
+  const response = await fetch(`/api/platform/members?organizationId=${encodeURIComponent(organizationId)}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as Partial<PlatformMemberDirectory> & { error?: string } | null;
+  if (!response.ok || !body?.organization) {
+    throw new MarketplaceApiError(response.status, body?.error || "成员列表读取失败");
+  }
+  return body as PlatformMemberDirectory;
+}
+
+export async function invitePlatformMember(input: {
+  organizationId: string;
+  email: string;
+  role: string;
+  resend?: boolean;
+}): Promise<PlatformInvitationRecord> {
+  const response = await fetch("/api/platform/members", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { invitation?: PlatformInvitationRecord; error?: string } | null;
+  if (!response.ok || !body?.invitation) throw new MarketplaceApiError(response.status, body?.error || "成员邀请失败");
+  return body.invitation;
+}
+
+export async function updatePlatformMember(input: {
+  organizationId: string;
+  memberId: string;
+  role: string;
+}): Promise<PlatformMemberRecord> {
+  const response = await fetch("/api/platform/members", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { member?: PlatformMemberRecord; error?: string } | null;
+  if (!response.ok || !body?.member) throw new MarketplaceApiError(response.status, body?.error || "成员权限更新失败");
+  return body.member;
+}
+
+export async function removePlatformMember(input: {
+  organizationId: string;
+  memberIdOrEmail?: string;
+  invitationId?: string;
+}): Promise<void> {
+  const response = await fetch("/api/platform/members", {
+    method: "DELETE",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    throw new MarketplaceApiError(response.status, body?.error || "成员移除失败");
+  }
+}
+
+export interface PlatformAdministratorRecord {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+  role: string;
+  createdAt: string;
+  banned?: boolean;
+}
+
+export async function getPlatformAdministrators(): Promise<PlatformAdministratorRecord[]> {
+  const response = await fetch("/api/platform/administrators", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as { administrators?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "账号列表读取失败");
+  return Array.isArray(body?.administrators) ? body.administrators as PlatformAdministratorRecord[] : [];
+}
+
+export async function updatePlatformAdministrator(input: {
+  userId: string;
+  role: "rootAdmin" | "user";
+}): Promise<PlatformAdministratorRecord> {
+  const response = await fetch("/api/platform/administrators", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { administrator?: PlatformAdministratorRecord; error?: string } | null;
+  if (!response.ok || !body?.administrator) throw new MarketplaceApiError(response.status, body?.error || "根管理员权限更新失败");
+  return body.administrator;
+}
+
+export interface PlatformApiKeyRecord {
+  id: string;
+  name: string | null;
+  start: string | null;
+  prefix: string | null;
+  referenceId: string;
+  enabled: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  permissions?: Record<string, string[]> | string | null;
+  metadata?: Record<string, unknown> | string | null;
+  key?: string;
+}
+
+export async function getPlatformApiKeys(organizationId: string): Promise<PlatformApiKeyRecord[]> {
+  const response = await fetch(`/api/platform/api-keys?organizationId=${encodeURIComponent(organizationId)}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as { apiKeys?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "API Key 列表读取失败");
+  return Array.isArray(body?.apiKeys) ? body.apiKeys as PlatformApiKeyRecord[] : [];
+}
+
+export async function createPlatformApiKey(input: {
+  organizationId: string;
+  name: string;
+  expiresIn?: number;
+  permissions?: Record<string, string[]>;
+  agentSide?: "demand" | "supply" | "both";
+}): Promise<PlatformApiKeyRecord> {
+  const response = await fetch("/api/platform/api-keys", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as PlatformApiKeyRecord & { error?: string } | null;
+  if (!response.ok || !body?.id) throw new MarketplaceApiError(response.status, body?.error || "API Key 创建失败");
+  return body;
+}
+
+export async function updatePlatformApiKey(input: { organizationId: string; keyId: string; enabled: boolean }): Promise<PlatformApiKeyRecord> {
+  const response = await fetch("/api/platform/api-keys", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as PlatformApiKeyRecord & { error?: string } | null;
+  if (!response.ok || !body?.id) throw new MarketplaceApiError(response.status, body?.error || "API Key 更新失败");
+  return body;
+}
+
+export async function revokePlatformApiKey(input: { organizationId: string; keyId: string }): Promise<void> {
+  const response = await fetch("/api/platform/api-keys", {
+    method: "DELETE",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    throw new MarketplaceApiError(response.status, body?.error || "API Key 撤销失败");
+  }
+}
+
+export interface PlatformOidcClientRecord {
+  clientId: string;
+  clientName: string | null;
+  clientUri: string | null;
+  redirectUris: string[];
+  disabled: boolean;
+  requirePkce: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  matchplane?: Record<string, unknown>;
+}
+
+export async function getPlatformOidcClients(): Promise<PlatformOidcClientRecord[]> {
+  const response = await fetch("/api/platform/oidc/clients", { credentials: "include", headers: { accept: "application/json" } });
+  const body = await response.json().catch(() => null) as { clients?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "OIDC 客户端列表读取失败");
+  return Array.isArray(body?.clients) ? body.clients as PlatformOidcClientRecord[] : [];
+}
+
+export async function createPlatformOidcClient(input: {
+  subplatformRegistrationId: string;
+  clientName: string;
+  redirectUris: string[];
+}): Promise<PlatformOidcClientRecord & { clientSecret?: string; client_secret?: string }> {
+  const response = await fetch("/api/platform/oidc/clients", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as PlatformOidcClientRecord & { client_id?: string; clientSecret?: string; client_secret?: string; error?: string } | null;
+  const clientId = body?.clientId || body?.client_id;
+  if (!response.ok || !clientId) throw new MarketplaceApiError(response.status, body?.error || "OIDC 客户端创建失败");
+  return { ...body, clientId };
+}
+
+export async function updatePlatformOidcClient(input: { clientId: string; action: "enable" | "disable" | "rotate-secret" }): Promise<Record<string, unknown>> {
+  const response = await fetch("/api/platform/oidc/clients", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as Record<string, unknown> & { error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "OIDC 客户端更新失败");
+  return body || {};
 }
 
 export interface PlatformChildSummary {
@@ -180,11 +442,12 @@ export async function getPlatformChildren(path = "/"): Promise<PlatformChildSumm
 
 export interface SubplatformOrganizationRecord {
   id: string;
+  isRoot?: boolean;
   name: string;
   slug: string;
   parentOrganizationId: string | null;
   tenantId: string;
-  domainId: string;
+  domainId: string | null;
   sourceRepository: string | null;
   createdAt: string;
   registrationId: string | null;
@@ -488,6 +751,40 @@ export async function getPlatformSetupStatus(): Promise<PlatformSetupStatus> {
     throw new MarketplaceApiError(response.status, "平台初始化状态暂时不可用");
   }
   return body as PlatformSetupStatus;
+}
+
+export async function getPlatformDomains(): Promise<PlatformDomainRecord[]> {
+  const response = await fetch("/api/platform/domains", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as { domains?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "domain 列表读取失败");
+  return Array.isArray(body?.domains) ? body.domains as PlatformDomainRecord[] : [];
+}
+
+export async function createPlatformDomain(input: { slug: string; name: string }): Promise<PlatformDomainRecord> {
+  const response = await fetch("/api/platform/domains", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { domain?: PlatformDomainRecord; error?: string } | null;
+  if (!response.ok || !body?.domain) throw new MarketplaceApiError(response.status, body?.error || "domain 创建失败");
+  return body.domain;
+}
+
+export async function updatePlatformDomain(input: { id: string; name?: string; status?: "active" | "disabled" }): Promise<PlatformDomainRecord> {
+  const response = await fetch("/api/platform/domains", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { domain?: PlatformDomainRecord; error?: string } | null;
+  if (!response.ok || !body?.domain) throw new MarketplaceApiError(response.status, body?.error || "domain 更新失败");
+  return body.domain;
 }
 
 export async function getSubplatformOrganizations(parentOrganizationId?: string): Promise<SubplatformOrganizationRecord[]> {

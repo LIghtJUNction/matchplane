@@ -9,6 +9,7 @@ const { getSession, handler, query } = vi.hoisted(() => ({
 vi.mock("./lib/auth", () => ({
   auth: { api: { getSession }, handler },
   authDatabase: { query },
+  rootPlatformReferenceId: () => "root-platform",
 }));
 vi.mock("./lib/internal-auth", () => ({
   loadInternalBearer: vi.fn(async () => "internal-test-token"),
