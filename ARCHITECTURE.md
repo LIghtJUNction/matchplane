@@ -54,8 +54,11 @@ Agent routing is likewise a platform-owned control-plane operation. The root cho
 authorized direct children, invokes the configured provider with a bounded multi-step budget, and
 records `cost_bearer = platform` plus provider usage in `platform_ai_usage`. Provider keys remain
 server-side; buyers, sellers, and mounted subplatforms never receive a token bill or a browser
-credential. Skills and MCP tools are subplatform-owned extension points behind the stable
-`matchplane.agent/v1` envelope, not an excuse to bypass authorization or spend without a budget.
+credential. Hosted calls are admitted under both per-subject and deployment-wide hourly quotas;
+external buyer/seller Agents use caller-funded handoffs and MCP capabilities instead of consuming
+the root provider account. Skills and MCP tools are subplatform-owned extension points behind the
+stable `matchplane.agent/v1` envelope, not an excuse to bypass authorization or spend without a
+budget.
 
 For `offline_direct`, buyer and seller settle the vehicle price with each other. The isolated payment
 service is optional. The primary off-platform revenue policy is seller-funded promotion: fixed,

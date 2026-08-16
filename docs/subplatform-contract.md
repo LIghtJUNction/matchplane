@@ -182,7 +182,10 @@ When a buyer or seller brings its own Agent, that Agent owns its provider creden
 costs; calls into MatchPlane MCP are bounded tool calls, not an invitation to spend from the root
 provider account. Provider credentials stay server-side, requests carry bounded input/step/output
 budgets, and hosted routing audits `cost_bearer: "platform"`, the selected model, and
-provider-reported usage when available. A subplatform may still operate its own MCP infrastructure,
+provider-reported usage when available. Hosted calls are additionally constrained by both the
+per-subject `MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR` limit and the deployment-wide
+`MATCHPLANE_ROUTER_AI_GLOBAL_REQUESTS_PER_HOUR` limit; external Agents remain caller-funded.
+A subplatform may still operate its own MCP infrastructure,
 but it cannot shift an unbounded model call to a browser, charge a party for root tokens, or silently
 reuse a root credential.
 The normative Agent/Skill/MCP envelope is

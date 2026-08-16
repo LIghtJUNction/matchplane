@@ -81,7 +81,8 @@ export async function POST(request: Request): Promise<Response> {
                   authUserId: actor.subject,
                   requestId,
                   platformPath: currentPath,
-                  limit: configuredAiRequestsPerHour(),
+                  perSubjectLimit: configuredAiRequestsPerHour(),
+                  globalLimit: configuredAiGlobalRequestsPerHour(),
                 }))) {
                   throw new PlatformRouterQuotaExceededError();
                 }
@@ -182,18 +183,30 @@ async function admitPlatformAiCall(input: {
   authUserId: string;
   requestId: string;
   platformPath: string;
-  limit: number;
+  perSubjectLimit: number;
+  globalLimit: number;
 }): Promise<boolean> {
   const client = await authDatabase.connect();
   try {
     await client.query("BEGIN");
+    // The per-subject limit prevents one identity from monopolizing the hosted router; the
+    // global limit prevents a large number of verified identities from multiplying the
+    // platform's provider bill without an operator changing an explicit deployment setting.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('matchplane:platform-ai:global'))");
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.authUserId]);
     await client.query(
       `DELETE FROM platform_ai_call_admissions
-        WHERE auth_user_id = $1
-          AND created_at < clock_timestamp() - interval '2 hours'`,
-      [input.authUserId],
+        WHERE created_at < clock_timestamp() - interval '2 hours'`,
     );
+    const globalRecent = await client.query<{ count: number }>(
+      `SELECT count(*)::int AS count
+         FROM platform_ai_call_admissions
+        WHERE created_at >= clock_timestamp() - interval '1 hour'`,
+    );
+    if (Number(globalRecent.rows[0]?.count ?? 0) >= input.globalLimit) {
+      await client.query("ROLLBACK");
+      return false;
+    }
     const recent = await client.query<{ count: number }>(
       `SELECT count(*)::int AS count
          FROM platform_ai_call_admissions
@@ -202,7 +215,7 @@ async function admitPlatformAiCall(input: {
       [input.authUserId],
     );
     const count = Number(recent.rows[0]?.count ?? 0);
-    if (count >= input.limit) {
+    if (count >= input.perSubjectLimit) {
       await client.query("ROLLBACK");
       return false;
     }
@@ -225,6 +238,11 @@ async function admitPlatformAiCall(input: {
 function configuredAiRequestsPerHour(): number {
   const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_REQUESTS_PER_HOUR ?? String(DEFAULT_AI_REQUESTS_PER_HOUR), 10);
   return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(10_000, parsed)) : DEFAULT_AI_REQUESTS_PER_HOUR;
+}
+
+function configuredAiGlobalRequestsPerHour(): number {
+  const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_GLOBAL_REQUESTS_PER_HOUR ?? String(DEFAULT_AI_REQUESTS_PER_HOUR), 10);
+  return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(100_000, parsed)) : DEFAULT_AI_REQUESTS_PER_HOUR;
 }
 
 function configuredAiMaxSteps(): number {
