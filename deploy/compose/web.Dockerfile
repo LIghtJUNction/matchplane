@@ -14,7 +14,11 @@ RUN --mount=type=cache,id=matchplane-web-cargo-registry,target=/usr/local/cargo/
     cargo build --release --locked -p xtask --bin matchplane \
     && install -Dm755 target/release/matchplane /build/out/matchplane
 
-FROM oven/bun:1.3.14@sha256:50317d83cd5a5ae1d8b35b3379c69f57ce1a0dbf4def91f0965653d767851834 AS builder
+# Keep the repository's pinned Bun release, but use the glibc-based image for the build stage.
+# The Alpine/musl image intermittently crashes with SIGILL while Next/Turbopack builds on the
+# GitHub-hosted x86 runner; this stage still runs both dependency installation and the build with
+# Bun, while the final runtime remains the pinned Node image below.
+FROM oven/bun:1.3.14-debian@sha256:431b37ce1acfed987e4f5b6c86a9f210ff63285a912fc5f21e18aeac0cb067ef AS builder
 
 WORKDIR /app
 COPY web/package.json web/bun.lock ./
