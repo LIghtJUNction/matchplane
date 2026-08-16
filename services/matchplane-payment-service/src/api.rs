@@ -1366,10 +1366,14 @@ fn validate_payment_request(
         request.offline_deal_id.is_some(),
         request.payer_party_id.is_some(),
     ) {
-        ("online_platform", _, false, false)
+        // Generic domains may attach a payment to any bounded source reference.  A payer
+        // capability is optional for operator-initiated online checkout and required when a
+        // participant is charged directly; the old offline-deal tuple remains a compatibility
+        // adapter only.
+        ("online_platform", _, false, _)
         | ("offline_direct", "platform_commission", true, true) => Ok(()),
         _ => Err(ApiError::bad_request(
-            "offline_direct accepts only a platform_commission payment linked to both offline_deal_id and payer_party_id",
+            "transaction channel requires a valid generic source or compatible offline deal",
         )),
     }
 }

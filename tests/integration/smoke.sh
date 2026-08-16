@@ -33,7 +33,9 @@ wait_for() {
 wait_for 'gateway readiness' "curl --fail --silent '$base_url/health/ready' | jq -e '.status == \"ready\"'"
 
 unauthenticated_core=$(curl --silent --output /dev/null --write-out '%{http_code}' \
-  --request POST --header 'content-type: application/json' --data '{}' "$base_url/v1/embeddings")
+  --request POST --header 'content-type: application/json' \
+  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"asset_id\":\"$asset_id\",\"embedding_model_id\":\"$model_id\",\"values\":[0.1,0.2,0.3]}" \
+  "$base_url/v1/embeddings")
 test "$unauthenticated_core" = 401
 
 curl --fail-with-body --silent --request POST "$base_url/v1/embeddings" \
@@ -137,6 +139,6 @@ platform_audit_assertion=$("${compose[@]}" exec -T postgres psql --username matc
              WHERE table_name = 'marketplace_subplatform_memberships');")
 test "$platform_audit_assertion" = '1|1'
 
-bash "$repository_root/tests/integration/marketplace-smoke.sh"
+bash "$repository_root/tests/integration/generic-marketplace-smoke.sh"
 
 echo 'MatchPlane end-to-end smoke test passed'

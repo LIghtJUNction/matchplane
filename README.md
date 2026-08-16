@@ -72,12 +72,14 @@ followed by `bun run --cwd web dev`; the Next.js development server listens on
 `/usr/share/matchplane/web` in every Linux package; the packaged `matchplane-web.service` serves
 the UI and Better Auth routes.
 
-The generic marketplace kernel supports seller exposure analytics, explainable recommendations,
-consent-controlled introductions, and offline settlement without assuming what is being matched.
-The package under `subplatforms/auto` is only a compatibility adapter: it supplies its own schema
-and UI and is not seeded into a clean root deployment. Its legacy HTTP routes are disabled unless
-an operator explicitly sets `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true`; new packages
-use the manifest-declared generic contract. See
+The generic marketplace kernel supports neutral demand/supply participants, explainable
+recommendations, consent-controlled introductions, and bounded source references for the separate
+payment service without assuming what is being matched. Register a participant through
+`POST /v1/marketplace/participants` with `marketplace_sides`, then publish opaque
+`attributes`/`terms` supplied by the vertical or participant. The package under `subplatforms/auto`
+is only a compatibility adapter: it supplies its own schema and UI and is not seeded into a clean
+root deployment. Its legacy HTTP routes are disabled unless an operator explicitly sets
+`MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true`; new packages use the manifest-declared generic contract. See
 [docs/marketplace-payments.md](docs/marketplace-payments.md) for the payment and commission
 boundary.
 

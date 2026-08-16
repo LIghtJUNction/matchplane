@@ -169,6 +169,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/embeddings", post(upsert_embedding))
         .route("/v1/candidates/search", post(search_candidates))
         .route("/v1/marketplace/parties", post(marketplace::create_party))
+        // Generic callers use neutral participant terminology.  The legacy `/parties` route is
+        // retained for existing clients; both handlers persist the same capability projection.
+        .route(
+            "/v1/marketplace/participants",
+            post(marketplace::create_participant),
+        )
         .route(
             "/v1/admin/marketplace/parties/session",
             post(marketplace::ensure_party_session),

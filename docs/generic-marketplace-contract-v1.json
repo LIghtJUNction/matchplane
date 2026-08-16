@@ -5,6 +5,23 @@
   "description": "The root persists bounded intent, offer and consent-gated introduction records. Vertical attributes and terms remain opaque JSON objects.",
   "version": "v1",
   "resources": {
+    "participant": {
+      "create": {
+        "method": "POST",
+        "path": "/v1/marketplace/participants",
+        "required": ["tenant_id", "external_key", "display_name", "marketplace_sides", "contact"],
+        "properties": {
+          "party_id": { "type": ["string", "null"], "format": "uuid" },
+          "tenant_id": { "type": "string", "format": "uuid" },
+          "domain_id": { "type": ["string", "null"], "format": "uuid" },
+          "platform_path": { "type": "string" },
+          "external_key": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "display_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "marketplace_sides": { "type": "array", "items": { "enum": ["demand", "supply"] }, "minItems": 1, "maxItems": 2, "uniqueItems": true },
+          "contact": { "type": "object" }
+        }
+      }
+    },
     "intent": {
       "create": {
         "method": "POST",

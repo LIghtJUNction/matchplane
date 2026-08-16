@@ -279,6 +279,7 @@ between a platform Agent and a subplatform-owned schema or retrieval adapter:
 
 | Resource | Endpoint | Authority and purpose |
 | --- | --- | --- |
+| participant | `POST /v1/marketplace/participants` | Registers a scoped participant with one or both kernel capabilities in `marketplace_sides`; no vertical role label is required. |
 | intent | `POST /v1/marketplace/intents` | An authenticated party creates a `demand` or `supply` narrative with opaque JSON `attributes` and `terms`. |
 | intent | `GET /v1/marketplace/intents/{id}?tenant_id=&participant_id=` | The owning party reads its intent. |
 | offer | `POST /v1/marketplace/offers` | An authenticated supply party creates a draft offer; `asset_id` is optional for services and other verticals. |

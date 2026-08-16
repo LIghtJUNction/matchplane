@@ -41,7 +41,9 @@ pub(super) struct CreatePartyRequest {
     platform_path: Option<String>,
     external_key: String,
     display_name: String,
-    role: String,
+    /// Optional compatibility label. Generic callers should send `marketplace_sides` instead;
+    /// the storage projection derives the old label only at this adapter boundary.
+    role: Option<String>,
     /// Generic kernel capabilities. Omitted only for legacy callers; then derived from `role`.
     #[serde(default)]
     marketplace_sides: Option<Vec<String>>,
@@ -323,12 +325,16 @@ pub(super) async fn create_party(
 ) -> Result<(StatusCode, Json<CreatedPartyResponse>), ApiError> {
     validate_text(&request.external_key, "external_key", 256)?;
     validate_text(&request.display_name, "display_name", 200)?;
-    if !matches!(request.role.as_str(), "buyer" | "seller" | "both") {
+    if let Some(role) = request.role.as_deref()
+        && !matches!(role, "buyer" | "seller" | "both")
+    {
         return Err(ApiError::bad_request(
             "role must be buyer, seller, or both".to_owned(),
         ));
     }
-    let marketplace_sides = resolve_marketplace_sides(&request.role, request.marketplace_sides)?;
+    let marketplace_sides =
+        resolve_marketplace_sides(request.role.as_deref(), request.marketplace_sides)?;
+    let compatibility_role = compatibility_role_for_sides(&marketplace_sides);
     let contact = normalize_contact(&request.contact)?;
     let contact_bytes = serde_json::to_vec(&contact)
         .map_err(|error| ApiError::bad_request(format!("contact is invalid: {error}")))?;
@@ -398,7 +404,7 @@ pub(super) async fn create_party(
             platform_path,
             external_key: request.external_key,
             display_name: request.display_name,
-            role: request.role,
+            role: compatibility_role,
             marketplace_sides,
             access_token_hash,
             access_token_expires_at,
@@ -419,6 +425,25 @@ pub(super) async fn create_party(
     ))
 }
 
+/// Registers a participant through the domain-neutral surface.  Compatibility role labels are
+/// deliberately not accepted here; only the stable kernel capabilities are part of this API.
+pub(super) async fn create_participant(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<CreatePartyRequest>,
+) -> Result<(StatusCode, Json<CreatedPartyResponse>), ApiError> {
+    if request.marketplace_sides.is_none() {
+        return Err(ApiError::bad_request(
+            "marketplace_sides is required for generic participants".to_owned(),
+        ));
+    }
+    if request.role.is_some() {
+        return Err(ApiError::bad_request(
+            "generic participants use marketplace_sides instead of role".to_owned(),
+        ));
+    }
+    create_party(State(state), Json(request)).await
+}
+
 /// Bridges an authenticated Better Auth session to a tenant-scoped marketplace capability.
 /// Only the Next server, holding the gateway operator secret, may call this endpoint.
 pub(super) async fn ensure_party_session(
@@ -436,7 +461,8 @@ pub(super) async fn ensure_party_session(
             "role must be buyer, seller, or both".to_owned(),
         ));
     }
-    let marketplace_sides = resolve_marketplace_sides(&request.role, request.marketplace_sides)?;
+    let marketplace_sides =
+        resolve_marketplace_sides(Some(request.role.as_str()), request.marketplace_sides)?;
     let tenant_id = parse_id(&request.tenant_id)?;
     let platform_path = normalize_platform_path(request.platform_path.as_deref().unwrap_or("/"))?;
     let scope_domain_id = request
@@ -478,7 +504,7 @@ pub(super) async fn ensure_party_session(
             platform_path,
             external_key: request.external_key,
             display_name: request.display_name,
-            role: request.role,
+            role: compatibility_role_for_sides(&marketplace_sides),
             marketplace_sides,
             access_token_hash: Sha256::digest(access_token.as_bytes()).to_vec(),
             access_token_expires_at,
@@ -1437,10 +1463,10 @@ fn default_promotion_policy() -> String {
 }
 
 fn resolve_marketplace_sides(
-    role: &str,
+    role: Option<&str>,
     requested: Option<Vec<String>>,
 ) -> Result<Vec<String>, ApiError> {
-    let sides = requested.unwrap_or_else(|| match role {
+    let sides = requested.unwrap_or_else(|| match role.unwrap_or("both") {
         "buyer" => vec!["demand".to_owned()],
         "seller" => vec!["supply".to_owned()],
         _ => vec!["demand".to_owned(), "supply".to_owned()],
@@ -1459,6 +1485,17 @@ fn resolve_marketplace_sides(
         ));
     }
     Ok(sides)
+}
+
+/// The SQL projection still carries the pre-generic role column for existing integrations.  New
+/// callers never need to know those labels: generic sides are translated once at the HTTP/storage
+/// boundary and all kernel authorization uses `marketplace_sides`.
+fn compatibility_role_for_sides(sides: &[String]) -> String {
+    match sides {
+        [side] if side == "demand" => "buyer".to_owned(),
+        [side] if side == "supply" => "seller".to_owned(),
+        _ => "both".to_owned(),
+    }
 }
 
 pub(super) fn contact_aad(tenant_id: TenantId, party_id: MarketplacePartyId) -> Vec<u8> {
