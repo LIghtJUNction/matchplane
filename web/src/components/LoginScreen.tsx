@@ -195,8 +195,8 @@ export function LoginScreen() {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await authClient.signIn.oauth2({
-        providerId: provider,
+      const result = await authClient.signIn.social({
+        provider,
         callbackURL: next,
         errorCallbackURL: `/login?role=${role}&next=${encodeURIComponent(next)}`,
         ...(oauthQuery ? { oauth_query: oauthQuery, additionalData: { query: oauthQuery } } : {}),

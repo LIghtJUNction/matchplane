@@ -367,6 +367,11 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
       providerId,
       clientId,
       clientSecret,
+      accountSubject: ({ profile }) => {
+        const subject = firstProfileString(profile, ["sub", "id", "openid", "unionid", "user_id", "uid"]);
+        if (!subject) throw new Error(`${providerId} OAuth profile has no stable subject`);
+        return subject;
+      },
       authorizationUrl,
       tokenUrl,
       userInfoUrl,
@@ -376,7 +381,6 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
         const email = firstProfileString(profile, ["email", "email_address"])
           ?? `${providerId}.${subject || "account"}@oauth.matchplane.invalid`;
         return {
-          id: subject ? `${providerId}:${subject}` : undefined,
           name: firstProfileString(profile, ["name", "nickname", "nick_name"]) ?? `${providerId} 用户`,
           email,
           // Never treat the mere presence of an email field as proof that the provider
