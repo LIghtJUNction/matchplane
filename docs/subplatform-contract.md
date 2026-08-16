@@ -104,7 +104,7 @@ workflow stages and MCP tool names only; it contains no endpoints, credentials o
 configuration.
 
 Domain copy, pricing capabilities, filters and seller fields belong to the package, not the root implementation. A
-package may declare `pricing`, `ui.chat`, `ui.filters` and `ui.supplyFields` in its manifest; the root validates
+package may declare `pricing`, `ui.chat`, `ui.copy`, `ui.filters` and `ui.supplyFields` in its manifest; the root validates
 and passes those values to the generic shell/plugin. The root never ships a sample listing,
 vertical trust claim, or default business currency. A seller submits the values defined by the
 active package schema, while the root stores and forwards the resulting structured attributes.

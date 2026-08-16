@@ -25,6 +25,8 @@ export interface SubplatformConfig {
   /** Optional copy/schema hints owned by the mounted subplatform; root UI remains domain-neutral. */
   ui?: {
     chat?: Record<string, string>;
+    /** Human-facing labels are supplied by the mounted package, not inferred by the root. */
+    copy?: Record<string, string>;
     filters?: Array<{
       key: string;
       label: string;
@@ -119,6 +121,7 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       email?: { providerKey?: string; fromAddress?: string };
       ui?: {
         chat?: Record<string, string>;
+        copy?: Record<string, string>;
         filters?: NonNullable<SubplatformConfig["ui"]>["filters"];
         supplyFields?: NonNullable<SubplatformConfig["ui"]>["supplyFields"];
       };
@@ -168,6 +171,34 @@ export function pricingFor(subplatform: SubplatformConfig): PricingConfig {
   return { mode: "none" };
 }
 
+/** Resolve a bounded package-owned label with a root-owned generic fallback. */
+export function subplatformCopy(
+  subplatform: SubplatformConfig,
+  key: string,
+  fallback: string,
+): string {
+  const value = subplatform.ui?.copy?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+/** Resolve a human label for a schema attribute without exposing machine keys in the UI. */
+export function subplatformFieldLabel(
+  subplatform: SubplatformConfig,
+  key: string,
+): string {
+  const configured = subplatform.ui?.supplyFields?.find((field) => field.key === key)?.label;
+  if (configured?.trim()) return configured.trim();
+  const properties = subplatform.assetSchema?.properties;
+  if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+    const descriptor = (properties as Record<string, unknown>)[key];
+    if (descriptor && typeof descriptor === "object" && !Array.isArray(descriptor)) {
+      const title = (descriptor as { title?: unknown }).title;
+      if (typeof title === "string" && title.trim()) return title.trim();
+    }
+  }
+  return key.replace(/[_.-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 function validPricing(value: PricingConfig | undefined): PricingConfig | undefined {
   if (!value || typeof value !== "object") return undefined;
   const mode = value.mode;
@@ -192,6 +223,9 @@ function validUi(value: SubplatformConfig["ui"] | undefined): SubplatformConfig[
   const chat = value.chat && typeof value.chat === "object"
     ? Object.fromEntries(Object.entries(value.chat).filter(([key, item]) => /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) && typeof item === "string" && item.length <= 500))
     : undefined;
+  const copy = value.copy && typeof value.copy === "object"
+    ? Object.fromEntries(Object.entries(value.copy).filter(([key, item]) => /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) && typeof item === "string" && item.length <= 500))
+    : undefined;
   const filters = Array.isArray(value.filters)
     ? value.filters.filter((filter) => filter && typeof filter.key === "string" && /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(filter.key)
       && typeof filter.label === "string" && filter.label.length <= 200
@@ -206,9 +240,10 @@ function validUi(value: SubplatformConfig["ui"] | undefined): SubplatformConfig[
       && (!field.options || (Array.isArray(field.options) && field.options.every((option) => typeof option === "string" && option.length <= 200))))
       .slice(0, 64)
     : undefined;
-  if (!chat && !filters?.length && !supplyFields?.length) return undefined;
+  if (!chat && !copy && !filters?.length && !supplyFields?.length) return undefined;
   return {
     ...(chat ? { chat } : {}),
+    ...(copy ? { copy } : {}),
     ...(filters?.length ? { filters } : {}),
     ...(supplyFields?.length ? { supplyFields } : {}),
   };

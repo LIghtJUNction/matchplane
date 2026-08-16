@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 
-import type { SubplatformConfig } from "../subplatform";
+import { subplatformCopy, type SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 import { getPlatformChildren, type PlatformChildSummary } from "../api";
 import { ListingVisual, SectionHeading, spring } from "./Primitives";
@@ -35,6 +35,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   const isRoot = subplatform.slug === "root";
   const savedKey = `matchplane.saved.${subplatform.path}`;
   const filterDefinitions = subplatform.ui?.filters ?? [];
+  const copy = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
 
   useEffect(() => {
     window.localStorage.setItem(savedKey, JSON.stringify([...saved]));
@@ -96,13 +97,13 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
           <div className="hero-copy">
             <span className="hero-kicker">
               <Sparkles size={16} aria-hidden="true" />
-              需求由你定义
+              {copy("demandEyebrow", "需求由你定义")}
             </span>
             <h1 id="buyer-hero-title">
-              把目标说清楚，
-              <span>找到合适的供给方。</span>
+              {copy("demandTitle", "把目标说清楚，")}
+              <span>{copy("demandTitleAccent", "找到合适的供给方。")}</span>
             </h1>
-            <p>告诉我们真实用途、预算和不能妥协的条件。MatchPlane 会解释每一次推荐，撮合后你可以直接联系供给方，也可以在线下完成交易。</p>
+            <p>{copy("demandDescription", "告诉我们目标、预算和不能妥协的条件。平台会解释每一次推荐，撮合后你可以直接联系供给方，也可以在线下完成后续安排。")}</p>
             <div className="hero-actions">
               <motion.button
                 className="button button-dark"
@@ -111,28 +112,28 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
                 whileTap={{ scale: 0.97 }}
                 transition={spring}
               >
-                查看可用供给
+                {copy("browseOffersLabel", "查看可用供给")}
                 <ArrowRight size={18} aria-hidden="true" />
               </motion.button>
               <a className="button button-quiet" href={`${subplatform.path}?role=seller`}>
-                我来提供
+                {copy("supplyActionLabel", "我来提供")}
               </a>
               <motion.button
                 className="button button-quiet"
                 type="button"
                 onClick={() => {
                   document.getElementById("match-chat-input")?.focus();
-                  onNotice("已回到需求输入框，可以继续补充预算、时间和不能妥协的条件");
+                  onNotice(copy("refineDemandNotice", "已回到需求输入框，可以继续补充目标、预算和限制条件"));
                 }}
                 whileTap={{ scale: 0.97 }}
                 transition={spring}
               >
-                调整需求
+                {copy("refineDemandLabel", "调整需求")}
               </motion.button>
             </div>
-            <div className="hero-proof" aria-label="平台保障">
-              <span><ShieldCheck size={16} aria-hidden="true" /> 联系信息受控解锁</span>
-              <span><BadgeCheck size={16} aria-hidden="true" /> 匹配理由可解释</span>
+            <div className="hero-proof" aria-label={copy("trustLabel", "平台保障")}>
+              <span><ShieldCheck size={16} aria-hidden="true" /> {copy("contactProtectionLabel", "联系信息受控解锁")}</span>
+              <span><BadgeCheck size={16} aria-hidden="true" /> {copy("explainableMatchLabel", "匹配理由可解释")}</span>
             </div>
           </div>
           <motion.div
@@ -146,23 +147,23 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
             <span className="generic-art-orbit orbit-two" />
             <span className="generic-art-core"><Sparkles size={40} strokeWidth={1.3} /></span>
             <div className="floating-match-card">
-              <span>匹配核心</span>
+              <span>{copy("matchingCoreLabel", "匹配核心")}</span>
               <strong>AI</strong>
-              <small>目标 · 约束 · 可信度</small>
+              <small>{copy("matchingCoreDetail", "目标 · 约束 · 可信度")}</small>
             </div>
           </motion.div>
         </section>
       )}
 
       {listings.length ? (
-        <section className="discovery-panel" aria-label="搜索供给">
+        <section className="discovery-panel" aria-label={copy("searchOffersLabel", "搜索供给")}>
           <label className="search-field">
             <Search size={20} aria-hidden="true" />
-            <span className="sr-only">搜索供给</span>
+            <span className="sr-only">{copy("searchOffersLabel", "搜索供给")}</span>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索名称、属性或地点"
+              placeholder={copy("searchPlaceholder", "搜索名称、属性或地点")}
               type="search"
             />
           </label>
@@ -173,10 +174,10 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
             onClick={() => setFiltersOpen((open) => !open)}
           >
             <SlidersHorizontal size={18} aria-hidden="true" />
-            <span>筛选{activeFilters.size ? ` · ${activeFilters.size}` : ""}</span>
+            <span>{copy("filterLabel", "筛选")}{activeFilters.size ? ` · ${activeFilters.size}` : ""}</span>
           </button> : null}
           {filterDefinitions.length && filtersOpen ? (
-            <div className="filter-menu" role="group" aria-label="高级筛选">
+            <div className="filter-menu" role="group" aria-label={copy("advancedFilterLabel", "高级筛选")}>
               {filterDefinitions.map((filter) => {
                 const active = activeFilters.has(filter.key);
                 return (
@@ -206,9 +207,9 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
       ) : null}
 
       <section id="recommendations" className={`content-section${isRoot ? " root-content" : ""}`}>
-        <SectionHeading eyebrow={subplatform.ui?.chat?.listingEyebrow} title={`${visible.length} ${subplatform.ui?.chat?.listingLabel || "个可用供给"}`} />
+        <SectionHeading eyebrow={subplatform.ui?.chat?.listingEyebrow} title={`${visible.length} ${subplatform.ui?.chat?.listingLabel || copy("listingCountLabel", "个可用供给")}`} />
         {visible.length ? (
-          <div className="vehicle-grid">
+          <div className="listing-grid">
             {visible.map((listing, index) => (
               <AssetCard
                 key={listing.id}
@@ -223,25 +224,24 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         ) : (
           <div className="empty-state">
             <Search size={28} aria-hidden="true" />
-            <h3>{query ? "没有命中这次搜索" : "等待供给方上传资料"}</h3>
+            <h3>{query ? copy("searchEmptyTitle", "没有命中这次搜索") : copy("noOffersTitle", "等待供给方上传资料")}</h3>
             <p>
               {query
-                ? "换一个名称、属性或地点试试。"
-                : "平台不预置样例内容；卖家提交并通过审核后，这里会出现真实供给。"}
+                ? copy("searchEmptyDescription", "换一个名称、属性或地点试试。")
+                : copy("noOffersDescription", "平台不预置样例内容；供给方提交并通过审核后，这里会出现真实供给。")}
             </p>
-            {query ? <button type="button" onClick={() => setQuery("")}>清除搜索</button> : null}
-            {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice("先描述你的目标，平台会从已激活的子平台开始路由"); }}>描述需求</button> : null}
+            {query ? <button type="button" onClick={() => setQuery("")}>{copy("clearSearchLabel", "清除搜索")}</button> : null}
+            {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice(copy("describeDemandNotice", "先描述你的目标，平台会从已激活的子平台开始路由")); }}>{copy("describeDemandLabel", "描述需求")}</button> : null}
           </div>
         )}
       </section>
 
       {!isRoot ? <section className="offline-section" aria-labelledby="offline-title">
         <div className="offline-intro">
-          <span className="eyebrow">线上撮合 · 线下协商</span>
-          <h2 id="offline-title">双方在哪完成交易，由双方决定。</h2>
+          <span className="eyebrow">{copy("offlineEyebrow", "线上撮合 · 线下协商")}</span>
+          <h2 id="offline-title">{copy("offlineTitle", "双方在哪完成后续安排，由双方决定。")}</h2>
           <p>
-            平台确认双方匹配与服务费安排后，才按权限交换联系方式。线下成交也会保留撮合记录，
-            平台只收取事先披露的撮合提成。
+            {copy("offlineDescription", "平台确认双方匹配与服务安排后，才按权限交换联系方式。线下完成后续安排也会保留撮合记录，平台只收取事先披露的服务费用。")}
           </p>
         </div>
         <ol className="offline-steps">
@@ -270,24 +270,25 @@ function matchesFilter(
   if (filter.source === "trust") return Boolean(listing.trust?.length);
   if (filter.source === "price") return Boolean(listing.price.trim() && listing.price.trim() !== "—");
   if (!filter.attribute) return false;
-  const fact = listing.facts.find((candidate) => candidate.label === filter.attribute);
+  const fact = listing.facts.find((candidate) => candidate.key === filter.attribute || candidate.label === filter.attribute);
   if (!fact) return false;
   return filter.value === undefined || fact.value === filter.value;
 }
 
 function RootFlow({ subplatform, childPlatforms }: { subplatform: SubplatformConfig; childPlatforms: PlatformChildSummary[] }) {
+  const copy = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
   return (
     <section className="root-routing-strip" aria-labelledby="root-routing-title">
       <div className="root-routing-copy">
-        <h2 id="root-routing-title">从一句话开始。</h2>
-        <p>{subplatform.description || "描述目标，平台会把请求交给已激活的匹配节点。"}</p>
+        <h2 id="root-routing-title">{copy("rootRoutingTitle", "从一句话开始。")}</h2>
+        <p>{subplatform.description || copy("rootRoutingDescription", "描述目标，平台会把请求交给已激活的匹配节点。")}</p>
       </div>
       <a className="button button-quiet root-routing-seller-link" href={`${subplatform.path}?role=seller`}>
-        我来提供
+        {copy("supplyActionLabel", "我来提供")}
         <ArrowRight size={17} aria-hidden="true" />
       </a>
       {childPlatforms.length ? (
-        <div className="root-platform-links" aria-label="已激活的平台">
+        <div className="root-platform-links" aria-label={copy("activePlatformsLabel", "已激活的平台")}>
           {childPlatforms.map((child) => (
             <a className="root-platform-link-card" key={child.path} href={child.path}>
               <strong>{child.displayName}</strong>
@@ -314,15 +315,16 @@ function AssetCard({
   onSave: () => void;
   onOpen: () => void;
 }) {
+  const viewLabel = `查看 ${listing.title}`;
   return (
     <motion.article
-      className="vehicle-card"
+      className="listing-card"
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ ...spring, delay: index * 0.045 }}
       layout
     >
-      <button className="vehicle-open" type="button" onClick={onOpen} aria-label={`查看 ${listing.title}`}>
+      <button className="listing-open" type="button" onClick={onOpen} aria-label={viewLabel}>
         <ListingVisual accent={listing.accent} label={listing.trust?.[0]} />
       </button>
       <motion.button
@@ -336,17 +338,17 @@ function AssetCard({
       >
         <Heart size={19} fill={saved ? "currentColor" : "none"} aria-hidden="true" />
       </motion.button>
-      <div className="vehicle-content">
+      <div className="listing-content">
         <div className="match-row">
           {listing.matchScore !== undefined ? <span className="match-score">{listing.matchScore}% 匹配</span> : null}
           {listing.location ? <span><MapPin size={14} aria-hidden="true" /> {listing.location}</span> : null}
         </div>
-        <button className="vehicle-title-button" type="button" onClick={onOpen}>
+        <button className="listing-title-button" type="button" onClick={onOpen}>
           <h3>{listing.title}</h3>
         </button>
-        {listing.subtitle ? <p className="vehicle-subtitle">{listing.subtitle}</p> : null}
+        {listing.subtitle ? <p className="listing-subtitle">{listing.subtitle}</p> : null}
         {listing.facts.length ? (
-          <dl className="vehicle-facts">
+          <dl className="listing-facts">
             {listing.facts.slice(0, 3).map((fact) => <div key={`${fact.label}-${fact.value}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
           </dl>
         ) : null}
@@ -358,7 +360,7 @@ function AssetCard({
         ) : null}
         <div className="price-row">
           <div><strong>{listing.price}</strong>{listing.priceLabel ? <small>{listing.priceLabel}</small> : null}</div>
-          <motion.button className="round-arrow" type="button" aria-label={`查看 ${listing.title}`} onClick={onOpen} whileTap={{ scale: 0.88 }} transition={spring}>
+          <motion.button className="round-arrow" type="button" aria-label={viewLabel} onClick={onOpen} whileTap={{ scale: 0.88 }} transition={spring}>
             <ArrowRight size={18} aria-hidden="true" />
           </motion.button>
         </div>

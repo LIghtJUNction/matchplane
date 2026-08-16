@@ -16,7 +16,7 @@ export interface AssetListing {
   location?: string;
   matchScore?: number;
   accent: Accent;
-  facts: Array<{ label: string; value: string }>;
+  facts: Array<{ label: string; value: string; key?: string }>;
   reasons?: string[];
   trust?: string[];
   seller?: string;

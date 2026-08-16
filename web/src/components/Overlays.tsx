@@ -14,16 +14,18 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 
 import type { AssetListing } from "../types";
+import { subplatformCopy, type SubplatformConfig } from "../subplatform";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { ListingVisual, momentumSpring, spring } from "./Primitives";
 
 interface ListingSheetProps {
   listing: AssetListing | null;
+  subplatform: SubplatformConfig;
   onClose: () => void;
   onContact: (listing: AssetListing) => Promise<void> | void;
 }
 
-export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps) {
+export function ListingSheet({ listing, subplatform, onClose, onContact }: ListingSheetProps) {
   const desktop = useMediaQuery("(min-width: 56rem)");
   const closeRef = useRef<HTMLButtonElement>(null);
   const [contactSubmitting, setContactSubmitting] = useState(false);
@@ -75,7 +77,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
           >
             <div className="sheet-handle" aria-hidden="true" />
             <div className="sheet-header">
-              <span className="sheet-label">供给详情</span>
+              <span className="sheet-label">{subplatformCopy(subplatform, "offerDetailLabel", "供给详情")}</span>
               <motion.button
                 ref={closeRef}
                 type="button"
@@ -89,7 +91,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
             </div>
             <div className="sheet-scroll">
               <ListingVisual accent={listing.accent} label={listing.trust?.[0]} />
-              {listing.matchScore !== undefined ? <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {listing.matchScore}% 需求匹配</div> : null}
+              {listing.matchScore !== undefined ? <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {listing.matchScore}% {subplatformCopy(subplatform, "matchLabel", "匹配")}</div> : null}
               <h2 id="listing-sheet-title">{listing.title}</h2>
               <p className="sheet-subtitle">{listing.subtitle}</p>
               <div className="sheet-price"><strong>{listing.price}</strong>{listing.priceLabel ? <span>{listing.priceLabel}</span> : null}</div>
@@ -111,7 +113,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
                 <div className="seller-line">
                   <span className="seller-avatar">{listing.seller.slice(0, 1)}</span>
                   <div><strong>{listing.seller}</strong>{listing.response ? <small>{listing.response}</small> : null}</div>
-                  <BadgeCheck size={20} aria-label="卖家身份已核验" />
+                  <BadgeCheck size={20} aria-label={subplatformCopy(subplatform, "verifiedSupplyLabel", "供给方身份已核验")} />
                 </div>
                 {listing.trust?.length ? <ul>{listing.trust.map((item) => <li key={item}><ShieldCheck size={15} aria-hidden="true" />{item}</li>)}</ul> : null}
               </section> : null}
@@ -119,19 +121,19 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
               <section className="offline-contact-card">
                 <span className="contact-icon"><LockKeyhole aria-hidden="true" /></span>
                 <div>
-                  <h3>匹配后直接联系卖家</h3>
-                  <p>平台确认撮合与服务费安排后，双方联系方式按权限解锁；交易可以在线下完成。</p>
+                  <h3>{subplatformCopy(subplatform, "contactTitle", "匹配后直接联系供给方")}</h3>
+                  <p>{subplatformCopy(subplatform, "contactDescription", "平台确认撮合与服务安排后，双方联系方式按权限解锁；后续可以在线下完成。")}</p>
                 </div>
                 <div className="contact-options">
                   <span><MessageCircle size={15} aria-hidden="true" />站内沟通</span>
-                  <span><Phone size={15} aria-hidden="true" />联系方式</span>
-                  <span><CalendarDays size={15} aria-hidden="true" />预约协商</span>
-                  <span><MapPin size={15} aria-hidden="true" />地点加密</span>
+                  <span><Phone size={15} aria-hidden="true" />{subplatformCopy(subplatform, "contactChannelsLabel", "联系方式")}</span>
+                  <span><CalendarDays size={15} aria-hidden="true" />{subplatformCopy(subplatform, "appointmentLabel", "预约协商")}</span>
+                  <span><MapPin size={15} aria-hidden="true" />{subplatformCopy(subplatform, "locationLabel", "地点受控")}</span>
                 </div>
               </section>
             </div>
             <div className="sheet-footer">
-              <div><small>平台服务费</small><strong>按当前子平台披露规则结算</strong></div>
+              <div><small>{subplatformCopy(subplatform, "platformFeeLabel", "平台服务费")}</small><strong>{subplatformCopy(subplatform, "platformFeeDescription", "按当前子平台披露规则结算")}</strong></div>
               <motion.button
                 className="button button-dark"
                 type="button"
@@ -140,7 +142,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
                 whileTap={{ scale: 0.97 }}
                 transition={momentumSpring}
               >
-                {contactSubmitting ? "正在提交…" : "申请联系"}
+                {contactSubmitting ? subplatformCopy(subplatform, "contactSubmittingLabel", "正在提交…") : subplatformCopy(subplatform, "requestContactLabel", "申请联系")}
               </motion.button>
             </div>
           </motion.aside>

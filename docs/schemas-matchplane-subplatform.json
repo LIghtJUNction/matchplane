@@ -45,6 +45,7 @@
       "additionalProperties": false,
       "properties": {
         "chat": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 500 }, "maxProperties": 64 },
+        "copy": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 500 }, "maxProperties": 128 },
         "filters": {
           "type": "array",
           "maxItems": 32,

@@ -18,7 +18,7 @@ import { SellerDashboard } from "./components/SellerDashboard";
 import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
 import { PluginHost } from "./components/PluginHost";
 import { MatchChat } from "./components/MatchChat";
-import { loadSubplatform, resolveSubplatform, type SubplatformConfig } from "./subplatform";
+import { loadSubplatform, resolveSubplatform, subplatformCopy, subplatformFieldLabel, type SubplatformConfig } from "./subplatform";
 import {
   createMarketplaceIntroduction,
   requestMarketplaceContact,
@@ -201,7 +201,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               <IconButton label={ui.notifications} onClick={() => setNotice(ui.noNotifications) }><Bell size={19} aria-hidden="true" /></IconButton>
               <button className="profile-button" type="button" aria-label={authUser ? ui.openAccount : ui.signIn} aria-expanded={authUser ? accountMenuOpen : undefined} onClick={openAccount}>
                 <span><UserRound size={18} aria-hidden="true" /></span>
-                <span className="profile-copy"><strong>{authUser?.name || subplatform.brandName}</strong><small>{authUser ? roleLabel(role, locale) : ui.signIn}</small></span>
+                <span className="profile-copy"><strong>{authUser?.name || subplatform.brandName}</strong><small>{authUser ? roleLabel(role, locale, subplatform) : ui.signIn}</small></span>
               </button>
               <AnimatePresence>
                 {authUser && accountMenuOpen ? (
@@ -249,7 +249,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 <MatchChat
                   role={role}
                   onNotice={setNotice}
-                  onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations))}
+                  onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform))}
                   subplatform={subplatform}
                 />
               ) : null}
@@ -262,11 +262,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
         <ListingSheet
           listing={listing}
+          subplatform={subplatform}
           onClose={closeListing}
           onContact={async (selected) => {
             if (!isLiveMarketplaceEnabled()) {
               closeListing();
-              setNotice(`${selected.title} 的联系申请已提交`);
+              setNotice(`${selected.title} ${subplatformCopy(subplatform, "contactRequestSubmittedSuffix", "的联系申请已提交")}`);
               return;
             }
             const isGenericOffer = Boolean(selected.offerId && selected.intentId);
@@ -314,7 +315,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   session,
                   domainId: subplatform.domainId,
                   listingId,
-                  narrative: "希望与供给方直接沟通并完成后续协商",
+                  narrative: subplatformCopy(subplatform, "contactIntentNarrative", "希望与供给方直接沟通并完成后续协商"),
                   requirements: {},
                   currency: subplatform.currency,
                   currencyScale: subplatform.currencyScale ?? 0,
@@ -361,11 +362,23 @@ function roleFromLocation(): WorkspaceRole {
   return requested === "seller" || requested === "platform" || requested === "subplatform_admin" ? requested : "buyer";
 }
 
-function roleLabel(role: WorkspaceRole, locale: "zh" | "en"): string {
+function roleLabel(role: WorkspaceRole, locale: "zh" | "en", subplatform: SubplatformConfig): string {
   if (locale === "en") {
-    return role === "buyer" ? "Buyer" : role === "seller" ? "Seller" : "Admin";
+    return role === "buyer"
+      ? subplatformCopy(subplatform, "demandRoleLabelEn", "Demand")
+      : role === "seller"
+        ? subplatformCopy(subplatform, "supplyRoleLabelEn", "Supply")
+        : role === "subplatform_admin"
+          ? subplatformCopy(subplatform, "subplatformAdminLabelEn", "Platform admin")
+          : subplatformCopy(subplatform, "platformAdminLabelEn", "Admin");
   }
-  return role === "buyer" ? "买家" : role === "seller" ? "卖家" : "管理员";
+  return role === "buyer"
+    ? subplatformCopy(subplatform, "demandRoleLabel", "需求方")
+    : role === "seller"
+      ? subplatformCopy(subplatform, "supplyRoleLabel", "供给方")
+      : role === "subplatform_admin"
+        ? subplatformCopy(subplatform, "subplatformAdminLabel", "子平台管理员")
+        : subplatformCopy(subplatform, "platformAdminLabel", "平台管理员");
 }
 
 function appCopy(locale: "zh" | "en") {
@@ -417,7 +430,7 @@ function listingFromLocation(): AssetListing | null {
   return null;
 }
 
-function mapRecommendations(items: RecommendedBackendListing[]): AssetListing[] {
+function mapRecommendations(items: RecommendedBackendListing[], subplatform: SubplatformConfig): AssetListing[] {
   return items.flatMap((item, index) => {
     const id = item.listing_id ?? item.offer_id;
     if (!id) return [];
@@ -427,7 +440,7 @@ function mapRecommendations(items: RecommendedBackendListing[]): AssetListing[] 
     const facts = Object.entries(attributes)
       .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
       .slice(0, 4)
-      .map(([label, value]) => ({ label, value: String(value) }));
+      .map(([label, value]) => ({ label: subplatformFieldLabel(subplatform, label), key: label, value: String(value) }));
     const subtitle = facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ");
     const location = typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined;
     const terms = item.terms && typeof item.terms === "object" && !Array.isArray(item.terms) ? item.terms : {};

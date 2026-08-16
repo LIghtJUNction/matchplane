@@ -868,13 +868,13 @@ main {
   font-weight: 620;
 }
 
-.vehicle-grid {
+.listing-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
 }
 
-.vehicle-card {
+.listing-card {
   position: relative;
   min-width: 0;
   overflow: hidden;
@@ -884,8 +884,8 @@ main {
   box-shadow: 0 0.55rem 2rem rgba(20, 20, 19, 0.045);
 }
 
-.vehicle-open,
-.vehicle-title-button {
+.listing-open,
+.listing-title-button {
   width: 100%;
   padding: 0;
   border: 0;
@@ -894,7 +894,7 @@ main {
   text-align: left;
 }
 
-.vehicle-visual {
+.listing-visual {
   position: relative;
   min-height: 13.6rem;
   display: grid;
@@ -903,11 +903,11 @@ main {
   background: var(--cactus);
 }
 
-.vehicle-visual.accent-clay { background: var(--clay); }
-.vehicle-visual.accent-heather { background: var(--heather); }
-.vehicle-visual.accent-oat { background: var(--oat); }
+.listing-visual.accent-clay { background: var(--clay); }
+.listing-visual.accent-heather { background: var(--heather); }
+.listing-visual.accent-oat { background: var(--oat); }
 
-.vehicle-visual > svg {
+.listing-visual > svg {
   position: relative;
   z-index: 2;
   width: 42%;
@@ -974,7 +974,7 @@ main {
   color: var(--clay);
 }
 
-.vehicle-content {
+.listing-content {
   padding: 1.15rem;
 }
 
@@ -1007,13 +1007,13 @@ main {
   font-weight: 720;
 }
 
-.vehicle-title-button h3 {
+.listing-title-button h3 {
   margin-top: 0.8rem;
   font-size: 1.14rem;
   letter-spacing: -0.025em;
 }
 
-.vehicle-subtitle {
+.listing-subtitle {
   margin-top: 0.32rem;
   overflow: hidden;
   color: var(--muted);
@@ -1022,24 +1022,24 @@ main {
   white-space: nowrap;
 }
 
-.vehicle-facts {
+.listing-facts {
   margin-top: 1rem;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   border-block: 1px solid var(--line);
 }
 
-.vehicle-facts div {
+.listing-facts div {
   padding: 0.72rem 0;
 }
 
-.vehicle-facts dt,
+.listing-facts dt,
 .sheet-facts dt {
   color: var(--muted);
   font-size: 0.64rem;
 }
 
-.vehicle-facts dd,
+.listing-facts dd,
 .sheet-facts dd {
   margin-top: 0.2rem;
   font-size: 0.76rem;
@@ -1356,7 +1356,7 @@ main {
   gap: 1.5rem;
 }
 
-.vehicle-compact {
+.listing-compact {
   min-height: 12rem;
   border-radius: 1.35rem;
 }
@@ -1900,7 +1900,7 @@ main {
   overscroll-behavior: contain;
 }
 
-.sheet-scroll > .vehicle-visual { min-height: 15.5rem; border-radius: 1.5rem; }
+.sheet-scroll > .listing-visual { min-height: 15.5rem; border-radius: 1.5rem; }
 .sheet-match { width: max-content; margin-top: 1rem; padding: 0.32rem 0.55rem; display: flex; align-items: center; gap: 0.3rem; border-radius: 999px; background: var(--cactus); color: #31574b; font-size: 0.7rem; font-weight: 700; }
 .sheet-scroll h2 { margin-top: 0.65rem; font-size: 1.7rem; letter-spacing: -0.045em; }
 .sheet-subtitle { margin-top: 0.25rem; color: var(--muted); font-size: 0.78rem; }
@@ -2040,7 +2040,7 @@ main {
   .buyer-hero,
   .hero-art-wrap img,
   .discovery-panel,
-  .vehicle-card,
+  .listing-card,
   .workspace-heading,
   .metric-card,
   .surface,
@@ -2057,8 +2057,8 @@ main {
   .profile-copy { display: none; }
   .profile-button { min-width: 2.75rem; padding: 0.25rem; }
   .buyer-hero { grid-template-columns: 1fr minmax(18rem, 0.72fr); }
-  .vehicle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .vehicle-card:last-child { display: none; }
+  .listing-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .listing-card:last-child { display: none; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -2136,9 +2136,9 @@ main {
   .section-heading h2 { font-size: 1.65rem; }
   .text-action { font-size: 0; }
   .text-action svg { width: 1.3rem; height: 1.3rem; }
-  .vehicle-grid { grid-template-columns: 1fr; }
-  .vehicle-card:last-child { display: block; }
-  .vehicle-visual { min-height: 13rem; }
+  .listing-grid { grid-template-columns: 1fr; }
+  .listing-card:last-child { display: block; }
+  .listing-visual { min-height: 13rem; }
   .offline-section { padding: 1.25rem; }
   .offline-steps li { grid-template-columns: 3rem 1fr; }
   .offline-steps li > span { width: 3rem; height: 3rem; }
@@ -2157,7 +2157,7 @@ main {
   .gateway-state { display: none; }
   .finance-actions { grid-template-columns: 1fr; }
   .sheet-scroll { padding-inline: 0.9rem; }
-  .sheet-scroll > .vehicle-visual { min-height: 12.5rem; }
+  .sheet-scroll > .listing-visual { min-height: 12.5rem; }
   .sheet-facts { grid-template-columns: 1fr 1fr; }
   .trust-section ul { grid-template-columns: 1fr; }
   .sheet-footer { align-items: stretch; flex-direction: column; }
@@ -2366,7 +2366,7 @@ body,
 @media (prefers-contrast: more) {
   :root { --line: rgba(20, 20, 19, 0.42); }
   .surface,
-  .vehicle-card,
+  .listing-card,
   .metric-card,
   .buyer-hero,
   .workspace-heading,

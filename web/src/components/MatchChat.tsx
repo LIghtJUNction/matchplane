@@ -15,7 +15,7 @@ import {
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { authClient, authFetchOptions } from "../lib/auth-client";
-import { pricingFor, type SubplatformConfig } from "../subplatform";
+import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
 
 const PENDING_CHAT_KEY = "matchplane.pending-chat";
 
@@ -86,6 +86,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
   const pricing = pricingFor(subplatform);
   const usesLegacyMarketplace = pricing.mode === "fixed" && Boolean(subplatform.assetSchemaId);
   const copy = resolveChatCopy(subplatform);
+  const label = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
 
   const submitMessage = useCallback(
     async (rawText: string, session?: PartySession) => {
@@ -268,13 +269,13 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
     <section className={`match-chat${isRoot ? " is-root" : ""}${isSeller ? " is-seller" : ""}`} aria-labelledby="match-chat-title">
       <div className="match-chat-heading">
         <div>
-          <span className="eyebrow"><Sparkles size={14} aria-hidden="true" /> {isSeller ? copy.sellerEyebrow : isRoot ? "根平台入口" : copy.buyerEyebrow}</span>
+            <span className="eyebrow"><Sparkles size={14} aria-hidden="true" /> {isSeller ? copy.sellerEyebrow : isRoot ? label("rootEyebrow", "根平台入口") : copy.buyerEyebrow}</span>
           <h1 id="match-chat-title">{isSeller ? copy.sellerTitle : copy.buyerTitle}</h1>
           <p>{isSeller ? copy.sellerDescription : copy.buyerDescription}</p>
         </div>
         <span className={`match-chat-status${signedIn ? " is-signed-in" : ""}`}>
           <LockKeyhole size={14} aria-hidden="true" />
-          {signedIn ? "已登录 · 直接发送" : "登录后自动继续"}
+          {signedIn ? label("signedInChatStatus", "已登录 · 直接发送") : label("signedOutChatStatus", "登录后自动继续")}
         </span>
       </div>
 
@@ -287,7 +288,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
       ) : null}
 
       <form className="match-chat-form" onSubmit={send}>
-        <label className="sr-only" htmlFor="match-chat-input">{isSeller ? `告诉 MatchPlane ${copy.sellerTitle}` : "告诉 MatchPlane 你的需求"}</label>
+        <label className="sr-only" htmlFor="match-chat-input">{isSeller ? `${label("tellPlatformPrefix", "告诉 MatchPlane")} ${copy.sellerTitle}` : label("chatInputLabel", "告诉 MatchPlane 你的需求")}</label>
         <textarea
           id="match-chat-input"
           value={message}
@@ -297,7 +298,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
           maxLength={10000}
           disabled={sending}
         />
-        <button className="match-chat-send" type="submit" aria-label={isSeller ? "发送供给" : "发送需求"} disabled={!message.trim() || sending}>
+        <button className="match-chat-send" type="submit" aria-label={isSeller ? label("sendSupplyLabel", "发送供给") : label("sendDemandLabel", "发送需求")} disabled={!message.trim() || sending}>
           <ArrowUp size={18} aria-hidden="true" />
         </button>
       </form>

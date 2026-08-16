@@ -17,7 +17,7 @@ import {
   type ListingSubmission,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
-import { pricingFor, type SubplatformConfig } from "../subplatform";
+import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
 import { SectionHeading, spring } from "./Primitives";
 
 interface SellerDashboardProps {
@@ -33,6 +33,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
   const [displayName, setDisplayName] = useState("");
   const [askingAmount, setAskingAmount] = useState("");
   const pricing = pricingFor(subplatform);
+  const copy = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
   const isFixedPrice = pricing.mode === "fixed";
   const pricingCurrency = pricing.currency ?? subplatform.currency;
   const pricingScale = pricing.currencyScale ?? subplatform.currencyScale;
@@ -248,40 +249,40 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
     <div className="dashboard seller-dashboard">
       <section className="workspace-heading">
         <div>
-          <p className="eyebrow">供给方工作台 · {subplatform.label || "当前子平台"}</p>
-          <h1>由你上传真实资料，平台帮你找到合适的需求。</h1>
-          <p>根平台不预置任何商品样例。提交后先进入审核队列，审核通过才会进入 AI 撮合。</p>
+        <p className="eyebrow">{copy("supplyWorkspaceLabel", "供给方工作台")} · {subplatform.label || copy("currentPlatformLabel", "当前子平台")}</p>
+          <h1>{copy("supplyTitle", "由你上传真实资料，平台帮你找到合适的需求。")}</h1>
+          <p>{copy("supplyDescription", "根平台不预置任何样例内容。提交后先进入审核队列，审核通过才会进入 AI 撮合。")}</p>
         </div>
-        <span className="seller-mode-note"><ShieldCheck size={16} aria-hidden="true" /> 账号和联系方式由根平台保护</span>
+        <span className="seller-mode-note"><ShieldCheck size={16} aria-hidden="true" /> {copy("identityProtectionLabel", "账号和联系方式由根平台保护")}</span>
       </section>
 
-      <section className="seller-status-summary" aria-label="供给资料状态">
+      <section className="seller-status-summary" aria-label={copy("supplyStatusLabel", "供给资料状态")}>
         <FileUp size={19} aria-hidden="true" />
-        <div><strong>{submissions.length ? `已提交 ${submissions.length} 份资料` : "还没有提交资料"}</strong><small>提交后会进入当前子平台的审核流程</small></div>
+        <div><strong>{submissions.length ? `${copy("submittedPrefix", "已提交")} ${submissions.length} ${copy("submittedSuffix", "份资料")}` : copy("noSubmissionsLabel", "还没有提交资料")}</strong><small>{copy("submissionWorkflowLabel", "提交后会进入当前子平台的审核流程")}</small></div>
       </section>
 
       <section className="surface seller-upload" aria-labelledby="seller-upload-title">
-        <SectionHeading eyebrow="资料上传" title="提交一份新的供给资料" />
+        <SectionHeading eyebrow={copy("uploadEyebrow", "资料上传")} title={copy("uploadTitle", "提交一份新的供给资料")} />
         <p className="seller-upload-intro">
-          字段由当前子平台的 schema 定义。根平台只保存结构化 JSON，不会替商家猜测或填充领域信息。
+          {copy("uploadDescription", "字段由当前子平台的 schema 定义。根平台只保存结构化 JSON，不会替供给方猜测或填充领域信息。")}
         </p>
         <form className="seller-upload-form" onSubmit={submit}>
           <label htmlFor="seller-display-name">
-            <span>供给名称</span>
-            <input id="seller-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="由你填写" maxLength={500} required />
+            <span>{copy("offerNameLabel", "供给名称")}</span>
+            <input id="seller-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder={copy("offerNamePlaceholder", "由你填写")} maxLength={500} required />
           </label>
           <label htmlFor="seller-external-key">
-            <span>内部编号</span>
-            <input id="seller-external-key" value={externalKey} onChange={(event) => setExternalKey(event.target.value)} placeholder="用于管理这份资料" maxLength={256} required />
+            <span>{copy("externalKeyLabel", "内部编号")}</span>
+            <input id="seller-external-key" value={externalKey} onChange={(event) => setExternalKey(event.target.value)} placeholder={copy("externalKeyPlaceholder", "用于管理这份资料")} maxLength={256} required />
           </label>
           {isFixedPrice ? (
             <>
               <label htmlFor="seller-asking-amount">
-                <span>报价{currency ? `（${currency}）` : ""}</span>
+                <span>{copy("priceLabel", "报价")}{currency ? `（${currency}）` : ""}</span>
                 <input id="seller-asking-amount" value={askingAmount} onChange={(event) => setAskingAmount(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0)} required />
               </label>
               <label htmlFor="seller-currency">
-                <span>币种</span>
+                <span>{copy("currencyLabel", "币种")}</span>
                 <input id="seller-currency" value={currency} onChange={(event) => setCurrency(event.target.value.toUpperCase())} placeholder="等待子平台配置" maxLength={3} readOnly={Boolean(pricingCurrency)} required />
               </label>
             </>
@@ -312,14 +313,14 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
           </div>
           {advancedOpen ? (
             <label className="seller-upload-wide" htmlFor="seller-attributes">
-              <span>高级资料（JSON）</span>
+                <span>{copy("advancedAttributesLabel", "高级资料（JSON）")}</span>
               <textarea id="seller-attributes" value={advancedAttributes} onChange={(event) => setAdvancedAttributes(event.target.value)} rows={8} spellCheck={false} />
             </label>
           ) : null}
           <div className="seller-upload-actions seller-upload-wide">
-            <p><FileUp size={17} aria-hidden="true" /> 提交后状态为“待审核”，平台不会自动发布未经确认的资料。</p>
+            <p><FileUp size={17} aria-hidden="true" /> {copy("reviewNotice", "提交后状态为“待审核”，平台不会自动发布未经确认的资料。")}</p>
             <motion.button className="button button-dark" type="submit" disabled={submitting || (isLiveMarketplaceEnabled() && (!subplatform.domainId || (isFixedPrice && (!subplatform.assetSchemaId || !pricingCurrency || !Number.isInteger(pricingScale)))))} whileTap={{ scale: 0.97 }} transition={spring}>
-              {submitting ? "正在提交…" : "上传并提交审核"}
+              {submitting ? copy("submittingLabel", "正在提交…") : copy("submitForReviewLabel", "上传并提交审核")}
               {!submitting ? <ArrowRight size={18} aria-hidden="true" /> : null}
             </motion.button>
           </div>
@@ -327,7 +328,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       </section>
 
       <section className="surface seller-submissions" aria-labelledby="seller-submissions-title">
-        <SectionHeading eyebrow="提交记录" title="当前子平台的资料" />
+        <SectionHeading eyebrow={copy("submissionHistoryEyebrow", "提交记录")} title={copy("submissionHistoryTitle", "当前子平台的资料")} />
         {submissionsLoading ? (
           <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>正在读取你的提交记录…</p></div>
         ) : submissionsError ? (
@@ -342,12 +343,12 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
             ))}
           </ol>
         ) : (
-          <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>还没有上传记录。第一份资料由你定义。</p></div>
+          <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>{copy("noSubmissionHistoryLabel", "还没有上传记录。第一份资料由你定义。")}</p></div>
         )}
       </section>
 
       <section className="surface seller-submissions" aria-labelledby="seller-introductions-title">
-        <SectionHeading eyebrow="联系申请" title="需要你明确同意，才会交换联系方式" />
+        <SectionHeading eyebrow={copy("contactRequestsEyebrow", "联系申请")} title={copy("contactRequestsTitle", "需要你明确同意，才会交换联系方式")} />
         {introductionsError ? (
           <div className="seller-empty-state"><ShieldCheck size={24} aria-hidden="true" /><p>{introductionsError}</p></div>
         ) : introductions.length ? (
@@ -355,14 +356,14 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
             {introductions.map((introduction) => (
               <li key={introduction.introduction_id}>
                 <div>
-                  <strong>一条撮合联系申请</strong>
+                  <strong>{copy("contactRequestLabel", "一条撮合联系申请")}</strong>
                   <small>{introductionStatusLabel(introduction.status)} · {formatSubmissionDate(introduction.created_at)}</small>
                 </div>
                 {introduction.supply_contact_consent_at ? (
                   <span className="submission-status">已同意</span>
                 ) : introduction.status === "contact_requested" ? (
                   <button className="text-action" type="button" onClick={() => void consent(introduction)} disabled={consentingIntroductionId === introduction.introduction_id}>
-                    {consentingIntroductionId === introduction.introduction_id ? "处理中…" : "同意交换"}
+                    {consentingIntroductionId === introduction.introduction_id ? copy("processingLabel", "处理中…") : copy("consentContactLabel", "同意交换")}
                   </button>
                 ) : (
                   <span className="submission-status">等待需求方确认</span>
@@ -371,7 +372,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
             ))}
           </ol>
         ) : (
-          <div className="seller-empty-state"><ShieldCheck size={24} aria-hidden="true" /><p>暂无待处理的联系申请。</p></div>
+          <div className="seller-empty-state"><ShieldCheck size={24} aria-hidden="true" /><p>{copy("noContactRequestsLabel", "暂无待处理的联系申请。")}</p></div>
         )}
       </section>
     </div>

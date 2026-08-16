@@ -6,7 +6,7 @@ import { ExternalLink, ShieldCheck } from "lucide-react";
 
 import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
-import { pricingFor, type SubplatformConfig } from "../subplatform";
+import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
 import type { WorkspaceRole } from "../types";
 
 interface PluginHostProps {
@@ -26,6 +26,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
   const contextTokenRef = useRef<string | null>(null);
   const [failed, setFailed] = useState(false);
   const artifact = subplatform.pluginArtifact;
+  const copy = (key: string, fallbackText: string) => subplatformCopy(subplatform, key, fallbackText);
 
   const postContext = () => {
     frameRef.current?.contentWindow?.postMessage({
@@ -65,9 +66,9 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
       if (event.data.contextToken !== contextTokenRef.current) return;
       if (event.data.type === "chat.open") {
         document.getElementById("match-chat-input")?.focus();
-        onNotice("已打开共享 AI 撮合输入框");
+        onNotice(copy("pluginChatOpenedNotice", "已打开共享 AI 撮合输入框"));
       } else if (event.data.type === "listing.select") {
-        onNotice("插件已提交供给选择，平台会继续按权限撮合");
+        onNotice(copy("pluginSelectionNotice", "插件已提交供给选择，平台会继续按权限撮合"));
       } else if (event.data.type === "listing.submit") {
         void submitPluginListing(event.data, {
           frame: frameRef.current?.contentWindow,
@@ -78,7 +79,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
           onNotice,
         });
       } else if (event.data.type === "navigation") {
-        onNotice("插件导航请求已收到；平台会校验当前路径权限");
+        onNotice(copy("pluginNavigationNotice", "插件导航请求已收到；平台会校验当前路径权限"));
       }
     };
     window.addEventListener("message", onMessage);
@@ -91,15 +92,15 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
     <div className="plugin-workspace">
       <section className="plugin-host" aria-label={`${subplatform.brandName} 插件界面`}>
         <div className="plugin-host-bar">
-          <span><ShieldCheck size={15} aria-hidden="true" />已验证静态插件</span>
+          <span><ShieldCheck size={15} aria-hidden="true" />{copy("verifiedPluginLabel", "已验证静态插件")}</span>
           <small>{artifact.digest.slice(0, 12)}…</small>
           <a href={artifact.url} target="_blank" rel="noreferrer">
-            <ExternalLink size={14} aria-hidden="true" />独立打开
+            <ExternalLink size={14} aria-hidden="true" />{copy("openPluginLabel", "独立打开")}
           </a>
         </div>
         {failed ? (
           <div className="plugin-host-fallback">
-            <p role="status">插件界面暂时不可用，已回退到平台通用工作台。</p>
+            <p role="status">{copy("pluginFallbackNotice", "插件界面暂时不可用，已回退到平台通用工作台。")}</p>
             {fallback}
           </div>
         ) : (
@@ -150,7 +151,7 @@ async function submitPluginListing(
   };
 
   try {
-    if (input.role !== "seller") throw new Error("只有供给方可以提交资料");
+    if (input.role !== "seller") throw new Error(subplatformCopy(input.subplatform, "supplyOnlyError", "只有供给方可以提交资料"));
     if (!isLiveMarketplaceEnabled()) throw new Error("插件供给提交需要连接真实平台 API");
     if (!input.subplatform.tenantId || !input.subplatform.domainId) {
       throw new Error("当前子平台尚未发布完整的身份配置");
@@ -180,7 +181,7 @@ async function submitPluginListing(
     });
     if (!session) {
       const next = `${window.location.pathname}${window.location.search}`;
-      input.onNotice("请先登录供给方账号，登录后会回到当前子平台");
+      input.onNotice(subplatformCopy(input.subplatform, "supplyLoginNotice", "请先登录供给方账号，登录后会回到当前子平台"));
       window.location.assign(`/login?role=seller&next=${encodeURIComponent(next)}`);
       throw new Error("Better Auth 会话尚未建立");
     }
@@ -206,7 +207,7 @@ async function submitPluginListing(
         attributes,
       });
     }
-    input.onNotice("供给已真实提交，等待子平台审核后进入 AI 撮合");
+    input.onNotice(subplatformCopy(input.subplatform, "pluginSubmissionSuccess", "供给已真实提交，等待子平台审核后进入 AI 撮合"));
     respond(true);
   } catch (error) {
     const messageText = error instanceof Error ? error.message : "供给提交失败，请稍后重试";
