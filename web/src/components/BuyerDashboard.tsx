@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   BadgeCheck,
@@ -27,10 +27,16 @@ interface BuyerDashboardProps {
 
 export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform }: BuyerDashboardProps) {
   const [query, setQuery] = useState("");
-  const [saved, setSaved] = useState<Set<string>>(() => new Set());
+  const [saved, setSaved] = useState<Set<string>>(() => readSavedItems(`matchplane.saved.${subplatform.path}`));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(() => new Set());
   const isRoot = subplatform.slug === "root";
+  const savedKey = `matchplane.saved.${subplatform.path}`;
+  const filterDefinitions = subplatform.ui?.filters ?? [];
+
+  useEffect(() => {
+    window.localStorage.setItem(savedKey, JSON.stringify([...saved]));
+  }, [saved, savedKey]);
 
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -40,14 +46,13 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         .join(" ")
         .toLocaleLowerCase();
       if (normalized && !searchable.includes(normalized)) return false;
-      for (const filter of activeFilters) {
-        if (filter === "已核验供给" && !(listing.trust?.length || /核验|verified/i.test(searchable))) return false;
-        if (filter === "支持线下协商" && !/线下|当面|offline/i.test(searchable)) return false;
-        if (filter === "有明确报价" && (!listing.price.trim() || listing.price.trim() === "—")) return false;
+      for (const key of activeFilters) {
+        const filter = filterDefinitions.find((candidate) => candidate.key === key);
+        if (filter && !matchesFilter(listing, filter)) return false;
       }
       return true;
     });
-  }, [activeFilters, listings, query]);
+  }, [activeFilters, filterDefinitions, listings, query]);
 
   const toggleSaved = (id: string) => {
     setSaved((current) => {
@@ -65,7 +70,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   return (
     <div className="dashboard buyer-dashboard">
       {isRoot ? (
-        <RootFlow />
+        <RootFlow subplatform={subplatform} />
       ) : (
         <section className="buyer-hero" aria-labelledby="buyer-hero-title">
           <div className="hero-copy">
@@ -89,6 +94,9 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
                 查看可用供给
                 <ArrowRight size={18} aria-hidden="true" />
               </motion.button>
+              <a className="button button-quiet" href={`${subplatform.path}?role=seller`}>
+                我来提供
+              </a>
               <motion.button
                 className="button button-quiet"
                 type="button"
@@ -138,7 +146,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
               type="search"
             />
           </label>
-          <button
+          {filterDefinitions.length ? <button
             className={`filter-button${filtersOpen ? " is-active" : ""}`}
             type="button"
             aria-expanded={filtersOpen}
@@ -146,28 +154,28 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
           >
             <SlidersHorizontal size={18} aria-hidden="true" />
             <span>筛选{activeFilters.size ? ` · ${activeFilters.size}` : ""}</span>
-          </button>
-          {filtersOpen ? (
+          </button> : null}
+          {filterDefinitions.length && filtersOpen ? (
             <div className="filter-menu" role="group" aria-label="高级筛选">
-              {["已核验供给", "支持线下协商", "有明确报价"].map((filter) => {
-                const active = activeFilters.has(filter);
+              {filterDefinitions.map((filter) => {
+                const active = activeFilters.has(filter.key);
                 return (
                   <button
-                    key={filter}
+                    key={filter.key}
                     className={active ? "is-active" : ""}
                     type="button"
                     aria-pressed={active}
                     onClick={() => {
                       setActiveFilters((current) => {
                         const next = new Set(current);
-                        if (next.has(filter)) next.delete(filter);
-                        else next.add(filter);
+                        if (next.has(filter.key)) next.delete(filter.key);
+                        else next.add(filter.key);
                         return next;
                       });
-                      onNotice(active ? `已移除筛选：${filter}` : `已启用筛选：${filter}`);
+                      onNotice(active ? `已移除筛选：${filter.label}` : `已启用筛选：${filter.label}`);
                     }}
                   >
-                    {filter}
+                    {filter.label}
                     {active ? <Check size={14} aria-hidden="true" /> : null}
                   </button>
                 );
@@ -235,7 +243,19 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   );
 }
 
-function RootFlow() {
+function matchesFilter(
+  listing: AssetListing,
+  filter: NonNullable<NonNullable<SubplatformConfig["ui"]>["filters"]>[number],
+): boolean {
+  if (filter.source === "trust") return Boolean(listing.trust?.length);
+  if (filter.source === "price") return Boolean(listing.price.trim() && listing.price.trim() !== "—");
+  if (!filter.attribute) return false;
+  const fact = listing.facts.find((candidate) => candidate.label === filter.attribute);
+  if (!fact) return false;
+  return filter.value === undefined || fact.value === filter.value;
+}
+
+function RootFlow({ subplatform }: { subplatform: SubplatformConfig }) {
   return (
     <section className="root-routing-strip" aria-labelledby="root-routing-title">
       <div className="root-routing-copy">
@@ -247,6 +267,10 @@ function RootFlow() {
         <li><span aria-hidden="true" /><div><strong>沿平台树路由</strong><small>只访问已激活节点</small></div></li>
         <li><span aria-hidden="true" /><div><strong>双方同意后联系</strong><small>保留撮合与审计记录</small></div></li>
       </ol>
+      <a className="button button-quiet root-routing-seller-link" href={`${subplatform.path}?role=seller`}>
+        我来提供
+        <ArrowRight size={17} aria-hidden="true" />
+      </a>
     </section>
   );
 }
@@ -273,7 +297,7 @@ function AssetCard({
       layout
     >
       <button className="vehicle-open" type="button" onClick={onOpen} aria-label={`查看 ${listing.title}`}>
-        <ListingVisual accent={listing.accent} />
+        <ListingVisual accent={listing.accent} label={listing.trust?.[0]} />
       </button>
       <motion.button
         type="button"
@@ -308,11 +332,21 @@ function AssetCard({
         ) : null}
         <div className="price-row">
           <div><strong>{listing.price}</strong>{listing.priceLabel ? <small>{listing.priceLabel}</small> : null}</div>
-          <motion.button className="round-arrow" type="button" onClick={onOpen} whileTap={{ scale: 0.88 }} transition={spring}>
+          <motion.button className="round-arrow" type="button" aria-label={`查看 ${listing.title}`} onClick={onOpen} whileTap={{ scale: 0.88 }} transition={spring}>
             <ArrowRight size={18} aria-hidden="true" />
           </motion.button>
         </div>
       </div>
     </motion.article>
   );
+}
+
+function readSavedItems(key: string): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(key) ?? "[]") as unknown;
+    return new Set(Array.isArray(stored) ? stored.filter((item): item is string => typeof item === "string") : []);
+  } catch {
+    return new Set();
+  }
 }

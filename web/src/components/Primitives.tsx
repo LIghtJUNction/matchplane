@@ -94,13 +94,13 @@ export function MetricCard({
   );
 }
 
-export function ListingVisual({ accent, compact = false }: { accent: Accent; compact?: boolean }) {
+export function ListingVisual({ accent, compact = false, label }: { accent: Accent; compact?: boolean; label?: string }) {
   return (
     <div className={`listing-visual accent-${accent}${compact ? " listing-compact" : ""}`}>
       <span className="organic-shape organic-one" />
       <span className="organic-shape organic-two" />
       <Sparkles aria-hidden="true" strokeWidth={1.45} />
-      <span className="visual-label">已核验供给</span>
+      {label ? <span className="visual-label">{label}</span> : null}
     </div>
   );
 }

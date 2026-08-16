@@ -35,6 +35,10 @@ web:
   # Optional ReadWriteMany PVC for opaque archive uploads. The isolated builder should mount
   # the same PVC read-only or consume the upload object through an external worker.
   uploadPvc: ''
+  secretRoot: /run/matchplane/subplatform-email-secrets
+  # Optional read-only PVC populated by the deployment secret manager. Its layout is
+  # <tenant-uuid>/<domain-uuid>/<slot-name> and is never writable by the web pod.
+  secretPvc: ''
   # The router provider is optional. Keep its API key in existingWebSecret under router-ai-key.
   routerAiUrl: ''
   routerAiModel: ''

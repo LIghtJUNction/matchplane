@@ -46,6 +46,7 @@ describe("platform child route visibility", () => {
         "/",
         "00000000-0000-4000-8000-000000000003",
         "00000000-0000-4000-8000-000000000004",
+        false,
       ],
     );
   });
@@ -63,6 +64,7 @@ describe("platform child route visibility", () => {
       "/used-car",
       null,
       "00000000-0000-4000-8000-000000000004",
+      false,
     ]);
   });
 });

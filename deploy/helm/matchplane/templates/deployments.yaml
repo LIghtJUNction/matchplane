@@ -189,6 +189,8 @@ spec:
               value: {{ $root.Values.web.artifactRoot | quote }}
             - name: MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT
               value: {{ $root.Values.web.uploadRoot | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_SECRET_ROOT
+              value: {{ $root.Values.web.secretRoot | quote }}
             - name: MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID
               value: {{ $root.Values.web.rootOrganizationId | quote }}
             - name: MATCHPLANE_ROOT_SMTP_PROVIDER_KEY
@@ -288,6 +290,11 @@ spec:
               mountPath: {{ $root.Values.web.uploadRoot | quote }}
               readOnly: false
           {{- end }}
+          {{- if $root.Values.web.secretPvc }}
+            - name: subplatform-email-secrets
+              mountPath: {{ $root.Values.web.secretRoot | quote }}
+              readOnly: true
+          {{- end }}
           resources:
             {{- toYaml (default $root.Values.resources $root.Values.web.resources) | nindent 12 }}
       volumes:
@@ -318,4 +325,9 @@ spec:
         - name: subplatform-uploads
           persistentVolumeClaim:
             claimName: {{ $root.Values.web.uploadPvc | quote }}
+      {{- end }}
+      {{- if $root.Values.web.secretPvc }}
+        - name: subplatform-email-secrets
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.web.secretPvc | quote }}
       {{- end }}

@@ -313,11 +313,17 @@ function validateManifest(value: unknown, slug: string | undefined, packageId: s
   if (unknownKey) return { ok: false, error: `manifest 包含未声明字段: ${unknownKey}` };
   if (manifest.apiVersion !== "matchplane.subplatform/v1" || manifest.rootApiVersion !== "v1") return { ok: false, error: "manifest API 版本不受支持" };
   if (!stringMatches(manifest.id, /^[a-z0-9][a-z0-9._-]{1,127}$/) || manifest.id !== packageId) return { ok: false, error: "manifest.id 与 packageId 不一致" };
-  if (!stringMatches(manifest.slug, /^[a-z0-9][a-z0-9-]{1,62}$/) || manifest.slug !== slug) return { ok: false, error: "manifest.slug 与 slug 不一致" };
+  if (!stringMatches(manifest.slug, /^[a-z0-9][a-z0-9-]{1,62}$/) || manifest.slug === "root" || manifest.slug !== slug) return { ok: false, error: "manifest.slug 与 slug 不一致或使用了保留值" };
   if (!stringMatches(manifest.displayName, /^.{1,200}$/u) || !stringMatches(manifest.entry, /^(?!\/)(?!.*\.\.).+$/)) return { ok: false, error: "manifest displayName/entry 无效" };
   if (manifest.description !== undefined && !stringMatches(manifest.description, /^.{0,2000}$/u)) return { ok: false, error: "manifest.description 无效" };
   if (manifest.email !== undefined && !validateManifestEmail(manifest.email)) return { ok: false, error: "manifest.email 无效" };
-  if (!Array.isArray(manifest.routes) || manifest.routes.length === 0 || manifest.routes.some((route) => !stringMatches(route, /^\/[a-z0-9][a-z0-9-]*(?:\/.*)?$/))) return { ok: false, error: "manifest.routes 无效" };
+  if (manifest.ui !== undefined && !validateManifestUi(manifest.ui)) return { ok: false, error: "manifest.ui 无效" };
+  if (!Array.isArray(manifest.routes)
+    || manifest.routes.length === 0
+    || manifest.routes[0] !== `/${manifest.slug}`
+    || manifest.routes.some((route) => !stringMatches(route, /^\/[a-z0-9][a-z0-9-]*(?:\/.*)?$/))) {
+    return { ok: false, error: "manifest.routes 无效，第一条路由必须是 /slug" };
+  }
   if (!Array.isArray(manifest.capabilities) || manifest.capabilities.some((item) => !stringMatches(item, /^[a-z0-9_:-]+$/))) return { ok: false, error: "manifest.capabilities 无效" };
   if (!Array.isArray(manifest.requiredScopes) || manifest.requiredScopes.some((item) => !allowedScopes.has(item))) return { ok: false, error: "manifest.requiredScopes 无效" };
   if (!manifest.assets || typeof manifest.assets !== "object" || !stringMatches(manifest.assets.staticDirectory, /^(?!\/)(?!.*\.\.).+$/) || !stringMatches(manifest.assets.buildCommand, /^.{1,500}$/u)) return { ok: false, error: "manifest.assets 无效" };
@@ -351,6 +357,43 @@ function validateManifestEmail(value: unknown): boolean {
   return true;
 }
 
+function validateManifestUi(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const ui = value as { chat?: unknown; filters?: unknown; supplyFields?: unknown };
+  if (Object.keys(ui).some((key) => key !== "chat" && key !== "filters" && key !== "supplyFields")) return false;
+  if (ui.chat !== undefined) {
+    if (!ui.chat || typeof ui.chat !== "object" || Array.isArray(ui.chat)) return false;
+    if (Object.keys(ui.chat).length > 64 || Object.entries(ui.chat).some(([key, item]) =>
+      !/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) || typeof item !== "string" || item.length > 500)) return false;
+  }
+  if (ui.filters !== undefined) {
+    if (!Array.isArray(ui.filters) || ui.filters.length > 32) return false;
+    if (ui.filters.some((filter) => {
+      if (!filter || typeof filter !== "object" || Array.isArray(filter)) return true;
+      const item = filter as { key?: unknown; label?: unknown; source?: unknown; attribute?: unknown; value?: unknown };
+      return !stringMatches(item.key, /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/)
+        || !stringMatches(item.label, /^.{1,200}$/u)
+        || !["trust", "price", "attribute"].includes(String(item.source))
+        || (item.attribute !== undefined && !stringMatches(item.attribute, /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/))
+        || (item.value !== undefined && !stringMatches(item.value, /^.{0,200}$/u));
+    })) return false;
+  }
+  if (ui.supplyFields !== undefined) {
+    if (!Array.isArray(ui.supplyFields) || ui.supplyFields.length > 64) return false;
+    if (ui.supplyFields.some((field) => {
+      if (!field || typeof field !== "object" || Array.isArray(field)) return true;
+      const item = field as { key?: unknown; label?: unknown; type?: unknown; required?: unknown; placeholder?: unknown; options?: unknown };
+      return !stringMatches(item.key, /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/)
+        || !stringMatches(item.label, /^.{1,200}$/u)
+        || (item.type !== undefined && !["text", "number", "url", "date", "select"].includes(String(item.type)))
+        || (item.required !== undefined && typeof item.required !== "boolean")
+        || (item.placeholder !== undefined && !stringMatches(item.placeholder, /^.{0,500}$/u))
+        || (item.options !== undefined && (!Array.isArray(item.options) || item.options.length > 64 || item.options.some((option) => !stringMatches(option, /^.{1,200}$/u))));
+    })) return false;
+  }
+  return true;
+}
+
 function validateAgentManifest(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const agent = value as { protocol?: unknown; stages?: unknown; skills?: unknown; mcpTools?: unknown };
@@ -381,6 +424,11 @@ interface Manifest {
   displayName: string;
   description?: string;
   email?: { providerKey?: string; fromAddress?: string };
+  ui?: {
+    chat?: Record<string, string>;
+    filters?: Array<{ key: string; label: string; source: "trust" | "price" | "attribute"; attribute?: string; value?: string }>;
+    supplyFields?: Array<{ key: string; label: string; type?: string; required?: boolean; placeholder?: string; options?: string[] }>;
+  };
   rootApiVersion: "v1";
   entry: string;
   routes: string[];
@@ -404,6 +452,7 @@ const manifestKeys = new Set([
   "displayName",
   "description",
   "email",
+  "ui",
   "rootApiVersion",
   "entry",
   "routes",

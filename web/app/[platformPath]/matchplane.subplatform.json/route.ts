@@ -26,7 +26,11 @@ export async function GET(
   }
   const actor = await authenticatePlatformRequest(_request);
   const viewer = actor
-    ? { authUserId: actor.access === "session" ? actor.subject : null, organizationId: actor.organizationId }
+    ? {
+        authUserId: actor.access === "session" ? actor.subject : null,
+        organizationId: actor.organizationId,
+        isRootAdministrator: actor.isRootAdministrator,
+      }
     : undefined;
   if (!(await isActivePlatformPathVisible(mountedPath, viewer))) {
     return NextResponse.json({ error: "platform manifest is not available" }, { status: 404 });

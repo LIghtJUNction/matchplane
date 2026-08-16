@@ -49,33 +49,6 @@ import {
 import { ModeDialog } from "./Overlays";
 import { MetricCard, SectionHeading, spring } from "./Primitives";
 
-const DEFAULT_SUBPLATFORM_MANIFEST = `{
-  "apiVersion": "matchplane.subplatform/v1",
-  "id": "example.market",
-  "slug": "example-market",
-  "displayName": "Example Market",
-  "description": "A domain-owned market experience.",
-  "rootApiVersion": "v1",
-  "entry": "index.html",
-  "routes": ["/example-market"],
-  "capabilities": ["demand", "supply"],
-  "requiredScopes": ["marketplace:read"],
-  "assets": {
-    "staticDirectory": "dist",
-    "buildCommand": "bun run build"
-  },
-  "agent": {
-    "protocol": "matchplane.agent/v1",
-    "stages": ["merchant", "inventory"],
-    "skills": [],
-    "mcpTools": []
-  },
-  "retrieval": {
-    "protocol": "matchplane.retrieval/v1",
-    "owner": "subplatform"
-  }
-}`;
-
 interface PlatformDashboardProps {
   paymentMode: "test" | "production";
   onRequestModeChange: () => void;
@@ -109,8 +82,8 @@ export function PlatformDashboard({
   const [gatewaySettings, setGatewaySettings] = useState("{}");
   const [gatewayCredentialRef, setGatewayCredentialRef] = useState("");
   const [routeGatewayId, setRouteGatewayId] = useState("");
-  const [routeMethodCode, setRouteMethodCode] = useState("wechat");
-  const [routeCurrency, setRouteCurrency] = useState("CNY");
+  const [routeMethodCode, setRouteMethodCode] = useState("");
+  const [routeCurrency, setRouteCurrency] = useState("");
   const [routePriority, setRoutePriority] = useState("100");
   const [invoiceName, setInvoiceName] = useState("");
   const [invoiceProviderKey, setInvoiceProviderKey] = useState("local_test");
@@ -126,7 +99,9 @@ export function PlatformDashboard({
   const [subplatformSourceLocator, setSubplatformSourceLocator] = useState("");
   const [subplatformPinnedRevision, setSubplatformPinnedRevision] = useState("");
   const [subplatformSourceDigest, setSubplatformSourceDigest] = useState("");
-  const [subplatformManifest, setSubplatformManifest] = useState(DEFAULT_SUBPLATFORM_MANIFEST);
+  // The root platform never ships a sample market manifest. Operators paste or upload the
+  // manifest that belongs to the package they are registering; domain data stays in that package.
+  const [subplatformManifest, setSubplatformManifest] = useState("");
   const [subplatformScopes, setSubplatformScopes] = useState("marketplace:read");
   const [subplatformMembershipPolicy, setSubplatformMembershipPolicy] = useState<"public" | "invite">("public");
   const [subplatformArchive, setSubplatformArchive] = useState<File | null>(null);
@@ -201,7 +176,7 @@ export function PlatformDashboard({
     setSubplatformSourceLocator("");
     setSubplatformPinnedRevision("");
     setSubplatformSourceDigest("");
-    setSubplatformManifest(DEFAULT_SUBPLATFORM_MANIFEST);
+    setSubplatformManifest("");
     setSubplatformScopes("marketplace:read");
     setSubplatformMembershipPolicy("public");
     setSubplatformArchive(null);
@@ -344,8 +319,8 @@ export function PlatformDashboard({
       });
       await refreshPaymentAdministration();
       setRouteEditorOpen(false);
-      setRouteMethodCode("wechat");
-      setRouteCurrency("CNY");
+      setRouteMethodCode("");
+      setRouteCurrency("");
       setRoutePriority("100");
       onNotice("支付路由已保存；切换生产模式前请完成网关健康检查");
     } catch (error) {
@@ -487,9 +462,9 @@ export function PlatformDashboard({
     <div className="dashboard platform-dashboard">
       <section className="workspace-heading platform-heading">
         <div>
-          <p className="eyebrow">平台经营与结算</p>
-          <h1>每一笔撮合，都能解释价值从哪里来。</h1>
-          <p>支付、发票、退款和线下结果都由根平台记录；具体费率与网关由管理员配置。</p>
+          <p className="eyebrow">平台管理</p>
+          <h1>平台管理</h1>
+          <p>管理平台树、支付、发票和退款。</p>
         </div>
         <div className={`mode-summary mode-${paymentMode}`}>
           <span className="status-orb" aria-hidden="true" />
@@ -578,8 +553,8 @@ export function PlatformDashboard({
               <div className="subplatform-form-grid">
                 <label><span>挂载到</span><select value={subplatformParentId} onChange={(event) => setSubplatformParentId(event.target.value)}><option value="">根平台</option>{subplatforms.map((organization) => <option key={organization.id} value={organization.id}>/{organization.slug} · {organization.name}</option>)}</select></label>
                 <label><span>所属 domain</span><select value={subplatformDomainId} onChange={(event) => setSubplatformDomainId(event.target.value)}><option value="">选择 active domain</option>{setup?.domains.map((domain) => <option key={domain.id} value={domain.id}>{domain.name} · {domain.slug}</option>)}</select></label>
-                <label><span>package id</span><input value={subplatformPackageId} onChange={(event) => setSubplatformPackageId(event.target.value)} placeholder="example.market" autoComplete="off" /></label>
-                <label><span>slug / 路径</span><input value={subplatformSlug} onChange={(event) => setSubplatformSlug(event.target.value)} placeholder="example-market" autoComplete="off" /></label>
+                <label><span>package id</span><input value={subplatformPackageId} onChange={(event) => setSubplatformPackageId(event.target.value)} placeholder="包 manifest 中的 id" autoComplete="off" /></label>
+                <label><span>slug / 路径</span><input value={subplatformSlug} onChange={(event) => setSubplatformSlug(event.target.value)} placeholder="包 manifest 中的 slug" autoComplete="off" /></label>
               </div>
               <div className="subplatform-source-switch" role="group" aria-label="子平台来源类型">
                 <button type="button" className={subplatformSourceKind === "git" ? "is-selected" : ""} aria-pressed={subplatformSourceKind === "git"} onClick={() => setSubplatformSourceKind("git")}><GitBranch size={16} aria-hidden="true" />Git 仓库</button>
@@ -602,7 +577,7 @@ export function PlatformDashboard({
                 <label><span>请求 scopes（逗号分隔）</span><input value={subplatformScopes} onChange={(event) => setSubplatformScopes(event.target.value)} placeholder="marketplace:read,retrieval:query" /></label>
                 <label><span>成员加入策略</span><select value={subplatformMembershipPolicy} onChange={(event) => setSubplatformMembershipPolicy(event.target.value as "public" | "invite")}><option value="public">公开映射</option><option value="invite">邀请加入</option></select></label>
               </div>
-              <label><span>manifest（只声明通用能力，不写死业务实体）</span><textarea value={subplatformManifest} onChange={(event) => setSubplatformManifest(event.target.value)} rows={12} spellCheck={false} /></label>
+              <label><span>manifest（来自待注册仓库；根平台不提供示例）</span><textarea value={subplatformManifest} onChange={(event) => setSubplatformManifest(event.target.value)} rows={12} spellCheck={false} placeholder="粘贴仓库中的 matchplane.subplatform.json；业务字段由子平台自己声明。" /></label>
               <div className="subplatform-editor-footer">
                 <p><ShieldCheck size={16} aria-hidden="true" />登记不会立即进入路由；只有构建器签发 build digest 后才能激活。</p>
                 <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "提交中…" : "登记并进入构建"}</button>
@@ -667,9 +642,9 @@ export function PlatformDashboard({
               <div className="admin-editor route-editor" aria-label="支付路由配置">
                 <div className="admin-editor-heading"><strong>新增支付路由</strong><button type="button" onClick={() => setRouteEditorOpen(false)}>关闭</button></div>
                 <label><span>支付网关</span><select value={routeGatewayId} onChange={(event) => setRouteGatewayId(event.target.value)}><option value="">选择已保存的网关</option>{gateways.map((gateway) => <option key={gateway.gateway_id} value={gateway.gateway_id}>{gateway.name} · {gateway.kind}</option>)}</select></label>
-                <label><span>方式编码</span><input value={routeMethodCode} onChange={(event) => setRouteMethodCode(event.target.value)} placeholder="wechat / alipay / epay" /></label>
+                <label><span>方式编码</span><input value={routeMethodCode} onChange={(event) => setRouteMethodCode(event.target.value)} placeholder="由网关协议定义" /></label>
                 <div className="route-editor-grid">
-                  <label><span>币种</span><input value={routeCurrency} onChange={(event) => setRouteCurrency(event.target.value.toUpperCase())} maxLength={3} placeholder="CNY" /></label>
+                  <label><span>币种</span><input value={routeCurrency} onChange={(event) => setRouteCurrency(event.target.value.toUpperCase())} maxLength={3} placeholder="ISO 4217" /></label>
                   <label><span>优先级</span><input value={routePriority} onChange={(event) => setRoutePriority(event.target.value)} inputMode="numeric" /></label>
                 </div>
                 <button className="button button-dark" type="button" disabled={saving || !gateways.length} onClick={() => void submitPaymentRoute()}>{saving ? "保存中…" : "保存路由"}</button>

@@ -43,8 +43,19 @@ export async function POST(request: Request): Promise<Response> {
 
   let form: FormData;
   try {
-    form = await request.formData();
-  } catch {
+    // Request.formData() parses the complete multipart body before returning. Read the stream
+    // through a hard cap first so chunked requests cannot bypass the archive limit and make the
+    // Next/Node process buffer an unbounded body.
+    const body = await readBodyBounded(request, MAX_ARCHIVE_BYTES + MAX_MULTIPART_OVERHEAD);
+    form = await new Request(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: Buffer.from(body),
+    }).formData();
+  } catch (error) {
+    if (error instanceof BodyLimitError) {
+      return NextResponse.json({ error: "子平台压缩包不能超过 64 MiB" }, { status: 413 });
+    }
     return NextResponse.json({ error: "请使用 multipart/form-data 上传压缩包" }, { status: 400 });
   }
   const archive = form.get("archive");
@@ -71,26 +82,31 @@ export async function POST(request: Request): Promise<Response> {
 
   let wrotePath: string | null = null;
   try {
-    const bytes = Buffer.from(await archive.arrayBuffer());
-    if (bytes.length === 0 || bytes.length > MAX_ARCHIVE_BYTES) {
-      return NextResponse.json({ error: "子平台压缩包大小超出限制" }, { status: 413 });
-    }
     await fs.mkdir(root, { recursive: true, mode: 0o750 });
     const fileHandle = await fs.open(archivePath, "wx", 0o600);
+    const digest = createHash("sha256");
+    let bytesWritten = 0;
     try {
-      await fileHandle.writeFile(bytes);
+      for await (const chunk of archive.stream()) {
+        const bytes = Buffer.from(chunk);
+        bytesWritten += bytes.length;
+        if (bytesWritten > MAX_ARCHIVE_BYTES) throw new BodyLimitError();
+        digest.update(bytes);
+        await fileHandle.write(bytes);
+      }
       await fileHandle.sync();
     } finally {
       await fileHandle.close();
     }
     wrotePath = archivePath;
-    const sourceDigest = createHash("sha256").update(bytes).digest("hex");
+    if (bytesWritten === 0) return NextResponse.json({ error: "子平台压缩包不能为空" }, { status: 413 });
+    const sourceDigest = digest.digest("hex");
     return NextResponse.json({
       sourceKind: "archive",
       sourceLocator: `upload://${uploadId}`,
       sourceDigest,
       originalName: archive.name.slice(0, 255),
-      size: bytes.length,
+      size: bytesWritten,
       next: "submit_the_locator_and_digest_to_subplatform_registration",
     }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch (error) {
@@ -130,4 +146,36 @@ function isWithin(parent: string, child: string): boolean {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+class BodyLimitError extends Error {
+  constructor() {
+    super("request body exceeds the configured limit");
+    this.name = "BodyLimitError";
+  }
+}
+
+async function readBodyBounded(request: Request, maximum: number): Promise<Uint8Array> {
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maximum) throw new BodyLimitError();
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 }

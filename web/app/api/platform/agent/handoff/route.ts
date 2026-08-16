@@ -6,6 +6,7 @@ import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization } from ".
 import { authenticatePlatformRequest } from "../../../../../src/platform-request-auth";
 import { parseAgentHandoff, type AgentHandoffEnvelope } from "../../../../../src/platform-agent-handoff";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
+import { isActivePlatformPathVisible } from "../../../../../src/platform-visibility";
 
 export const runtime = "nodejs";
 
@@ -35,11 +36,16 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "API key 不能访问该平台节点" }, { status: 403 });
   }
 
-  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   const viewer = {
     authUserId: actor.access === "session" ? actor.subject : null,
     organizationId: actor.organizationId,
+    isRootAdministrator: actor.isRootAdministrator,
   };
+  if (!(await isActivePlatformPathVisible(handoff.platformPath, viewer))) {
+    return NextResponse.json({ error: "当前平台节点不对该身份开放" }, { status: 404 });
+  }
+
+  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   const children = rootTenantId && isUuid(rootTenantId)
     ? await readActiveDirectChildRoutes(handoff.platformPath, rootTenantId, viewer)
     : [];

@@ -20,6 +20,8 @@
   --coral: #ebcece;
   --sky: #6a9bcc;
   --surface: rgba(250, 249, 245, 0.86);
+  --header-surface: rgba(240, 238, 230, 0.78);
+  --header-veil: rgba(240, 238, 230, 0.34);
   --shadow-small: 0 0.45rem 1.5rem rgba(20, 20, 19, 0.07);
   --shadow-large: 0 1.4rem 4.5rem rgba(20, 20, 19, 0.16);
   --radius-small: 0.9rem;
@@ -28,6 +30,32 @@
   --radius-hero: 2.6rem;
   background: var(--paper);
   color: var(--ink);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #f4f1e9;
+  --ink-soft: #d8d3c8;
+  --muted: #aaa79e;
+  --ivory: #20211e;
+  --paper: #141512;
+  --paper-deep: #2b2d28;
+  --line: rgba(244, 241, 233, 0.14);
+  --line-strong: rgba(244, 241, 233, 0.26);
+  --cactus: #3e5c51;
+  --cactus-deep: #a8c7b9;
+  --heather: #4c4b63;
+  --oat: #5a4d43;
+  --clay: #b86348;
+  --olive: #a9c27b;
+  --coral: #6d5154;
+  --sky: #8bbaf4;
+  --surface: rgba(32, 33, 30, 0.9);
+  --header-surface: rgba(20, 21, 18, 0.82);
+  --header-veil: rgba(20, 21, 18, 0.5);
+  --shadow-small: 0 0.45rem 1.5rem rgba(0, 0, 0, 0.18);
+  --shadow-large: 0 1.4rem 4.5rem rgba(0, 0, 0, 0.38);
+  background: var(--paper);
 }
 
 * {
@@ -44,6 +72,7 @@ body {
   min-height: 100vh;
   margin: 0;
   background: var(--paper);
+  color: var(--ink);
 }
 
 button,
@@ -140,7 +169,7 @@ p {
   z-index: 50;
   top: 0;
   padding: 0.72rem 1rem;
-  background: rgba(240, 238, 230, 0.78);
+  background: var(--header-surface);
   backdrop-filter: blur(1.5rem) saturate(150%);
   -webkit-backdrop-filter: blur(1.5rem) saturate(150%);
 }
@@ -151,7 +180,7 @@ p {
   bottom: -0.6rem;
   left: 0;
   height: 0.28rem;
-  background: rgba(240, 238, 230, 0.34);
+  background: var(--header-veil);
   content: "";
   pointer-events: none;
 }
@@ -361,6 +390,66 @@ p {
   border-top: 1px solid var(--line);
   border-radius: 0;
   color: #8e3d2b;
+}
+
+.account-menu-preferences {
+  margin: 0.25rem 0;
+  padding: 0.45rem 0.7rem;
+  border-block: 1px solid var(--line);
+}
+
+.preference-controls {
+  min-height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  color: var(--muted);
+}
+
+.preference-icon,
+.preference-locale button {
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.preference-icon:hover,
+.preference-icon:focus-visible,
+.preference-locale button:hover,
+.preference-locale button:focus-visible {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.preference-language-icon { margin-left: 0.25rem; }
+
+.preference-locale {
+  padding: 0.15rem;
+  display: inline-flex;
+  gap: 0.15rem;
+  border: 1px solid var(--line);
+  border-radius: 0.72rem;
+  background: var(--paper);
+}
+
+.preference-locale button {
+  min-width: 2rem;
+  min-height: 1.9rem;
+  border: 0;
+  border-radius: 0.52rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.preference-locale button.is-active {
+  background: var(--ink);
+  color: var(--ivory);
 }
 
 main {
@@ -1444,6 +1533,24 @@ main {
   align-items: center;
 }
 
+.platform-dashboard .workspace-heading {
+  min-height: auto;
+  padding: clamp(1.2rem, 3vw, 1.8rem);
+}
+
+.platform-dashboard .workspace-heading h1 {
+  max-width: 13ch;
+  font-size: clamp(2rem, 4vw, 3.35rem);
+  line-height: 0.98;
+}
+
+.platform-dashboard .workspace-heading > div:first-child > p:last-child {
+  max-width: 38rem;
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .mode-summary {
   min-width: 17rem;
   padding: 0.7rem;
@@ -2073,6 +2180,87 @@ main {
   padding: 0 1rem 5rem;
 }
 
+html,
+body,
+.app-shell,
+.login-page {
+  overflow-x: clip;
+}
+
+:root[data-theme="dark"] .app-header,
+:root[data-theme="dark"] .login-page {
+  background: var(--paper);
+}
+
+:root[data-theme="dark"] .login-card,
+:root[data-theme="dark"] .surface,
+:root[data-theme="dark"] .workspace-heading,
+:root[data-theme="dark"] .buyer-hero,
+:root[data-theme="dark"] .metric-card,
+:root[data-theme="dark"] .account-menu,
+:root[data-theme="dark"] .mode-dialog {
+  background: var(--ivory);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .button-quiet,
+:root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .profile-button,
+:root[data-theme="dark"] .login-methods,
+:root[data-theme="dark"] .login-form input,
+:root[data-theme="dark"] .login-form select,
+:root[data-theme="dark"] .match-chat-form textarea,
+:root[data-theme="dark"] .filter-menu,
+:root[data-theme="dark"] .filter-button {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .login-methods button.is-active,
+:root[data-theme="dark"] .social-login-buttons button,
+:root[data-theme="dark"] .account-menu-links a:hover,
+:root[data-theme="dark"] .account-menu-links a:focus-visible,
+:root[data-theme="dark"] .account-menu-signout:hover,
+:root[data-theme="dark"] .account-menu-signout:focus-visible {
+  background: var(--paper-deep);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .secure-status {
+  background: rgba(62, 92, 81, 0.72);
+  color: #d2eadf;
+}
+
+:root[data-theme="dark"] .mode-summary,
+:root[data-theme="dark"] .readiness-item,
+:root[data-theme="dark"] .subplatform-row,
+:root[data-theme="dark"] .subplatform-editor,
+:root[data-theme="dark"] .gateway-list > button,
+:root[data-theme="dark"] .admin-editor,
+:root[data-theme="dark"] .admin-editor input,
+:root[data-theme="dark"] .admin-editor textarea,
+:root[data-theme="dark"] .admin-editor select,
+:root[data-theme="dark"] .dialog-checks,
+:root[data-theme="dark"] .funnel-track,
+:root[data-theme="dark"] .funnel-insight,
+:root[data-theme="dark"] .commission-note,
+:root[data-theme="dark"] .invoice-mode-card {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .offline-intro {
+  background: #0d0e0c;
+}
+
+:root[data-theme="dark"] .login-error {
+  color: #ffc5b5;
+}
+
+:root[data-theme="dark"] .login-notice {
+  color: #cde9d9;
+}
+
 .plugin-host {
   overflow: hidden;
   margin-top: 1.25rem;
@@ -2330,6 +2518,7 @@ main {
 }
 
 .login-page {
+  position: relative;
   min-height: 100vh;
   padding: 1.2rem;
   display: grid;
@@ -2337,10 +2526,20 @@ main {
   background: var(--paper);
 }
 
+.login-topbar {
+  position: absolute;
+  top: 1.15rem;
+  right: 1.2rem;
+  left: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.login-topbar > * { pointer-events: auto; }
+
 .login-back {
-  position: fixed;
-  top: 1.25rem;
-  left: 1.25rem;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -2352,8 +2551,8 @@ main {
 .login-back:hover { color: var(--ink); }
 
 .login-card {
-  width: min(100%, 31rem);
-  padding: clamp(1.5rem, 5vw, 3.2rem);
+  width: min(100%, 27rem);
+  padding: clamp(1.4rem, 4vw, 2.45rem);
   border-radius: 2rem;
   background: var(--ivory);
   box-shadow: var(--shadow-large);
@@ -2411,7 +2610,7 @@ main {
 .login-mark {
   width: 2.6rem;
   height: 2.6rem;
-  margin-bottom: 1.7rem;
+  margin-bottom: 1.15rem;
   display: grid;
   place-items: center;
   border-radius: 0.9rem;
@@ -2420,10 +2619,18 @@ main {
 }
 
 .login-card h1 {
-  margin-top: 0.65rem;
-  font-size: clamp(2rem, 5vw, 3.25rem);
-  letter-spacing: -0.06em;
-  line-height: 1.02;
+  margin-top: 0.45rem;
+  font-size: clamp(2rem, 5vw, 2.8rem);
+  letter-spacing: -0.045em;
+  line-height: 1;
+}
+
+.login-role {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .login-intro {
@@ -2434,7 +2641,7 @@ main {
 }
 
 .login-methods {
-  margin-top: 1.35rem;
+  margin-top: 1.55rem;
   padding: 0.25rem;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2463,7 +2670,7 @@ main {
 }
 
 .login-form {
-  margin-top: 1.7rem;
+  margin-top: 1.15rem;
   display: grid;
   gap: 0.9rem;
 }
@@ -2696,7 +2903,18 @@ main {
 .seller-upload-form input:focus,
 .seller-upload-form textarea:focus { border-color: var(--sky); box-shadow: 0 0 0 0.12rem rgba(106, 155, 204, 0.2); }
 .seller-upload-form select:focus { border-color: var(--sky); box-shadow: 0 0 0 0.12rem rgba(106, 155, 204, 0.2); }
+.seller-status-summary { display: flex; align-items: center; gap: 0.7rem; width: fit-content; margin: 0 0 1.1rem; padding: 0.72rem 0.9rem; border: 1px solid var(--line); border-radius: 0.9rem; background: var(--surface); color: var(--ink-soft); }
+.seller-status-summary > svg { color: var(--accent); }
+.seller-status-summary div { display: grid; gap: 0.14rem; }
+.seller-status-summary strong { color: var(--ink); font-size: 0.78rem; }
+.seller-status-summary small { color: var(--muted); font-size: 0.68rem; }
 .seller-upload-wide { grid-column: 1 / -1; }
+.seller-form-tools { display: flex; flex-wrap: wrap; gap: 0.8rem; }
+.seller-form-tools .text-action { display: inline-flex; align-items: center; gap: 0.3rem; }
+.seller-custom-field { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) auto; gap: 0.55rem; align-items: center; grid-column: 1 / -1; }
+.seller-custom-field button { display: grid; place-items: center; width: 2.45rem; height: 2.45rem; border: 1px solid var(--line); border-radius: 0.75rem; background: transparent; color: var(--muted); cursor: pointer; }
+.seller-custom-field button:hover { color: var(--ink); border-color: var(--ink-soft); }
+.root-routing-seller-link { display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.9rem; }
 .seller-upload-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: 0.2rem; }
 .seller-upload-actions p { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.7rem; line-height: 1.45; }
 .seller-submissions { grid-column: 1 / -1; }
@@ -2733,7 +2951,8 @@ main {
   .match-chat-heading h1 { font-size: 1.8rem; }
   .match-chat-heading p { font-size: 0.8rem; }
   .login-page { padding: 0.75rem; }
-  .login-back { position: static; align-self: start; margin: 0.4rem 0 0 0.4rem; }
+  .login-topbar { position: static; width: 100%; margin: 0.25rem 0 1rem; }
+  .login-back { position: static; align-self: start; margin: 0 0 0 0.4rem; }
   .login-page { display: flex; flex-direction: column; align-items: stretch; }
   .login-card { margin: auto 0; border-radius: 1.5rem; }
   .subplatform-form-grid { grid-template-columns: 1fr; }

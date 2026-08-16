@@ -46,7 +46,7 @@ capability。客户端 secret 不进入浏览器、前端 bundle、日志或 cap
 
 ## 登录方式
 
-- 密码登录、邮箱验证码和免密链接均由 Better Auth 插件实现；邮箱发送使用目标子平台配置的 SMTP 路由（按 active registration 的 slug 映射到其 `domain_id`，不要求 domain slug 与 URL slug 相同）。
+- 密码登录、邮箱验证码和免密链接均由 Better Auth 插件实现；这些是整棵联邦平台共享的身份生命周期，因此统一使用部署方持有的根平台 SMTP。不会依据浏览器传来的 `x-matchplane-subplatform` 选择路由，避免子平台管理员重定向根平台的重置密码、验证码或验证邮件。子平台 SMTP 仅用于由已认证服务端按精确 `tenant_id/domain_id` 发送的平台通知（例如发票、商家通知），不能承载根身份邮件。
 - 微信、QQ、支付宝使用 Better Auth `genericOAuth`。每个 provider 必须完整配置 server-only 的 client id、secret、authorization/token/userinfo URL 才会启用。
 - 未配置的社会化登录不会渲染假按钮；登录页显示“已预留，待管理员配置”的说明。
 - OAuth 资料没有邮箱时，Better Auth 使用不可对外投递的 provider-scoped 账号标识，不把第三方 access token 暴露给浏览器。

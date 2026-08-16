@@ -533,6 +533,7 @@ async function claimPublicSubplatformMembership(
         AND o."tenantId" = $2::text
         AND ($3::uuid IS NULL OR o."domainId" = $3::text)
         AND r.state = 'active'
+        AND r.membership_policy = 'public'
       ORDER BY r.version DESC
       LIMIT 1`,
     [slug, tenantId, domainId ?? null],

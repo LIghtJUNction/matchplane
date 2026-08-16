@@ -17,7 +17,9 @@ import {
   isPlatformPathAccessibleByOrganization,
 } from "../../../../src/platform-mount";
 import { authenticatePlatformRequest } from "../../../../src/platform-request-auth";
+import { isActivePlatformPathVisible } from "../../../../src/platform-visibility";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 
 export const runtime = "nodejs";
 
@@ -38,7 +40,15 @@ export async function POST(request: Request): Promise<Response> {
   const actor = await authenticatePlatformRequest(request);
   if (!actor) return NextResponse.json({ error: "Better Auth session or platform API key is required" }, { status: 401 });
 
-  const input = await parseBody(request);
+  let input: MatchRequest;
+  try {
+    input = await readJsonBody<MatchRequest>(request, 128 * 1024);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof RequestBodyTooLargeError ? "请求体不能超过 128 KiB" : "请求体必须是有效 JSON" },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
   const narrative = input.narrative?.trim() ?? "";
   const platformPath = normalizePlatformPath(input.platformPath);
   if (!narrative || narrative.length > MAX_NARRATIVE_LENGTH) {
@@ -54,11 +64,16 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "API key 不能访问该平台节点" }, { status: 403 });
   }
 
-  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   const viewer = {
     authUserId: actor.access === "session" ? actor.subject : null,
     organizationId: actor.organizationId,
+    isRootAdministrator: actor.isRootAdministrator,
   };
+  if (!(await isActivePlatformPathVisible(platformPath, viewer))) {
+    return NextResponse.json({ error: "当前平台节点不对该身份开放" }, { status: 404 });
+  }
+
+  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   const candidates = rootTenantId && isUuid(rootTenantId)
     ? await readActiveDirectChildRoutes(platformPath, rootTenantId, viewer)
     : [];
@@ -294,15 +309,6 @@ function summarizeRouting(trace: PlatformRouteTrace[], truncated: boolean): Plat
 interface MatchRequest {
   narrative?: string;
   platformPath?: string;
-}
-
-async function parseBody(request: Request): Promise<MatchRequest> {
-  try {
-    const body = (await request.json()) as MatchRequest;
-    return body && typeof body === "object" && !Array.isArray(body) ? body : {};
-  } catch {
-    return {};
-  }
 }
 
 function normalizePlatformPath(value: string | undefined): string | null {

@@ -28,18 +28,60 @@ interface PendingChat {
   next: string;
 }
 
+interface ChatCopy {
+  buyerEyebrow: string;
+  sellerEyebrow: string;
+  buyerTitle: string;
+  sellerTitle: string;
+  buyerDescription: string;
+  sellerDescription: string;
+  buyerPlaceholder: string;
+  sellerPlaceholder: string;
+  buyerFootnote: string;
+  sellerFootnote: string;
+  buyerPending: string;
+  sellerPending: string;
+  buyerSuccess: string;
+  sellerSuccess: string;
+}
+
+const defaultChatCopy: ChatCopy = {
+  buyerEyebrow: "需求方入口",
+  sellerEyebrow: "供给方入口",
+  buyerTitle: "先说说你想解决什么。",
+  sellerTitle: "说说你能提供什么。",
+  buyerDescription: "描述目标、预算、时间和不能妥协的条件，平台会把需求交给合适的供给方。",
+  sellerDescription: "描述你能提供的内容、价格和交付条件，平台会把资料交给合适的需求方。",
+  buyerPlaceholder: "例如：我想解决一个具体问题，预算、时间和不能妥协的条件是……",
+  sellerPlaceholder: "例如：我能提供什么，价格、地点和交付条件是……",
+  buyerFootnote: "联系方式只在双方同意后交换；线下成交也会保留平台撮合记录。",
+  sellerFootnote: "资料审核通过后才会展示；联系方式只在双方同意后交换。",
+  buyerPending: "我先把你的目标、限制和优先级整理成一份匹配需求。",
+  sellerPending: "我先把你的供给、价格和交付条件整理成一份资料。",
+  buyerSuccess: "需求已发送，撮合会围绕你的真实目标展开",
+  sellerSuccess: "供给意图已记录，请在下方填写资料",
+};
+
+function resolveChatCopy(subplatform: SubplatformConfig): ChatCopy {
+  const configured = subplatform.ui?.chat ?? {};
+  return Object.fromEntries(Object.entries(defaultChatCopy).map(([key, fallback]) => [key, configured[key] || fallback])) as ChatCopy;
+}
+
 interface MatchChatProps {
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
+  role?: "buyer" | "seller";
   onRecommendations?: (recommendations: RecommendedBackendListing[]) => void;
 }
 
-export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchChatProps) {
+export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendations }: MatchChatProps) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const isRoot = subplatform.slug === "root";
+  const isSeller = role === "seller";
+  const copy = resolveChatCopy(subplatform);
 
   const submitMessage = useCallback(
     async (rawText: string, session?: PartySession) => {
@@ -53,13 +95,21 @@ export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchCha
         ...current,
         { id: `${requestId}-user`, role: "user", text },
         {
-          id: `${requestId}-assistant-pending`,
+          id: `${requestId}-assistant`,
           role: "assistant",
-          text: "我先把你的目标、限制和优先级整理成一份匹配需求。",
+          text: isSeller ? copy.sellerPending : copy.buyerPending,
         },
       ]);
 
       try {
+        if (isSeller) {
+          setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
+            ? { ...item, text: copy.sellerSuccess }
+            : item));
+          onNotice(copy.sellerSuccess);
+          window.setTimeout(() => document.getElementById("seller-display-name")?.focus(), 0);
+          return;
+        }
         const live = isLiveMarketplaceEnabled();
         const route = live
           ? await routePlatformIntent({ platformPath: platformPath(subplatform), narrative: text })
@@ -92,37 +142,30 @@ export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchCha
             onRecommendations?.(recommendations);
           }
         }
-        setMessages((current) => [
-          ...current,
-          {
-            id: `${requestId}-assistant-done`,
-            role: "assistant",
-            text: live
-              ? route?.status === "degraded" && route.routePlan.length
-                ? `AI 路由暂时不可用，已按受控策略把需求交给 ${route.routePlan.map((hop) => hop.displayName).join("、")}；子平台会继续筛选商家和具体商品。`
-                : route?.routePlan.length
-                  ? `AI 已从当前节点的候选商城中选出 ${route.routePlan.map((hop) => hop.displayName).join("、")}，接下来由子平台继续挑选商家、货柜和商品，并解释匹配理由。`
-                  : route?.routing.source === "ai"
-                    ? "需求已记录在当前平台节点；AI 判断当前候选商城暂时没有合适的匹配。你可以补充用途、预算或限制条件后重试。"
-                    : "需求已记录在当前平台节点，当前没有已激活的下级商城；管理员启用子平台后会继续向下传递。"
-              : "需求已记录（演示模式）。登录状态有效，下一步会按你的条件给出匹配与理由。",
-          },
-        ]);
-        onNotice("需求已发送，撮合会围绕你的真实目标展开");
+        setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
+          ? {
+              ...item,
+              text: live
+                ? route?.status === "degraded" && route.routePlan.length
+                  ? `AI 路由暂时不可用，已按受控策略把需求交给 ${route.routePlan.map((hop) => hop.displayName).join("、")}；下级平台会继续筛选商家与具体供给。`
+                  : route?.routePlan.length
+                    ? `AI 已从当前节点的候选平台中选出 ${route.routePlan.map((hop) => hop.displayName).join("、")}，接下来由下级平台继续挑选商家与具体供给，并解释匹配理由。`
+                    : route?.routing.source === "ai"
+                      ? "需求已记录在当前平台节点；AI 判断当前候选平台暂时没有合适的匹配。你可以补充目标、预算或限制条件后重试。"
+                      : "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。"
+                : "需求已记录（演示模式）。登录状态有效，下一步会按你的条件给出匹配与理由。",
+            }
+          : item));
+        onNotice(copy.buyerSuccess);
       } catch (error) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: `${requestId}-assistant-error`,
-            role: "assistant",
-            text: error instanceof Error ? error.message : "需求暂时没有发送成功，请稍后再试。",
-          },
-        ]);
+        setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
+          ? { ...item, text: error instanceof Error ? error.message : "需求暂时没有发送成功，请稍后再试。" }
+          : item));
       } finally {
         setSending(false);
       }
     },
-    [onNotice, onRecommendations, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, onNotice, onRecommendations, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
@@ -134,7 +177,7 @@ export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchCha
             platformPath: subplatform.path,
             tenantId: subplatform.tenantId,
             domainId: subplatform.domainId,
-            role: "buyer",
+            role,
           })
         : null;
       const authState = subplatform.domainId
@@ -154,7 +197,7 @@ export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchCha
       if (!cancelled) setSignedIn(false);
     });
     return () => { cancelled = true; };
-  }, [subplatform.domainId, subplatform.slug, subplatform.tenantId, submitMessage]);
+  }, [role, subplatform.domainId, subplatform.slug, subplatform.tenantId, submitMessage]);
 
   const send = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -168,7 +211,7 @@ export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchCha
             platformPath: subplatform.path,
             tenantId: subplatform.tenantId,
             domainId: subplatform.domainId,
-            role: "buyer",
+            role,
           })
         : null;
       const authState = subplatform.domainId
@@ -186,14 +229,12 @@ export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchCha
   };
 
   return (
-    <section className={`match-chat${isRoot ? " is-root" : ""}`} aria-labelledby="match-chat-title">
+    <section className={`match-chat${isRoot ? " is-root" : ""}${isSeller ? " is-seller" : ""}`} aria-labelledby="match-chat-title">
       <div className="match-chat-heading">
         <div>
-          <span className="eyebrow"><Sparkles size={14} aria-hidden="true" /> {isRoot ? "根平台 AI 撮合入口" : `${subplatform.label || "当前平台"} AI 撮合入口`}</span>
-          <h1 id="match-chat-title">先说说你想解决什么。</h1>
-          <p>{isRoot
-            ? "不用先选分类。根平台会理解你的目标，再把需求沿平台层级传递给已启用的子平台。"
-            : `不用先选分类。告诉我目标、预算、时间和不能妥协的条件，${subplatform.label || "当前平台"} 会先处理，再继续询问下属平台。`}</p>
+          <span className="eyebrow"><Sparkles size={14} aria-hidden="true" /> {isSeller ? copy.sellerEyebrow : isRoot ? "根平台入口" : copy.buyerEyebrow}</span>
+          <h1 id="match-chat-title">{isSeller ? copy.sellerTitle : copy.buyerTitle}</h1>
+          <p>{isSeller ? copy.sellerDescription : copy.buyerDescription}</p>
         </div>
         <span className={`match-chat-status${signedIn ? " is-signed-in" : ""}`}>
           <LockKeyhole size={14} aria-hidden="true" />
@@ -210,21 +251,21 @@ export function MatchChat({ onNotice, subplatform, onRecommendations }: MatchCha
       ) : null}
 
       <form className="match-chat-form" onSubmit={send}>
-        <label className="sr-only" htmlFor="match-chat-input">告诉 MatchPlane 你的需求</label>
+        <label className="sr-only" htmlFor="match-chat-input">{isSeller ? `告诉 MatchPlane ${copy.sellerTitle}` : "告诉 MatchPlane 你的需求"}</label>
         <textarea
           id="match-chat-input"
           value={message}
           onChange={(event) => setMessage(event.target.value)}
-          placeholder="例如：我想解决一个具体问题，预算、时间和不能妥协的条件是……"
+          placeholder={isSeller ? copy.sellerPlaceholder : copy.buyerPlaceholder}
           rows={2}
           maxLength={10000}
           disabled={sending}
         />
-        <button className="match-chat-send" type="submit" aria-label="发送需求" disabled={!message.trim() || sending}>
+        <button className="match-chat-send" type="submit" aria-label={isSeller ? "发送供给" : "发送需求"} disabled={!message.trim() || sending}>
           <ArrowUp size={18} aria-hidden="true" />
         </button>
       </form>
-      <p className="match-chat-footnote">联系方式只在双方同意后交换；线下成交也会保留平台撮合记录。</p>
+      <p className="match-chat-footnote">{isSeller ? copy.sellerFootnote : copy.buyerFootnote}</p>
     </section>
   );
 }

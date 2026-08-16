@@ -16,6 +16,33 @@
     "seller_promotion"
   ],
   "requiredScopes": ["marketplace:read", "marketplace:write"],
+  "ui": {
+    "chat": {
+      "buyerEyebrow": "二手车需求",
+      "sellerEyebrow": "车源供给",
+      "buyerTitle": "说清楚你想找的车。",
+      "sellerTitle": "提交你的真实车源。",
+      "buyerDescription": "告诉我们预算、用途、时间和不能妥协的条件，平台会把需求交给合适的车源。",
+      "sellerDescription": "填写车源资料和报价，审核通过后进入买家匹配。",
+      "buyerPlaceholder": "例如：预算、用途、时间和不能妥协的条件……",
+      "sellerPlaceholder": "例如：车型、车况、价格和看车地点……",
+      "buyerFootnote": "联系方式只在双方同意后交换；线下看车会保留撮合记录。",
+      "sellerFootnote": "资料审核通过后才会展示；联系方式只在双方同意后交换。"
+    },
+    "filters": [
+      { "key": "verified", "label": "已核验", "source": "trust" },
+      { "key": "priced", "label": "有明确报价", "source": "price" },
+      { "key": "energy", "label": "能源类型已填写", "source": "attribute", "attribute": "energy" }
+    ],
+    "supplyFields": [
+      { "key": "brand", "label": "品牌", "type": "text", "required": true },
+      { "key": "model", "label": "车型", "type": "text", "required": true },
+      { "key": "year", "label": "上牌年份", "type": "number", "required": true },
+      { "key": "mileage", "label": "里程（公里）", "type": "number", "required": true },
+      { "key": "energy", "label": "能源类型", "type": "select", "required": true, "options": ["燃油", "混动", "纯电", "其他"] },
+      { "key": "location", "label": "看车地点", "type": "text", "required": true }
+    ]
+  },
   "agent": {
     "protocol": "matchplane.agent/v1",
     "stages": ["merchant", "inventory"],

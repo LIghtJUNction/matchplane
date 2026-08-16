@@ -6,6 +6,8 @@ export interface PlatformRequestActor {
   subject: string;
   access: "session" | "api_key";
   organizationId: string | null;
+  /** Root administrators may inspect private descendants without becoming child members. */
+  isRootAdministrator: boolean;
 }
 
 /**
@@ -19,10 +21,12 @@ export async function authenticatePlatformRequest(
   try {
     const session = await auth.api.getSession({ headers: request.headers });
     if (session) {
+      const role = (session.user as { role?: unknown }).role;
       return {
         subject: session.user.id,
         access: "session",
         organizationId: null,
+        isRootAdministrator: role === "rootSuperAdmin" || role === "rootAdmin",
       };
     }
   } catch {
@@ -35,6 +39,7 @@ export async function authenticatePlatformRequest(
     subject: `api-key:${key.id}`,
     access: "api_key",
     organizationId: key.referenceId,
+    isRootAdministrator: false,
   };
 }
 

@@ -99,9 +99,8 @@ export const auth = betterAuth({
     autoSignIn: false,
     minPasswordLength: 8,
     maxPasswordLength: 128,
-    sendResetPassword: (data, request) =>
+    sendResetPassword: (data) =>
       sendConfiguredAuthEmail({
-        request,
         recipient: data.user.email,
         subject: "重置你的 MatchPlane 密码",
         text: `请打开以下链接重置密码：${data.url}`,
@@ -112,9 +111,8 @@ export const auth = betterAuth({
     sendOnSignUp: !allowDemoBootstrap,
     sendOnSignIn: !allowDemoBootstrap,
     autoSignInAfterVerification: true,
-    sendVerificationEmail: (data, request) =>
+    sendVerificationEmail: (data) =>
       sendConfiguredAuthEmail({
-        request,
         recipient: data.user.email,
         subject: "验证你的 MatchPlane 邮箱",
         text: `请打开以下链接完成邮箱验证：${data.url}`,
@@ -184,9 +182,8 @@ export const auth = betterAuth({
       allowedAttempts: 3,
       storeOTP: "hashed",
       rateLimit: { window: 60, max: 3 },
-      sendVerificationOTP: (data, context) =>
+      sendVerificationOTP: (data) =>
         sendConfiguredAuthEmail({
-          request: context?.request,
           recipient: data.email,
           subject: "你的 MatchPlane 登录验证码",
           text: `你的 MatchPlane 登录验证码是 ${data.otp}。验证码 5 分钟内有效，请勿转发给他人。`,
@@ -197,9 +194,8 @@ export const auth = betterAuth({
       expiresIn: 5 * 60,
       storeToken: "hashed",
       rateLimit: { window: 60, max: 5 },
-      sendMagicLink: (data, context) =>
+      sendMagicLink: (data) =>
         sendConfiguredAuthEmail({
-          request: context?.request,
           recipient: data.email,
           subject: "继续你的 MatchPlane 匹配",
           text: `请打开以下链接继续登录：${data.url}\n\n链接 5 分钟内有效。`,

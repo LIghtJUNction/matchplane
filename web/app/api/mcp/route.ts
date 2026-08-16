@@ -4,6 +4,7 @@ import { POST as establishAgentSession } from "../marketplace/agent-session/rout
 import { POST as matchPlatform } from "../platform/match/route";
 import { POST as handoffAgent } from "../platform/agent/handoff/route";
 import { hasTrustedBrowserOrigin } from "../../../src/lib/request-origin";
+import { readJsonBody, RequestBodyTooLargeError } from "../../../src/lib/body-limit";
 
 export const runtime = "nodejs";
 
@@ -17,11 +18,12 @@ export async function POST(request: Request): Promise<Response> {
   }
   let message: JsonRpcRequest;
   try {
-    const value = await request.json();
+    const value = await readJsonBody<unknown>(request, 256 * 1024);
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("object required");
     message = value as JsonRpcRequest;
-  } catch {
-    return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "invalid JSON-RPC request" } }, { status: 400 });
+  } catch (error) {
+    const tooLarge = error instanceof RequestBodyTooLargeError;
+    return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: tooLarge ? -32013 : -32700, message: tooLarge ? "JSON-RPC request exceeds 256 KiB" : "invalid JSON-RPC request" } }, { status: tooLarge ? 413 : 400 });
   }
 
   if (message.jsonrpc !== "2.0" || typeof message.method !== "string" || !message.method) {

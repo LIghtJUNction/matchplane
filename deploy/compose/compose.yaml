@@ -172,7 +172,9 @@ services:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       PORT: 4173
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:4173}
+      # Keep the browser origin aligned with a custom host port. Better Auth rejects sign-in
+      # requests when the published port (for example 54173) is absent from its trusted origins.
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${MATCHPLANE_WEB_HOST_PORT:-4173}}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-matchplane_dev_only_auth_secret_change_in_production}
       MATCHPLANE_OIDC_ENABLED: ${MATCHPLANE_OIDC_ENABLED:-true}
       MATCHPLANE_ROOT_ADMIN_EMAIL: ${MATCHPLANE_ROOT_ADMIN_EMAIL:-admin@example.com}
@@ -190,6 +192,7 @@ services:
       MATCHPLANE_ROOT_TENANT_ID: ${MATCHPLANE_ROOT_TENANT_ID:-00000000-0000-7000-8000-000000000100}
       MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT: ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-/var/lib/matchplane/subplatform-artifacts}
       MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT: ${MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT:-/var/lib/matchplane/subplatform-uploads}
+      MATCHPLANE_SUBPLATFORM_SECRET_ROOT: ${MATCHPLANE_SUBPLATFORM_SECRET_ROOT:-/run/secrets/subplatform-email}
       MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID: ${MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID:-}
       MATCHPLANE_ROUTER_AI_URL: ${MATCHPLANE_ROUTER_AI_URL:-}
       MATCHPLANE_ROUTER_AI_KEY: ${MATCHPLANE_ROUTER_AI_KEY:-}
@@ -221,6 +224,7 @@ services:
     volumes:
       - ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-./var/subplatform-artifacts}:/var/lib/matchplane/subplatform-artifacts:ro
       - ${MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT:-./var/subplatform-uploads}:/var/lib/matchplane/subplatform-uploads:rw
+      - ${MATCHPLANE_SUBPLATFORM_SECRET_HOST_ROOT:-./var/subplatform-email-secrets}:/run/secrets/subplatform-email:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health/web').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s

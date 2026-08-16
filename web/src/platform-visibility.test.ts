@@ -21,7 +21,7 @@ describe("platform path visibility", () => {
     await expect(isActivePlatformPathVisible("/private-market")).resolves.toBe(false);
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining("membership_policy = 'public'"),
-      ["00000000-0000-4000-8000-000000000001", "/private-market", null, null],
+      ["00000000-0000-4000-8000-000000000001", "/private-market", null, null, false],
     );
   });
 
@@ -31,5 +31,20 @@ describe("platform path visibility", () => {
     await expect(isActivePlatformPathVisible("/private-market", {
       authUserId: "00000000-0000-4000-8000-000000000002",
     })).resolves.toBe(true);
+  });
+
+  it("allows a root administrator to inspect a private descendant", async () => {
+    query.mockResolvedValue({ rowCount: 1 });
+
+    await expect(isActivePlatformPathVisible("/private-market", {
+      isRootAdministrator: true,
+    })).resolves.toBe(true);
+    expect(query.mock.calls[0]?.[1]).toEqual([
+      "00000000-0000-4000-8000-000000000001",
+      "/private-market",
+      null,
+      null,
+      true,
+    ]);
   });
 });

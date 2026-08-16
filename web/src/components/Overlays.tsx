@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BadgeCheck,
   CalendarDays,
@@ -20,14 +20,29 @@ import { ListingVisual, momentumSpring, spring } from "./Primitives";
 interface ListingSheetProps {
   listing: AssetListing | null;
   onClose: () => void;
-  onContact: (listing: AssetListing) => void;
+  onContact: (listing: AssetListing) => Promise<void> | void;
 }
 
 export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps) {
   const desktop = useMediaQuery("(min-width: 56rem)");
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [contactSubmitting, setContactSubmitting] = useState(false);
 
   useOverlayLifecycle(Boolean(listing), onClose, closeRef);
+
+  useEffect(() => {
+    if (!listing) setContactSubmitting(false);
+  }, [listing]);
+
+  const submitContact = async () => {
+    if (!listing || contactSubmitting) return;
+    setContactSubmitting(true);
+    try {
+      await onContact(listing);
+    } finally {
+      setContactSubmitting(false);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -73,7 +88,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
               </motion.button>
             </div>
             <div className="sheet-scroll">
-              <ListingVisual accent={listing.accent} />
+              <ListingVisual accent={listing.accent} label={listing.trust?.[0]} />
               {listing.matchScore !== undefined ? <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {listing.matchScore}% 需求匹配</div> : null}
               <h2 id="listing-sheet-title">{listing.title}</h2>
               <p className="sheet-subtitle">{listing.subtitle}</p>
@@ -110,7 +125,7 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
                 <div className="contact-options">
                   <span><MessageCircle size={15} aria-hidden="true" />站内沟通</span>
                   <span><Phone size={15} aria-hidden="true" />电话 / 微信</span>
-                  <span><CalendarDays size={15} aria-hidden="true" />预约看车</span>
+                  <span><CalendarDays size={15} aria-hidden="true" />预约协商</span>
                   <span><MapPin size={15} aria-hidden="true" />地点加密</span>
                 </div>
               </section>
@@ -120,11 +135,12 @@ export function ListingSheet({ listing, onClose, onContact }: ListingSheetProps)
               <motion.button
                 className="button button-dark"
                 type="button"
-                onClick={() => onContact(listing)}
+                onClick={() => void submitContact()}
+                disabled={contactSubmitting}
                 whileTap={{ scale: 0.97 }}
                 transition={momentumSpring}
               >
-                申请联系
+                {contactSubmitting ? "正在提交…" : "申请联系"}
               </motion.button>
             </div>
           </motion.aside>

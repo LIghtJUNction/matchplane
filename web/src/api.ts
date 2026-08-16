@@ -980,7 +980,7 @@ export async function createBuyerIntroduction(input: {
     limit: 20,
   });
   if (!recommendations.some((item) => item.listing_id === input.listingId)) {
-    throw new MarketplaceApiError(409, "这台车不满足当前需求，请刷新匹配理由后再试");
+    throw new MarketplaceApiError(409, "该供给不满足当前需求，请刷新匹配理由后再试");
   }
   const outcome = await request<{ offline_deal_id: string }>(
     "/v1/marketplace/offline-deals",

@@ -5,6 +5,8 @@ export interface PlatformViewer {
   authUserId?: string | null;
   /** Better Auth organization id for a scoped Agent API key. */
   organizationId?: string | null;
+  /** Root operators can manage private descendants without being marketplace members. */
+  isRootAdministrator?: boolean;
 }
 
 /**
@@ -91,8 +93,15 @@ export async function isActivePlatformPathVisible(
              )
              SELECT 1 FROM key_scope WHERE id = target.organization_id
            ))
+           OR ($5::boolean IS TRUE)
         LIMIT 1`,
-      [rootTenantId, platformPath, viewer?.authUserId ?? null, viewer?.organizationId ?? null],
+      [
+        rootTenantId,
+        platformPath,
+        viewer?.authUserId ?? null,
+        viewer?.organizationId ?? null,
+        viewer?.isRootAdministrator === true,
+      ],
     );
     return result.rowCount === 1;
   } catch (error) {

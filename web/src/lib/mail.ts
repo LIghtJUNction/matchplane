@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
+import path from "node:path";
 
 import nodemailer from "nodemailer";
 
@@ -10,11 +11,16 @@ const database = new Pool({
 });
 
 interface AuthEmailInput {
-  request?: Request;
   recipient: string;
   subject: string;
   text: string;
   html: string;
+}
+
+/** Server-side context for a child platform notification route. */
+export interface PlatformEmailContext {
+  tenantId: string;
+  domainId: string;
 }
 
 interface EmailRoute {
@@ -28,13 +34,15 @@ interface EmailRoute {
   replyTo: string | null;
   mode: string;
   enabled: boolean;
+  tenantId: string | null;
+  domainId: string | null;
 }
 
 /**
- * Root authentication is needed before a platform administrator can configure a child node.
- * Keep this bootstrap route deployment-owned: the password is still resolved from an env/file
- * reference and never stored in PostgreSQL, a manifest, or the browser. Child routes continue to
- * come from `subplatform_email_configs` and can be changed by their scoped administrators.
+ * Root authentication is shared by every mounted platform. Keep this bootstrap route deployment-
+ * owned: the password is resolved from an env/file reference and never stored in PostgreSQL, a
+ * manifest, or the browser. A child SMTP route must never be selected by an unauthenticated
+ * request because that would let a child administrator redirect root auth mail.
  */
 export function rootEmailRouteFromEnv(environment = process.env.MATCHPLANE_ENVIRONMENT): EmailRoute | null {
   const fields = {
@@ -82,17 +90,46 @@ export function rootEmailRouteFromEnv(environment = process.env.MATCHPLANE_ENVIR
     replyTo: fields.replyTo || null,
     mode,
     enabled,
+    tenantId: null,
+    domainId: null,
   };
 }
 
-/** Send Better Auth lifecycle messages through the selected subplatform's configured route. */
+/**
+ * Send Better Auth lifecycle messages through the deployment-owned root route.
+ *
+ * Better Auth is the federated account authority for the whole platform tree. The request object
+ * is intentionally not part of route selection: `x-matchplane-subplatform` is a UI/API routing
+ * hint, not an authentication trust boundary.
+ */
 export async function sendConfiguredAuthEmail(input: AuthEmailInput): Promise<void> {
-  const route = await loadEmailRoute(input.request);
+  const route = rootEmailRouteFromEnv();
+  if (!route || !route.enabled) {
+    throw new Error("根平台尚未启用邮箱发送路由");
+  }
+
+  await deliverEmail(route, input);
+}
+
+/**
+ * Send a platform-owned notification using an exact child tenant/domain route. The caller must
+ * derive this context from an authenticated server-side platform record; never pass browser
+ * headers or form values directly into this function.
+ */
+export async function sendConfiguredPlatformEmail(
+  context: PlatformEmailContext,
+  input: AuthEmailInput,
+): Promise<void> {
+  const route = await loadSubplatformEmailRoute(context);
   if (!route || !route.enabled) {
     throw new Error("当前子平台尚未启用邮箱发送路由");
   }
 
-  const password = await resolveSecret(route.credentialSecretRef);
+  await deliverEmail(route, input);
+}
+
+async function deliverEmail(route: EmailRoute, input: AuthEmailInput): Promise<void> {
+  const password = await resolveSecret(route);
   const transport = nodemailer.createTransport({
     host: route.smtpHost,
     port: route.smtpPort,
@@ -111,13 +148,11 @@ export async function sendConfiguredAuthEmail(input: AuthEmailInput): Promise<vo
   });
 }
 
-async function loadEmailRoute(request?: Request): Promise<EmailRoute | null> {
-  const slug = request?.headers.get("x-matchplane-subplatform")?.trim() || "root";
-  if (slug === "root") {
-    const rootRoute = rootEmailRouteFromEnv();
-    if (rootRoute) return rootRoute;
-  }
+async function loadSubplatformEmailRoute(context: PlatformEmailContext): Promise<EmailRoute | null> {
+  if (!isUuid(context.tenantId) || !isUuid(context.domainId)) return null;
   const result = await database.query<{
+    tenant_id: string;
+    domain_id: string;
     provider_key: string;
     smtp_host: string;
     smtp_port: number;
@@ -129,25 +164,16 @@ async function loadEmailRoute(request?: Request): Promise<EmailRoute | null> {
     mode: string;
     enabled: boolean;
   }>(
-    `SELECT c.provider_key, c.smtp_host, c.smtp_port, c.tls_mode, c.username,
+    `SELECT c.tenant_id, c.domain_id, c.provider_key, c.smtp_host, c.smtp_port, c.tls_mode, c.username,
             c.credential_secret_ref, c.from_address, c.reply_to, c.mode, c.enabled
        FROM subplatform_email_configs c
        JOIN domains d ON d.tenant_id = c.tenant_id AND d.id = c.domain_id
       WHERE d.status = 'active' AND c.enabled = true
-        AND (
-          d.slug = $1
-          OR EXISTS (
-            SELECT 1
-              FROM subplatform_registrations r
-             WHERE r.tenant_id = c.tenant_id
-               AND r.domain_id = c.domain_id
-               AND r.slug = $1
-               AND r.state = 'active'
-          )
-        )
+        AND c.tenant_id = $1::uuid
+        AND c.domain_id = $2::uuid
       ORDER BY c.updated_at DESC
       LIMIT 1`,
-    [slug],
+    [context.tenantId, context.domainId],
   );
   const row = result.rows[0];
   return row
@@ -162,11 +188,20 @@ async function loadEmailRoute(request?: Request): Promise<EmailRoute | null> {
         replyTo: row.reply_to,
         mode: row.mode,
         enabled: row.enabled,
+        tenantId: row.tenant_id,
+        domainId: row.domain_id,
       }
     : null;
 }
 
-async function resolveSecret(reference: string): Promise<string> {
+async function resolveSecret(route: EmailRoute): Promise<string> {
+  if (route.tenantId && route.domainId) {
+    return resolveSubplatformSecret(route);
+  }
+  return resolveDeploymentSecret(route.credentialSecretRef);
+}
+
+async function resolveDeploymentSecret(reference: string): Promise<string> {
   if (reference.startsWith("env://")) {
     const variable = reference.slice("env://".length);
     const value = process.env[variable];
@@ -178,12 +213,45 @@ async function resolveSecret(reference: string): Promise<string> {
     if (!value) throw new Error("邮箱 secret 文件为空");
     return value;
   }
-  throw new Error("邮箱 secret reference 必须使用 env:// 或 file://，不接受明文密码");
+  throw new Error("根平台邮箱 secret reference 必须使用 env:// 或 file://，不接受明文密码");
+}
+
+async function resolveSubplatformSecret(route: EmailRoute): Promise<string> {
+  const match = /^secret:\/\/subplatform\/([0-9a-f-]{36})\/([0-9a-f-]{36})\/([A-Za-z0-9._-]{1,128})$/i.exec(route.credentialSecretRef);
+  if (!match || match[1].toLowerCase() !== route.tenantId?.toLowerCase() || match[2].toLowerCase() !== route.domainId?.toLowerCase()) {
+    throw new Error("子平台邮箱 secret 必须是绑定当前 tenant/domain 的 secret:// 引用");
+  }
+  const secretRoot = process.env.MATCHPLANE_SUBPLATFORM_SECRET_ROOT?.trim();
+  if (!secretRoot || !path.isAbsolute(secretRoot)) {
+    throw new Error("子平台邮箱 secret 存储尚未配置");
+  }
+  const root = path.resolve(secretRoot);
+  const candidate = path.resolve(root, match[1].toLowerCase(), match[2].toLowerCase(), match[3]);
+  if (!isWithin(root, candidate)) throw new Error("子平台邮箱 secret 路径无效");
+  try {
+    const [rootReal, candidateReal] = await Promise.all([realpath(root), realpath(candidate)]);
+    if (!isWithin(rootReal, candidateReal)) throw new Error("子平台邮箱 secret 路径越界");
+    const value = (await readFile(candidateReal, "utf8")).trim();
+    if (!value) throw new Error("子平台邮箱 secret 文件为空");
+    return value;
+  } catch (error) {
+    if (error instanceof Error && /子平台邮箱 secret/.test(error.message)) throw error;
+    throw new Error("子平台邮箱 secret 不可用");
+  }
 }
 
 function isSecretReference(value: string): boolean {
   return (value.startsWith("env://") && value.length > "env://".length)
     || (value.startsWith("file://") && value.length > "file://".length);
+}
+
+function isWithin(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function isEmailAddress(value: string): boolean {

@@ -38,7 +38,11 @@ export async function GET(request: Request): Promise<Response> {
   if (!(await isMountedPlatformPath(platformPath))) return NextResponse.json({ error: "平台路径尚未激活" }, { status: 404 });
   const actor = await authenticatePlatformRequest(request);
   const viewer = actor
-    ? { authUserId: actor.access === "session" ? actor.subject : null, organizationId: actor.organizationId }
+    ? {
+        authUserId: actor.access === "session" ? actor.subject : null,
+        organizationId: actor.organizationId,
+        isRootAdministrator: actor.isRootAdministrator,
+      }
     : undefined;
   if (!(await isActivePlatformPathVisible(platformPath, viewer))) {
     return NextResponse.json({ error: "plugin asset is not available" }, { status: 404 });

@@ -61,7 +61,11 @@ same web-only secret/environment file. Set `MATCHPLANE_ROOT_SMTP_HOST`, `_PORT`,
 `subplatform_email_configs`: a root administrator must be able to receive the first verification
 email before any child platform or child SMTP configuration exists. After the root account is
 verified, each child administrator can configure its own SMTP route from the scoped subplatform
-workspace.
+workspace. Populate a read-only secret root for the web workload using the layout
+`<tenant-uuid>/<domain-uuid>/<slot-name>` and set `MATCHPLANE_SUBPLATFORM_SECRET_ROOT`; the
+administrator stores only the matching opaque `secret://subplatform/<tenant>/<domain>/<slot>`
+reference. Child configuration cannot read deployment `env://` variables or arbitrary
+`file://` paths.
 
 The web administrator BFF also needs a narrowly projected copy of the gateway and payment admin
 bearers. On systemd, keep them at `/etc/matchplane/secrets/web/payment-admin.token` and

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { auth } from "../../../../src/lib/auth";
+import { auth, authDatabase } from "../../../../src/lib/auth";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
@@ -38,6 +38,9 @@ export async function POST(request: Request): Promise<Response> {
 
   const userRole = (session.user as { role?: string }).role;
   const globalManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
+  if (globalManager && !(await belongsToConfiguredRootTenant(input.organizationId))) {
+    return NextResponse.json({ error: "API Key 只能签发给当前 root tenant 的平台组织" }, { status: 403 });
+  }
   let organization = await readOrganization(request, input.organizationId);
   if (!organization && globalManager) {
     try {
@@ -111,6 +114,9 @@ export async function GET(request: Request): Promise<Response> {
   }
   const userRole = (session.user as { role?: string }).role;
   const globalManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
+  if (globalManager && !(await belongsToConfiguredRootTenant(organizationId))) {
+    return NextResponse.json({ error: "API Key 只能读取当前 root tenant 的平台组织" }, { status: 403 });
+  }
   let organization = await readOrganization(request, organizationId);
   if (!organization && globalManager) {
     try {
@@ -173,6 +179,25 @@ async function readOrganization(
   } catch {
     return null;
   }
+}
+
+/**
+ * A root administrator is global only inside this deployment's platform tree. Do not let a
+ * browser-supplied Better Auth organization id turn the convenience endpoint into a cross-tenant
+ * API-key minting or listing primitive.
+ */
+async function belongsToConfiguredRootTenant(organizationId: string): Promise<boolean> {
+  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  if (!rootTenantId || !isUuid(rootTenantId)) return false;
+  const result = await authDatabase.query(
+    `SELECT 1
+       FROM "organization"
+      WHERE id = $1::uuid
+        AND "tenantId" = $2
+      LIMIT 1`,
+    [organizationId, rootTenantId],
+  );
+  return result.rowCount === 1;
 }
 
 function normalizePermissions(

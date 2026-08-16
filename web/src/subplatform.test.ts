@@ -32,6 +32,12 @@ describe("nested subplatform paths", () => {
     expect(resolveSubplatform("/used-car?role=seller").path).toBe("/used-car");
   });
 
+  it("does not treat a child path ending in root as the deployment root", () => {
+    expect(resolveSubplatform("/root").slug).toBe("root");
+    expect(resolveSubplatform("/root").path).toBe("/root");
+    expect(resolveSubplatform("/parent/root").path).toBe("/parent/root");
+  });
+
   it("requires the dedicated builder token for digest callbacks", () => {
     expect(hasValidSubplatformBuilderToken("builder-secret", "builder-secret")).toBe(true);
     expect(hasValidSubplatformBuilderToken("builder-secret", "wrong-secret")).toBe(false);

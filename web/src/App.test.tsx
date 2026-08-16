@@ -38,6 +38,8 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
   window.localStorage.clear();
   window.sessionStorage.clear();
+  document.documentElement.dataset.theme = "light";
+  document.documentElement.lang = "zh-CN";
   clearPartySessionCache();
 });
 
@@ -58,7 +60,7 @@ describe("MatchPlane workspaces", () => {
 
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("内部编号"), "seller-item");
-    await user.type(screen.getByLabelText("报价（最小货币单位）"), "100");
+    await user.type(screen.getByLabelText(/报价/), "100");
     await user.type(screen.getByLabelText("币种"), "CNY");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
 
@@ -80,7 +82,7 @@ describe("MatchPlane workspaces", () => {
 
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("内部编号"), "seller-item");
-    await user.type(screen.getByLabelText("报价（最小货币单位）"), "100");
+    await user.type(screen.getByLabelText(/报价/), "100");
     await user.type(screen.getByLabelText("币种"), "CNY");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
 
@@ -94,7 +96,7 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await screen.findByRole("heading", { name: /解释价值从哪里来/ });
+    await screen.findByRole("heading", { name: "平台管理" });
     await user.click(screen.getByRole("button", { name: "切换" }));
 
     const dialog = screen.getByRole("dialog", { name: "切换到生产模式？" });
@@ -146,5 +148,18 @@ describe("MatchPlane workspaces", () => {
 
     expect(authClient.signOut).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("status")).toHaveTextContent("已退出当前账号");
+  });
+
+  it("lets a signed-in user change theme and language from the account menu", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开个人账户菜单" }));
+    await user.click(screen.getByRole("button", { name: "切换到暗色" }));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    await user.click(screen.getByRole("button", { name: "EN" }));
+    expect(document.documentElement.lang).toBe("en");
+    expect(screen.getByRole("menuitem", { name: "Buyer workspace" })).toBeInTheDocument();
   });
 });

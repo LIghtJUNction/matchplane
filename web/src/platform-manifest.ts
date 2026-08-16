@@ -56,6 +56,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
                 registration.tenant_id AS "tenantId",
                 registration.domain_id AS "domainId",
                 schema_default.id AS "assetSchemaId",
+                schema_default.schema_document AS "assetSchema",
                 market_default.quote_asset_key AS currency,
                 market_default.price_scale AS "currencyScale",
                 encode(registration.manifest_digest, 'hex') AS "manifestDigest",
@@ -81,7 +82,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
               LIMIT 1
            ) registration ON true
            LEFT JOIN LATERAL (
-             SELECT s.id
+             SELECT s.id, s.schema_document
                FROM asset_schemas s
               WHERE s.tenant_id = registration.tenant_id
                 AND s.domain_id = registration.domain_id
@@ -99,7 +100,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
               LIMIT 1
            ) market_default ON true
        )
-       SELECT manifest, "tenantId", "domainId", "assetSchemaId", currency, "currencyScale",
+       SELECT manifest, "tenantId", "domainId", "assetSchemaId", "assetSchema", currency, "currencyScale",
               "manifestDigest", "buildDigest", "artifactLocator", "artifactEntry", version
          FROM active_release
         WHERE platform_path = $2
@@ -112,6 +113,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
       tenantId?: unknown;
       domainId?: unknown;
       assetSchemaId?: unknown;
+      assetSchema?: unknown;
       currency?: unknown;
       currencyScale?: unknown;
       manifestDigest?: unknown;
@@ -140,6 +142,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
       tenantId: typeof row.tenantId === "string" ? row.tenantId : undefined,
       domainId: typeof row.domainId === "string" ? row.domainId : undefined,
       assetSchemaId: typeof row.assetSchemaId === "string" ? row.assetSchemaId : undefined,
+      assetSchema: row.assetSchema && typeof row.assetSchema === "object" && !Array.isArray(row.assetSchema) ? row.assetSchema : undefined,
       currency: typeof row.currency === "string" ? row.currency : undefined,
       currencyScale: Number.isInteger(row.currencyScale) ? row.currencyScale : undefined,
       manifestDigest: typeof row.manifestDigest === "string" ? row.manifestDigest : undefined,

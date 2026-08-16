@@ -102,6 +102,12 @@ are negotiated before the package is enabled. The optional `agent` block adverti
 workflow stages and MCP tool names only; it contains no endpoints, credentials or vector-store
 configuration.
 
+Domain copy, filters and seller fields belong to the package, not the root implementation. A
+package may declare `ui.chat`, `ui.filters` and `ui.supplyFields` in its manifest; the root validates
+and passes those values to the generic shell/plugin. The root never ships a sample listing,
+vertical trust claim, or default business currency. A seller submits the values defined by the
+active package schema, while the root stores and forwards the resulting structured attributes.
+
 The built-in registration intake is `POST /api/platform/subplatforms`. It requires a Better Auth
 root/parent administrator session, an existing `tenantId`/`domainId`, a pinned Git commit or
 immutable archive locator, and the manifest JSON. It creates the Better Auth organization,
@@ -312,9 +318,16 @@ boundary, not as a requirement imposed on new subplatforms.
 The optional `email` block is public routing metadata only. A subplatform administrator configures
 the SMTP host, TLS mode, username and a deployment secret reference through
 `/v1/subplatforms/{domain_id}/email-config`. The secret reference is never returned to the browser;
-the worker that sends login links resolves it from the host secret manager. Each subplatform has
+the server-side notification worker resolves it from the host secret manager. Each subplatform has
 its own row and optimistic version, so changing one provider cannot change another subplatform's
-mail route.
+mail route. A child reference must be the opaque form
+`secret://subplatform/<tenant-uuid>/<domain-uuid>/<slot-name>` and the web worker resolves that
+slot only below `MATCHPLANE_SUBPLATFORM_SECRET_ROOT`; child administrators cannot submit
+`env://` or `file://` paths. Better Auth's global password, verification, OTP, and magic-link mail
+always uses the deployment-owned root route; a child route is available only to authenticated
+server-side notification jobs (for example invoices or seller notifications) with an exact
+`tenant_id/domain_id` context. The root route may use `env://` or `file://` because it is never
+writable by a child administrator.
 
 ## Two registration inputs
 

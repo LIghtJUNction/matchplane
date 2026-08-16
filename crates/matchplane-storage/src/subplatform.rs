@@ -3,6 +3,7 @@
 use matchplane_domain::{DomainId, MarketplacePartyId, TenantId};
 use serde::Serialize;
 use sqlx::Row;
+use uuid::Uuid;
 
 use crate::{PgStore, StorageError};
 
@@ -98,9 +99,13 @@ impl PgStore {
                 "tls_mode must be starttls, tls, or plain".to_owned(),
             ));
         }
-        if command.credential_secret_ref.len() < 5 || command.credential_secret_ref.len() > 2048 {
+        if !is_scoped_secret_reference(
+            &command.credential_secret_ref,
+            command.tenant_id,
+            command.domain_id,
+        ) {
             return Err(StorageError::InvalidData(
-                "credential_secret_ref must contain 5..=2048 bytes".to_owned(),
+                "credential_secret_ref must be secret://subplatform/<tenant>/<domain>/<name> and match this platform".to_owned(),
             ));
         }
         if !matches!(command.mode.as_str(), "test" | "production") {
@@ -213,6 +218,29 @@ impl PgStore {
             ))
         }
     }
+}
+
+fn is_scoped_secret_reference(value: &str, tenant_id: TenantId, domain_id: DomainId) -> bool {
+    let Some(rest) = value.strip_prefix("secret://subplatform/") else {
+        return false;
+    };
+    let mut segments = rest.split('/');
+    let (Some(tenant), Some(domain), Some(name), None) = (
+        segments.next(),
+        segments.next(),
+        segments.next(),
+        segments.next(),
+    ) else {
+        return false;
+    };
+    if Uuid::parse_str(tenant).ok() != Some(tenant_id.into_uuid())
+        || Uuid::parse_str(domain).ok() != Some(domain_id.into_uuid())
+        || !(1..=128).contains(&name.len())
+    {
+        return false;
+    }
+    name.bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 async fn ensure_subplatform_admin_in_transaction(

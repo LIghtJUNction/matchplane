@@ -37,6 +37,10 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
         platform: subplatform.slug,
         role,
         contextToken: contextTokenRef.current,
+        currency: subplatform.currency,
+        currencyScale: subplatform.currencyScale,
+        assetSchema: subplatform.assetSchema,
+        ui: subplatform.ui,
         capabilities: ["chat.open", "listing.select", "listing.submit", "navigation"],
       },
     }, "*");

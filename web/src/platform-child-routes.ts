@@ -27,6 +27,8 @@ export async function readActiveDirectChildRoutes(
     authUserId?: string | null;
     /** Better Auth organization id for a scoped Agent API key. */
     organizationId?: string | null;
+    /** Root operators may enumerate private descendants for administration. */
+    isRootAdministrator?: boolean;
   },
 ): Promise<PlatformChildRoute[]> {
   const currentSlug = platformPath === "/" ? null : platformPath.split("/").filter(Boolean).at(-1) ?? null;
@@ -74,12 +76,20 @@ export async function readActiveDirectChildRoutes(
             )
             SELECT 1 FROM key_scope WHERE id = o.id
           ))
+          OR ($6::boolean IS TRUE)
         )
         AND (($1::text IS NULL AND o."parentOrganizationId" IS NULL)
           OR ($1::text IS NOT NULL AND current_node.id IS NOT NULL
               AND o."parentOrganizationId" = current_node.id))
       ORDER BY r.slug ASC`,
-    [currentSlug, rootTenantId, platformPath, viewer?.authUserId ?? null, viewer?.organizationId ?? null],
+    [
+      currentSlug,
+      rootTenantId,
+      platformPath,
+      viewer?.authUserId ?? null,
+      viewer?.organizationId ?? null,
+      viewer?.isRootAdministrator === true,
+    ],
   );
 
   return result.rows.map((row) => ({

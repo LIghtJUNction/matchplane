@@ -12,6 +12,7 @@ import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { BuyerDashboard } from "./components/BuyerDashboard";
 import { ListingSheet, ModeDialog } from "./components/Overlays";
 import { PlatformDashboard } from "./components/PlatformDashboard";
+import { PreferenceControls } from "./components/PreferenceControls";
 import { Brand, IconButton, spring } from "./components/Primitives";
 import { SellerDashboard } from "./components/SellerDashboard";
 import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
@@ -29,6 +30,7 @@ import {
 } from "./api";
 import { getMarketplaceSession } from "./lib/marketplace-session";
 import { authClient, authFetchOptions } from "./lib/auth-client";
+import { useInterfacePreferences } from "./lib/preferences";
 import type { AssetListing, WorkspaceRole } from "./types";
 
 interface AuthenticatedUser {
@@ -39,6 +41,8 @@ interface AuthenticatedUser {
 }
 
 export function App({ initialPath = "/" }: { initialPath?: string }) {
+  const { theme, locale, setTheme, setLocale } = useInterfacePreferences();
+  const ui = appCopy(locale);
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform(initialPath));
   const [listings, setListings] = useState<AssetListing[]>([]);
@@ -110,9 +114,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       clearPartySessionCache();
       setAuthUser(null);
       setAccountMenuOpen(false);
-      setNotice("已退出当前账号");
+      setNotice(ui.signedOut);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "退出登录失败，请稍后重试");
+      setNotice(error instanceof Error ? error.message : ui.signOutFailed);
     }
   };
 
@@ -178,7 +182,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   return (
     <MotionConfig reducedMotion="user" transition={spring}>
       <div id="top" className="app-shell">
-        <a className="skip-link" href="#main-content">跳到主要内容</a>
+        <a className="skip-link" href="#main-content">{ui.skipToContent}</a>
         <header className="app-header">
           <div className="header-inner">
             <div className="brand-cluster">
@@ -186,38 +190,41 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 label={subplatform.brandName}
                 homeHref={subplatform.slug === "root" ? "#top" : `/${subplatform.slug}`}
               />
-              {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">根平台</a> : null}
+              {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">{ui.rootPlatform}</a> : null}
             </div>
             <div className="header-actions">
-              <span className="secure-status"><ShieldCheck size={15} aria-hidden="true" />安全连接</span>
-              <IconButton label="通知" onClick={() => setNotice("目前没有新的平台通知") }><Bell size={19} aria-hidden="true" /></IconButton>
-              <button className="profile-button" type="button" aria-label={authUser ? "打开个人账户菜单" : "登录账户"} aria-expanded={authUser ? accountMenuOpen : undefined} onClick={openAccount}>
+              <span className="secure-status"><ShieldCheck size={15} aria-hidden="true" />{ui.secure}</span>
+              <IconButton label={ui.notifications} onClick={() => setNotice(ui.noNotifications) }><Bell size={19} aria-hidden="true" /></IconButton>
+              <button className="profile-button" type="button" aria-label={authUser ? ui.openAccount : ui.signIn} aria-expanded={authUser ? accountMenuOpen : undefined} onClick={openAccount}>
                 <span><UserRound size={18} aria-hidden="true" /></span>
-                <span className="profile-copy"><strong>{authUser?.name || subplatform.brandName}</strong><small>{authUser ? (role === "buyer" ? "买家" : role === "seller" ? "卖家" : "管理员") : "登录"}</small></span>
+                <span className="profile-copy"><strong>{authUser?.name || subplatform.brandName}</strong><small>{authUser ? roleLabel(role, locale) : ui.signIn}</small></span>
               </button>
               <AnimatePresence>
                 {authUser && accountMenuOpen ? (
                   <motion.div
                     className="account-menu"
                     role="menu"
-                    aria-label="个人账户菜单"
+                    aria-label={ui.accountMenu}
                     initial={{ opacity: 0, y: -6, scale: 0.98 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -4, scale: 0.98 }}
                     transition={spring}
                   >
                     <div className="account-menu-identity">
-                      <strong>{authUser.name || "MatchPlane 用户"}</strong>
-                      <small>{authUser.email || "已登录的统一身份"}</small>
+                      <strong>{authUser.name || ui.user}</strong>
+                      <small>{authUser.email || ui.unifiedIdentity}</small>
                     </div>
                     <div className="account-menu-links">
-                      <a role="menuitem" href={`${window.location.pathname}?role=buyer`}>买方工作台</a>
-                      <a role="menuitem" href={`${window.location.pathname}?role=seller`}>卖方工作台</a>
+                      <a role="menuitem" href={`${window.location.pathname}?role=buyer`}>{ui.buyerWorkspace}</a>
+                      <a role="menuitem" href={`${window.location.pathname}?role=seller`}>{ui.sellerWorkspace}</a>
                       {authUser.role === "rootSuperAdmin" || authUser.role === "rootAdmin" ? (
-                        <a role="menuitem" href="/?role=platform">根平台管理</a>
+                        <a role="menuitem" href="/?role=platform">{ui.platformAdmin}</a>
                       ) : null}
                     </div>
-                    <button className="account-menu-signout" type="button" role="menuitem" onClick={() => void signOut()}>退出登录</button>
+                    <div className="account-menu-preferences">
+                      <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
+                    </div>
+                    <button className="account-menu-signout" type="button" role="menuitem" onClick={() => void signOut()}>{ui.signOut}</button>
                   </motion.div>
                 ) : null}
               </AnimatePresence>
@@ -234,11 +241,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               exit={{ opacity: 0, y: -8 }}
               transition={spring}
             >
-              <MatchChat
-                onNotice={setNotice}
-                onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations))}
-                subplatform={subplatform}
-              />
+              {role === "buyer" || role === "seller" ? (
+                <MatchChat
+                  role={role}
+                  onNotice={setNotice}
+                  onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations))}
+                  subplatform={subplatform}
+                />
+              ) : null}
               {subplatform.pluginArtifact ? (
                 <PluginHost role={role} onNotice={setNotice} subplatform={subplatform} fallback={genericWorkspace} />
               ) : genericWorkspace}
@@ -252,7 +262,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           onContact={async (selected) => {
             if (!isLiveMarketplaceEnabled()) {
               closeListing();
-              setNotice(`${selected.title} 的联系与看车申请已提交`);
+              setNotice(`${selected.title} 的联系申请已提交`);
               return;
             }
             const listingId = listingIdFromBackend(selected);
@@ -327,6 +337,54 @@ function roleFromLocation(): WorkspaceRole {
   return requested === "seller" || requested === "platform" || requested === "subplatform_admin" ? requested : "buyer";
 }
 
+function roleLabel(role: WorkspaceRole, locale: "zh" | "en"): string {
+  if (locale === "en") {
+    return role === "buyer" ? "Buyer" : role === "seller" ? "Seller" : "Admin";
+  }
+  return role === "buyer" ? "买家" : role === "seller" ? "卖家" : "管理员";
+}
+
+function appCopy(locale: "zh" | "en") {
+  if (locale === "en") {
+    return {
+      skipToContent: "Skip to content",
+      rootPlatform: "Root platform",
+      secure: "Secure",
+      notifications: "Notifications",
+      noNotifications: "No new notifications",
+      openAccount: "Open account menu",
+      signIn: "Sign in",
+      accountMenu: "Account menu",
+      user: "MatchPlane user",
+      unifiedIdentity: "Unified identity",
+      buyerWorkspace: "Buyer workspace",
+      sellerWorkspace: "Seller workspace",
+      platformAdmin: "Platform admin",
+      signOut: "Sign out",
+      signedOut: "Signed out",
+      signOutFailed: "Could not sign out. Try again.",
+    };
+  }
+  return {
+    skipToContent: "跳到主要内容",
+    rootPlatform: "根平台",
+    secure: "安全连接",
+    notifications: "通知",
+    noNotifications: "目前没有新的平台通知",
+    openAccount: "打开个人账户菜单",
+    signIn: "登录",
+    accountMenu: "个人账户菜单",
+    user: "MatchPlane 用户",
+    unifiedIdentity: "已登录的统一身份",
+    buyerWorkspace: "买方工作台",
+    sellerWorkspace: "卖方工作台",
+    platformAdmin: "根平台管理",
+    signOut: "退出登录",
+    signedOut: "已退出当前账号",
+    signOutFailed: "退出登录失败，请稍后重试",
+  };
+}
+
 function listingFromLocation(): AssetListing | null {
   // Listings are loaded from the root API/subplatform adapter. Never hydrate a fabricated
   // inventory item from a URL parameter.
@@ -343,7 +401,7 @@ function mapRecommendations(items: RecommendedBackendListing[]): AssetListing[] 
       .slice(0, 4)
       .map(([label, value]) => ({ label, value: String(value) }));
     const subtitle = facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ") || "来自当前子平台的真实供给";
-    const location = attributeText(attributes, ["location", "city", "地区", "城市"]);
+    const location = typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined;
     return {
       id: item.listing_id,
       title: item.display_name,
@@ -354,16 +412,26 @@ function mapRecommendations(items: RecommendedBackendListing[]): AssetListing[] 
       accent: (["cactus", "clay", "heather", "oat"] as const)[index % 4],
       facts,
       reasons: item.match_reasons,
-      trust: ["审核通过", "匹配理由可解释"],
-      response: "由当前子平台供给方确认",
+      trust: stringArrayAttribute(item, ["trust", "verification_labels", "verificationLabels"]),
+      response: stringAttribute(item, ["response", "seller_response", "sellerResponse"]),
     };
   });
 }
 
-function attributeText(attributes: Record<string, unknown>, keys: string[]): string | undefined {
+function stringAttribute(value: Record<string, unknown>, keys: string[]): string | undefined {
   for (const key of keys) {
-    const value = attributes[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value[key] === "string" && value[key].trim()) return value[key].trim();
+  }
+  return undefined;
+}
+
+function stringArrayAttribute(value: Record<string, unknown>, keys: string[]): string[] | undefined {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (Array.isArray(candidate)) {
+      const items = candidate.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
+      if (items.length) return items.slice(0, 8);
+    }
   }
   return undefined;
 }

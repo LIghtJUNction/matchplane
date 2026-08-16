@@ -1032,6 +1032,11 @@ impl PgStore {
                                 OR EXISTS ( \
                                     SELECT 1 \
                                       FROM marketplace_party_auth_links l \
+                                      JOIN \"user\" linked_user \
+                                        ON linked_user.id = l.auth_user_id \
+                                       AND linked_user.banned IS NOT TRUE \
+                                       AND (linked_user.\"banExpires\" IS NULL \
+                                            OR linked_user.\"banExpires\" <= clock_timestamp()) \
                                       JOIN \"member\" member_projection \
                                         ON member_projection.\"userId\" = l.auth_user_id \
                                       JOIN \"organization\" organization_projection \
