@@ -128,6 +128,12 @@
           "items": { "$ref": "#/$defs/candidate" }
         },
         "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "idempotency_key": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 240,
+          "description": "Optional retry key. The same actor, platform path, and key return the original result without another hosted Agent call."
+        },
         "trace_id": { "type": ["string", "null"], "maxLength": 200 }
       }
     },

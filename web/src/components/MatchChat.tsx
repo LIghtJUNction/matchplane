@@ -93,7 +93,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
 
       setSending(true);
       setMessage("");
-      const requestId = `chat-${Date.now()}`;
+      const requestId = crypto.randomUUID();
       setMessages((current) => [
         ...current,
         { id: `${requestId}-user`, role: "user", text },
@@ -115,7 +115,11 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
           return;
         }
         const route = live
-          ? await routePlatformIntent({ platformPath: platformPath(subplatform), narrative: text })
+          ? await routePlatformIntent({
+              platformPath: platformPath(subplatform),
+              narrative: text,
+              idempotencyKey: requestId,
+            })
           : null;
         const routedRecommendations: RecommendedBackendListing[] = [];
         if (live) {

@@ -15,6 +15,18 @@ describe("HTTP MCP argument contract", () => {
     })).toContain("platformPath");
   });
 
+  it("accepts a bounded retry key for platform routing", () => {
+    expect(validateMcpToolArguments("platform.match", {
+      narrative: "找一个合适的供给",
+      platformPath: "/used-car",
+      idempotency_key: "chat-123",
+    })).toBeNull();
+    expect(validateMcpToolArguments("platform.match", {
+      narrative: "找一个合适的供给",
+      idempotency_key: "x".repeat(241),
+    })).toContain("idempotency_key");
+  });
+
   it("requires the exact tenant/domain/path scope for marketplace tools", () => {
     expect(validateMcpToolArguments("marketplace.intent.create", {
       tenant_id: tenantId,

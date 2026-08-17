@@ -887,6 +887,7 @@ export async function activateSubplatform(input: { registrationId: string; build
 export async function routePlatformIntent(input: {
   platformPath: string;
   narrative: string;
+  idempotencyKey?: string;
 }): Promise<PlatformIntentRoute> {
   const response = await fetch("/api/platform/match", {
     method: "POST",
@@ -895,7 +896,11 @@ export async function routePlatformIntent(input: {
       accept: "application/json",
       "content-type": "application/json",
     },
-    body: JSON.stringify(input),
+    body: JSON.stringify({
+      platformPath: input.platformPath,
+      narrative: input.narrative,
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+    }),
   });
   if (!response.ok) {
     let message = `平台撮合请求失败（${response.status}）`;

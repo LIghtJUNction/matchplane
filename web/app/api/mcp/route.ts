@@ -66,6 +66,7 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
     body: JSON.stringify(isHandoff ? args : {
       narrative: args.narrative,
       platformPath: args.platformPath,
+      idempotencyKey: args.idempotency_key,
     }),
   });
   const result = await (isHandoff ? handoffAgent(forwarded) : matchPlatform(forwarded));
@@ -227,6 +228,7 @@ function toolList(): Record<string, unknown> {
         properties: {
           narrative: { type: "string", minLength: 1, maxLength: 10000 },
           platformPath: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
+          idempotency_key: { type: "string", minLength: 1, maxLength: 240, description: "Optional retry key; replays return the original routing result without another hosted model call." },
         },
       },
     }, {

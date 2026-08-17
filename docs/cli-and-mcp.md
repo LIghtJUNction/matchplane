@@ -53,7 +53,11 @@ not expose shell execution, arbitrary HTTP forwarding, database writes, payment 
 data. Platform matching and subplatform retrieval remain behind their authenticated HTTP/MCP
 contracts and are not granted by this operations server. The web service exposes the authenticated
 HTTP MCP facade at `/api/mcp`; its `platform.match` tool forwards the same bounded route request as
-the chat API and accepts either a Better Auth session or a scoped organization API key. The
+the chat API and accepts either a Better Auth session or a scoped organization API key. It accepts
+an optional `idempotency_key` (at most 240 printable characters); retries with the same actor,
+canonical platform path, and key return the original routing result without another hosted model
+call, while a different narrative is rejected as a conflict. A concurrent duplicate receives `409`
+with `Retry-After: 2` and can retry after the first request completes. The
 `platform.agent.handoff` tool accepts the caller-funded `matchplane.agent/v1` envelope, persists an
 idempotent handoff, and returns only the active direct-child capabilities. It never invokes the
 root model: an external demand/supply Agent keeps its own provider credentials and token bill. Use

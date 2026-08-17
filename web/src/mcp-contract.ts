@@ -44,7 +44,9 @@ export function validateMcpToolArguments(
 function validatePlatformMatch(args: Record<string, unknown>): string | null {
   const narrative = requiredString(args, "narrative", 10_000);
   if (narrative) return narrative;
-  return optionalPlatformPath(args);
+  const platformPath = optionalPlatformPath(args);
+  if (platformPath) return platformPath;
+  return optionalString(args, "idempotency_key", 240);
 }
 
 function validateAgentHandoff(args: Record<string, unknown>): string | null {

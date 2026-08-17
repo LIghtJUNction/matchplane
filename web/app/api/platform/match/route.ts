@@ -20,6 +20,7 @@ import { authenticatePlatformRequest } from "../../../../src/platform-request-au
 import { isActivePlatformPathVisible } from "../../../../src/platform-visibility";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
+import { normalizeMatchIdempotencyKey } from "../../../../src/platform-match-idempotency";
 
 export const runtime = "nodejs";
 
@@ -73,70 +74,107 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "当前平台节点不对该身份开放" }, { status: 404 });
   }
 
-  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  const candidates = rootTenantId && isUuid(rootTenantId)
-    ? await readActiveDirectChildRoutes(platformPath, rootTenantId, viewer)
-    : [];
-  const requestId = randomUUID();
-  let recursive: Awaited<ReturnType<typeof expandPlatformRouteTree>>;
-  try {
-    recursive = await expandPlatformRouteTree({
-      platformPath,
-      narrative,
-      candidates,
-      loadChildren: async (childPath) => readActiveDirectChildRoutes(childPath, rootTenantId ?? "", viewer),
-      decide: ({ platformPath: currentPath, narrative: currentNarrative, candidates: currentCandidates }) =>
-        decidePlatformRoutes({
-          platformPath: currentPath,
-          narrative: currentNarrative,
-          candidates: currentCandidates.map(({ tenantId: _tenantId, domainId: _domainId, ...candidate }) => candidate),
-          admitCall: isPlatformRouterConfigured()
-            ? async () => {
-                if (!(await admitPlatformAiCall({
-                  authUserId: actor.subject,
-                  requestId,
-                  platformPath: currentPath,
-                  perSubjectLimit: configuredAiRequestsPerHour(),
-                  globalLimit: configuredAiGlobalRequestsPerHour(),
-                }))) {
-                  throw new PlatformRouterQuotaExceededError();
-                }
-              }
-            : undefined,
-        }),
-      maxSteps: configuredAiMaxSteps(),
-      maxDepth: configuredAiMaxSteps(),
-    });
-  } catch (error) {
-    if (error instanceof PlatformRouterQuotaExceededError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 429, headers: { "retry-after": "3600", "cache-control": "no-store" } },
-      );
-    }
-    console.error("platform route expansion failed", error);
-    return NextResponse.json({ error: "平台路由暂时不可用，请稍后再试。" }, { status: 503 });
+  const rawIdempotencyKey = input.idempotencyKey;
+  const idempotencyKey = normalizeMatchIdempotencyKey(rawIdempotencyKey);
+  if (rawIdempotencyKey !== undefined && !idempotencyKey) {
+    return NextResponse.json({ error: "idempotencyKey must contain 1..240 printable characters" }, { status: 400 });
   }
-  const routing = summarizeRouting(recursive.trace, recursive.truncated);
-  const routePlan = recursive.routePlan;
-  const modelCalls = recursive.trace.filter(({ decision }) => decision.source === "ai").length;
-  const status = routePlan.length === 0
-    ? "accepted"
-    : routing.degraded
-      ? "degraded"
-      : "delegated";
+
+  let idempotencyLock: PoolClient | null = null;
+  if (idempotencyKey) {
+    try {
+      const lock = await acquireMatchIdempotencyLock(actor.subject, platformPath, idempotencyKey);
+      if (lock === "busy") {
+        return NextResponse.json(
+          { error: "相同幂等请求正在处理中，请稍后重试。" },
+          { status: 409, headers: { "retry-after": "2", "cache-control": "no-store" } },
+        );
+      }
+      idempotencyLock = lock;
+    } catch (error) {
+      console.error("platform match idempotency lock failed", error);
+      return NextResponse.json({ error: "平台撮合暂时不可用，请稍后重试。" }, { status: 503 });
+    }
+  }
+
   let client: PoolClient | undefined;
   try {
+    if (idempotencyKey) {
+      const existing = await readIdempotentMatchRequest(actor.subject, platformPath, idempotencyKey);
+      if (existing) {
+        if (existing.narrative !== narrative) {
+          return NextResponse.json(
+            { error: "同一个 idempotencyKey 不能提交不同的 narrative" },
+            { status: 409, headers: { "cache-control": "no-store" } },
+          );
+        }
+        return idempotentMatchResponse(existing, actor.access);
+      }
+    }
+
+    const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+    const candidates = rootTenantId && isUuid(rootTenantId)
+      ? await readActiveDirectChildRoutes(platformPath, rootTenantId, viewer)
+      : [];
+    const requestId = randomUUID();
+    let recursive: Awaited<ReturnType<typeof expandPlatformRouteTree>>;
+    try {
+      recursive = await expandPlatformRouteTree({
+        platformPath,
+        narrative,
+        candidates,
+        loadChildren: async (childPath) => readActiveDirectChildRoutes(childPath, rootTenantId ?? "", viewer),
+        decide: ({ platformPath: currentPath, narrative: currentNarrative, candidates: currentCandidates }) =>
+          decidePlatformRoutes({
+            platformPath: currentPath,
+            narrative: currentNarrative,
+            candidates: currentCandidates.map(({ tenantId: _tenantId, domainId: _domainId, ...candidate }) => candidate),
+            admitCall: isPlatformRouterConfigured()
+              ? async () => {
+                  if (!(await admitPlatformAiCall({
+                    authUserId: actor.subject,
+                    requestId,
+                    platformPath: currentPath,
+                    perSubjectLimit: configuredAiRequestsPerHour(),
+                    globalLimit: configuredAiGlobalRequestsPerHour(),
+                  }))) {
+                    throw new PlatformRouterQuotaExceededError();
+                  }
+                }
+              : undefined,
+          }),
+        maxSteps: configuredAiMaxSteps(),
+        maxDepth: configuredAiMaxSteps(),
+      });
+    } catch (error) {
+      if (error instanceof PlatformRouterQuotaExceededError) {
+        return NextResponse.json(
+          { error: error.message },
+          { status: 429, headers: { "retry-after": "3600", "cache-control": "no-store" } },
+        );
+      }
+      console.error("platform route expansion failed", error);
+      return NextResponse.json({ error: "平台路由暂时不可用，请稍后再试。" }, { status: 503 });
+    }
+    const routing = summarizeRouting(recursive.trace, recursive.truncated);
+    const routePlan = recursive.routePlan;
+    const modelCalls = recursive.trace.filter(({ decision }) => decision.source === "ai").length;
+    const status = routePlan.length === 0
+      ? "accepted"
+      : routing.degraded
+        ? "degraded"
+        : "delegated";
     client = await authDatabase.connect();
     await client.query("BEGIN");
     await client.query(
       `INSERT INTO platform_match_requests
-        (id, auth_user_id, platform_path, narrative, route_plan, routing_decision, status)
-       VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
+        (id, auth_user_id, platform_path, idempotency_key, narrative, route_plan, routing_decision, status)
+       VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)`,
       [
         requestId,
         actor.subject,
         platformPath,
+        idempotencyKey,
         narrative,
         JSON.stringify(routePlan),
         JSON.stringify({ ...routing, trace: recursive.trace }),
@@ -167,26 +205,115 @@ export async function POST(request: Request): Promise<Response> {
       ],
     );
     await client.query("COMMIT");
+    return NextResponse.json(
+      {
+        requestId,
+        platformPath,
+        status,
+        routePlan,
+        routing,
+        routingTrace: recursive.trace,
+        access: actor.access,
+        idempotent: Boolean(idempotencyKey),
+      },
+      { status: 202, headers: { "cache-control": "no-store" } },
+    );
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
     console.error("platform match request persistence failed", error);
     return NextResponse.json({ error: "平台撮合记录保存失败，请稍后再试。" }, { status: 503 });
   } finally {
     client?.release();
+    idempotencyLock?.release();
   }
+}
 
+type MatchIdempotencyLock = PoolClient | "busy";
+
+interface StoredMatchRequest {
+  id: string;
+  narrative: string;
+  platformPath: string;
+  status: string;
+  routePlan: unknown;
+  routingDecision: unknown;
+}
+
+/**
+ * Hold a PostgreSQL session advisory lock across the bounded router call. A
+ * transaction lock would be released before the provider request completed;
+ * the session lock closes that race while keeping the key optional for legacy
+ * callers that do not need retry semantics.
+ */
+async function acquireMatchIdempotencyLock(
+  authSubject: string,
+  platformPath: string,
+  idempotencyKey: string,
+): Promise<MatchIdempotencyLock> {
+  const client = await authDatabase.connect();
+  try {
+    const lockKey = `matchplane:platform-match:${authSubject}:${platformPath}:${idempotencyKey}`;
+    const result = await client.query<{ acquired: boolean }>(
+      "SELECT pg_try_advisory_lock(hashtext($1)) AS acquired",
+      [lockKey],
+    );
+    if (result.rows[0]?.acquired !== true) {
+      client.release();
+      return "busy";
+    }
+    return client;
+  } catch (error) {
+    client.release();
+    throw error;
+  }
+}
+
+async function readIdempotentMatchRequest(
+  authSubject: string,
+  platformPath: string,
+  idempotencyKey: string,
+): Promise<StoredMatchRequest | null> {
+  const result = await authDatabase.query<StoredMatchRequest>(
+    `SELECT id::text,
+            auth_user_id AS "authSubject",
+            platform_path AS "platformPath",
+            idempotency_key AS "idempotencyKey",
+            narrative,
+            route_plan AS "routePlan",
+            routing_decision AS "routingDecision",
+            status
+       FROM platform_match_requests
+      WHERE auth_user_id = $1
+        AND platform_path = $2
+        AND idempotency_key = $3
+      LIMIT 1`,
+    [authSubject, platformPath, idempotencyKey],
+  );
+  return result.rows[0] ?? null;
+}
+
+function idempotentMatchResponse(existing: StoredMatchRequest, access: "session" | "api_key"): Response {
+  if (!Array.isArray(existing.routePlan) || !isRecord(existing.routingDecision)) {
+    return NextResponse.json({ error: "平台撮合记录格式无效" }, { status: 503 });
+  }
+  const { trace, ...routing } = existing.routingDecision;
   return NextResponse.json(
     {
-      requestId,
-      platformPath,
-      status,
-      routePlan,
+      requestId: existing.id,
+      platformPath: existing.platformPath,
+      status: existing.status,
+      routePlan: existing.routePlan,
       routing,
-      routingTrace: recursive.trace,
-      access: actor.access,
+      ...(Array.isArray(trace) ? { routingTrace: trace } : {}),
+      access,
+      idempotent: true,
     },
-    { status: 202, headers: { "cache-control": "no-store" } },
+    { status: 200, headers: { "cache-control": "no-store", "x-matchplane-idempotent": "true" } },
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
@@ -309,6 +436,7 @@ function summarizeRouting(trace: PlatformRouteTrace[], truncated: boolean): Plat
 interface MatchRequest {
   narrative?: string;
   platformPath?: string;
+  idempotencyKey?: string;
 }
 
 function normalizePlatformPath(value: string | undefined): string | null {
