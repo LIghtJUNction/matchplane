@@ -44,6 +44,7 @@ describe("rootEmailRouteFromEnv", () => {
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_USERNAME", "no-reply@example.test");
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_CREDENTIAL_SECRET_REF", "env://MATCHPLANE_TEST_SMTP_PASSWORD");
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_FROM_ADDRESS", "no-reply@example.test");
+    vi.stubEnv("MATCHPLANE_TEST_SMTP_PASSWORD", "test-secret");
     expect(isRootEmailAuthConfigured()).toBe(true);
   });
 });

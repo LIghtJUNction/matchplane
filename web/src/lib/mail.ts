@@ -1,4 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
+import { accessSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
 
 import nodemailer from "nodemailer";
@@ -103,7 +104,17 @@ export function rootEmailRouteFromEnv(environment = process.env.MATCHPLANE_ENVIR
 export function isRootEmailAuthConfigured(): boolean {
   try {
     const route = rootEmailRouteFromEnv();
-    return Boolean(route?.enabled);
+    if (!route?.enabled) return false;
+    // A syntactically valid secret reference is not enough for a useful button. Check only
+    // presence/readability here; the sender still resolves the secret immediately before use.
+    if (route.credentialSecretRef.startsWith("env://")) {
+      return Boolean(process.env[route.credentialSecretRef.slice("env://".length)]?.trim());
+    }
+    if (route.credentialSecretRef.startsWith("file://")) {
+      accessSync(route.credentialSecretRef.slice("file://".length), fsConstants.R_OK);
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
