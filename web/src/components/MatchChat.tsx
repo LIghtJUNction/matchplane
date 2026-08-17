@@ -279,9 +279,14 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
         setSignedIn(false);
         return;
       }
-      setSignedIn(Boolean(session || authState?.data));
+      const hasAuthSession = Boolean(session || authState?.data);
+      setSignedIn(hasAuthSession);
       const pending = readPendingChat();
       if (!pending) return;
+      // A pending message is only a hand-off across the login page. Keep it until the user is
+      // authenticated and still on the exact path it came from; otherwise a signed-out refresh
+      // could consume it without a valid marketplace capability or send it to the wrong node.
+      if (!hasAuthSession || pending.next !== currentLocation()) return;
       window.sessionStorage.removeItem(PENDING_CHAT_KEY);
       if (!cancelled) void submitMessage(pending.text, session ?? undefined);
     })().catch(() => {
@@ -370,9 +375,21 @@ function readPendingChat(): PendingChat | null {
     const raw = window.sessionStorage.getItem(PENDING_CHAT_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PendingChat;
-    if (typeof parsed.text !== "string" || !parsed.text.trim()) return null;
-    return parsed;
+    if (typeof parsed.text !== "string" || !parsed.text.trim() || parsed.text.length > 10000) return null;
+    if (typeof parsed.next !== "string" || !isSafePendingLocation(parsed.next)) return null;
+    return { text: parsed.text.trim(), next: parsed.next };
   } catch {
     return null;
   }
+}
+
+function currentLocation(): string {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+function isSafePendingLocation(value: string): boolean {
+  return value.startsWith("/")
+    && !value.startsWith("//")
+    && !value.includes("\\")
+    && !/[\u0000-\u001f\u007f]/.test(value);
 }

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -113,6 +113,16 @@ describe("MatchPlane workspaces", () => {
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(/未连接真实撮合 API/);
+  });
+
+  it("does not consume a pending chat while the user is still signed out", async () => {
+    const pending = JSON.stringify({ text: "保留这条需求", next: "/?role=buyer" });
+    window.sessionStorage.setItem("matchplane.pending-chat", pending);
+    render(<App />);
+
+    await waitFor(() => expect(authClient.getSession).toHaveBeenCalled());
+    expect(window.sessionStorage.getItem("matchplane.pending-chat")).toBe(pending);
+    expect(screen.queryByText("保留这条需求")).not.toBeInTheDocument();
   });
 
   it("keeps visible controls actionable instead of leaving placeholder buttons", async () => {
