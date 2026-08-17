@@ -137,6 +137,27 @@ describe("MatchPlane workspaces", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(/未连接真实撮合 API/);
   });
 
+  it("lets the user clear the visible conversation without leaving the page", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    savePartySession({
+      tenantId: crypto.randomUUID(),
+      partyId: crypto.randomUUID(),
+      role: "buyer",
+      accessToken: "demo-session-token",
+      accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    }, "root", "buyer");
+    render(<App />);
+
+    const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
+    await user.type(input, "把这段需求整理一下");
+    await user.click(screen.getByRole("button", { name: "发送需求" }));
+    await screen.findByRole("button", { name: "清空" });
+
+    await user.click(screen.getByRole("button", { name: "清空" }));
+    expect(screen.queryByRole("log", { name: "对话记录" })).not.toBeInTheDocument();
+  });
+
   it("does not consume a pending chat while the user is still signed out", async () => {
     const pending = JSON.stringify({ text: "保留这条需求", next: "/?role=buyer" });
     window.sessionStorage.setItem("matchplane.pending-chat", pending);

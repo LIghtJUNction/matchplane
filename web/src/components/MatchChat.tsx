@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, LoaderCircle, LockKeyhole, Sparkles } from "lucide-react";
+import { ArrowUp, LoaderCircle, Trash2 } from "lucide-react";
 
 import {
   createMarketplaceIntent,
@@ -52,12 +52,12 @@ const defaultChatCopy: ChatCopy = {
   sellerEyebrow: "供给方入口",
   buyerTitle: "先说说你想解决什么。",
   sellerTitle: "说说你能提供什么。",
-  buyerDescription: "描述目标、预算、时间和不能妥协的条件，平台会把需求交给合适的供给方。",
-  sellerDescription: "描述你能提供的内容、交付条件和限制，平台会把资料交给合适的需求方。",
+  buyerDescription: "说出目标、预算和不能妥协的条件。",
+  sellerDescription: "说出你能提供的内容、条件和限制。",
   buyerPlaceholder: "例如：我想解决一个具体问题，预算、时间和不能妥协的条件是……",
   sellerPlaceholder: "例如：我能提供什么，交付条件和限制是……",
-  buyerFootnote: "联系方式只在双方同意后交换；线下成交也会保留平台撮合记录。",
-  sellerFootnote: "资料审核通过后才会展示；联系方式只在双方同意后交换。",
+  buyerFootnote: "Enter 发送 · Shift + Enter 换行",
+  sellerFootnote: "Enter 发送 · Shift + Enter 换行",
   buyerPending: "我先把你的目标、限制和优先级整理成一份匹配需求。",
   sellerPending: "我先把你的供给、条件和限制整理成一份资料。",
   buyerSuccess: "需求已发送，撮合会围绕你的真实目标展开",
@@ -379,22 +379,34 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
     event.currentTarget.form?.requestSubmit();
   };
 
+  const clearConversation = () => {
+    if (sending) return;
+    setMessages([]);
+  };
+
   return (
     <section className={`match-chat${isRoot ? " is-root" : ""}${isSeller ? " is-seller" : ""}`} aria-labelledby="match-chat-title">
       <div className="match-chat-heading">
         <div>
-            <span className="eyebrow"><Sparkles size={14} aria-hidden="true" /> {isSeller ? copy.sellerEyebrow : isRoot ? label("rootEyebrow", "根平台入口") : copy.buyerEyebrow}</span>
           <h1 id="match-chat-title">{isSeller ? copy.sellerTitle : copy.buyerTitle}</h1>
           <p>{isSeller ? copy.sellerDescription : copy.buyerDescription}</p>
         </div>
-        <span className={`match-chat-status${signedIn ? " is-signed-in" : ""}${sending ? " is-sending" : ""}`} aria-live="polite">
-          <LockKeyhole size={14} aria-hidden="true" />
-          {sending
-            ? label("sendingChatStatus", "正在发送…")
-            : signedIn
-              ? label("signedInChatStatus", "已登录 · 直接发送")
-              : label("signedOutChatStatus", "登录后自动继续")}
-        </span>
+        <div className="match-chat-actions">
+          {messages.length ? (
+            <button className="match-chat-clear" type="button" onClick={clearConversation} disabled={sending}>
+              <Trash2 size={14} aria-hidden="true" />
+              <span>{label("clearChatLabel", "清空")}</span>
+            </button>
+          ) : null}
+          <span className={`match-chat-status${signedIn ? " is-signed-in" : ""}${sending ? " is-sending" : ""}`} aria-live="polite">
+            <span className="match-chat-status-dot" aria-hidden="true" />
+            {sending
+              ? label("sendingChatStatus", "正在发送…")
+              : signedIn
+                ? label("signedInChatStatus", "已登录")
+                : label("signedOutChatStatus", "登录后继续")}
+          </span>
+        </div>
       </div>
 
       {messages.length ? (
@@ -419,13 +431,14 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
           placeholder={isSeller ? copy.sellerPlaceholder : copy.buyerPlaceholder}
           rows={2}
           maxLength={10000}
+          aria-describedby="match-chat-footnote"
           disabled={sending}
         />
         <button className="match-chat-send" type="submit" aria-label={isSeller ? label("sendSupplyLabel", "发送供给") : label("sendDemandLabel", "发送需求")} aria-busy={sending} disabled={!message.trim() || sending}>
           {sending ? <LoaderCircle className="match-chat-spinner" size={18} aria-hidden="true" /> : <ArrowUp size={18} aria-hidden="true" />}
         </button>
       </form>
-      <p className="match-chat-footnote">{isSeller ? copy.sellerFootnote : copy.buyerFootnote}</p>
+      <p id="match-chat-footnote" className="match-chat-footnote">{isSeller ? copy.sellerFootnote : copy.buyerFootnote}</p>
     </section>
   );
 }
