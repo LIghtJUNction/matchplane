@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "./auth";
+import { readJsonBody } from "./body-limit";
 import { loadInternalBearer } from "./internal-auth";
 import { hasTrustedBrowserOrigin } from "./request-origin";
 
@@ -53,7 +54,7 @@ export async function forwardPaymentAdmin(
   } else {
     let input: Record<string, unknown>;
     try {
-      const parsed = await request.json();
+      const parsed = await readJsonBody<unknown>(request, 64 * 1024);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         return NextResponse.json({ error: "支付管理请求必须是 JSON 对象" }, { status: 400 });
       }

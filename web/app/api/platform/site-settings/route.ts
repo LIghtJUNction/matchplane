@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
+import { readJsonBody } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 import { isMountedPlatformPath, readActivePlatformScope } from "../../../../src/platform-mount";
 import { isActivePlatformPathVisible } from "../../../../src/platform-visibility";
@@ -440,7 +441,7 @@ function isUuid(value: string): boolean {
 
 async function parseJson(request: Request): Promise<Record<string, unknown>> {
   try {
-    const value = await request.json();
+    const value = await readJsonBody<unknown>(request, 32 * 1024);
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   } catch {
     return {};

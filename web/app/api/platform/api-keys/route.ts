@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
+import { readJsonBody } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
@@ -229,7 +230,7 @@ interface ApiKeyRequest {
 
 async function parseBody(request: Request): Promise<ApiKeyRequest> {
   try {
-    const body = (await request.json()) as ApiKeyRequest;
+    const body = await readJsonBody<unknown>(request, 32 * 1024) as ApiKeyRequest;
     return body && typeof body === "object" ? body : {};
   } catch {
     return {};

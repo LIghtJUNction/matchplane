@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase, rootPlatformReferenceId } from "../../../../../src/lib/auth";
+import { readJsonBody } from "../../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
@@ -262,7 +263,7 @@ async function findActiveRegistration(id: string): Promise<RegistrationRow | nul
 
 async function parseJson(request: Request): Promise<Record<string, unknown> | null> {
   try {
-    const value = await request.json() as unknown;
+    const value = await readJsonBody<unknown>(request, 64 * 1024);
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
   } catch {
     return null;
