@@ -144,16 +144,22 @@ export interface AgentSkillToolObservation {
 
 export interface AgentSkillRunnerOptions {
   provider: AgentSkillProvider;
+  /** Optional caller-controlled cancellation signal. */
+  signal?: AbortSignal;
+  /** Optional wall-clock deadline for the whole Skill, bounded to 5 minutes. */
+  timeout_ms?: number;
   decide: (context: {
     request: AgentSkillRequest;
     history: readonly AgentSkillToolObservation[];
     remaining_steps: number;
+    signal: AbortSignal;
   }) => Promise<AgentSkillDecision>;
   callTool: (context: {
     request: AgentSkillRequest;
     step: number;
     tool: string;
     arguments: Record<string, unknown>;
+    signal: AbortSignal;
   }) => Promise<unknown>;
 }
 
@@ -170,80 +176,107 @@ export async function runBoundedAgentSkill(
   request: AgentSkillRequest,
   options: AgentSkillRunnerOptions,
 ): Promise<AgentSkillResult> {
-  const validationError = validateAgentSkillRequest(request, options.provider);
-  if (validationError) return rejectedSkillResult(request, options.provider, validationError);
+  const rawRequest: unknown = request;
+  const rawOptions: unknown = options;
+  const rawProvider = isRecord(rawOptions) ? rawOptions.provider : undefined;
+  const safeProvider = normalizeProvider(rawProvider);
+  const validationError = validateAgentSkillRequest(rawRequest, rawProvider)
+    ?? validateRunnerOptions(rawOptions);
+  if (validationError) return rejectedSkillResult(rawRequest, safeProvider, validationError);
 
-  const allowedTools = new Set(request.allowed_mcp_tools);
+  const boundedRequest = snapshotAgentSkillRequest(rawRequest as AgentSkillRequest);
+  const runnerOptions = rawOptions as AgentSkillRunnerOptions;
+  const maxSteps = boundedRequest.budget.max_steps;
+  const allowedTools = new Set(boundedRequest.allowed_mcp_tools);
   const history: AgentSkillToolObservation[] = [];
   const steps: AgentSkillToolStep[] = [];
   const generatedAt = new Date().toISOString();
+  const deadline = createDeadlineSignal(runnerOptions.signal, runnerOptions.timeout_ms);
 
-  for (let step = 1; step <= request.budget.max_steps; step += 1) {
-    if (serializedBytes({ request, history }) > request.budget.max_input_characters) {
-      return skillResult(request, options.provider, steps, [], "degraded", true, generatedAt, "input_budget_exceeded");
-    }
-
-    let decision: AgentSkillDecision;
-    try {
-      decision = await options.decide({
-        request,
-        history,
-        remaining_steps: request.budget.max_steps - step + 1,
-      });
-    } catch (error) {
-      return skillResult(request, options.provider, steps, [], "degraded", true, generatedAt, errorMessage(error));
-    }
-
-    if (!isRecord(decision) || (decision.type !== "tool" && decision.type !== "complete" && decision.type !== "reject")) {
-      return skillResult(request, options.provider, steps, [], "rejected", true, generatedAt, "Skill decision is invalid");
-    }
-    if (serializedBytes(decision) > request.budget.max_output_tokens * 4) {
-      return skillResult(request, options.provider, steps, [], "degraded", true, generatedAt, "output_budget_exceeded");
-    }
-    if (decision.type === "complete") {
-      const selected = normalizeSelectedReferences(decision.selected);
-      if (!selected) {
-        return skillResult(request, options.provider, steps, [], "rejected", true, generatedAt, "selected references are invalid");
+  try {
+    for (let step = 1; step <= maxSteps; step += 1) {
+      if (deadline.signal.aborted) {
+        return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt, deadline.reason());
       }
-      return skillResult(request, options.provider, steps, selected, "completed", false, generatedAt);
-    }
-    if (decision.type === "reject") {
-      return skillResult(request, options.provider, steps, [], "rejected", true, generatedAt, boundedReason(decision.reason));
-    }
-    if (!allowedTools.has(decision.tool)) {
-      return skillResult(request, options.provider, steps, [], "rejected", true, generatedAt, `tool_not_allowed:${decision.tool}`);
-    }
-    if (!isRecord(decision.arguments) || serializedBytes(decision.arguments) > request.budget.max_input_characters) {
-      return skillResult(request, options.provider, steps, [], "degraded", true, generatedAt, "tool_input_budget_exceeded");
-    }
+      if (serializedBytes({ request: boundedRequest, history }) > boundedRequest.budget.max_input_characters) {
+        return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt, "input_budget_exceeded");
+      }
 
-    let output: unknown;
-    try {
-      output = await options.callTool({
-        request,
-        step,
-        tool: decision.tool,
-        arguments: decision.arguments,
-      });
-    } catch (error) {
-      const inputDigest = await digestJson(decision.arguments);
-      steps.push({ step, tool: decision.tool, status: "failed", input_digest: inputDigest, output_digest: null, reason: boundedReason(errorMessage(error)) });
-      return skillResult(request, options.provider, steps, [], "degraded", true, generatedAt, "tool_failed");
-    }
-    if (serializedBytes(output) > request.budget.max_input_characters) {
+      let decision: AgentSkillDecision;
+      try {
+        decision = await awaitWithSignal(runnerOptions.decide({
+          request: boundedRequest,
+          history: snapshotHistory(history),
+          remaining_steps: maxSteps - step + 1,
+          signal: deadline.signal,
+        }), deadline.signal);
+      } catch (error) {
+        return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt,
+          deadline.signal.aborted ? deadline.reason() : errorMessage(error));
+      }
+
+      if (!isRecord(decision) || (decision.type !== "tool" && decision.type !== "complete" && decision.type !== "reject")) {
+        return skillResult(boundedRequest, safeProvider, steps, [], "rejected", true, generatedAt, "Skill decision is invalid");
+      }
+      if (serializedBytes(decision) > boundedRequest.budget.max_output_tokens * 4) {
+        return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt, "output_budget_exceeded");
+      }
+      if (decision.type === "complete") {
+        const selected = normalizeSelectedReferences(decision.selected);
+        if (!selected) {
+          return skillResult(boundedRequest, safeProvider, steps, [], "rejected", true, generatedAt, "selected references are invalid");
+        }
+        return skillResult(boundedRequest, safeProvider, steps, selected, "completed", false, generatedAt);
+      }
+      if (decision.type === "reject") {
+        return skillResult(boundedRequest, safeProvider, steps, [], "rejected", true, generatedAt, boundedReason(decision.reason));
+      }
+      if (!allowedTools.has(decision.tool)) {
+        return skillResult(boundedRequest, safeProvider, steps, [], "rejected", true, generatedAt, `tool_not_allowed:${decision.tool}`);
+      }
+      if (!isRecord(decision.arguments) || serializedBytes(decision.arguments) > boundedRequest.budget.max_input_characters) {
+        return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt, "tool_input_budget_exceeded");
+      }
+
+      let output: unknown;
+      try {
+        output = await awaitWithSignal(runnerOptions.callTool({
+          request: boundedRequest,
+          step,
+          tool: decision.tool,
+          arguments: decision.arguments,
+          signal: deadline.signal,
+        }), deadline.signal);
+      } catch (error) {
+        if (deadline.signal.aborted) {
+          return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt, deadline.reason());
+        }
+        const inputDigest = await digestJson(decision.arguments);
+        steps.push({ step, tool: decision.tool, status: "failed", input_digest: inputDigest, output_digest: null, reason: boundedReason(errorMessage(error)) });
+        return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt, "tool_failed");
+      }
+      if (serializedBytes(output) > boundedRequest.budget.max_input_characters) {
+        const inputDigest = await digestJson(decision.arguments);
+        const outputDigest = await digestJson(output);
+        steps.push({ step, tool: decision.tool, status: "failed", input_digest: inputDigest, output_digest: outputDigest, reason: "tool_output_budget_exceeded" });
+        return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt, "tool_output_budget_exceeded");
+      }
+      if (isRecord(output) && output.isError === true) {
+        const inputDigest = await digestJson(decision.arguments);
+        const outputDigest = await digestJson(output);
+        steps.push({ step, tool: decision.tool, status: "failed", input_digest: inputDigest, output_digest: outputDigest, reason: boundedReason(extractErrorMessage(output.structuredContent)) });
+        return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt, "tool_failed");
+      }
+
       const inputDigest = await digestJson(decision.arguments);
       const outputDigest = await digestJson(output);
-      steps.push({ step, tool: decision.tool, status: "failed", input_digest: inputDigest, output_digest: outputDigest, reason: "tool_output_budget_exceeded" });
-      return skillResult(request, options.provider, steps, [], "degraded", true, generatedAt, "tool_output_budget_exceeded");
+      steps.push({ step, tool: decision.tool, status: "completed", input_digest: inputDigest, output_digest: outputDigest });
+      history.push({ step, tool: decision.tool, arguments: snapshotRecord(decision.arguments), output: snapshotValue(output) });
     }
-
-    const inputDigest = await digestJson(decision.arguments);
-    const outputDigest = await digestJson(output);
-    steps.push({ step, tool: decision.tool, status: "completed", input_digest: inputDigest, output_digest: outputDigest });
-    history.push({ step, tool: decision.tool, arguments: decision.arguments, output });
+    return skillResult(boundedRequest, safeProvider, steps, [], "degraded", true, generatedAt, "step_budget_exceeded");
+  } finally {
+    deadline.dispose();
   }
-
-  return skillResult(request, options.provider, steps, [], "degraded", true, generatedAt, "step_budget_exceeded");
 }
 
 export interface MarketplaceIntentInput {
@@ -448,40 +481,106 @@ export class MatchPlaneAgentClient {
   }
 }
 
-function validateAgentSkillRequest(request: AgentSkillRequest, provider: AgentSkillProvider): string | null {
+function validateAgentSkillRequest(request: unknown, provider: unknown): string | null {
+  if (!isRecord(request)) return "Skill request must be an object";
   if (request.protocol !== MATCHPLANE_AGENT_PROTOCOL) return "Skill protocol must be matchplane.agent/v1";
   if (!isUuid(request.request_id)) return "Skill request_id must be a UUID";
   if (!isAgentStage(request.stage)) return "Skill stage is invalid";
-  if (!isPlatformPath(request.scope?.platform_path)) return "Skill platform_path is invalid";
-  if (!request.intent || typeof request.intent.narrative !== "string" || !request.intent.narrative.trim()) {
+  if (!isRecord(request.scope) || !isPlatformPath(request.scope.platform_path)) return "Skill platform_path is invalid";
+  if (!isRecord(request.intent) || typeof request.intent.narrative !== "string" || !request.intent.narrative.trim()) {
     return "Skill intent narrative is required";
   }
   if (request.intent.narrative.length > 10_000 || !isRecord(request.intent.requirements)) {
     return "Skill intent is invalid";
   }
-  if (!/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(request.skill)) return "Skill name is invalid";
+  if (!/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(String(request.skill))) return "Skill name is invalid";
   if (!Array.isArray(request.allowed_mcp_tools) || request.allowed_mcp_tools.length > 64
     || request.allowed_mcp_tools.some((tool) => typeof tool !== "string" || !/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(tool))) {
     return "Skill allowed_mcp_tools is invalid";
   }
   if (new Set(request.allowed_mcp_tools).size !== request.allowed_mcp_tools.length) return "Skill allowed_mcp_tools must be unique";
-  const budget = request.budget;
-  if (!budget || budget.cost_bearer !== "caller") return "Skill budget must be caller-funded";
-  if (!Number.isSafeInteger(budget.max_steps) || budget.max_steps < 1 || budget.max_steps > 16
-    || !Number.isSafeInteger(budget.max_input_characters) || budget.max_input_characters < 1 || budget.max_input_characters > 24_000
-    || !Number.isSafeInteger(budget.max_output_tokens) || budget.max_output_tokens < 64 || budget.max_output_tokens > 2_048) {
-    return "Skill budget is outside the bounded protocol limits";
+  if (request.trace_id !== undefined && request.trace_id !== null
+    && (typeof request.trace_id !== "string" || request.trace_id.length > 200)) {
+    return "Skill trace_id is invalid";
   }
-  if (!provider || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(provider.id)
-    || !/^[a-zA-Z0-9][a-zA-Z0-9._:+-]{0,127}$/.test(provider.version)) {
+  const budget = request.budget;
+  if (!isBoundedBudget(budget)) return "Skill budget must be caller-funded and bounded";
+  if (!isRecord(provider) || typeof provider.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(provider.id)
+    || typeof provider.version !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:+-]{0,127}$/.test(provider.version)) {
     return "Skill provider metadata is invalid";
   }
+  if (provider.model !== undefined && provider.model !== null
+    && (typeof provider.model !== "string" || provider.model.length > 200)) {
+    return "Skill provider model is invalid";
+  }
   for (const value of [provider.prompt_tokens, provider.completion_tokens, provider.total_tokens]) {
-    if (value !== undefined && value !== null && (!Number.isSafeInteger(value) || value < 0)) {
+    if (value !== undefined && value !== null && (!isSafeInteger(value) || value < 0)) {
       return "Skill provider token usage is invalid";
     }
   }
   return serializedBytes(request) > budget.max_input_characters ? "Skill request exceeds input budget" : null;
+}
+
+function validateRunnerOptions(options: unknown): string | null {
+  if (!isRecord(options) || typeof options.decide !== "function" || typeof options.callTool !== "function") {
+    return "Skill runner callbacks are required";
+  }
+  if (options.timeout_ms !== undefined
+    && (!isSafeInteger(options.timeout_ms) || options.timeout_ms < 1 || options.timeout_ms > 300_000)) {
+    return "Skill timeout_ms is outside the bounded limits";
+  }
+  if (options.signal !== undefined && !isAbortSignal(options.signal)) return "Skill signal is invalid";
+  return null;
+}
+
+function normalizeProvider(value: unknown): AgentSkillProvider {
+  if (!isRecord(value)) return { id: "unknown", version: "0" };
+  const id = typeof value.id === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value.id)
+    ? value.id.slice(0, 128)
+    : "unknown";
+  const version = typeof value.version === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._:+-]{0,127}$/.test(value.version)
+    ? value.version.slice(0, 128)
+    : "0";
+  const promptTokens = isSafeInteger(value.prompt_tokens) && value.prompt_tokens >= 0 ? value.prompt_tokens : undefined;
+  const completionTokens = isSafeInteger(value.completion_tokens) && value.completion_tokens >= 0 ? value.completion_tokens : undefined;
+  const totalTokens = isSafeInteger(value.total_tokens) && value.total_tokens >= 0 ? value.total_tokens : undefined;
+  return {
+    id,
+    version,
+    ...(typeof value.model === "string" || value.model === null ? { model: typeof value.model === "string" ? value.model.slice(0, 200) : null } : {}),
+    ...(promptTokens === undefined ? {} : { prompt_tokens: promptTokens }),
+    ...(completionTokens === undefined ? {} : { completion_tokens: completionTokens }),
+    ...(totalTokens === undefined ? {} : { total_tokens: totalTokens }),
+  };
+}
+
+function isBoundedBudget(value: unknown): value is AgentSkillRequest["budget"] {
+  if (!isRecord(value) || value.cost_bearer !== "caller") return false;
+  return isSafeInteger(value.max_steps) && value.max_steps >= 1 && value.max_steps <= 16
+    && isSafeInteger(value.max_input_characters) && value.max_input_characters >= 1 && value.max_input_characters <= 24_000
+    && isSafeInteger(value.max_output_tokens) && value.max_output_tokens >= 64 && value.max_output_tokens <= 2_048;
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+function snapshotAgentSkillRequest(request: AgentSkillRequest): AgentSkillRequest {
+  const snapshot: AgentSkillRequest = {
+    protocol: MATCHPLANE_AGENT_PROTOCOL,
+    request_id: request.request_id,
+    stage: request.stage,
+    scope: { platform_path: request.scope.platform_path },
+    intent: {
+      narrative: request.intent.narrative,
+      requirements: snapshotRecord(request.intent.requirements),
+    },
+    skill: request.skill,
+    allowed_mcp_tools: [...request.allowed_mcp_tools],
+    budget: { ...request.budget },
+    ...(request.trace_id === undefined ? {} : { trace_id: request.trace_id }),
+  };
+  return deepFreeze(snapshot);
 }
 
 function skillResult(
@@ -510,12 +609,18 @@ function skillResult(
 }
 
 function rejectedSkillResult(
-  request: AgentSkillRequest,
+  request: unknown,
   provider: AgentSkillProvider,
   reason: string,
 ): AgentSkillResult {
+  const record = isRecord(request) ? request : {};
+  const requestId = isUuid(record.request_id) ? record.request_id : "00000000-0000-4000-8000-000000000000";
+  const stage = isAgentStage(record.stage) ? record.stage : "platform";
+  const budget = isBoundedBudget(record.budget)
+    ? { ...record.budget }
+    : { max_steps: 1, max_input_characters: 1, max_output_tokens: 64, cost_bearer: "caller" as const };
   return skillResult(
-    request,
+    { protocol: MATCHPLANE_AGENT_PROTOCOL, request_id: requestId, stage, scope: { platform_path: "/" }, intent: { narrative: "", requirements: {} }, skill: "invalid", allowed_mcp_tools: [], budget },
     provider,
     [],
     [],
@@ -563,8 +668,8 @@ async function digestJson(value: unknown): Promise<string | null> {
   }
 }
 
-function boundedReason(value: string): string {
-  return value.trim().slice(0, 500) || "agent skill failed";
+function boundedReason(value: unknown): string {
+  return typeof value === "string" ? value.trim().slice(0, 500) || "agent skill failed" : "agent skill failed";
 }
 
 function errorMessage(error: unknown): string {
@@ -585,6 +690,89 @@ function isUuid(value: unknown): value is string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return isRecord(value) && typeof value.aborted === "boolean"
+    && typeof value.addEventListener === "function" && typeof value.removeEventListener === "function";
+}
+
+function createDeadlineSignal(parent: AbortSignal | undefined, timeoutMs: number | undefined): {
+  signal: AbortSignal;
+  dispose: () => void;
+  reason: () => string;
+} {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const onAbort = () => controller.abort(parent?.reason ?? new Error("skill_cancelled"));
+  if (parent?.aborted) onAbort();
+  else parent?.addEventListener("abort", onAbort, { once: true });
+  if (timeoutMs !== undefined) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error("skill_timeout"));
+    }, timeoutMs);
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      if (timer !== undefined) clearTimeout(timer);
+      parent?.removeEventListener("abort", onAbort);
+    },
+    reason: () => timedOut ? "skill_timeout" : "skill_cancelled",
+  };
+}
+
+async function awaitWithSignal<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw signal.reason ?? new Error("skill_cancelled");
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(signal.reason ?? new Error("skill_cancelled"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(operation).then((value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    }, (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    });
+  });
+}
+
+function snapshotHistory(history: readonly AgentSkillToolObservation[]): readonly AgentSkillToolObservation[] {
+  return deepFreeze(history.map((entry) => ({
+    step: entry.step,
+    tool: entry.tool,
+    arguments: snapshotRecord(entry.arguments),
+    output: snapshotValue(entry.output),
+  })));
+}
+
+function snapshotRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return snapshotValue(value) as Record<string, unknown>;
+}
+
+function snapshotValue<T>(value: T): T {
+  const serialized = JSON.stringify(value);
+  return JSON.parse(serialized === undefined ? "null" : serialized) as T;
+}
+
+function deepFreeze<T>(value: T): T {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  Object.freeze(value);
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  return value;
 }
 
 function normalizeBaseUrl(value: string): string {

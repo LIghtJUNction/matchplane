@@ -201,4 +201,108 @@ describe("MatchPlane external Agent client", () => {
     expect(result.steps).toHaveLength(2);
     expect(calls).toBe(2);
   });
+
+  it("keeps the verified budget and tool set stable when callbacks try to mutate them", async () => {
+    const request: AgentSkillRequest = {
+      protocol: "matchplane.agent/v1",
+      request_id: "123e4567-e89b-12d3-a456-426614174000",
+      stage: "inventory",
+      scope: { platform_path: "/used-car" },
+      intent: { narrative: "验证预算边界", requirements: {} },
+      skill: "matchplane.matching.v1",
+      allowed_mcp_tools: ["inventory.search"],
+      budget: { max_steps: 1, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+    };
+    let calls = 0;
+    const result = await runBoundedAgentSkill(request, {
+      provider: { id: "bounded.example", version: "1.0.0" },
+      decide: async ({ request: callbackRequest }) => {
+        try {
+          callbackRequest.budget.max_steps = 16;
+          callbackRequest.allowed_mcp_tools.push("payment.refund");
+        } catch {
+          // The runner intentionally freezes the callback view.
+        }
+        return { type: "tool", tool: "inventory.search", arguments: {} };
+      },
+      callTool: async () => {
+        calls += 1;
+        return {};
+      },
+    });
+
+    expect(result.reason).toBe("step_budget_exceeded");
+    expect(result.budget.max_steps).toBe(1);
+    expect(result.steps).toHaveLength(1);
+    expect(calls).toBe(1);
+  });
+
+  it("returns bounded rejected results for malformed runtime inputs and reasons", async () => {
+    const malformed = await runBoundedAgentSkill(
+      null as unknown as AgentSkillRequest,
+      null as unknown as Parameters<typeof runBoundedAgentSkill>[1],
+    );
+    expect(malformed.status).toBe("rejected");
+    expect(malformed.request_id).toBe("00000000-0000-4000-8000-000000000000");
+
+    const request: AgentSkillRequest = {
+      protocol: "matchplane.agent/v1",
+      request_id: "123e4567-e89b-12d3-a456-426614174000",
+      stage: "platform",
+      scope: { platform_path: "/" },
+      intent: { narrative: "验证错误原因", requirements: {} },
+      skill: "matchplane.route.v1",
+      allowed_mcp_tools: [],
+      budget: { max_steps: 1, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+    };
+    const rejected = await runBoundedAgentSkill(request, {
+      provider: { id: "bounded.example", version: "1.0.0" },
+      decide: async () => ({ type: "reject", reason: 123 } as unknown as ReturnType<NonNullable<Parameters<typeof runBoundedAgentSkill>[1]["decide"]>>),
+      callTool: async () => ({}),
+    });
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.reason).toBe("agent skill failed");
+  });
+
+  it("returns when the caller deadline aborts a hung model callback", async () => {
+    const request: AgentSkillRequest = {
+      protocol: "matchplane.agent/v1",
+      request_id: "123e4567-e89b-12d3-a456-426614174000",
+      stage: "platform",
+      scope: { platform_path: "/" },
+      intent: { narrative: "验证超时", requirements: {} },
+      skill: "matchplane.route.v1",
+      allowed_mcp_tools: [],
+      budget: { max_steps: 1, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+    };
+    const result = await runBoundedAgentSkill(request, {
+      provider: { id: "bounded.example", version: "1.0.0" },
+      timeout_ms: 5,
+      decide: async () => new Promise(() => {}),
+      callTool: async () => ({}),
+    });
+    expect(result.status).toBe("degraded");
+    expect(result.reason).toBe("skill_timeout");
+  });
+
+  it("treats an MCP isError result as a failed tool step", async () => {
+    const request: AgentSkillRequest = {
+      protocol: "matchplane.agent/v1",
+      request_id: "123e4567-e89b-12d3-a456-426614174000",
+      stage: "inventory",
+      scope: { platform_path: "/used-car" },
+      intent: { narrative: "验证 MCP 错误", requirements: {} },
+      skill: "matchplane.matching.v1",
+      allowed_mcp_tools: ["inventory.search"],
+      budget: { max_steps: 1, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+    };
+    const result = await runBoundedAgentSkill(request, {
+      provider: { id: "bounded.example", version: "1.0.0" },
+      decide: async () => ({ type: "tool", tool: "inventory.search", arguments: {} }),
+      callTool: async () => ({ isError: true, structuredContent: { error: "upstream unavailable" } }),
+    });
+    expect(result.status).toBe("degraded");
+    expect(result.reason).toBe("tool_failed");
+    expect(result.steps[0]?.status).toBe("failed");
+  });
 });
