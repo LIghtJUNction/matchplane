@@ -115,6 +115,28 @@ describe("MatchPlane workspaces", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(/未连接真实撮合 API/);
   });
 
+  it("submits with Enter while Shift+Enter keeps a multiline draft", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    savePartySession({
+      tenantId: crypto.randomUUID(),
+      partyId: crypto.randomUUID(),
+      role: "buyer",
+      accessToken: "demo-session-token",
+      accessTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    }, "root", "buyer");
+    render(<App />);
+
+    const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
+    await user.type(input, "第一行");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.type(input, "第二行");
+    expect(input).toHaveValue("第一行\n第二行");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/未连接真实撮合 API/);
+  });
+
   it("does not consume a pending chat while the user is still signed out", async () => {
     const pending = JSON.stringify({ text: "保留这条需求", next: "/?role=buyer" });
     window.sessionStorage.setItem("matchplane.pending-chat", pending);

@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import { ArrowUp, LockKeyhole, Sparkles } from "lucide-react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ArrowUp, LoaderCircle, LockKeyhole, Sparkles } from "lucide-react";
 
 import {
   createMarketplaceIntent,
@@ -81,10 +81,43 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const focusInputAfterErrorRef = useRef(false);
   const isRoot = subplatform.slug === "root";
   const isSeller = role === "seller";
   const copy = resolveChatCopy(subplatform);
   const label = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
+
+  const resizeInput = useCallback((input: HTMLTextAreaElement | null) => {
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 240)}px`;
+  }, []);
+
+  useEffect(() => {
+    resizeInput(inputRef.current);
+  }, [message, resizeInput]);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    if (typeof thread.scrollTo === "function") {
+      thread.scrollTo({ top: thread.scrollHeight, behavior });
+    } else {
+      // jsdom does not implement Element#scrollTo; keeping the fallback makes
+      // the log behavior testable without changing the browser experience.
+      thread.scrollTop = thread.scrollHeight;
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    if (sending || !focusInputAfterErrorRef.current) return;
+    focusInputAfterErrorRef.current = false;
+    inputRef.current?.focus();
+    resizeInput(inputRef.current);
+  }, [resizeInput, sending]);
 
   const submitMessage = useCallback(
     async (rawText: string, session?: PartySession) => {
@@ -111,6 +144,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
             ? "当前环境未连接真实供给 API，内容没有写入系统。请先启用平台 API 后再发送。"
             : "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。";
           setMessages((current) => current.map((item) => item.id === `${requestId}-assistant` ? { ...item, text: message } : item));
+          setMessage(text);
           onNotice(message);
           return;
         }
@@ -262,11 +296,13 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
         setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
           ? { ...item, text: error instanceof Error ? error.message : "需求暂时没有发送成功，请稍后再试。" }
           : item));
+        setMessage(text);
+        focusInputAfterErrorRef.current = true;
       } finally {
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, onNotice, onRecommendations, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, onNotice, onRecommendations, resizeInput, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
@@ -334,6 +370,12 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
     })().catch((error) => onNotice(error instanceof Error ? error.message : "Better Auth 会话校验失败"));
   };
 
+  const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  };
+
   return (
     <section className={`match-chat${isRoot ? " is-root" : ""}${isSeller ? " is-seller" : ""}`} aria-labelledby="match-chat-title">
       <div className="match-chat-heading">
@@ -342,14 +384,18 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
           <h1 id="match-chat-title">{isSeller ? copy.sellerTitle : copy.buyerTitle}</h1>
           <p>{isSeller ? copy.sellerDescription : copy.buyerDescription}</p>
         </div>
-        <span className={`match-chat-status${signedIn ? " is-signed-in" : ""}`}>
+        <span className={`match-chat-status${signedIn ? " is-signed-in" : ""}${sending ? " is-sending" : ""}`} aria-live="polite">
           <LockKeyhole size={14} aria-hidden="true" />
-          {signedIn ? label("signedInChatStatus", "已登录 · 直接发送") : label("signedOutChatStatus", "登录后自动继续")}
+          {sending
+            ? label("sendingChatStatus", "正在发送…")
+            : signedIn
+              ? label("signedInChatStatus", "已登录 · 直接发送")
+              : label("signedOutChatStatus", "登录后自动继续")}
         </span>
       </div>
 
       {messages.length ? (
-        <div className="match-chat-thread" aria-live="polite">
+        <div ref={threadRef} className="match-chat-thread" role="log" aria-live="polite" aria-relevant="additions text" aria-label={label("chatThreadLabel", "对话记录")}>
           {messages.map((item) => (
             <p key={item.id} className={`match-chat-message is-${item.role}`}>{item.text}</p>
           ))}
@@ -359,16 +405,21 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
       <form className="match-chat-form" onSubmit={send}>
         <label className="sr-only" htmlFor="match-chat-input">{isSeller ? `${label("tellPlatformPrefix", "告诉 MatchPlane")} ${copy.sellerTitle}` : label("chatInputLabel", "告诉 MatchPlane 你的需求")}</label>
         <textarea
+          ref={inputRef}
           id="match-chat-input"
           value={message}
-          onChange={(event) => setMessage(event.target.value)}
+          onChange={(event) => {
+            setMessage(event.target.value);
+            resizeInput(event.currentTarget);
+          }}
+          onKeyDown={handleInputKeyDown}
           placeholder={isSeller ? copy.sellerPlaceholder : copy.buyerPlaceholder}
           rows={2}
           maxLength={10000}
           disabled={sending}
         />
-        <button className="match-chat-send" type="submit" aria-label={isSeller ? label("sendSupplyLabel", "发送供给") : label("sendDemandLabel", "发送需求")} disabled={!message.trim() || sending}>
-          <ArrowUp size={18} aria-hidden="true" />
+        <button className="match-chat-send" type="submit" aria-label={isSeller ? label("sendSupplyLabel", "发送供给") : label("sendDemandLabel", "发送需求")} aria-busy={sending} disabled={!message.trim() || sending}>
+          {sending ? <LoaderCircle className="match-chat-spinner" size={18} aria-hidden="true" /> : <ArrowUp size={18} aria-hidden="true" />}
         </button>
       </form>
       <p className="match-chat-footnote">{isSeller ? copy.sellerFootnote : copy.buyerFootnote}</p>
