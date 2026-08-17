@@ -75,11 +75,16 @@ export async function POST(request: Request): Promise<Response> {
   const parentError = await validateParent(parentId, input.tenantId);
   if (parentError) return NextResponse.json({ error: parentError }, { status: 400 });
   const domainExists = await authDatabase.query(
-    "SELECT 1 FROM domains WHERE tenant_id = $1::uuid AND id = $2::uuid LIMIT 1",
+    `SELECT 1
+       FROM domains
+      WHERE tenant_id = $1::uuid
+        AND id = $2::uuid
+        AND status = 'active'
+      LIMIT 1`,
     [input.tenantId, input.domainId],
   );
   if (domainExists.rowCount !== 1) {
-    return NextResponse.json({ error: "tenantId/domainId 不属于已注册的 root domain" }, { status: 400 });
+    return NextResponse.json({ error: "tenantId/domainId 不属于已启用的 root domain" }, { status: 400 });
   }
 
   const manifestDigest = sha256Hex(canonicalJson(manifest.value));

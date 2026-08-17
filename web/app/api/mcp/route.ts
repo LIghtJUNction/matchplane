@@ -5,6 +5,7 @@ import { POST as matchPlatform } from "../platform/match/route";
 import { POST as handoffAgent } from "../platform/agent/handoff/route";
 import { hasTrustedBrowserOrigin } from "../../../src/lib/request-origin";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../src/lib/body-limit";
+import { validateMcpToolArguments } from "../../../src/mcp-contract";
 
 export const runtime = "nodejs";
 
@@ -55,6 +56,8 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
     return rpcError(id, -32602, "tools/call requires a supported MatchPlane tool");
   }
   const args = isRecord(params.arguments) ? params.arguments : {};
+  const argumentError = validateMcpToolArguments(params.name, args);
+  if (argumentError) return rpcError(id, -32602, argumentError);
   const isHandoff = params.name === "platform.agent.handoff";
   if (params.name.startsWith("marketplace.")) return callMarketplaceTool(request, id, params.name, args);
   const forwarded = new Request(new URL(isHandoff ? "/api/platform/agent/handoff" : "/api/platform/match", request.url), {

@@ -144,7 +144,13 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
                   domainId: targetDomainId,
                   role,
                 })
-              : session;
+              : session ?? await getMarketplaceSession({
+                  subplatform: target.slug,
+                  platformPath: target.path,
+                  tenantId: target.tenantId,
+                  domainId: targetDomainId,
+                  role,
+                });
             if (!targetSession) throw new Error("Better Auth 会话尚未连接到当前平台节点");
             const targetPricing = pricingFor(target);
             const targetUsesLegacy = target.marketplaceContract === "legacy-v1";

@@ -55,6 +55,12 @@ idempotent handoff, and returns only the active direct-child capabilities. It ne
 root model: an external demand/supply Agent keeps its own provider credentials and token bill. Use
 an organization API key with the explicit `agent:handoff` permission for machine calls.
 
+The HTTP facade validates the advertised scope and budget contract before forwarding a call:
+platform paths must be normalized, tenant/domain/party identifiers must be UUIDs, marketplace
+calls must carry an explicit `platform_path`, and Agent handoffs must remain caller-funded. The
+Rust gateway remains the final authorization and domain-schema authority; this early validation is
+only a deterministic MCP boundary and does not grant access.
+
 For a machine Agent to continue into the generic marketplace tools, create an organization API key
 with `marketplace:write` and neutral API-key metadata `agentSide: demand`, `supply`, or `both`.
 The old `agentRole` field is accepted only as a compatibility migration alias. Call

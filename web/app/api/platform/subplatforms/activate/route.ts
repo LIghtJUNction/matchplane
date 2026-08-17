@@ -39,6 +39,10 @@ export async function POST(request: Request): Promise<Response> {
        FROM subplatform_registrations r
        JOIN "organization" o
          ON o.slug = r.slug AND o."tenantId" = r.tenant_id::text
+       JOIN domains d
+         ON d.id = r.domain_id
+        AND d.tenant_id = r.tenant_id
+        AND d.status = 'active'
       WHERE r.id = $1::uuid
       ORDER BY r.version DESC
       LIMIT 1`,
