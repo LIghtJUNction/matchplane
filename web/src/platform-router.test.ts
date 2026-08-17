@@ -251,4 +251,38 @@ describe("platform Agent router", () => {
     expect(decision.budget.maxOutputTokens).toBe(2_048);
     expect(decision.usage?.totalTokens).toBe(120);
   });
+
+  it("does not starve children after the provider window when a later child is relevant", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const manyCandidates = Array.from({ length: 40 }, (_, index): PlatformRouteCandidate => ({
+      slug: `child-${index}`,
+      path: `/child-${index}`,
+      displayName: index === 39 ? "摄影平台" : `平台 ${index}`,
+      description: index === 39 ? "摄影器材与服务" : "通用供给",
+      capabilities: ["demand", "supply"],
+      agentStages: ["participant", "offering"],
+      agentSkills: ["matchplane.matching.v1"],
+      depth: 1,
+    }));
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content?: unknown }> };
+      const content = JSON.parse(String(body.messages[1]?.content)) as { candidates?: Array<{ slug?: string }> };
+      expect(content.candidates?.some((candidate) => candidate.slug === "child-39")).toBe(true);
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ selectedSlugs: ["child-39"] }) } }],
+      }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "我想找摄影服务",
+      candidates: manyCandidates,
+    });
+
+    expect(decision.selectedSlugs).toEqual(["child-39"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

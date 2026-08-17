@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { ArrowRight, LockKeyhole, ShieldCheck } from "lucide-react";
+import { ArrowRight, LockKeyhole } from "lucide-react";
 import { motion } from "motion/react";
 
 import { type ContactExchange } from "../api";
@@ -101,7 +101,7 @@ export function ContactProfileCard({ subplatform, role, onNotice }: ContactProfi
           </label>
         ))}
         <div className="contact-profile-footer">
-          <span><ShieldCheck size={15} aria-hidden="true" />{subplatformCopy(subplatform, "contactProfileSecurityLabel", "加密保存 · 双方同意后释放")}</span>
+          <span>{subplatformCopy(subplatform, "contactProfileSecurityLabel", "加密保存 · 双方同意后释放")}</span>
           <motion.button className="button button-dark" type="submit" disabled={saving} whileTap={{ scale: 0.97 }} transition={spring}>
             {saving ? subplatformCopy(subplatform, "contactProfileSavingLabel", "保存中…") : subplatformCopy(subplatform, "contactProfileSaveLabel", "保存联系方式")}
             <ArrowRight size={17} aria-hidden="true" />

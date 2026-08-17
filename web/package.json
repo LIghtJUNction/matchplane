@@ -19,6 +19,7 @@
   "dependencies": {
     "@better-auth/api-key": "1.7.0-rc.6",
     "@better-auth/oauth-provider": "1.7.0-rc.6",
+    "@better-auth/passkey": "1.7.0-rc.6",
     "better-auth": "1.7.0-rc.6",
     "lucide-react": "1.31.0",
     "motion": "13.1.0",

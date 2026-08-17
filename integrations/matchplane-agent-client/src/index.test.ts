@@ -3,7 +3,9 @@ import { describe, expect, it } from "bun:test";
 import {
   MatchPlaneAgentClient,
   MatchPlaneMcpError,
+  routePlanPaths,
   runBoundedAgentSkill,
+  terminalRoutePlanPaths,
   type AgentSkillRequest,
 } from "./index";
 
@@ -28,6 +30,18 @@ function fakeFetch() {
 }
 
 describe("MatchPlane external Agent client", () => {
+  it("distinguishes the starting path from selected child paths", () => {
+    const result = {
+      requestId: "request",
+      platformPath: "/",
+      status: "delegated",
+      routePlan: [{ path: "/used-car" }, { path: "/used-car/premium" }, { path: "not-a-path" }],
+      routing: {},
+    };
+    expect(routePlanPaths(result)).toEqual(["/used-car", "/used-car/premium"]);
+    expect(terminalRoutePlanPaths(result)).toEqual(["/used-car/premium"]);
+  });
+
   it("routes a caller-funded narrative through the platform tree", async () => {
     const fake = fakeFetch();
     const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
@@ -52,6 +66,59 @@ describe("MatchPlane external Agent client", () => {
     const fake = fakeFetch();
     const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
     await expect(client.routePlatformIntent({ narrative: "   " })).rejects.toThrow("narrative is required");
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it("wraps child tools and parses the retrieval ABI without leaking provider details into the client", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const requestId = "123e4567-e89b-12d3-a456-426614174004";
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(url), init });
+      const body = JSON.parse(String(init?.body)) as { scope?: { platform_path?: string }; limit?: number; input?: { narrative?: string } };
+      const retrieval = {
+        protocol: "matchplane.retrieval/v1",
+        request_id: requestId,
+        provider: { id: "used-car.search", version: "2026.08", model: null },
+        candidates: [{
+          asset_id: "123e4567-e89b-12d3-a456-426614174002",
+          offer_id: "123e4567-e89b-12d3-a456-426614174003",
+          display_name: "通勤方案",
+          score: 0.91,
+          reasons: ["预算匹配"],
+        }],
+        degraded: false,
+      };
+      expect(String(url)).toBe("https://matx.tech/api/platform/retrieval/query");
+      expect(body.scope?.platform_path).toBe("/used-car");
+      expect(body.input?.narrative).toBe("预算内的通勤方案");
+      expect(body.limit).toBe(2);
+      return new Response(JSON.stringify(retrieval), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl });
+
+    const result = await client.queryRetrieval({
+      tenant_id: "123e4567-e89b-12d3-a456-426614174000",
+      domain_id: "123e4567-e89b-12d3-a456-426614174001",
+      platform_path: "/used-car",
+      narrative: "预算内的通勤方案",
+      requirements: { budget_max: 100000 },
+      request_id: requestId,
+      limit: 2,
+    });
+
+    expect(result.candidates[0]?.offer_id).toBe("123e4567-e89b-12d3-a456-426614174003");
+    expect(new Headers(calls[0]?.init?.headers).get("x-matchplane-api-key")).toBe("mpk_test");
+  });
+
+  it("rejects invalid child retrieval scope before contacting the gateway", async () => {
+    const fake = fakeFetch();
+    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
+    await expect(client.queryRetrieval({
+      tenant_id: "not-a-uuid",
+      domain_id: "123e4567-e89b-12d3-a456-426614174001",
+      platform_path: "/",
+      narrative: "找供给",
+    })).rejects.toThrow("UUIDs");
     expect(fake.calls).toHaveLength(0);
   });
 

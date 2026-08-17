@@ -38,6 +38,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ printf "%s@%s" .Values.web.image.repository $digest }}
 {{- end }}
 
+{{- define "matchplane.builderImage" -}}
+{{- $digest := required "subplatformBuilder.image.digest must be set to an immutable sha256 digest" .Values.subplatformBuilder.image.digest -}}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" $digest) -}}
+{{- fail "subplatformBuilder.image.digest must match sha256:<64 lowercase hexadecimal characters>" -}}
+{{- end -}}
+{{ printf "%s@%s" .Values.subplatformBuilder.image.repository $digest }}
+{{- end }}
+
 {{/*
   Runtime credentials are intentionally selected per workload. The legacy
   runtime.existingSecret value remains a development/test fallback only; a

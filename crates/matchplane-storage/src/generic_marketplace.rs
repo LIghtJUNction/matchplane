@@ -560,19 +560,32 @@ impl PgStore {
         .fetch_all(self.pool())
         .await?;
 
-        let mut candidates = rows
+        let mut candidates: Vec<MarketplaceOfferCandidate> = rows
             .iter()
             .map(|row| {
                 let offer = offer_from_row(row)?;
-                let (score, reasons) =
-                    generic_attribute_score(&intent.attributes, &offer.attributes);
-                Ok(MarketplaceOfferCandidate {
+                let (score, reasons) = generic_match_score(
+                    &intent.narrative,
+                    &intent.attributes,
+                    &offer.display_name,
+                    &offer.attributes,
+                );
+                // An empty/unsupported request must not be presented as a real match. The
+                // caller can still hand the narrative to its own retrieval provider, but the
+                // kernel should not manufacture a neutral 50% recommendation.
+                if score <= 0.0 {
+                    return Ok(None);
+                }
+                Ok(Some(MarketplaceOfferCandidate {
                     offer,
                     score,
                     reasons,
-                })
+                }))
             })
-            .collect::<Result<Vec<_>, StorageError>>()?;
+            .collect::<Result<Vec<_>, StorageError>>()?
+            .into_iter()
+            .flatten()
+            .collect();
         candidates.sort_by(|left, right| {
             right
                 .score
@@ -1148,13 +1161,15 @@ fn ensure_same_offer(
     Ok(())
 }
 
-fn generic_attribute_score(demand: &Value, supply: &Value) -> (f64, Vec<String>) {
+fn generic_match_score(
+    narrative: &str,
+    demand: &Value,
+    supply_name: &str,
+    supply: &Value,
+) -> (f64, Vec<String>) {
     let Some(demand) = demand.as_object() else {
         return (0.0, Vec::new());
     };
-    if demand.is_empty() {
-        return (0.5, vec!["no structured constraints supplied".to_owned()]);
-    }
     let Some(supply) = supply.as_object() else {
         return (0.0, Vec::new());
     };
@@ -1168,7 +1183,69 @@ fn generic_attribute_score(demand: &Value, supply: &Value) -> (f64, Vec<String>)
             }
         }
     }
-    (matched as f64 / demand.len() as f64, reasons)
+    let considered = demand.values().filter(|value| !value.is_null()).count();
+    let attribute_score = if considered == 0 {
+        0.0
+    } else {
+        matched as f64 / considered as f64
+    };
+    let narrative_tokens = generic_match_tokens(narrative);
+    let supply_json = serde_json::to_string(supply).unwrap_or_default();
+    let supply_tokens = generic_match_tokens(&format!("{supply_name} {supply_json}"));
+    let narrative_matches = narrative_tokens
+        .iter()
+        .filter(|token| supply_tokens.contains(*token))
+        .count();
+    let narrative_score = if narrative_tokens.is_empty() {
+        0.0
+    } else {
+        narrative_matches as f64 / narrative_tokens.len() as f64
+    };
+    if narrative_matches > 0 {
+        for token in narrative_tokens
+            .iter()
+            .filter(|token| supply_tokens.contains(*token))
+            .take(8)
+        {
+            reasons.push(format!("narrative_match:{token}"));
+        }
+    }
+    let score = match (considered, narrative_tokens.is_empty()) {
+        (0, true) => 0.0,
+        (0, false) => narrative_score,
+        (_, true) => attribute_score,
+        (_, false) => attribute_score.mul_add(0.7, narrative_score * 0.3),
+    };
+    (score.clamp(0.0, 1.0), reasons)
+}
+
+fn generic_match_tokens(value: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut ascii = String::new();
+    let flush_ascii = |tokens: &mut Vec<String>, ascii: &mut String| {
+        if ascii.len() >= 2 {
+            tokens.push(std::mem::take(ascii));
+        } else {
+            ascii.clear();
+        }
+    };
+    for character in value.chars().flat_map(char::to_lowercase) {
+        if character.is_ascii_alphanumeric() {
+            ascii.push(character);
+        } else {
+            flush_ascii(&mut tokens, &mut ascii);
+            if ('\u{3400}'..='\u{9fff}').contains(&character) {
+                tokens.push(character.to_string());
+            }
+        }
+        if tokens.len() >= 256 {
+            break;
+        }
+    }
+    flush_ascii(&mut tokens, &mut ascii);
+    tokens.sort_unstable();
+    tokens.dedup();
+    tokens
 }
 
 const INTENT_SELECT: &str = "SELECT id, tenant_id, domain_id, participant_id, side, narrative,
@@ -1330,28 +1407,48 @@ async fn serializable(transaction: &mut Transaction<'_, Postgres>) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::generic_attribute_score;
+    use super::generic_match_score;
     use serde_json::json;
 
     #[test]
-    fn generic_attribute_score_is_explainable_and_bounded() {
-        let (score, reasons) = generic_attribute_score(
+    fn generic_match_score_keeps_exact_attributes_explainable() {
+        let (score, reasons) = generic_match_score(
+            "service",
             &json!({"kind": "service", "region": "cn", "capacity": 4}),
+            "service offer",
             &json!({"kind": "service", "region": "cn", "capacity": 2}),
         );
 
-        assert_eq!(score, 2.0 / 3.0);
+        assert!(score > 0.6);
         assert_eq!(
-            reasons,
+            reasons
+                .iter()
+                .take(2)
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
             vec!["shared attribute: kind", "shared attribute: region"]
         );
     }
 
     #[test]
-    fn empty_constraints_are_neutral_instead_of_matching_everything() {
-        let (score, reasons) = generic_attribute_score(&json!({}), &json!({"kind": "anything"}));
+    fn empty_constraints_without_narrative_do_not_match_everything() {
+        let (score, reasons) =
+            generic_match_score("", &json!({}), "anything", &json!({"kind": "anything"}));
 
-        assert_eq!(score, 0.5);
-        assert_eq!(reasons, vec!["no structured constraints supplied"]);
+        assert_eq!(score, 0.0);
+        assert!(reasons.is_empty());
+    }
+
+    #[test]
+    fn narrative_overlap_produces_a_bounded_explanation_without_schema_fields() {
+        let (score, reasons) = generic_match_score(
+            "新能源服务",
+            &json!({}),
+            "城市新能源服务",
+            &json!({"kind": "service"}),
+        );
+
+        assert!(score > 0.0);
+        assert!(reasons.iter().any(|reason| reason == "narrative_match:新"));
     }
 }

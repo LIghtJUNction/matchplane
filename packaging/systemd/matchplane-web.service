@@ -26,6 +26,9 @@ Environment=MATCHPLANE_WEB_NODE=/usr/bin/node
 # secret directory with matchplane-web ownership.
 Environment=MATCHPLANE_PAYMENT_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/web/payment-admin.token
 Environment=MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE=/etc/matchplane/secrets/web/gateway-admin.token
+# The isolated builder callback is a shared value, but each service receives its own
+# least-privilege copy: matchplane-web cannot read the builder user's secret directory.
+Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchplane/secrets/web/builder.token
 ExecStart=/usr/bin/matchplane serve web
 Restart=on-failure
 RestartSec=3s

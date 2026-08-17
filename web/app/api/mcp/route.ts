@@ -6,6 +6,7 @@ import { POST as handoffAgent } from "../platform/agent/handoff/route";
 import { hasTrustedBrowserOrigin } from "../../../src/lib/request-origin";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../src/lib/body-limit";
 import { validateMcpToolArguments } from "../../../src/mcp-contract";
+import { executeAuthenticatedChildTool } from "../../../src/platform-child-tool";
 
 export const runtime = "nodejs";
 
@@ -59,6 +60,7 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
   const argumentError = validateMcpToolArguments(params.name, args);
   if (argumentError) return rpcError(id, -32602, argumentError);
   const isHandoff = params.name === "platform.agent.handoff";
+  if (params.name === "platform.child.tool") return callChildTool(request, id, args);
   if (params.name.startsWith("marketplace.")) return callMarketplaceTool(request, id, params.name, args);
   const forwarded = new Request(new URL(isHandoff ? "/api/platform/agent/handoff" : "/api/platform/match", request.url), {
     method: "POST",
@@ -81,6 +83,35 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
       structuredContent: payload,
     },
   }, { status: 200, headers: { "cache-control": "no-store" } });
+}
+
+/**
+ * Invoke a tool owned by one active child node. The root only performs authorization, allowlist
+ * checking and bounded transport; the child MCP server owns retrieval/catalog semantics.
+ */
+async function callChildTool(
+  request: Request,
+  id: JsonRpcId,
+  args: Record<string, unknown>,
+): Promise<Response> {
+  const platformPath = typeof args.platform_path === "string" ? args.platform_path : "";
+  const toolName = typeof args.tool_name === "string" ? args.tool_name : "";
+  const toolArguments = isRecord(args.arguments) ? args.arguments : {};
+  const result = await executeAuthenticatedChildTool({
+    request,
+    platformPath,
+    toolName,
+    arguments: toolArguments,
+    requestId: typeof args.request_id === "string" ? args.request_id : undefined,
+    allowSession: false,
+  });
+  if (result.status === 401) {
+    const message = typeof result.payload.error === "string"
+      ? result.payload.error
+      : "Better Auth session or agent:tool API key is required";
+    return rpcError(id, -32002, message);
+  }
+  return rpcToolResponse(id, result.payload, !result.ok, result.status);
 }
 
 /**
@@ -200,6 +231,7 @@ async function callMarketplaceTool(
 function supportedTool(name: unknown): name is string {
   return name === "platform.match"
     || name === "platform.agent.handoff"
+    || name === "platform.child.tool"
     || name === "marketplace.agent.session"
     || name === "marketplace.intent.create"
     || name === "marketplace.offer.create"
@@ -214,6 +246,27 @@ function supportedTool(name: unknown): name is string {
 function stringArgument(args: Record<string, unknown>, key: string): string | null {
   const value = args[key];
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function rpcToolResponse(
+  id: JsonRpcId,
+  payload: Record<string, unknown>,
+  isError: boolean,
+  status = 200,
+): Response {
+  return NextResponse.json({
+    jsonrpc: "2.0",
+    id,
+    result: {
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      isError,
+      structuredContent: payload,
+    },
+  }, { status: 200, headers: { "cache-control": "no-store", "x-matchplane-upstream-status": String(status) } });
+}
+
+function rpcToolError(id: JsonRpcId, status: number, message: string): Response {
+  return rpcToolResponse(id, { error: message }, true, status);
 }
 
 function toolList(): Record<string, unknown> {
@@ -241,7 +294,7 @@ function toolList(): Record<string, unknown> {
         properties: {
           protocol: { const: "matchplane.agent/v1" },
           request_id: { type: "string", format: "uuid" },
-          stage: { type: "string", enum: ["platform", "merchant", "inventory"] },
+          stage: { type: "string", pattern: "^[a-z0-9][a-z0-9._:-]{1,127}$", description: "Domain-owned stage taxonomy key." },
           scope: {
             type: "object",
             additionalProperties: false,
@@ -281,6 +334,20 @@ function toolList(): Record<string, unknown> {
             },
           },
           selected_refs: { type: "array", maxItems: 100, items: { type: "string", maxLength: 256 } },
+        },
+      },
+    }, {
+      name: "platform.child.tool",
+      description: "Call one MCP tool declared by an active child platform through its operator-configured endpoint.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["platform_path", "tool_name", "arguments"],
+        properties: {
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)$", maxLength: 512 },
+          tool_name: { type: "string", pattern: "^[a-z0-9][a-z0-9._:-]{1,127}$", maxLength: 128 },
+          arguments: { type: "object", maxProperties: 256 },
+          request_id: { type: "string", minLength: 1, maxLength: 200 },
         },
       },
     }, {

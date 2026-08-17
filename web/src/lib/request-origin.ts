@@ -4,6 +4,8 @@
  * authorization path.  A missing Origin is kept compatible with non-browser clients; when a
  * browser supplies one, an attacker-controlled cross-site Origin fails closed.
  */
+import { isProductionEnvironment } from "./runtime";
+
 export function hasTrustedBrowserOrigin(request: Request): boolean {
   if (!request.headers.get("cookie")) return true;
   const origin = request.headers.get("origin")?.trim();
@@ -24,7 +26,7 @@ export function hasTrustedBrowserOrigin(request: Request): boolean {
   ]
     .map((value) => value?.trim())
     .filter((value): value is string => Boolean(value));
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProductionEnvironment()) {
     configured.push("http://localhost:4173", "http://127.0.0.1:4173");
   }
 

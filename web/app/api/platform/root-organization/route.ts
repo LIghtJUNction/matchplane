@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
+import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
@@ -49,7 +50,15 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ organization: adopted, created: false, adopted: true }, { headers: { "cache-control": "no-store" } });
   }
 
-  const input = await parseBody(request);
+  let input: { name?: string; slug?: string };
+  try {
+    input = await parseBody(request);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof RequestBodyTooLargeError ? "根平台初始化请求体过大" : "请求必须是有效 JSON" },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
   const name = input.name?.trim() || tenantRecord.name.trim();
   const slug = input.slug?.trim().toLowerCase() || tenantRecord.slug.trim().toLowerCase();
   if (!isOrganizationName(name)) return NextResponse.json({ error: "根平台名称必须为 1..200 个字符" }, { status: 400 });
@@ -184,17 +193,13 @@ async function adoptConfiguredRoot(tenantId: string, organizationId: string) {
 }
 
 async function parseBody(request: Request): Promise<{ name?: string; slug?: string }> {
-  try {
-    const value = await request.json() as unknown;
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    const record = value as Record<string, unknown>;
-    return {
-      ...(typeof record.name === "string" ? { name: record.name } : {}),
-      ...(typeof record.slug === "string" ? { slug: record.slug } : {}),
-    };
-  } catch {
-    return {};
-  }
+  const value = await readJsonBody<unknown>(request, 16 * 1024);
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new SyntaxError("object required");
+  const record = value as Record<string, unknown>;
+  return {
+    ...(typeof record.name === "string" ? { name: record.name } : {}),
+    ...(typeof record.slug === "string" ? { slug: record.slug } : {}),
+  };
 }
 
 function isRootManager(user: { role?: string | null }): boolean {

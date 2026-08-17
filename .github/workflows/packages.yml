@@ -43,7 +43,7 @@ jobs:
         run: cargo build --release --locked --workspace --bins
       - name: Verify runtime linkage
         run: |
-          for binary in matchplane-event-relay matchplane-federation-hub matchplane-gateway matchplane-matcher matchplane-payment-service matchplane-projector matchplane-vector-worker matchplane; do
+          for binary in matchplane-event-relay matchplane-federation-hub matchplane-gateway matchplane-matcher matchplane-payment-service matchplane-projector matchplane-subplatform-builder matchplane-vector-worker matchplane; do
             ldd "target/release/$binary"
           done
       - name: Build portable archive
@@ -162,6 +162,16 @@ jobs:
           docker push "$IMAGE_PREFIX/matchplane-web:$VERSION"
           digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_PREFIX/matchplane-web:$VERSION")
           printf 'matchplane-web=%s\n' "$digest" >> service-digest.txt
+      - name: Build and publish immutable subplatform builder image
+        run: |
+          docker build \
+            --file deploy/compose/builder.Dockerfile \
+            --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
+            --label org.opencontainers.image.version="$VERSION" \
+            --tag "$IMAGE_PREFIX/matchplane-subplatform-builder:$VERSION" .
+          docker push "$IMAGE_PREFIX/matchplane-subplatform-builder:$VERSION"
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_PREFIX/matchplane-subplatform-builder:$VERSION")
+          printf 'matchplane-subplatform-builder=%s\n' "$digest" >> service-digest.txt
       - name: Upload image digests
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

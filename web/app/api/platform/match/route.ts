@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 
 import { NextResponse } from "next/server";
@@ -28,6 +28,7 @@ const MAX_NARRATIVE_LENGTH = 10_000;
 const MAX_PATH_LENGTH = 512;
 const DEFAULT_AI_REQUESTS_PER_HOUR = 120;
 const DEFAULT_AI_MAX_STEPS = 8;
+const DEFAULT_AI_MAX_FANOUT = 4;
 
 /**
  * Accepts a domain-neutral intent at the current platform node and returns the
@@ -80,43 +81,76 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "idempotencyKey must contain 1..240 printable characters" }, { status: 400 });
   }
 
-  let idempotencyLock: PoolClient | null = null;
+  let idempotencyClaimRequestId: string | null = null;
+  let requestId: string = randomUUID();
   if (idempotencyKey) {
     try {
-      const lock = await acquireMatchIdempotencyLock(actor.subject, platformPath, idempotencyKey);
-      if (lock === "busy") {
+      const reservation = await reserveMatchIdempotencyClaim({
+        authSubject: actor.subject,
+        platformPath,
+        idempotencyKey,
+        requestId,
+        narrative,
+      });
+      if (reservation.state === "conflict") {
+        return NextResponse.json(
+          { error: "同一个 idempotencyKey 不能提交不同的 narrative" },
+          { status: 409, headers: { "cache-control": "no-store" } },
+        );
+      }
+      if (reservation.state === "busy") {
+        // A process can persist the match and crash before the claim completion update.  Treat
+        // the durable match row as the source of truth on a retry instead of making the caller
+        // wait for the stale-claim timeout.
+        const existing = await readIdempotentMatchRequest(actor.subject, platformPath, idempotencyKey);
+        if (existing && existing.narrative === narrative) {
+          await completeMatchIdempotencyClaim(reservation.requestId, existing.id);
+          return idempotentMatchResponse(existing, actor.access);
+        }
         return NextResponse.json(
           { error: "相同幂等请求正在处理中，请稍后重试。" },
           { status: 409, headers: { "retry-after": "2", "cache-control": "no-store" } },
         );
       }
-      idempotencyLock = lock;
+      requestId = reservation.requestId;
+      idempotencyClaimRequestId = reservation.requestId;
+      if (reservation.state === "completed") {
+        const existing = await readIdempotentMatchRequest(actor.subject, platformPath, idempotencyKey);
+        if (!existing || existing.id !== reservation.requestId) {
+          return NextResponse.json({ error: "幂等撮合记录暂时不可用，请稍后重试。" }, { status: 503 });
+        }
+        return idempotentMatchResponse(existing, actor.access);
+      }
+
+      // Rows created before the claim migration are still replayable. Adopt the existing
+      // request instead of spending another model call, then mark the short-lived claim done.
+      const existing = await readIdempotentMatchRequest(actor.subject, platformPath, idempotencyKey);
+      if (existing) {
+        if (existing.narrative !== narrative) {
+          await failMatchIdempotencyClaim(reservation.requestId);
+          return NextResponse.json(
+            { error: "同一个 idempotencyKey 不能提交不同的 narrative" },
+            { status: 409, headers: { "cache-control": "no-store" } },
+          );
+        }
+        await completeMatchIdempotencyClaim(reservation.requestId, existing.id);
+        idempotencyClaimRequestId = null;
+        return idempotentMatchResponse(existing, actor.access);
+      }
     } catch (error) {
-      console.error("platform match idempotency lock failed", error);
+      await failMatchIdempotencyClaim(idempotencyClaimRequestId);
+      idempotencyClaimRequestId = null;
+      console.error("platform match idempotency claim failed", error);
       return NextResponse.json({ error: "平台撮合暂时不可用，请稍后重试。" }, { status: 503 });
     }
   }
 
   let client: PoolClient | undefined;
   try {
-    if (idempotencyKey) {
-      const existing = await readIdempotentMatchRequest(actor.subject, platformPath, idempotencyKey);
-      if (existing) {
-        if (existing.narrative !== narrative) {
-          return NextResponse.json(
-            { error: "同一个 idempotencyKey 不能提交不同的 narrative" },
-            { status: 409, headers: { "cache-control": "no-store" } },
-          );
-        }
-        return idempotentMatchResponse(existing, actor.access);
-      }
-    }
-
     const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
     const candidates = rootTenantId && isUuid(rootTenantId)
       ? await readActiveDirectChildRoutes(platformPath, rootTenantId, viewer)
       : [];
-    const requestId = randomUUID();
     let recursive: Awaited<ReturnType<typeof expandPlatformRouteTree>>;
     try {
       recursive = await expandPlatformRouteTree({
@@ -145,15 +179,20 @@ export async function POST(request: Request): Promise<Response> {
           }),
         maxSteps: configuredAiMaxSteps(),
         maxDepth: configuredAiMaxSteps(),
+        maxFanout: configuredAiMaxFanout(),
       });
     } catch (error) {
       if (error instanceof PlatformRouterQuotaExceededError) {
+        await failMatchIdempotencyClaim(idempotencyClaimRequestId);
+        idempotencyClaimRequestId = null;
         return NextResponse.json(
           { error: error.message },
           { status: 429, headers: { "retry-after": "3600", "cache-control": "no-store" } },
         );
       }
       console.error("platform route expansion failed", error);
+      await failMatchIdempotencyClaim(idempotencyClaimRequestId);
+      idempotencyClaimRequestId = null;
       return NextResponse.json({ error: "平台路由暂时不可用，请稍后再试。" }, { status: 503 });
     }
     const routing = summarizeRouting(recursive.trace, recursive.truncated);
@@ -205,6 +244,8 @@ export async function POST(request: Request): Promise<Response> {
       ],
     );
     await client.query("COMMIT");
+    await completeMatchIdempotencyClaim(idempotencyClaimRequestId, requestId);
+    idempotencyClaimRequestId = null;
     return NextResponse.json(
       {
         requestId,
@@ -220,15 +261,19 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
+    await failMatchIdempotencyClaim(idempotencyClaimRequestId);
+    idempotencyClaimRequestId = null;
     console.error("platform match request persistence failed", error);
     return NextResponse.json({ error: "平台撮合记录保存失败，请稍后再试。" }, { status: 503 });
   } finally {
     client?.release();
-    idempotencyLock?.release();
   }
 }
 
-type MatchIdempotencyLock = PoolClient | "busy";
+type MatchIdempotencyReservation = {
+  state: "acquired" | "busy" | "completed" | "conflict";
+  requestId: string;
+};
 
 interface StoredMatchRequest {
   id: string;
@@ -239,33 +284,80 @@ interface StoredMatchRequest {
   routingDecision: unknown;
 }
 
-/**
- * Hold a PostgreSQL session advisory lock across the bounded router call. A
- * transaction lock would be released before the provider request completed;
- * the session lock closes that race while keeping the key optional for legacy
- * callers that do not need retry semantics.
- */
-async function acquireMatchIdempotencyLock(
-  authSubject: string,
-  platformPath: string,
-  idempotencyKey: string,
-): Promise<MatchIdempotencyLock> {
-  const client = await authDatabase.connect();
+/** Reserve a retry key in a short transaction; never hold a connection across provider I/O. */
+async function reserveMatchIdempotencyClaim(input: {
+  authSubject: string;
+  platformPath: string;
+  idempotencyKey: string;
+  requestId: string;
+  narrative: string;
+}): Promise<MatchIdempotencyReservation> {
+  const narrativeHash = createHash("sha256").update(input.narrative).digest("hex");
+  const inserted = await authDatabase.query<{ requestId: string; state: string; narrativeHash: string }>(
+    `INSERT INTO platform_match_idempotency_claims
+      (auth_user_id, platform_path, idempotency_key, request_id, narrative_hash, state)
+     VALUES ($1, $2, $3, $4::uuid, $5, 'processing')
+     ON CONFLICT (auth_user_id, platform_path, idempotency_key) DO UPDATE
+       SET request_id = EXCLUDED.request_id,
+           narrative_hash = EXCLUDED.narrative_hash,
+           state = 'processing',
+           updated_at = clock_timestamp()
+     WHERE platform_match_idempotency_claims.state = 'failed'
+        OR (platform_match_idempotency_claims.state = 'processing'
+            AND platform_match_idempotency_claims.updated_at < clock_timestamp() - interval '10 minutes')
+     RETURNING request_id AS "requestId", state, narrative_hash AS "narrativeHash"`,
+    [input.authSubject, input.platformPath, input.idempotencyKey, input.requestId, narrativeHash],
+  );
+  const owned = inserted.rows[0];
+  if (owned) return { state: "acquired", requestId: owned.requestId };
+
+  const existing = await authDatabase.query<{ requestId: string; state: string; narrativeHash: string }>(
+    `SELECT request_id AS "requestId", state, narrative_hash AS "narrativeHash"
+       FROM platform_match_idempotency_claims
+      WHERE auth_user_id = $1 AND platform_path = $2 AND idempotency_key = $3
+      LIMIT 1`,
+    [input.authSubject, input.platformPath, input.idempotencyKey],
+  );
+  const row = existing.rows[0];
+  if (!row) throw new Error("idempotency claim disappeared");
+  if (row.narrativeHash !== narrativeHash) return { state: "conflict", requestId: row.requestId };
+  return {
+    state: row.state === "completed" ? "completed" : "busy",
+    requestId: row.requestId,
+  };
+}
+
+async function completeMatchIdempotencyClaim(claimRequestId: string | null, requestId: string): Promise<boolean> {
+  if (!claimRequestId) return true;
   try {
-    const lockKey = `matchplane:platform-match:${authSubject}:${platformPath}:${idempotencyKey}`;
-    const result = await client.query<{ acquired: boolean }>(
-      "SELECT pg_try_advisory_lock(hashtext($1)) AS acquired",
-      [lockKey],
+    const result = await authDatabase.query(
+      `UPDATE platform_match_idempotency_claims
+          SET request_id = $2::uuid, state = 'completed', updated_at = clock_timestamp()
+        WHERE request_id = $1::uuid`,
+      [claimRequestId, requestId],
     );
-    if (result.rows[0]?.acquired !== true) {
-      client.release();
-      return "busy";
-    }
-    return client;
+    if (result.rowCount === 1) return true;
+    console.error("platform match idempotency claim completion did not update its owner", {
+      claimRequestId,
+      requestId,
+    });
   } catch (error) {
-    client.release();
-    throw error;
+    // The match row is already durable when this helper is called. Never turn a successful
+    // marketplace request into a 503 merely because the small replay marker could not be
+    // completed; a retry can discover the durable row and repair the claim in the busy branch.
+    console.error("platform match idempotency claim completion failed", error);
   }
+  return false;
+}
+
+async function failMatchIdempotencyClaim(claimRequestId: string | null): Promise<void> {
+  if (!claimRequestId) return;
+  await authDatabase.query(
+    `UPDATE platform_match_idempotency_claims
+        SET state = 'failed', updated_at = clock_timestamp()
+      WHERE request_id = $1::uuid AND state = 'processing'`,
+    [claimRequestId],
+  ).catch((error) => console.error("platform match idempotency claim update failed", error));
 }
 
 async function readIdempotentMatchRequest(
@@ -390,6 +482,11 @@ function configuredAiGlobalRequestsPerHour(): number {
 function configuredAiMaxSteps(): number {
   const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_MAX_STEPS ?? String(DEFAULT_AI_MAX_STEPS), 10);
   return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(16, parsed)) : DEFAULT_AI_MAX_STEPS;
+}
+
+function configuredAiMaxFanout(): number {
+  const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_MAX_FANOUT ?? String(DEFAULT_AI_MAX_FANOUT), 10);
+  return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(16, parsed)) : DEFAULT_AI_MAX_FANOUT;
 }
 
 function summarizeRouting(trace: PlatformRouteTrace[], truncated: boolean): PlatformRouteDecision {

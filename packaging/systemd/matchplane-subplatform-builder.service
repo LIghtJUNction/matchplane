@@ -1,0 +1,33 @@
+[Unit]
+Description=MatchPlane isolated static subplatform builder
+After=network-online.target matchplane-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=matchplane-builder
+Group=matchplane-builder
+SupplementaryGroups=matchplane-web
+EnvironmentFile=/etc/matchplane/matchplane.env
+EnvironmentFile=/etc/matchplane/services/subplatform-builder.env
+Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchplane/secrets/builder/builder.token
+ExecStart=/usr/bin/matchplane serve subplatform-builder
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/var/lib/matchplane/subplatform-artifacts /var/lib/matchplane/subplatform-builder-work
+ReadOnlyPaths=/var/lib/matchplane/subplatform-uploads
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -81,4 +81,25 @@ describe("bounded recursive platform orchestrator", () => {
     expect(result.routePlan).toHaveLength(2);
     expect(result.truncated).toBe(true);
   });
+
+  it("bounds fanout and loads selected child registries in parallel", async () => {
+    const loadChildren = vi.fn(async (path: string) => {
+      await new Promise((resolve) => setTimeout(resolve, path === "/one" ? 5 : 1));
+      return [candidate(`${path.slice(1)}-child`, `${path}/child`)] as PlatformRouteCandidate[];
+    });
+    const result = await expandPlatformRouteTree({
+      platformPath: "/",
+      narrative: "控制分支",
+      candidates: [candidate("one", "/one"), candidate("two", "/two"), candidate("three", "/three")],
+      loadChildren,
+      decide: async () => decision(["one", "two", "three"]),
+      maxSteps: 1,
+      maxDepth: 2,
+      maxFanout: 2,
+    });
+
+    expect(result.routePlan.map((item) => item.path)).toEqual(["/one", "/two"]);
+    expect(loadChildren).toHaveBeenCalledTimes(2);
+    expect(result.truncated).toBe(true);
+  });
 });

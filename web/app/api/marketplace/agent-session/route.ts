@@ -6,6 +6,8 @@ import { loadInternalBearer } from "../../../../src/lib/internal-auth";
 import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization, readActivePlatformScope } from "../../../../src/platform-mount";
 import { isAgentKeyRole, isAgentKeySide, keyCanActAsNeutralSide, keyCanActAsSide, parseAgentSessionRequest, stableAgentPrincipalId } from "../../../../src/platform-agent-session";
 import { verifyPlatformApiKey } from "../../../../src/lib/platform-api-key";
+import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
+import { isProductionEnvironment } from "../../../../src/lib/runtime";
 
 export const runtime = "nodejs";
 
@@ -40,7 +42,16 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const parsed = parseAgentSessionRequest(await parseJson(request));
+  let requestBody: unknown;
+  try {
+    requestBody = await readJsonBody<unknown>(request, 128 * 1024);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof RequestBodyTooLargeError ? "Agent 会话请求过大" : "请求必须是有效 JSON" },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
+  const parsed = parseAgentSessionRequest(requestBody);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const input = parsed.value;
   if (!(isAgentKeySide(configuredSide) ? keyCanActAsNeutralSide(keySide, input.side) : keyCanActAsSide(configuredRole as "buyer" | "seller" | "both", input.side))) {
@@ -58,7 +69,7 @@ export async function POST(request: Request): Promise<Response> {
     ? await isActiveRootScope(input.tenantId, input.domainId)
     : await isActiveChildScope(input.platformPath, input.tenantId, input.domainId);
   if (
-    (process.env.MATCHPLANE_ENVIRONMENT === "production"
+    (isProductionEnvironment()
       && input.platformPath !== "/"
       && (!resolvedScope || resolvedScope.tenantId !== input.tenantId || resolvedScope.domainId !== input.domainId))
     || !scopeMatchesNode
@@ -112,14 +123,14 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const body = (await gatewayResponse.json()) as {
+  const gatewayBody = (await gatewayResponse.json()) as {
     tenant_id: string;
     party_id: string;
     role: "buyer" | "seller" | "both";
     access_token: string;
     access_token_expires_at: string;
   };
-  if (!isUuid(body.party_id) || body.tenant_id !== input.tenantId) {
+  if (!isUuid(gatewayBody.party_id) || gatewayBody.tenant_id !== input.tenantId) {
     return NextResponse.json({ error: "撮合 Agent 会话服务返回了无效的平台身份" }, { status: 502 });
   }
   try {
@@ -129,7 +140,7 @@ export async function POST(request: Request): Promise<Response> {
     await upsertMachineMembershipProjection({
       tenantId: input.tenantId,
       domainId: input.domainId,
-      partyId: body.party_id,
+      partyId: gatewayBody.party_id,
       approvedBy: `api-key:${apiKey.id}`,
       role: input.role,
     });
@@ -137,7 +148,7 @@ export async function POST(request: Request): Promise<Response> {
       tenantId: input.tenantId,
       domainId: input.domainId,
       platformPath: input.platformPath,
-      partyId: body.party_id,
+      partyId: gatewayBody.party_id,
       apiKeyId: apiKey.id,
       organizationId: apiKey.referenceId,
       requestId: request.headers.get("x-request-id"),
@@ -151,12 +162,12 @@ export async function POST(request: Request): Promise<Response> {
   }
   return NextResponse.json(
     {
-      tenant_id: body.tenant_id,
-      party_id: body.party_id,
-      role: body.role,
+      tenant_id: gatewayBody.tenant_id,
+      party_id: gatewayBody.party_id,
+      role: gatewayBody.role,
       side: input.side,
-      access_token: body.access_token,
-      access_token_expires_at: body.access_token_expires_at,
+      access_token: gatewayBody.access_token,
+      access_token_expires_at: gatewayBody.access_token_expires_at,
       platform_path: input.platformPath,
       domain_id: input.domainId,
       cost_bearer: "caller",
@@ -277,7 +288,7 @@ async function isActiveChildScope(
 
 async function isActiveRootScope(tenantId: string, domainId: string): Promise<boolean> {
   const configuredRootTenant = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  if (process.env.MATCHPLANE_ENVIRONMENT === "production" && configuredRootTenant !== tenantId) return false;
+  if (isProductionEnvironment() && configuredRootTenant !== tenantId) return false;
   const result = await authDatabase.query(
     `SELECT 1
        FROM domains
@@ -288,14 +299,6 @@ async function isActiveRootScope(tenantId: string, domainId: string): Promise<bo
     [tenantId, domainId],
   );
   return result.rowCount === 1;
-}
-
-async function parseJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
 }
 
 function isUuid(value: unknown): value is string {

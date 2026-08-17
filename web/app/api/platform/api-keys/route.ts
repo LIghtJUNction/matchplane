@@ -10,7 +10,7 @@ const allowedPermissions: Record<string, readonly string[]> = {
   platform: ["read", "configure", "manage_children", "manage_api_keys"],
   retrieval: ["query", "write"],
   marketplace: ["read", "write", "moderate", "publish"],
-  agent: ["handoff"],
+  agent: ["handoff", "tool"],
 };
 
 /**
@@ -38,8 +38,8 @@ export async function POST(request: Request): Promise<Response> {
 
   const userRole = (session.user as { role?: string }).role;
   const globalManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
-  if (globalManager && !(await belongsToConfiguredRootTenant(input.organizationId))) {
-    return NextResponse.json({ error: "API Key 只能签发给当前 root tenant 的平台组织" }, { status: 403 });
+  if (!(await belongsToConfiguredTenant(input.organizationId))) {
+    return NextResponse.json({ error: "API Key 只能签发给当前 root tenant 下的平台组织" }, { status: 403 });
   }
   let organization = await readOrganization(request, input.organizationId);
   if (!organization && globalManager) {
@@ -128,8 +128,8 @@ export async function GET(request: Request): Promise<Response> {
   }
   const userRole = (session.user as { role?: string }).role;
   const globalManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
-  if (globalManager && !(await belongsToConfiguredRootTenant(organizationId))) {
-    return NextResponse.json({ error: "API Key 只能读取当前 root tenant 的平台组织" }, { status: 403 });
+  if (!(await belongsToConfiguredTenant(organizationId))) {
+    return NextResponse.json({ error: "API Key 只能读取当前 root tenant 下的平台组织" }, { status: 403 });
   }
   let organization = await readOrganization(request, organizationId);
   if (!organization && globalManager) {
@@ -255,8 +255,8 @@ async function requireKeyManager(request: Request, organizationId: string): Prom
   if (!hasTrustedBrowserOrigin(request)) return { response: NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 }) };
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return { response: NextResponse.json({ error: "Better Auth session is required" }, { status: 401 }) };
-  if (!(await belongsToConfiguredRootTenant(organizationId))) {
-    return { response: NextResponse.json({ error: "API Key 只能管理当前 root tenant 的平台组织" }, { status: 403 }) };
+  if (!(await belongsToConfiguredTenant(organizationId))) {
+    return { response: NextResponse.json({ error: "API Key 只能管理当前 root tenant 下的平台组织" }, { status: 403 }) };
   }
   const userRole = (session.user as { role?: string }).role;
   const globalManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
@@ -290,7 +290,7 @@ async function keyBelongsToOrganization(keyId: string, organizationId: string): 
  * browser-supplied Better Auth organization id turn the convenience endpoint into a cross-tenant
  * API-key minting or listing primitive.
  */
-async function belongsToConfiguredRootTenant(organizationId: string): Promise<boolean> {
+async function belongsToConfiguredTenant(organizationId: string): Promise<boolean> {
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!rootTenantId || !isUuid(rootTenantId)) return false;
   const result = await authDatabase.query(

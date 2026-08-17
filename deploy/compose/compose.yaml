@@ -8,7 +8,9 @@ x-matchplane-service: &matchplane-service
   restart: unless-stopped
   environment: &matchplane-environment
     MATCHPLANE_ENVIRONMENT: development
-    MATCHPLANE_ALLOW_DEMO_BOOTSTRAP: "${MATCHPLANE_ALLOW_DEMO_BOOTSTRAP:-false}"
+    # Compose is a local development profile. The first account may inspect the admin workspace
+    # without SMTP; production packaging and the host bootstrap script keep this disabled.
+    MATCHPLANE_ALLOW_DEMO_BOOTSTRAP: "${MATCHPLANE_ALLOW_DEMO_BOOTSTRAP:-true}"
     # Compatibility adapters are opt-in. Production and normal development keep the
     # domain-neutral marketplace contract as the only mounted transport; CI can explicitly
     # enable the legacy migration surface while it exercises that compatibility test suite.
@@ -172,7 +174,7 @@ services:
     restart: unless-stopped
     environment:
       MATCHPLANE_ENVIRONMENT: ${MATCHPLANE_ENVIRONMENT:-development}
-      MATCHPLANE_ALLOW_DEMO_BOOTSTRAP: ${MATCHPLANE_ALLOW_DEMO_BOOTSTRAP:-false}
+      MATCHPLANE_ALLOW_DEMO_BOOTSTRAP: ${MATCHPLANE_ALLOW_DEMO_BOOTSTRAP:-true}
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       PORT: 4173
@@ -181,6 +183,13 @@ services:
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${MATCHPLANE_WEB_HOST_PORT:-4173}}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-matchplane_dev_only_auth_secret_change_in_production}
       MATCHPLANE_OIDC_ENABLED: ${MATCHPLANE_OIDC_ENABLED:-true}
+      MATCHPLANE_NATIONAL_IDENTITY_OAUTH_CLIENT_ID: ${MATCHPLANE_NATIONAL_IDENTITY_OAUTH_CLIENT_ID:-}
+      MATCHPLANE_NATIONAL_IDENTITY_OAUTH_CLIENT_SECRET: ${MATCHPLANE_NATIONAL_IDENTITY_OAUTH_CLIENT_SECRET:-}
+      MATCHPLANE_NATIONAL_IDENTITY_OAUTH_DISCOVERY_URL: ${MATCHPLANE_NATIONAL_IDENTITY_OAUTH_DISCOVERY_URL:-}
+      MATCHPLANE_NATIONAL_IDENTITY_OAUTH_AUTHORIZATION_URL: ${MATCHPLANE_NATIONAL_IDENTITY_OAUTH_AUTHORIZATION_URL:-}
+      MATCHPLANE_NATIONAL_IDENTITY_OAUTH_TOKEN_URL: ${MATCHPLANE_NATIONAL_IDENTITY_OAUTH_TOKEN_URL:-}
+      MATCHPLANE_NATIONAL_IDENTITY_OAUTH_USERINFO_URL: ${MATCHPLANE_NATIONAL_IDENTITY_OAUTH_USERINFO_URL:-}
+      MATCHPLANE_NATIONAL_IDENTITY_OAUTH_SCOPES: ${MATCHPLANE_NATIONAL_IDENTITY_OAUTH_SCOPES:-openid}
       MATCHPLANE_ROOT_ADMIN_EMAIL: ${MATCHPLANE_ROOT_ADMIN_EMAIL:-}
       MATCHPLANE_ROOT_SMTP_PROVIDER_KEY: ${MATCHPLANE_ROOT_SMTP_PROVIDER_KEY:-}
       MATCHPLANE_ROOT_SMTP_HOST: ${MATCHPLANE_ROOT_SMTP_HOST:-}
@@ -196,6 +205,7 @@ services:
       MATCHPLANE_ROOT_TENANT_ID: ${MATCHPLANE_ROOT_TENANT_ID:-}
       MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT: ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-/var/lib/matchplane/subplatform-artifacts}
       MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT: ${MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT:-/var/lib/matchplane/subplatform-uploads}
+      MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN: ${MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN:-}
       MATCHPLANE_SUBPLATFORM_SECRET_ROOT: ${MATCHPLANE_SUBPLATFORM_SECRET_ROOT:-/run/secrets/subplatform-email}
       MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID: ${MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID:-}
       MATCHPLANE_ROUTER_AI_URL: ${MATCHPLANE_ROUTER_AI_URL:-}
@@ -240,6 +250,43 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  subplatform-builder:
+    image: matchplane/subplatform-builder:dev
+    build:
+      context: ../..
+      dockerfile: deploy/compose/builder.Dockerfile
+    restart: unless-stopped
+    environment:
+      MATCHPLANE_SUBPLATFORM_BUILDER_WEB_URL: http://web:4173
+      MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN: ${MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN:-}
+      MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT: /var/lib/matchplane/subplatform-uploads
+      MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT: /var/lib/matchplane/subplatform-artifacts
+      MATCHPLANE_SUBPLATFORM_BUILDER_WORK_ROOT: /var/lib/matchplane/subplatform-builder-work
+      MATCHPLANE_SUBPLATFORM_BUILDER_POLL_SECONDS: ${MATCHPLANE_SUBPLATFORM_BUILDER_POLL_SECONDS:-5}
+      MATCHPLANE_SUBPLATFORM_BUILDER_BUILD_SECONDS: ${MATCHPLANE_SUBPLATFORM_BUILDER_BUILD_SECONDS:-900}
+      MATCHPLANE_SUBPLATFORM_GIT_ALLOWED_HOSTS: ${MATCHPLANE_SUBPLATFORM_GIT_ALLOWED_HOSTS:-github.com,gitlab.com}
+      MATCHPLANE_LOG_FILTER: ${MATCHPLANE_LOG_FILTER:-info}
+      MATCHPLANE_OTLP_ENDPOINT: http://otel-collector:4317
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-./var/subplatform-artifacts}:/var/lib/matchplane/subplatform-artifacts:rw
+      - ${MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT:-./var/subplatform-uploads}:/var/lib/matchplane/subplatform-uploads:ro
+      - subplatform-builder-work:/var/lib/matchplane/subplatform-builder-work:rw
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: "2.0"
+    networks:
+      - matchplane
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
   payment-service:
     <<: *matchplane-service
     entrypoint: ["/usr/local/bin/matchplane", "serve", "payment-service"]
@@ -275,6 +322,7 @@ volumes:
   postgres-data:
   valkey-data:
   kafka-data:
+  subplatform-builder-work:
 
 networks:
   matchplane:

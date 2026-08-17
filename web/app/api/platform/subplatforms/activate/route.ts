@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../../src/lib/auth";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
+import { readJsonBody, RequestBodyTooLargeError } from "../../../../../src/lib/body-limit";
+import { isProductionEnvironment } from "../../../../../src/lib/runtime";
+import {
+  probeSubplatformMcpEndpoint,
+  readSubplatformMcpEndpoint,
+  validateSubplatformMcpEndpointUrl,
+} from "../../../../../src/platform-agent-tool";
 
 export const runtime = "nodejs";
 
@@ -18,7 +25,17 @@ export async function POST(request: Request): Promise<Response> {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
 
-  const input = await parseBody(request);
+  let input: ActivationRequest;
+  try {
+    const value = await readJsonBody<unknown>(request, 16 * 1024);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new SyntaxError("object required");
+    input = value as ActivationRequest;
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof RequestBodyTooLargeError ? "激活请求过大" : "请求必须是有效 JSON" },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
   if (!input.registrationId || !isUuid(input.registrationId)) {
     return NextResponse.json({ error: "registrationId must be a UUID" }, { status: 400 });
   }
@@ -35,7 +52,9 @@ export async function POST(request: Request): Promise<Response> {
             r.tenant_id AS "tenantId",
             r.domain_id AS "domainId",
             o.id AS "organizationId",
-            o."parentOrganizationId" AS "parentOrganizationId"
+            o."parentOrganizationId" AS "parentOrganizationId",
+            r.manifest AS manifest,
+            COALESCE(NULLIF(r.manifest -> 'agent' ->> 'mcpServerKey', ''), r.slug) AS "mcpServerKey"
        FROM subplatform_registrations r
        JOIN "organization" o
          ON o.slug = r.slug AND o."tenantId" = r.tenant_id::text
@@ -70,6 +89,9 @@ export async function POST(request: Request): Promise<Response> {
   if (row.buildDigest.toLowerCase() !== input.buildDigest.toLowerCase()) {
     return NextResponse.json({ error: "buildDigest 与已验证构建产物不一致" }, { status: 409 });
   }
+
+  const toolHealthError = await validateDeclaredMcpTools(row);
+  if (toolHealthError) return NextResponse.json({ error: toolHealthError }, { status: 409 });
 
   const activated = await authDatabase.query(
     `UPDATE subplatform_registrations
@@ -113,15 +135,44 @@ interface RegistrationRow {
   domainId: string;
   organizationId: string;
   parentOrganizationId: string | null;
+  manifest: unknown;
+  mcpServerKey: string;
 }
 
-async function parseBody(request: Request): Promise<ActivationRequest> {
-  try {
-    const body = await request.json();
-    return body && typeof body === "object" && !Array.isArray(body) ? body as ActivationRequest : {};
-  } catch {
-    return {};
+/**
+ * A package that advertises MCP tools must not become routable in production while its
+ * operator-owned endpoint is missing or unable to complete the MCP handshake. Remote federation
+ * bindings have their own signed health lifecycle; this check covers packages mounted in the
+ * local deployment and deliberately remains opt-in for development so an operator can stage a
+ * package before wiring its service.
+ */
+async function validateDeclaredMcpTools(row: RegistrationRow): Promise<string | null> {
+  if (!isProductionEnvironment()) return null;
+  const tools = declaredMcpTools(row.manifest);
+  if (!tools.length) return null;
+  const endpoint = readSubplatformMcpEndpoint(row.mcpServerKey);
+  if (!endpoint) {
+    return `子平台已声明 MCP 工具（${tools.slice(0, 3).join(", ")}），但尚未配置 ${row.mcpServerKey} 的 MCP endpoint`;
   }
+  if (!(await validateSubplatformMcpEndpointUrl(endpoint.url))) {
+    return "子平台 MCP endpoint 未通过生产 DNS/公网地址校验";
+  }
+  const probe = await probeSubplatformMcpEndpoint({ endpoint });
+  if (!probe.ok) {
+    return `子平台 MCP endpoint 健康检查失败（HTTP ${probe.status}），暂不能启用已声明工具`;
+  }
+  return null;
+}
+
+function declaredMcpTools(value: unknown): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const agent = (value as { agent?: unknown }).agent;
+  if (!agent || typeof agent !== "object" || Array.isArray(agent)) return [];
+  const tools = (agent as { mcpTools?: unknown }).mcpTools;
+  if (!Array.isArray(tools)) return [];
+  return tools
+    .filter((tool): tool is string => typeof tool === "string" && /^[a-z0-9][a-z0-9._:-]{1,127}$/.test(tool))
+    .slice(0, 64);
 }
 
 async function canManageParent(userId: string, role: string | null | undefined, parentId: string | null): Promise<boolean> {

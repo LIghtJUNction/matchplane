@@ -44,13 +44,13 @@ beforeEach(() => {
 });
 
 describe("MatchPlane workspaces", () => {
-  it("keeps the root entry chat-first and hides role tabs", async () => {
+  it("keeps the root entry chat-first while showing root platform context", async () => {
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "先说说你想解决什么。" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "从一句话开始。" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "卖方供给" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "描述需求" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" })).toBeInTheDocument();
   });
 
   it("requires a seller session before accepting supply uploads", async () => {
@@ -175,8 +175,9 @@ describe("MatchPlane workspaces", () => {
     await user.click(screen.getByRole("button", { name: "通知" }));
     expect(screen.getByRole("status")).toHaveTextContent("目前没有新的平台通知");
 
-    await user.click(screen.getByRole("button", { name: "描述需求" }));
-    expect(screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" })).toHaveFocus();
+    const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
+    await user.click(input);
+    expect(input).toHaveFocus();
   });
 
   it("shows an account menu and signs out through Better Auth", async () => {

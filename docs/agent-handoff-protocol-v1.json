@@ -8,7 +8,11 @@
   "properties": {
     "protocol": { "const": "matchplane.agent/v1" },
     "request_id": { "type": "string", "format": "uuid" },
-    "stage": { "type": "string", "enum": ["platform", "merchant", "inventory"] },
+    "stage": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]{1,127}$",
+      "description": "Domain-owned stage taxonomy key; the root treats it as opaque."
+    },
     "scope": {
       "type": "object",
       "additionalProperties": false,

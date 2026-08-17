@@ -16,6 +16,7 @@ binaries=(
   matchplane-matcher
   matchplane-payment-service
   matchplane-projector
+  matchplane-subplatform-builder
   matchplane-vector-worker
   matchplane
 )

@@ -1,4 +1,5 @@
 import { authDatabase } from "./lib/auth";
+import { isProductionEnvironment } from "./lib/runtime";
 
 /**
  * Read the immutable manifest selected by the active recursive platform tree.
@@ -9,7 +10,7 @@ import { authDatabase } from "./lib/auth";
  * the same manifest path as the routing Agent.
  */
 export async function readActivePlatformManifest(platformPath: string): Promise<string | null> {
-  if (process.env.MATCHPLANE_ENVIRONMENT !== "production") return null;
+  if (!isProductionEnvironment()) return null;
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath) || platformPath === "/") {
     return null;

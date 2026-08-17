@@ -15,7 +15,7 @@ bash -n packaging/aur/matchplane-git/matchplane.install
 bash -n packaging/aur/matchplane-bin/PKGBUILD.in
 bash -n packaging/aur/matchplane-bin/matchplane.install
 
-for service in web gateway payment-service event-relay matcher projector vector-worker federation-hub; do
+for service in web gateway payment-service event-relay matcher projector subplatform-builder vector-worker federation-hub; do
   unit="packaging/systemd/matchplane-${service}.service"
   if ! rg -q "^EnvironmentFile=/etc/matchplane/services/${service}\.env$" "$unit"; then
     echo "$unit must require its workload-scoped environment file" >&2
@@ -27,7 +27,7 @@ if ! rg -q '^EnvironmentFile=/etc/matchplane/services/migration\.env$' \
   echo 'matchplane-initialize.service must require the migration environment file' >&2
   exit 1
 fi
-for service_user in relay matcher projector vector federation migration; do
+for service_user in relay matcher projector builder vector federation migration; do
   if ! rg -q "^User=matchplane-${service_user}$" \
     packaging/systemd/matchplane-*.service; then
     echo "missing dedicated service user matchplane-${service_user}" >&2
@@ -38,6 +38,16 @@ done
 if ! rg -q '^Environment=MATCHPLANE_WEB_NODE=/usr/bin/node$' \
   packaging/systemd/matchplane-web.service; then
   echo 'packaged web service must use the host nodejs path /usr/bin/node' >&2
+  exit 1
+fi
+if ! rg -q '^Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchplane/secrets/web/builder\.token$' \
+  packaging/systemd/matchplane-web.service; then
+  echo 'web service must use its own builder-token copy' >&2
+  exit 1
+fi
+if ! rg -q '^Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchplane/secrets/builder/builder\.token$' \
+  packaging/systemd/matchplane-subplatform-builder.service; then
+  echo 'builder service must use its isolated builder-token copy' >&2
   exit 1
 fi
 

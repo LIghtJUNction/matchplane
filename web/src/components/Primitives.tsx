@@ -1,4 +1,7 @@
-import type { ComponentType, ReactNode } from "react";
+"use client";
+
+import { useRef } from "react";
+import type { ComponentType, MouseEvent, ReactNode } from "react";
 import { ArrowUpRight, ChevronRight, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -8,8 +11,22 @@ export const spring = { type: "spring" as const, bounce: 0, duration: 0.38 };
 export const momentumSpring = { type: "spring" as const, bounce: 0.18, duration: 0.4 };
 
 export function Brand({ label = "MatchPlane", homeHref = "#top" }: { label?: string; homeHref?: string }) {
+  const clickState = useRef({ count: 0, lastAt: 0 });
+
+  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    const now = Date.now();
+    if (now - clickState.current.lastAt > 1_200) clickState.current.count = 0;
+    clickState.current.lastAt = now;
+    clickState.current.count += 1;
+    if (clickState.current.count >= 3) {
+      event.preventDefault();
+      clickState.current.count = 0;
+      window.location.assign("/about");
+    }
+  };
+
   return (
-    <a className="brand" href={homeHref} aria-label={`${label} 首页`}>
+    <a className="brand" href={homeHref} aria-label={`${label} 首页`} onClick={handleClick}>
       <span className="brand-mark" aria-hidden="true">
         <span />
         <span />

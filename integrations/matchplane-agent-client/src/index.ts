@@ -4,7 +4,8 @@ export const MATCHPLANE_AGENT_PROTOCOL = "matchplane.agent/v1" as const;
 /** Deprecated vertical alias. New integrations should use AgentSide. */
 export type AgentRole = "buyer" | "seller";
 export type AgentSide = "demand" | "supply";
-export type AgentStage = "platform" | "merchant" | "inventory";
+/** Stage names are owned by the mounted domain; the root treats them as opaque taxonomy keys. */
+export type AgentStage = string;
 
 export interface MatchPlaneAgentClientOptions {
   /** The public origin, for example `https://matx.tech`; never put this client in browser code. */
@@ -330,7 +331,7 @@ export interface MarketplaceContactActionInput {
   idempotency_key: string;
 }
 
-/** Input for the platform-tree router. The caller funds the routing Agent/model cost. */
+/** Input for the platform-tree router. The hosted routing model is paid by MatchPlane. */
 export interface PlatformMatchInput {
   narrative: string;
   platform_path?: string;
@@ -345,6 +346,64 @@ export interface PlatformMatchResult {
   routePlan: unknown[];
   routing: unknown;
   [key: string]: unknown;
+}
+
+/**
+ * Extract the authorized child paths returned by `platform.match`. `platformPath` is the node
+ * where the request started (often `/`); callers must not mistake it for the selected child.
+ */
+export function routePlanPaths(result: PlatformMatchResult): string[] {
+  if (!Array.isArray(result.routePlan)) return [];
+  return result.routePlan.flatMap((item) => {
+    if (!isRecord(item) || typeof item.path !== "string") return [];
+    return isPlatformPath(item.path) ? [item.path] : [];
+  });
+}
+
+/** Return only leaf paths from a recursive route plan; these are the nodes that own the next
+ * marketplace/tool lookup. Multiple leaves are possible and should be queried independently. */
+export function terminalRoutePlanPaths(result: PlatformMatchResult): string[] {
+  const paths = routePlanPaths(result);
+  return paths.filter((path) => !paths.some((other) => other !== path && other.startsWith(`${path}/`)));
+}
+
+export interface RetrievalQueryInput {
+  tenant_id: string;
+  domain_id: string;
+  platform_path: string;
+  narrative: string;
+  requirements?: Record<string, unknown>;
+  budget_min?: string | null;
+  budget_max?: string | null;
+  currency?: string | null;
+  currency_scale?: number | null;
+  limit?: number;
+  request_id?: string;
+  trace_id?: string | null;
+}
+
+export interface RetrievalCandidate {
+  asset_id: string;
+  offer_id?: string;
+  display_name?: string;
+  attributes?: Record<string, unknown>;
+  terms?: Record<string, unknown>;
+  score: number;
+  reasons: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface RetrievalResult {
+  protocol: "matchplane.retrieval/v1";
+  request_id: string;
+  provider: {
+    id: string;
+    version: string;
+    model?: string | null;
+  };
+  candidates: RetrievalCandidate[];
+  degraded: boolean;
+  generated_at?: string | null;
 }
 
 export class MatchPlaneMcpError extends Error {
@@ -394,6 +453,72 @@ export class MatchPlaneAgentClient {
   async handoff(envelope: AgentHandoff): Promise<AgentHandoffResult> {
     assertCallerBudget(envelope.budget);
     return this.callTool("platform.agent.handoff", envelope) as Promise<AgentHandoffResult>;
+  }
+
+  /** Invoke one manifest-allowlisted tool owned by an active child platform. */
+  async callChildTool(input: {
+    platform_path: string;
+    tool_name: string;
+    arguments?: Record<string, unknown>;
+    request_id?: string;
+  }): Promise<unknown> {
+    if (!isChildPlatformPath(input.platform_path)) {
+      throw new Error("platform.child.tool platform_path must identify a child platform");
+    }
+    if (typeof input.tool_name !== "string" || !TOOL_NAME_PATTERN.test(input.tool_name)) {
+      throw new Error("platform.child.tool tool_name is invalid");
+    }
+    if (input.arguments !== undefined && !isRecord(input.arguments)) {
+      throw new Error("platform.child.tool arguments must be an object");
+    }
+    if (input.request_id !== undefined && !isBoundedString(input.request_id, 200)) {
+      throw new Error("platform.child.tool request_id is invalid");
+    }
+    return this.callTool("platform.child.tool", {
+      platform_path: input.platform_path,
+      tool_name: input.tool_name,
+      arguments: input.arguments ?? {},
+      ...(input.request_id === undefined ? {} : { request_id: input.request_id }),
+    });
+  }
+
+  /** Query a child-owned retrieval adapter through the stable matchplane.retrieval/v1 envelope. */
+  async queryRetrieval(input: RetrievalQueryInput): Promise<RetrievalResult> {
+    const requestId = input.request_id ?? crypto.randomUUID();
+    validateRetrievalQueryInput(input, requestId);
+    const envelope = {
+      protocol: "matchplane.retrieval/v1",
+      request_id: requestId,
+      scope: {
+        tenant_id: input.tenant_id,
+        domain_id: input.domain_id,
+        platform_path: input.platform_path,
+      },
+      input: {
+        narrative: input.narrative.trim(),
+        requirements: input.requirements ?? {},
+        ...(input.budget_min === undefined ? {} : { budget_min: input.budget_min }),
+        ...(input.budget_max === undefined ? {} : { budget_max: input.budget_max }),
+        ...(input.currency === undefined ? {} : { currency: input.currency }),
+        ...(input.currency_scale === undefined ? {} : { currency_scale: input.currency_scale }),
+      },
+      limit: input.limit ?? 20,
+      ...(input.trace_id === undefined ? {} : { trace_id: input.trace_id }),
+    };
+    const response = await this.fetchImpl(`${this.baseUrl}/api/platform/retrieval/query`, {
+      method: "POST",
+      headers: new Headers({
+        accept: "application/json",
+        "content-type": "application/json",
+        "x-matchplane-api-key": this.apiKey,
+      }),
+      body: JSON.stringify(envelope),
+    });
+    const raw = await response.json().catch(() => null) as unknown;
+    if (!response.ok || !isRecord(raw)) {
+      throw new MatchPlaneMcpError(response.status || 502, "MatchPlane retrieval request failed", raw);
+    }
+    return parseRetrievalResult(raw, requestId, input.limit ?? 20);
   }
 
   async openMarketplaceSession(input: {
@@ -706,7 +831,131 @@ function errorMessage(error: unknown): string {
 }
 
 function isAgentStage(value: unknown): value is AgentStage {
-  return value === "platform" || value === "merchant" || value === "inventory";
+  return typeof value === "string" && /^[a-z0-9][a-z0-9._:-]{1,127}$/.test(value);
+}
+
+const TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9._:-]{1,127}$/;
+
+function isChildPlatformPath(value: unknown): value is string {
+  return isPlatformPath(value) && value !== "/";
+}
+
+function isBoundedString(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= maximum;
+}
+
+function validateRetrievalQueryInput(input: RetrievalQueryInput, requestId: string): void {
+  if (!isUuid(input.tenant_id) || !isUuid(input.domain_id)) {
+    throw new Error("retrieval scope tenant_id and domain_id must be UUIDs");
+  }
+  if (!isChildPlatformPath(input.platform_path)) {
+    throw new Error("retrieval platform_path must identify a child platform");
+  }
+  if (!isUuid(requestId)) throw new Error("retrieval request_id must be a UUID");
+  if (!isBoundedString(input.narrative, 10_000)) throw new Error("retrieval narrative is required");
+  if (input.requirements !== undefined && !isRecord(input.requirements)) {
+    throw new Error("retrieval requirements must be an object");
+  }
+  if (serializedBytes(input.requirements ?? {}) > 32 * 1024) {
+    throw new Error("retrieval requirements exceed 32 KiB");
+  }
+  for (const [name, value] of [["budget_min", input.budget_min], ["budget_max", input.budget_max]] as const) {
+    if (value !== undefined && value !== null && !isBoundedString(value, 200)) {
+      throw new Error(`retrieval ${name} is invalid`);
+    }
+  }
+  if (input.currency !== undefined && input.currency !== null && !/^[A-Z]{3}$/.test(input.currency)) {
+    throw new Error("retrieval currency must be an ISO-4217 code");
+  }
+  if (input.currency_scale !== undefined && input.currency_scale !== null
+    && (!isSafeInteger(input.currency_scale) || input.currency_scale < 0 || input.currency_scale > 18)) {
+    throw new Error("retrieval currency_scale must be between 0 and 18");
+  }
+  const limit = input.limit ?? 20;
+  if (!isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("retrieval limit must be between 1 and 100");
+  if (input.trace_id !== undefined && input.trace_id !== null && !isBoundedString(input.trace_id, 200)) {
+    throw new Error("retrieval trace_id is invalid");
+  }
+}
+
+function parseRetrievalResult(raw: unknown, requestId: string, limit: number): RetrievalResult {
+  const value = extractRetrievalPayload(raw);
+  if (!isRecord(value) || value.protocol !== "matchplane.retrieval/v1" || value.request_id !== requestId) {
+    throw new Error("retrieval provider returned an invalid protocol envelope");
+  }
+  const provider = value.provider;
+  if (!isRecord(provider) || !isBoundedString(provider.id, 128) || !isBoundedString(provider.version, 128)) {
+    throw new Error("retrieval provider metadata is invalid");
+  }
+  if (provider.model !== undefined && provider.model !== null && !isBoundedString(provider.model, 200)) {
+    throw new Error("retrieval provider model is invalid");
+  }
+  if (!Array.isArray(value.candidates) || value.candidates.length > Math.min(100, limit)) {
+    throw new Error("retrieval candidates exceed the requested limit");
+  }
+  const candidates = value.candidates.map((candidate, index) => parseRetrievalCandidate(candidate, index));
+  if (typeof value.degraded !== "boolean") throw new Error("retrieval degraded must be boolean");
+  if (value.generated_at !== undefined && value.generated_at !== null
+    && (!isBoundedString(value.generated_at, 80) || !Number.isFinite(Date.parse(value.generated_at)))) {
+    throw new Error("retrieval generated_at is invalid");
+  }
+  return {
+    protocol: "matchplane.retrieval/v1",
+    request_id: requestId,
+    provider: {
+      id: provider.id,
+      version: provider.version,
+      ...(provider.model === undefined ? {} : { model: provider.model as string | null }),
+    },
+    candidates,
+    degraded: value.degraded,
+    ...(value.generated_at === undefined ? {} : { generated_at: value.generated_at as string | null }),
+  };
+}
+
+function parseRetrievalCandidate(value: unknown, index: number): RetrievalCandidate {
+  if (!isRecord(value) || !isUuid(value.asset_id)) throw new Error(`retrieval candidate ${index} asset_id is invalid`);
+  if (value.offer_id !== undefined && !isUuid(value.offer_id)) throw new Error(`retrieval candidate ${index} offer_id is invalid`);
+  if (value.display_name !== undefined && !isBoundedString(value.display_name, 500)) throw new Error(`retrieval candidate ${index} display_name is invalid`);
+  if (typeof value.score !== "number" || !Number.isFinite(value.score) || value.score < -1 || value.score > 1) throw new Error(`retrieval candidate ${index} score is invalid`);
+  if (!Array.isArray(value.reasons) || value.reasons.length > 32
+    || value.reasons.some((reason) => !isBoundedString(reason, 500) || !reason.trim())) throw new Error(`retrieval candidate ${index} reasons are invalid`);
+  for (const field of ["attributes", "terms", "metadata"] as const) {
+    if (value[field] !== undefined && (!isRecord(value[field]) || serializedBytes(value[field]) > 32 * 1024)) {
+      throw new Error(`retrieval candidate ${index} ${field} is invalid`);
+    }
+  }
+  const attributes = value.attributes === undefined ? undefined : value.attributes as Record<string, unknown>;
+  const terms = value.terms === undefined ? undefined : value.terms as Record<string, unknown>;
+  const metadata = value.metadata === undefined ? undefined : value.metadata as Record<string, unknown>;
+  return {
+    asset_id: value.asset_id,
+    ...(value.offer_id === undefined ? {} : { offer_id: value.offer_id }),
+    ...(value.display_name === undefined ? {} : { display_name: value.display_name }),
+    ...(attributes === undefined ? {} : { attributes }),
+    ...(terms === undefined ? {} : { terms }),
+    score: value.score,
+    reasons: [...value.reasons] as string[],
+    ...(metadata === undefined ? {} : { metadata }),
+  };
+}
+
+function extractRetrievalPayload(raw: unknown): unknown {
+  if (!isRecord(raw)) return raw;
+  const result = isRecord(raw.result) ? raw.result : raw;
+  if (isRecord(result.structuredContent)) return result.structuredContent;
+  if (Array.isArray(result.content)) {
+    for (const item of result.content) {
+      if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
+      try {
+        const parsed = JSON.parse(item.text) as unknown;
+        if (isRecord(parsed)) return parsed;
+      } catch {
+        // Continue through human-readable MCP content blocks.
+      }
+    }
+  }
+  return raw;
 }
 
 function isPlatformPath(value: unknown): value is string {

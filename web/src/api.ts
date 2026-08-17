@@ -1,4 +1,5 @@
 import type { AssetListing } from "./types";
+import type { RetrievalResult } from "./retrieval-protocol";
 
 const apiBase = (process.env.NEXT_PUBLIC_MATCHPLANE_API_BASE_URL ?? "/api").replace(/\/$/, "");
 
@@ -162,7 +163,28 @@ export interface PlatformSetupStatus {
   domains: Array<{ id: string; slug: string; name: string }>;
   registrations: Record<string, number>;
   routing: { activeChildren: number; ready: boolean };
+  hostedAgent: { configured: boolean; status: "ready" | "fallback" };
   firstRun: { needsRootAccount: boolean; readyForAdmin: boolean };
+}
+
+export interface PlatformSiteSettings {
+  organization_id: string;
+  tenant_id: string;
+  icp_number: string | null;
+  icp_subject: string | null;
+  icp_record_url: string | null;
+  public_security_number: string | null;
+  public_security_url: string | null;
+  lookup_source: string | null;
+  lookup_checked_at: string | null;
+  version: number;
+  updated_at: string | null;
+  configured: boolean;
+}
+
+export interface PlatformSiteSettingsLookup extends PlatformSiteSettings {
+  lookup_source: string | null;
+  lookup_checked_at: string | null;
 }
 
 export interface RootPlatformOrganization {
@@ -445,6 +467,117 @@ export async function updatePlatformOidcClient(input: { clientId: string; action
   return body || {};
 }
 
+export interface FederationBindingRecord {
+  id: string;
+  inviteId: string;
+  organizationId: string | null;
+  registrationId: string | null;
+  nodeId: string;
+  slug: string;
+  displayName: string;
+  endpoint: string;
+  mcpServerKey: string;
+  tokenEnv: string | null;
+  status: "pending" | "active" | "degraded" | "revoked" | string;
+  registrationState?: string | null;
+  lastHealthAt?: string | null;
+  lastError?: string | null;
+  manifestDigest?: string | null;
+  createdAt?: string;
+  activatedAt?: string | null;
+}
+
+export async function getFederationBindings(): Promise<FederationBindingRecord[]> {
+  const response = await fetch("/api/platform/federation/bindings", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as { bindings?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "联邦节点列表读取失败");
+  return Array.isArray(body?.bindings) ? body.bindings as FederationBindingRecord[] : [];
+}
+
+export async function createFederationInvite(input: {
+  domainId: string;
+  parentOrganizationId?: string;
+  expiresInHours?: number;
+}): Promise<{
+  inviteId: string;
+  domainId: string;
+  parentOrganizationId: string;
+  expiresAt: string;
+  enrollmentToken: string;
+  enrollmentUrl: string;
+}> {
+  const response = await fetch("/api/platform/federation/invites", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as {
+    inviteId?: string;
+    domainId?: string;
+    parentOrganizationId?: string;
+    expiresAt?: string;
+    enrollmentToken?: string;
+    enrollmentUrl?: string;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.inviteId || !body.enrollmentToken || !body.enrollmentUrl) {
+    throw new MarketplaceApiError(response.status, body?.error || "联邦入驻邀请创建失败");
+  }
+  return body as {
+    inviteId: string;
+    domainId: string;
+    parentOrganizationId: string;
+    expiresAt: string;
+    enrollmentToken: string;
+    enrollmentUrl: string;
+  };
+}
+
+export async function activateFederationBinding(input: {
+  bindingId: string;
+  tokenEnv?: string;
+  membershipPolicy?: "public" | "invite";
+}): Promise<FederationBindingRecord & { bindingId: string; routing: string }> {
+  const response = await fetch("/api/platform/federation/bindings/activate", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as FederationBindingRecord & { bindingId?: string; routing?: string; error?: string } | null;
+  if (!response.ok || !body?.bindingId) throw new MarketplaceApiError(response.status, body?.error || "联邦节点激活失败");
+  return { ...body, id: body.bindingId, bindingId: body.bindingId, routing: body.routing || "enabled" };
+}
+
+export async function revokeFederationBinding(bindingId: string): Promise<void> {
+  const response = await fetch("/api/platform/federation/bindings", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ bindingId, status: "revoked" }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    throw new MarketplaceApiError(response.status, body?.error || "联邦节点撤销失败");
+  }
+}
+
+export async function probeFederationBinding(bindingId: string): Promise<{ status: string; lastHealthAt?: string; lastError?: string | null }> {
+  const response = await fetch("/api/platform/federation/bindings/health", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ bindingId }),
+  });
+  const body = await response.json().catch(() => null) as { status?: string; lastHealthAt?: string; lastError?: string | null; error?: string } | null;
+  if (!response.ok || !body?.status) throw new MarketplaceApiError(response.status, body?.error || "联邦节点健康检查失败");
+  return { status: body.status, lastHealthAt: body.lastHealthAt, lastError: body.lastError };
+}
+
 export interface PlatformChildSummary {
   slug: string;
   path: string;
@@ -479,6 +612,8 @@ export interface SubplatformOrganizationRecord {
   registrationState: string | null;
   buildDigest: string | null;
   manifestDigest: string | null;
+  buildAttempts?: number;
+  buildError?: string | null;
 }
 
 export interface SubplatformArchiveUpload {
@@ -497,6 +632,22 @@ export interface SubplatformRegistrationResult {
   manifestDigest: string;
   sourceDigest: string;
   next: string;
+}
+
+export interface SubplatformSourceIntake {
+  intakeId: string;
+  state: "queued" | "discovering" | "ready" | "rejected" | string;
+  sourceKind: "git" | "archive";
+  sourceLocator: string;
+  sourceDigest?: string | null;
+  pinnedRevision?: string | null;
+  manifest?: Record<string, unknown> | null;
+  manifestDigest?: string | null;
+  packageId?: string | null;
+  slug?: string | null;
+  requestedScopes?: string[];
+  membershipPolicy?: "public" | "invite" | string;
+  error?: string | null;
 }
 
 export interface SubplatformEmailConfig {
@@ -700,6 +851,34 @@ export class MarketplaceApiError extends Error {
   }
 }
 
+/** Redeem a one-time CLI-issued administrator invitation after Better Auth sign-in. */
+export async function redeemPlatformAdminInvite(token: string): Promise<{
+  redeemed: boolean;
+  organizationId: string;
+  role: "rootAdmin" | "subplatform_admin";
+}> {
+  const response = await fetch("/api/admin-invites/redeem", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  const body = await response.json().catch(() => null) as {
+    redeemed?: boolean;
+    organizationId?: string;
+    role?: "rootAdmin" | "subplatform_admin";
+    error?: string;
+  } | null;
+  if (!response.ok || body?.redeemed !== true || !body.organizationId || !body.role) {
+    throw new MarketplaceApiError(response.status, body?.error || "管理员注册链接兑换失败");
+  }
+  return {
+    redeemed: true,
+    organizationId: body.organizationId,
+    role: body.role,
+  };
+}
+
 /**
  * Marketplace capabilities are deliberately held in memory only.  They are short-lived
  * integration credentials, not login state; persisting them in localStorage would let an XSS
@@ -774,10 +953,75 @@ export async function getPlatformSetupStatus(): Promise<PlatformSetupStatus> {
     headers: { accept: "application/json" },
   });
   const body = await response.json().catch(() => null) as Partial<PlatformSetupStatus> | null;
-  if (!response.ok || !body || body.status !== "ok") {
+  if (!response.ok || !body || (body.status !== "ok" && body.status !== "degraded")) {
     throw new MarketplaceApiError(response.status, "平台初始化状态暂时不可用");
   }
   return body as PlatformSetupStatus;
+}
+
+export async function getPublicPlatformSiteSettings(platformPath = "/"): Promise<PlatformSiteSettings> {
+  const response = await fetch(`/api/platform/site-settings?platformPath=${encodeURIComponent(platformPath)}`, {
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null) as { settings?: PlatformSiteSettings; error?: string } | null;
+  if (!response.ok || !body?.settings) throw new MarketplaceApiError(response.status, body?.error || "平台备案信息读取失败");
+  return body.settings;
+}
+
+export async function getPlatformSiteSettings(organizationId: string): Promise<PlatformSiteSettings> {
+  const response = await fetch(`/api/platform/site-settings?organizationId=${encodeURIComponent(organizationId)}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null) as { settings?: PlatformSiteSettings; error?: string } | null;
+  if (!response.ok || !body?.settings) throw new MarketplaceApiError(response.status, body?.error || "平台备案设置读取失败");
+  return body.settings;
+}
+
+export async function savePlatformSiteSettings(input: {
+  organizationId: string;
+  icpNumber: string;
+  icpSubject: string;
+  icpRecordUrl: string;
+  publicSecurityNumber: string;
+  publicSecurityUrl: string;
+  expectedVersion?: number;
+}): Promise<PlatformSiteSettings> {
+  const response = await fetch("/api/platform/site-settings", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({
+      organizationId: input.organizationId,
+      icpNumber: input.icpNumber.trim() || null,
+      icpSubject: input.icpSubject.trim() || null,
+      icpRecordUrl: input.icpRecordUrl.trim() || null,
+      publicSecurityNumber: input.publicSecurityNumber.trim() || null,
+      publicSecurityUrl: input.publicSecurityUrl.trim() || null,
+      ...(input.expectedVersion ? { expectedVersion: input.expectedVersion } : {}),
+    }),
+  });
+  const body = await response.json().catch(() => null) as { settings?: PlatformSiteSettings; error?: string } | null;
+  if (!response.ok || !body?.settings) throw new MarketplaceApiError(response.status, body?.error || "平台备案设置保存失败");
+  return body.settings;
+}
+
+export async function lookupPlatformSiteSettings(input: {
+  organizationId: string;
+  platformPath: string;
+  hostname?: string;
+}): Promise<PlatformSiteSettingsLookup> {
+  const response = await fetch("/api/platform/site-settings", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ action: "lookup", ...input }),
+  });
+  const body = await response.json().catch(() => null) as { settings?: PlatformSiteSettingsLookup; error?: string } | null;
+  if (!response.ok || !body?.settings) throw new MarketplaceApiError(response.status, body?.error || "平台备案自动查询失败");
+  return body.settings;
 }
 
 export async function getPlatformDomains(): Promise<PlatformDomainRecord[]> {
@@ -843,6 +1087,36 @@ export async function uploadSubplatformArchive(file: File, parentOrganizationId?
     throw new MarketplaceApiError(response.status, body?.error || "子平台压缩包上传失败");
   }
   return body as SubplatformArchiveUpload;
+}
+
+export async function discoverSubplatformSource(input: {
+  domainId: string;
+  parentOrganizationId?: string;
+  sourceKind: "git" | "archive";
+  sourceLocator: string;
+  sourceDigest?: string;
+  requestedScopes?: string[];
+  membershipPolicy: "public" | "invite";
+}): Promise<{ intakeId: string; state: string }> {
+  const response = await fetch("/api/platform/subplatforms/discover", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { intakeId?: string; state?: string; error?: string } | null;
+  if (!response.ok || !body?.intakeId) throw new MarketplaceApiError(response.status, body?.error || "子平台源码发现任务创建失败");
+  return { intakeId: body.intakeId, state: body.state || "queued" };
+}
+
+export async function getSubplatformSourceIntake(intakeId: string): Promise<SubplatformSourceIntake> {
+  const response = await fetch(`/api/platform/subplatforms/discover?intakeId=${encodeURIComponent(intakeId)}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as (Partial<SubplatformSourceIntake> & { error?: string }) | null;
+  if (!response.ok || !body?.intakeId) throw new MarketplaceApiError(response.status, body?.error || "子平台源码发现状态读取失败");
+  return body as SubplatformSourceIntake;
 }
 
 export async function registerSubplatform(input: {
@@ -913,6 +1187,88 @@ export async function routePlatformIntent(input: {
     throw new MarketplaceApiError(response.status, message);
   }
   return (await response.json()) as PlatformIntentRoute;
+}
+
+/** Execute a mounted child-owned retrieval adapter through the root authorization facade. */
+export async function querySubplatformRetrieval(input: {
+  requestId: string;
+  platformPath: string;
+  tenantId: string;
+  domainId: string;
+  narrative: string;
+  requirements?: Record<string, unknown>;
+  budgetMin?: string | null;
+  budgetMax?: string | null;
+  currency?: string | null;
+  currencyScale?: number | null;
+  limit?: number;
+  traceId?: string | null;
+}): Promise<RetrievalResult> {
+  const response = await fetch("/api/platform/retrieval/query", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({
+      protocol: "matchplane.retrieval/v1",
+      request_id: input.requestId,
+      scope: {
+        tenant_id: input.tenantId,
+        domain_id: input.domainId,
+        platform_path: input.platformPath,
+      },
+      input: {
+        narrative: input.narrative,
+        requirements: input.requirements ?? {},
+        ...(input.budgetMin === undefined ? {} : { budget_min: input.budgetMin }),
+        ...(input.budgetMax === undefined ? {} : { budget_max: input.budgetMax }),
+        ...(input.currency === undefined ? {} : { currency: input.currency }),
+        ...(input.currencyScale === undefined ? {} : { currency_scale: input.currencyScale }),
+      },
+      limit: input.limit ?? 20,
+      ...(input.traceId === undefined ? {} : { trace_id: input.traceId }),
+    }),
+  });
+  const body = await response.json().catch(() => null) as (Partial<RetrievalWireResult> & { error?: string }) | null;
+  if (!response.ok || !body || body.protocol !== "matchplane.retrieval/v1") {
+    throw new MarketplaceApiError(response.status, body?.error || "子平台检索暂时不可用");
+  }
+  const result = body as RetrievalWireResult;
+  return {
+    protocol: "matchplane.retrieval/v1",
+    requestId: result.request_id,
+    provider: result.provider,
+    candidates: result.candidates.map((candidate) => ({
+      assetId: candidate.asset_id,
+      ...(candidate.offer_id === undefined ? {} : { offerId: candidate.offer_id }),
+      ...(candidate.display_name === undefined ? {} : { displayName: candidate.display_name }),
+      ...(candidate.attributes === undefined ? {} : { attributes: candidate.attributes }),
+      ...(candidate.terms === undefined ? {} : { terms: candidate.terms }),
+      score: candidate.score,
+      reasons: candidate.reasons,
+      ...(candidate.metadata === undefined ? {} : { metadata: candidate.metadata }),
+    })),
+    degraded: result.degraded,
+    ...(result.generated_at === undefined ? {} : { generatedAt: result.generated_at }),
+  };
+}
+
+interface RetrievalWireResult {
+  protocol: "matchplane.retrieval/v1";
+  request_id: string;
+  provider: RetrievalResult["provider"];
+  candidates: Array<{
+    asset_id: string;
+    offer_id?: string;
+    display_name?: string;
+    attributes?: Record<string, unknown>;
+    terms?: Record<string, unknown>;
+    score: number;
+    reasons: string[];
+    metadata?: Record<string, unknown>;
+  }>;
+  degraded: boolean;
+  generated_at?: string | null;
+  error?: string;
 }
 
 export function getPaymentSetting(tenantId?: string): Promise<PaymentSetting> {

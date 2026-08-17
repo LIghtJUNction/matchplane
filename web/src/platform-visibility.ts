@@ -1,4 +1,5 @@
 import { authDatabase } from "./lib/auth";
+import { isProductionEnvironment } from "./lib/runtime";
 
 export interface PlatformViewer {
   /** Better Auth user id for a human session. */
@@ -19,7 +20,7 @@ export async function isActivePlatformPathVisible(
   viewer?: PlatformViewer,
 ): Promise<boolean> {
   if (platformPath === "/") return true;
-  if (process.env.MATCHPLANE_ENVIRONMENT !== "production") return true;
+  if (!isProductionEnvironment()) return true;
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath)) return false;
 

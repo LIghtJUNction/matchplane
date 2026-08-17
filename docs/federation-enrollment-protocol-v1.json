@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matchplane.dev/schemas/federation-enrollment-protocol-v1.json",
+  "title": "MatchPlane remote federation enrollment v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "nodeId", "slug", "displayName", "endpoint", "mcpServerKey", "publicKey", "signature", "manifest"],
+  "properties": {
+    "protocol": { "const": "matchplane.federation/v1" },
+    "nodeId": { "type": "string", "format": "uuid" },
+    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "endpoint": { "type": "string", "format": "uri", "maxLength": 2048 },
+    "mcpServerKey": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{1,127}$" },
+    "publicKey": { "type": "string", "pattern": "^[A-Za-z0-9+/]+={0,2}$", "maxLength": 8192 },
+    "signature": { "type": "string", "pattern": "^[A-Za-z0-9+/]+={0,2}$", "maxLength": 8192 },
+    "manifest": {
+      "type": "object",
+      "required": ["apiVersion", "rootApiVersion", "id", "slug"],
+      "properties": {
+        "apiVersion": { "const": "matchplane.subplatform/v1" },
+        "rootApiVersion": { "const": "v1" },
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,127}$" },
+        "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$" },
+        "requiredScopes": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "maxLength": 128 } },
+        "agent": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

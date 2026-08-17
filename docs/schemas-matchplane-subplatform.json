@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://matchplane.dev/schemas/subplatform/v1.json",
-  "title": "MatchPlane subplatform manifest",
+  "title": "MatchPlane 子平台清单",
   "type": "object",
   "additionalProperties": false,
   "required": ["apiVersion", "id", "slug", "displayName", "rootApiVersion", "entry", "routes", "capabilities", "requiredScopes", "assets"],
@@ -14,7 +14,7 @@
     "marketplaceContract": {
       "enum": ["generic-v1", "legacy-v1"],
       "default": "generic-v1",
-      "description": "Stable marketplace transport. Omit for the domain-neutral contract; legacy-v1 is an explicit compatibility adapter only."
+      "description": "稳定的市场契约传输。若使用领域中立契约可省略；legacy-v1 仅为显式的兼容适配器。"
     },
     "pricing": {
       "type": "object",
@@ -49,7 +49,15 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "chat": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 500 }, "maxProperties": 64 },
+        "chat": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 500 },
+          "properties": {
+            "buyerHeadlines": { "type": "array", "maxItems": 12, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+            "sellerHeadlines": { "type": "array", "maxItems": 12, "items": { "type": "string", "minLength": 1, "maxLength": 160 } }
+          },
+          "maxProperties": 64
+        },
         "copy": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 500 }, "maxProperties": 128 },
         "filters": {
           "type": "array",
@@ -88,7 +96,7 @@
     },
     "rootApiVersion": { "const": "v1" },
     "entry": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.).+$" },
-    "routes": { "type": "array", "minItems": 1, "description": "The first route must be /slug; nested descendants are optional additional routes.", "items": { "type": "string", "pattern": "^/[a-z0-9][a-z0-9-]*(?:/.*)?$" } },
+    "routes": { "type": "array", "minItems": 1, "description": "第一条路由必须是 /slug；后续可选的后代路径写在后续条目。", "items": { "type": "string", "pattern": "^/[a-z0-9][a-z0-9-]*(?:/.*)?$" } },
     "capabilities": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9_:-]+$" }, "uniqueItems": true },
     "requiredScopes": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9_:-]+$" }, "uniqueItems": true },
     "retrieval": {
@@ -111,7 +119,8 @@
           "minItems": 1,
           "maxItems": 8,
           "uniqueItems": true,
-          "items": { "enum": ["merchant", "inventory"] }
+          "description": "Domain-owned stage taxonomy. Values are opaque to the root and may describe any vertical.",
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{1,127}$" }
         },
         "skills": {
           "type": "array",
@@ -124,6 +133,11 @@
           "maxItems": 64,
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{1,127}$" }
+        },
+        "mcpServerKey": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._:-]{1,127}$",
+          "description": "稳定的运营侧 key；该 key 将在包清单外映射到 MCP 终端。"
         }
       }
     },

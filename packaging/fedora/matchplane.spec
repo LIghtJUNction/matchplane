@@ -21,6 +21,8 @@ BuildRequires:  protobuf-devel
 BuildRequires:  rust
 BuildRequires:  systemd-rpm-macros
 Requires:       ca-certificates
+Requires:       bubblewrap
+Requires:       git
 Requires:       nodejs >= 22.12.0
 Requires:       systemd
 
@@ -53,14 +55,14 @@ packaging/scripts/stage.sh %{buildroot} target/release
 %sysusers_create_package %{name} %{SOURCE1}
 
 %post
-%systemd_post matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
+%systemd_post matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
 echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.env before enabling services.'
 
 %preun
-%systemd_preun matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
+%systemd_preun matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
 
 %postun
-%systemd_postun_with_restart matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
+%systemd_postun_with_restart matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
 
 %files
 %config(noreplace) %attr(0640,root,matchplane) /etc/matchplane/matchplane.env
@@ -71,6 +73,7 @@ echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.en
 %{_bindir}/matchplane-matcher
 %{_bindir}/matchplane-payment-service
 %{_bindir}/matchplane-projector
+%{_bindir}/matchplane-subplatform-builder
 %{_bindir}/matchplane-vector-worker
 %{_bindir}/matchplane
 %{_unitdir}/matchplane-*.service

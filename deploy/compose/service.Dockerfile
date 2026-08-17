@@ -20,6 +20,7 @@ RUN --mount=type=cache,id=matchplane-cargo-registry,target=/usr/local/cargo/regi
         target/release/matchplane-matcher \
         target/release/matchplane-payment-service \
         target/release/matchplane-projector \
+        target/release/matchplane-subplatform-builder \
         target/release/matchplane-vector-worker \
         target/release/matchplane \
         /out/

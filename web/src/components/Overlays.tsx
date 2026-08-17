@@ -23,9 +23,11 @@ interface ListingSheetProps {
   subplatform: SubplatformConfig;
   onClose: () => void;
   onContact: (listing: AssetListing) => Promise<void> | void;
+  /** Contact requests are disabled when the host is running without a live API. */
+  contactDisabled?: boolean;
 }
 
-export function ListingSheet({ listing, subplatform, onClose, onContact }: ListingSheetProps) {
+export function ListingSheet({ listing, subplatform, onClose, onContact, contactDisabled = false }: ListingSheetProps) {
   const desktop = useMediaQuery("(min-width: 56rem)");
   const closeRef = useRef<HTMLButtonElement>(null);
   const [contactSubmitting, setContactSubmitting] = useState(false);
@@ -115,7 +117,7 @@ export function ListingSheet({ listing, subplatform, onClose, onContact }: Listi
                   <div><strong>{listing.seller}</strong>{listing.response ? <small>{listing.response}</small> : null}</div>
                   <BadgeCheck size={20} aria-label={subplatformCopy(subplatform, "verifiedSupplyLabel", "供给方身份已核验")} />
                 </div>
-                {listing.trust?.length ? <ul>{listing.trust.map((item) => <li key={item}><ShieldCheck size={15} aria-hidden="true" />{item}</li>)}</ul> : null}
+                {listing.trust?.length ? <ul>{listing.trust.map((item) => <li key={item}>{item}</li>)}</ul> : null}
               </section> : null}
 
               <section className="offline-contact-card">
@@ -138,11 +140,16 @@ export function ListingSheet({ listing, subplatform, onClose, onContact }: Listi
                 className="button button-dark"
                 type="button"
                 onClick={() => void submitContact()}
-                disabled={contactSubmitting}
+                disabled={contactSubmitting || contactDisabled}
+                title={contactDisabled ? "当前环境未连接真实撮合 API" : undefined}
                 whileTap={{ scale: 0.97 }}
                 transition={momentumSpring}
               >
-                {contactSubmitting ? subplatformCopy(subplatform, "contactSubmittingLabel", "正在提交…") : subplatformCopy(subplatform, "requestContactLabel", "申请联系")}
+                {contactSubmitting
+                  ? subplatformCopy(subplatform, "contactSubmittingLabel", "正在提交…")
+                  : contactDisabled
+                    ? subplatformCopy(subplatform, "contactUnavailableLabel", "演示环境不可用")
+                    : subplatformCopy(subplatform, "requestContactLabel", "申请联系")}
               </motion.button>
             </div>
           </motion.aside>

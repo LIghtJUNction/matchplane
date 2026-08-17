@@ -15,6 +15,15 @@ export interface ContactField {
   placeholder?: string;
 }
 
+export interface ChatUiConfig {
+  /** Optional rotating typewriter headlines owned by the mounted platform package. */
+  buyerHeadlines?: string[];
+  sellerHeadlines?: string[];
+  listingEyebrow?: string;
+  listingLabel?: string;
+  [key: string]: string | string[] | undefined;
+}
+
 /**
  * Selects the stable marketplace transport owned by the mounted package.
  *
@@ -45,7 +54,7 @@ export interface SubplatformConfig {
   email?: { providerKey?: string; fromAddress?: string };
   /** Optional copy/schema hints owned by the mounted subplatform; root UI remains domain-neutral. */
   ui?: {
-    chat?: Record<string, string>;
+    chat?: ChatUiConfig;
     /** Human-facing labels are supplied by the mounted package, not inferred by the root. */
     copy?: Record<string, string>;
     filters?: Array<{
@@ -66,6 +75,8 @@ export interface SubplatformConfig {
     contactFields?: ContactField[];
   };
   assetSchema?: Record<string, unknown>;
+  /** Capability names exposed by the package's authenticated Agent/MCP server. */
+  agentMcpTools?: string[];
   pluginArtifact?: { entry: string; url: string; digest: string };
   manifestUrl?: string;
 }
@@ -123,7 +134,7 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
         root?: {
           tenantId?: unknown;
           tenant?: { name?: unknown } | null;
-          ui?: { contactFields?: unknown };
+          ui?: { chat?: unknown; contactFields?: unknown };
         };
         domains?: Array<{ id?: unknown }>;
       };
@@ -131,6 +142,9 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       const tenantId = typeof body.root?.tenantId === "string" ? body.root.tenantId : undefined;
       const domainId = typeof body.domains?.[0]?.id === "string" ? body.domains[0].id : undefined;
       const rootUi = validUi({
+        chat: body.root?.ui?.chat && typeof body.root.ui.chat === "object" && !Array.isArray(body.root.ui.chat)
+          ? body.root.ui.chat as ChatUiConfig
+          : undefined,
         contactFields: Array.isArray(body.root?.ui?.contactFields)
           ? body.root.ui.contactFields as ContactField[]
           : undefined,
@@ -159,13 +173,14 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       marketplaceContract?: MarketplaceContract;
       email?: { providerKey?: string; fromAddress?: string };
       ui?: {
-        chat?: Record<string, string>;
+        chat?: ChatUiConfig;
         copy?: Record<string, string>;
         filters?: NonNullable<SubplatformConfig["ui"]>["filters"];
         supplyFields?: NonNullable<SubplatformConfig["ui"]>["supplyFields"];
         contactFields?: NonNullable<SubplatformConfig["ui"]>["contactFields"];
       };
       assetSchema?: Record<string, unknown>;
+      agent?: { mcpTools?: unknown };
       assets?: {
         hosted?: { entry?: string; url?: string; digest?: string };
       };
@@ -194,11 +209,19 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       email: manifest.email,
       ui: validUi(manifest.ui),
       assetSchema: validAssetSchema(manifest.assetSchema),
+      agentMcpTools: validMcpTools(manifest.agent?.mcpTools),
       pluginArtifact: validHostedArtifact(manifest.assets?.hosted),
     };
   } catch {
     return base;
   }
+}
+
+function validMcpTools(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((tool): tool is string => typeof tool === "string" && /^[a-z0-9][a-z0-9._:-]{1,127}$/.test(tool))
+    .slice(0, 64);
 }
 
 export function pricingFor(subplatform: SubplatformConfig): PricingConfig {
@@ -269,7 +292,25 @@ function validPricing(value: PricingConfig | undefined): PricingConfig | undefin
 function validUi(value: SubplatformConfig["ui"] | undefined): SubplatformConfig["ui"] | undefined {
   if (!value || typeof value !== "object") return undefined;
   const chat = value.chat && typeof value.chat === "object"
-    ? Object.fromEntries(Object.entries(value.chat).filter(([key, item]) => /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) && typeof item === "string" && item.length <= 500))
+    ? (() => {
+        const entries: Array<[string, string | string[]]> = [];
+        for (const [key, item] of Object.entries(value.chat)) {
+          if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key)) continue;
+          if (typeof item === "string" && item.length <= 500) {
+            entries.push([key, item]);
+            continue;
+          }
+          if (key === "buyerHeadlines" || key === "sellerHeadlines") {
+            if (!Array.isArray(item)) continue;
+            const headlines = item
+              .filter((headline): headline is string => typeof headline === "string" && headline.trim().length > 0 && headline.length <= 160)
+              .map((headline) => headline.trim())
+              .slice(0, 12);
+            if (headlines.length) entries.push([key, headlines]);
+          }
+        }
+        return Object.fromEntries(entries) as ChatUiConfig;
+      })()
     : undefined;
   const copy = value.copy && typeof value.copy === "object"
     ? Object.fromEntries(Object.entries(value.copy).filter(([key, item]) => /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) && typeof item === "string" && item.length <= 500))

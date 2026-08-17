@@ -20,6 +20,8 @@ export function validateMcpToolArguments(
       return validatePlatformMatch(args);
     case "platform.agent.handoff":
       return validateAgentHandoff(args);
+    case "platform.child.tool":
+      return validateChildTool(args);
     case "marketplace.agent.session":
       return validateAgentSession(args);
     case "marketplace.intent.create":
@@ -41,6 +43,18 @@ export function validateMcpToolArguments(
   }
 }
 
+function validateChildTool(args: Record<string, unknown>): string | null {
+  const platformPath = platformPathArgument(args, "platform_path");
+  if (platformPath) return platformPath;
+  const toolName = args.tool_name;
+  if (typeof toolName !== "string" || !/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(toolName)) {
+    return "tool_name must be a valid MCP tool name";
+  }
+  const toolArguments = recordArgument(args, "arguments");
+  if (typeof toolArguments === "string") return toolArguments;
+  return optionalString(args, "request_id", 200);
+}
+
 function validatePlatformMatch(args: Record<string, unknown>): string | null {
   const narrative = requiredString(args, "narrative", 10_000);
   if (narrative) return narrative;
@@ -53,8 +67,8 @@ function validateAgentHandoff(args: Record<string, unknown>): string | null {
   if (args.protocol !== "matchplane.agent/v1") return "protocol must be matchplane.agent/v1";
   const requestId = uuidArgument(args, "request_id");
   if (requestId) return requestId;
-  if (args.stage !== "platform" && args.stage !== "merchant" && args.stage !== "inventory") {
-    return "stage must be platform, merchant, or inventory";
+  if (typeof args.stage !== "string" || !/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(args.stage)) {
+    return "stage must be a bounded lowercase taxonomy key";
   }
   const scope = recordArgument(args, "scope");
   if (typeof scope === "string") return scope;

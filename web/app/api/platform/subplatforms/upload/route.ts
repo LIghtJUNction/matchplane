@@ -164,12 +164,17 @@ async function readBodyBounded(request: Request, maximum: number): Promise<Uint8
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maximum) throw new BodyLimitError();
-      chunks.push(value);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maximum) throw new BodyLimitError();
+        chunks.push(value);
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      throw error;
     }
   } finally {
     reader.releaseLock();

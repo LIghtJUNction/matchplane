@@ -18,7 +18,7 @@ bundle this package into a browser application. Treat `access_token_expires_at` 
 deadline and request a fresh capability after it expires.
 
 ```ts
-import { MatchPlaneAgentClient } from "@matchplane/agent-client";
+import { MatchPlaneAgentClient, terminalRoutePlanPaths } from "@matchplane/agent-client";
 
 const client = new MatchPlaneAgentClient({
   baseUrl: process.env.MATCHPLANE_URL!,
@@ -26,15 +26,17 @@ const client = new MatchPlaneAgentClient({
 });
 
 // The same client can first ask the platform-tree router to choose a mounted
-// marketplace. Routing and model usage remain caller-funded.
+// marketplace. The hosted `platform.match` model call is billed to MatchPlane;
+// only the Agent's own model/tool loop remains caller-funded.
 const route = await client.routePlatformIntent({
   narrative: "寻找适合通勤、预算明确的方案",
   platform_path: "/",
   idempotency_key: crypto.randomUUID(),
 });
 
-// Continue with the returned path, or use it to choose the capability scope.
-const routedPath = route.platformPath;
+// `platformPath` is the node where the request started. Continue with an authorized
+// child from `routePlan` (a real Agent may open one capability per selected terminal).
+const routedPath = terminalRoutePlanPaths(route)[0] ?? process.env.MATCHPLANE_PLATFORM_PATH!;
 
 const capability = await client.openMarketplaceSession({
   tenant_id: process.env.MATCHPLANE_TENANT_ID!,
@@ -68,11 +70,43 @@ The client copies the capability's `platform_path` into every marketplace tool c
 intentional: a capability for one mounted path cannot be replayed against a sibling or parent
 node, even when the tenant and domain are the same.
 
-Create separate keys for demand and supply Agents with `marketplace:write` and the smallest
-`agentSide` metadata (`demand`, `supply`, or `both`) needed by the deployment. Call `handoff()` when the Agent needs
-the active child capabilities;
+Child-owned tools use the same authenticated client and are still constrained by the active
+child manifest. `queryRetrieval()` is a typed convenience wrapper for the stable
+`matchplane.retrieval/v1` envelope; the root only authorizes and forwards it, while the child
+owns its catalogue or vector-search implementation:
+
+```ts
+const result = await client.queryRetrieval({
+  tenant_id: capability.tenant_id,
+  domain_id: capability.domain_id,
+  platform_path: capability.platform_path,
+  narrative: "预算内、适合通勤的方案",
+  requirements: { budget_max: 100000 },
+  limit: 10,
+});
+
+// For another child-owned MCP tool, use the generic allowlisted bridge:
+const toolResult = await client.callChildTool({
+  platform_path: capability.platform_path,
+  tool_name: "catalog.search",
+  arguments: { query: "通勤" },
+});
+```
+
+Create separate keys for demand and supply Agents with `platform:read`, `marketplace:write`, and (when using the
+typed `queryRetrieval()` helper) `retrieval:query`, plus the smallest
+`agentSide` metadata (`demand`, `supply`, or `both`) needed by the deployment. `platform:read` is only needed for
+the optional first `routePlatformIntent()` tree lookup; add `agent:handoff` when the Agent uses `handoff()` to read
+active child capabilities;
 the handoff is caller-funded and never invokes MatchPlane's hosted model. The platform's own
 router remains bounded and is only used by the first-party chat when no external Agent is present.
+
+完整的 buyer/seller 服务器端示例见 [`examples/buyer-agent.ts`](examples/buyer-agent.ts) 和
+[`examples/seller-agent.ts`](examples/seller-agent.ts)。两者共享同一个 SDK 和 MCP 协议：买方用
+`side: "demand"` 创建 intent、选择 offer、发起 introduction；供给方用 `side: "supply"` 发布
+offer、读取自己可见的 introductions，并在人工或 Agent 策略确认后调用 `consentContact`。只有双方
+都同意，平台才会进入 contact release 阶段；示例不会把微信、手机号等联系方式放进 listing 或
+模型 prompt。
 
 ## Multi-step Skills
 

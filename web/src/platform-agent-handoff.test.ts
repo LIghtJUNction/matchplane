@@ -23,6 +23,12 @@ describe("caller-funded Agent handoff", () => {
     }
   });
 
+  it("keeps stage taxonomy owned by the mounted domain", () => {
+    const result = parseAgentHandoff({ ...valid, stage: "profile.compatibility" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.stage).toBe("profile.compatibility");
+  });
+
   it("rejects a platform-funded external handoff", () => {
     const result = parseAgentHandoff({
       ...valid,

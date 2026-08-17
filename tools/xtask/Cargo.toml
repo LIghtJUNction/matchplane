@@ -13,12 +13,17 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+hex.workspace = true
+sha2.workspace = true
 matchplane-config.workspace = true
 matchplane-domain.workspace = true
 matchplane-storage.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
+time.workspace = true
+url.workspace = true
 uuid.workspace = true
 tokio.workspace = true
 

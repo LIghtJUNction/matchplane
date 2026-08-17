@@ -19,7 +19,8 @@ interface PendingNode {
 
 const PROTOCOL_MAX_STEPS = 16;
 const DEFAULT_MAX_STEPS = 8;
-const PROTOCOL_MAX_HOPS = 100;
+const PROTOCOL_MAX_HOPS = 32;
+const DEFAULT_MAX_FANOUT = 4;
 
 /**
  * Expand only authorized direct-child candidates. The orchestrator never
@@ -38,9 +39,11 @@ export async function expandPlatformRouteTree(input: {
   }) => Promise<PlatformRouteDecision>;
   maxSteps?: number;
   maxDepth?: number;
+  maxFanout?: number;
 }): Promise<RecursivePlatformRouting> {
   const maxSteps = boundedPositiveInteger(input.maxSteps, DEFAULT_MAX_STEPS, PROTOCOL_MAX_STEPS);
   const maxDepth = boundedPositiveInteger(input.maxDepth, maxSteps, PROTOCOL_MAX_STEPS);
+  const maxFanout = boundedPositiveInteger(input.maxFanout, DEFAULT_MAX_FANOUT, DEFAULT_MAX_FANOUT * 4);
   const trace: PlatformRouteTrace[] = [];
   const routePlan: PlatformRouteCandidate[] = [];
   const queue: PendingNode[] = [{
@@ -63,27 +66,46 @@ export async function expandPlatformRouteTree(input: {
     trace.push({ platformPath: node.platformPath, decision });
 
     const candidatesBySlug = new Map(node.candidates.map((candidate) => [candidate.slug, candidate]));
-    for (const slug of decision.selectedSlugs) {
-      const selected = candidatesBySlug.get(slug);
-      if (!selected) continue;
-      if (routePlan.length >= PROTOCOL_MAX_HOPS) {
-        truncated = true;
-        break;
+    const availableHops = Math.max(0, PROTOCOL_MAX_HOPS - routePlan.length);
+    const selectedSlugs = decision.selectedSlugs.slice(0, Math.min(maxFanout, availableHops));
+    if (selectedSlugs.length < decision.selectedSlugs.length) truncated = true;
+    const selected = selectedSlugs.flatMap((slug) => {
+      const candidate = candidatesBySlug.get(slug);
+      return candidate ? [{ candidate, childDepth: node.depth + 1 }] : [];
+    });
+    if (selected.length < selectedSlugs.length) truncated = true;
+
+    // Child registry reads are independent. Parallel loading shortens tail latency while the
+    // model decisions themselves remain sequential and bounded by maxSteps.
+    const loaded = await Promise.all(selected.map(async ({ candidate, childDepth }) => {
+      if (routePlan.length >= PROTOCOL_MAX_HOPS) return { candidate, childDepth, children: [], failed: false };
+      routePlan.push({ ...candidate, depth: childDepth });
+      try {
+        return {
+          candidate,
+          childDepth,
+          children: await input.loadChildren(candidate.path),
+          failed: false,
+        };
+      } catch {
+        return { candidate, childDepth, children: [], failed: true };
       }
+    }));
 
-      const childDepth = node.depth + 1;
-      routePlan.push({ ...selected, depth: childDepth });
-
-      // Probe the active registry at the boundary so hitting maxDepth is an
-      // explicit degraded result rather than silently dropping descendants.
-      const children = await input.loadChildren(selected.path);
-      if (children.length === 0) continue;
-      if (childDepth >= maxDepth || visited.has(selected.path)) {
+    for (const { candidate, childDepth, children, failed } of loaded) {
+      if (failed) {
         truncated = true;
         continue;
       }
-      visited.add(selected.path);
-      queue.push({ platformPath: selected.path, candidates: children, depth: childDepth });
+      // Probe the active registry at the boundary so hitting maxDepth is an
+      // explicit degraded result rather than silently dropping descendants.
+      if (children.length === 0) continue;
+      if (childDepth >= maxDepth || visited.has(candidate.path)) {
+        truncated = true;
+        continue;
+      }
+      visited.add(candidate.path);
+      queue.push({ platformPath: candidate.path, candidates: children, depth: childDepth });
     }
   }
 

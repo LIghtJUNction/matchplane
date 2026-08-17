@@ -15,10 +15,16 @@
     "scope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tenant_id", "domain_id"],
+      "required": ["tenant_id", "domain_id", "platform_path"],
       "properties": {
         "tenant_id": { "$ref": "#/$defs/uuid" },
-        "domain_id": { "$ref": "#/$defs/uuid" }
+        "domain_id": { "$ref": "#/$defs/uuid" },
+        "platform_path": {
+          "type": "string",
+          "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$",
+          "maxLength": 512,
+          "description": "规范化递归平台路径；根服务只将检索转发给该节点的 active 子平台。"
+        }
       }
     },
     "query": {
@@ -52,6 +58,13 @@
       "required": ["asset_id", "score", "reasons"],
       "properties": {
         "asset_id": { "$ref": "#/$defs/uuid" },
+        "offer_id": {
+          "$ref": "#/$defs/uuid",
+          "description": "可选的 canonical marketplace offer；提供后根平台才能创建 introduction/contact 请求。"
+        },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "attributes": { "type": "object", "maxProperties": 256 },
+        "terms": { "type": "object", "maxProperties": 256 },
         "score": { "type": "number", "minimum": -1, "maximum": 1 },
         "reasons": {
           "type": "array",

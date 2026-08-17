@@ -67,6 +67,29 @@ describe("HTTP MCP argument contract", () => {
       ...valid,
       budget: { ...valid.budget, max_steps: 17 },
     })).toContain("max_steps");
+    expect(validateMcpToolArguments("platform.agent.handoff", {
+      ...valid,
+      stage: "profile.compatibility",
+    })).toBeNull();
+  });
+
+  it("validates child MCP tool calls without accepting arbitrary endpoints", () => {
+    expect(validateMcpToolArguments("platform.child.tool", {
+      platform_path: "/used-car",
+      tool_name: "inventory.search",
+      arguments: { narrative: "适合城市通勤" },
+    })).toBeNull();
+    expect(validateMcpToolArguments("platform.child.tool", {
+      platform_path: "/used-car",
+      tool_name: "inventory/search",
+      arguments: {},
+    })).toContain("tool_name");
+    expect(validateMcpToolArguments("platform.child.tool", {
+      platform_path: "/used-car",
+      tool_name: "inventory.search",
+      endpoint: "https://attacker.example/mcp",
+      arguments: {},
+    })).toBeNull();
   });
 
   it("rejects invalid generic introduction payloads", () => {

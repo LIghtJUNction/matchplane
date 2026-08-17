@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Bell,
-  ShieldCheck,
   UserRound,
 } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
@@ -18,6 +17,7 @@ import { SellerDashboard } from "./components/SellerDashboard";
 import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
 import { PluginHost } from "./components/PluginHost";
 import { MatchChat } from "./components/MatchChat";
+import { PlatformFooter } from "./components/PlatformFooter";
 import { loadSubplatform, resolveSubplatform, subplatformCopy, subplatformFieldLabel, type SubplatformConfig } from "./subplatform";
 import {
   createMarketplaceIntroduction,
@@ -26,6 +26,7 @@ import {
   clearPartySessionCache,
   getPaymentSetting,
   type RecommendedBackendListing,
+  type PlatformRouteHop,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
   switchPaymentMode,
@@ -56,7 +57,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [secureConnection, setSecureConnection] = useState(true);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
 
   const closeListing = useCallback(() => setListing(null), []);
   const closeModeDialog = useCallback(() => setModeDialogOpen(false), []);
@@ -68,8 +69,26 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   }, [notice]);
 
   useEffect(() => {
+    if (!accountMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAccountMenuOpen(false);
+    };
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node) || !accountMenuRef.current?.contains(target)) {
+        setAccountMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    };
+  }, [accountMenuOpen]);
+
+  useEffect(() => {
     const requestedPath = window.location.pathname;
-    setSecureConnection(window.location.protocol === "https:");
     setSubplatform(resolveSubplatform(requestedPath));
     void loadSubplatform(requestedPath).then(setSubplatform);
     setRole(roleFromLocation());
@@ -129,6 +148,23 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       setNotice(error instanceof Error ? error.message : ui.signOutFailed);
     }
   };
+
+  const selectSellerPlatform = useCallback(async (hop: PlatformRouteHop) => {
+    const loaded = await loadSubplatform(hop.path);
+    // The route decision owns the target identity; the package only fills in its UI/schema.
+    // Keep the browser in one process and update the URL so refresh/back links remain scoped.
+    setSubplatform({
+      ...loaded,
+      slug: hop.slug,
+      path: hop.path,
+      tenantId: hop.tenantId,
+      domainId: hop.domainId,
+    });
+    const url = new URL(window.location.href);
+    url.pathname = hop.path;
+    url.searchParams.set("role", "seller");
+    window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -203,8 +239,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               />
               {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">{ui.rootPlatform}</a> : null}
             </div>
-            <div className="header-actions">
-              <span className={`secure-status${secureConnection ? "" : " is-insecure"}`}><ShieldCheck size={15} aria-hidden="true" />{secureConnection ? ui.secure : ui.insecure}</span>
+            <div ref={accountMenuRef} className="header-actions">
+              <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
               <IconButton label={ui.notifications} onClick={() => setNotice(ui.noNotifications) }><Bell size={19} aria-hidden="true" /></IconButton>
               <button className="profile-button" type="button" aria-label={authUser ? ui.openAccount : ui.signIn} aria-expanded={authUser ? accountMenuOpen : undefined} onClick={openAccount}>
                 <span><UserRound size={18} aria-hidden="true" /></span>
@@ -235,9 +271,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                         <a role="menuitem" href="/?role=platform">{ui.platformAdmin}</a>
                       ) : null}
                     </div>
-                    <div className="account-menu-preferences">
-                      <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
-                    </div>
                     <button className="account-menu-signout" type="button" role="menuitem" onClick={() => void signOut()}>{ui.signOut}</button>
                   </motion.div>
                 ) : null}
@@ -258,14 +291,18 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               {role === "buyer" || role === "seller" ? (
                 <MatchChat
                   role={role}
+                  locale={locale}
                   onNotice={setNotice}
                   onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform))}
+                  onSellerPlatformSelected={selectSellerPlatform}
                   subplatform={subplatform}
                 />
               ) : null}
               {subplatform.pluginArtifact ? (
                 <PluginHost
                   role={role}
+                  theme={theme}
+                  locale={locale}
                   onNotice={setNotice}
                   subplatform={subplatform}
                   listings={role === "buyer" ? listings : []}
@@ -276,11 +313,13 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             </motion.div>
           </AnimatePresence>
         </main>
+        <PlatformFooter subplatform={subplatform} />
 
         <ListingSheet
           listing={listing}
           subplatform={subplatform}
           onClose={closeListing}
+          contactDisabled={!isLiveMarketplaceEnabled()}
           onContact={async (selected) => {
             const selectedPath = selected.platformPath || subplatform.path;
             const selectedSubplatform = selectedPath !== subplatform.path && selected.subplatform
@@ -295,8 +334,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             const selectedTenantId = selected.tenantId || selectedSubplatform.tenantId;
             const selectedDomainId = selected.domainId || selectedSubplatform.domainId;
             if (!isLiveMarketplaceEnabled()) {
-              closeListing();
-              setNotice(`${selected.title} ${subplatformCopy(subplatform, "contactRequestSubmittedSuffix", "的联系申请已提交")}`);
+              setNotice("当前环境未连接真实撮合 API，未发送联系申请");
               return;
             }
             const isGenericOffer = Boolean(selected.offerId && selected.intentId);
@@ -376,7 +414,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               exit={{ opacity: 0, y: 12, scale: 0.98 }}
               transition={spring}
             >
-              <span><ShieldCheck size={17} aria-hidden="true" /></span>
               {notice}
             </motion.div>
           ) : null}
@@ -416,8 +453,6 @@ function appCopy(locale: "zh" | "en") {
     return {
       skipToContent: "Skip to content",
       rootPlatform: "Root platform",
-      secure: "Secure",
-      insecure: "Local connection",
       notifications: "Notifications",
       noNotifications: "No new notifications",
       openAccount: "Open account menu",
@@ -437,8 +472,6 @@ function appCopy(locale: "zh" | "en") {
   return {
     skipToContent: "跳到主要内容",
     rootPlatform: "根平台",
-    secure: "安全连接",
-    insecure: "本地连接",
     notifications: "通知",
     noNotifications: "目前没有新的平台通知",
     openAccount: "打开个人账户菜单",
@@ -469,10 +502,19 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
     const attributes = item.attributes && typeof item.attributes === "object" && !Array.isArray(item.attributes)
       ? item.attributes
       : {};
+    const configuredLabels = item.field_labels && typeof item.field_labels === "object" && !Array.isArray(item.field_labels)
+      ? item.field_labels as Record<string, unknown>
+      : {};
     const facts = Object.entries(attributes)
       .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
       .slice(0, 4)
-      .map(([label, value]) => ({ label: subplatformFieldLabel(subplatform, label), key: label, value: String(value) }));
+      .map(([label, value]) => ({
+        label: typeof configuredLabels[label] === "string" && configuredLabels[label].trim()
+          ? configuredLabels[label] as string
+          : subplatformFieldLabel(subplatform, label),
+        key: label,
+        value: String(value),
+      }));
     const subtitle = facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ");
     const location = typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined;
     const terms = item.terms && typeof item.terms === "object" && !Array.isArray(item.terms) ? item.terms : {};

@@ -5,6 +5,8 @@ import { auth, authDatabase, rootPlatformReferenceId } from "../../../../src/lib
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
 import { isMountedPlatformPath, readActivePlatformScope } from "../../../../src/platform-mount";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
+import { isProductionEnvironment } from "../../../../src/lib/runtime";
 
 export const runtime = "nodejs";
 
@@ -43,7 +45,17 @@ interface MarketplaceIdentity {
  * Rust marketplace API. The operator credential never leaves this server route.
  */
 export async function POST(request: Request): Promise<Response> {
-  const input = await parseBody(request);
+  let input: SessionRequest;
+  try {
+    const value = await readJsonBody<unknown>(request, 128 * 1024);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new SyntaxError("object required");
+    input = value as SessionRequest;
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof RequestBodyTooLargeError ? "撮合会话请求过大" : "请求必须是有效 JSON" },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
   const isFederatedRequest = Boolean(input.federated);
   if (!isFederatedRequest && !hasTrustedBrowserOrigin(request)) {
     return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
@@ -88,7 +100,7 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "当前平台路径尚未激活" }, { status: 404 });
   }
 
-  if (input.subplatform !== "root" && process.env.MATCHPLANE_ENVIRONMENT === "production") {
+  if (input.subplatform !== "root" && isProductionEnvironment()) {
     const resolved = await readActivePlatformScope(platformPath);
     if (!resolved || resolved.slug !== input.subplatform) {
       return NextResponse.json({ error: "平台路径无法解析为唯一的 active 节点" }, { status: 404 });
@@ -101,7 +113,7 @@ export async function POST(request: Request): Promise<Response> {
   if (input.subplatform === "root") {
     const configuredRootTenant = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
     if (
-      process.env.MATCHPLANE_ENVIRONMENT === "production"
+      isProductionEnvironment()
       && (!configuredRootTenant || !isUuid(configuredRootTenant))
     ) {
       return NextResponse.json({ error: "根平台尚未配置 MATCHPLANE_ROOT_TENANT_ID" }, { status: 503 });
@@ -657,15 +669,6 @@ async function activeRootDomain(tenantId: string, domainId: string): Promise<boo
     [tenantId, domainId],
   );
   return result.rowCount === 1;
-}
-
-async function parseBody(request: Request): Promise<SessionRequest> {
-  try {
-    const body = (await request.json()) as SessionRequest;
-    return body && typeof body === "object" ? body : {};
-  } catch {
-    return {};
-  }
 }
 
 function isUuid(value: string): boolean {

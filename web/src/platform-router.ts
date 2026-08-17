@@ -7,6 +7,8 @@
  * the caller gets an explicit policy-fallback result so the event is auditable.
  */
 
+import { isProductionEnvironment } from "./lib/runtime";
+
 export interface PlatformRouteCandidate {
   slug: string;
   path: string;
@@ -63,6 +65,7 @@ const MAX_CANDIDATES = 32;
 const MAX_RATIONALE_LENGTH = 1_000;
 const DEFAULT_TIMEOUT_MS = 4_000;
 const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
+const DEFAULT_FALLBACK_CHILDREN = 4;
 const ROUTER_TOOL_NAME = "matchplane.platform.select_children";
 
 type RouterToolMode = "auto" | "required" | "disabled";
@@ -74,7 +77,12 @@ export async function decidePlatformRoutes(input: {
   /** Atomically reserve one provider call immediately before it is made. */
   admitCall?: () => Promise<void>;
 }): Promise<PlatformRouteDecision> {
-  const candidates = input.candidates.slice(0, MAX_CANDIDATES);
+  // A registry can contain more children than the provider prompt budget permits.  Taking the
+  // first rows (the SQL projection is intentionally stable) would permanently starve every
+  // child after MAX_CANDIDATES.  Rank the bounded window by the same explainable token overlap
+  // used by the policy fallback, then use a request-stable hash as a fair tie breaker so a
+  // no-overlap request still rotates through the whole registry without randomising retries.
+  const candidates = selectCandidateWindow(input.candidates, input.narrative);
   if (candidates.length === 0) {
     return {
       selectedSlugs: [],
@@ -94,7 +102,7 @@ export async function decidePlatformRoutes(input: {
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
   const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
   if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) {
-    return policyFallback(candidates, "AI 路由服务未配置，使用受控候选广播降级。", null);
+    return policyFallback(candidates, input.narrative, "AI 路由服务未配置，使用受控相关性降级。", null);
   }
 
   try {
@@ -158,8 +166,46 @@ export async function decidePlatformRoutes(input: {
   } catch (error) {
     if (error instanceof PlatformRouterQuotaExceededError) throw error;
     const reason = error instanceof Error ? error.message : "AI 路由服务不可用";
-    return policyFallback(candidates, `AI 路由降级：${reason.slice(0, 240)}`, model);
+    return policyFallback(candidates, input.narrative, `AI 路由降级：${reason.slice(0, 240)}`, model);
   }
+}
+
+function selectCandidateWindow(
+  candidates: PlatformRouteCandidate[],
+  narrative: string,
+): PlatformRouteCandidate[] {
+  if (candidates.length <= MAX_CANDIDATES) return candidates.slice();
+  const intentTokens = new Set(tokenize(narrative));
+  return candidates
+    .map((candidate, index) => {
+      const metadataTokens = tokenize([
+        candidate.slug,
+        candidate.displayName,
+        candidate.description,
+        ...candidate.capabilities,
+        ...candidate.agentSkills,
+      ].join(" "));
+      const overlap = metadataTokens.reduce((count, token) => count + (intentTokens.has(token) ? 1 : 0), 0);
+      return {
+        candidate,
+        index,
+        overlap,
+        tie: stableHash(`${narrative}\u0000${candidate.path}`),
+      };
+    })
+    .sort((left, right) => right.overlap - left.overlap || left.tie - right.tie || left.index - right.index)
+    .slice(0, MAX_CANDIDATES)
+    .map(({ candidate }) => candidate);
+}
+
+/** Small deterministic non-cryptographic hash used only for fair candidate ordering. */
+function stableHash(value: string): number {
+  let hash = 2_166_136_261;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
 }
 
 /** True when a server-side provider credential is present and the endpoint is allowed. */
@@ -172,21 +218,63 @@ export function isPlatformRouterConfigured(): boolean {
 
 function policyFallback(
   candidates: PlatformRouteCandidate[],
+  narrative: string,
   rationale: string,
   model: string | null,
 ): PlatformRouteDecision {
+  const ranked = rankFallbackCandidates(candidates, narrative);
   return {
-    selectedSlugs: candidates.map((candidate) => candidate.slug),
+    selectedSlugs: ranked.slice(0, configuredFallbackChildren()).map((candidate) => candidate.slug),
     source: "policy_fallback",
     routeMechanism: "policy_fallback",
     model,
-    rationale: rationale.slice(0, MAX_RATIONALE_LENGTH),
+    rationale: `${rationale} 已按需求与平台描述的轻量相关性选择最多 ${configuredFallbackChildren()} 个候选。`.slice(0, MAX_RATIONALE_LENGTH),
     confidence: null,
     degraded: true,
     costBearer: "platform",
     budget: currentBudget(),
     usage: null,
   };
+}
+
+function configuredFallbackChildren(): number {
+  const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_FALLBACK_CHILDREN ?? String(DEFAULT_FALLBACK_CHILDREN), 10);
+  return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(MAX_CANDIDATES, parsed)) : DEFAULT_FALLBACK_CHILDREN;
+}
+
+/**
+ * A deterministic, domain-neutral fallback. It is intentionally not presented as an AI score:
+ * it only counts bounded token/character overlap in operator-authored public metadata and leaves
+ * confidence null. Ties retain registration order so an operator can apply a separate exposure
+ * policy without turning alphabetical slug order into an accidental ranking rule.
+ */
+function rankFallbackCandidates(
+  candidates: PlatformRouteCandidate[],
+  narrative: string,
+): PlatformRouteCandidate[] {
+  const intentTokens = tokenize(narrative);
+  return candidates
+    .map((candidate, index) => {
+      const metadataTokens = tokenize([
+        candidate.slug,
+        candidate.displayName,
+        candidate.description,
+        ...candidate.capabilities,
+        ...candidate.agentSkills,
+      ].join(" "));
+      const metadata = new Set(metadataTokens);
+      const overlap = intentTokens.reduce((count, token) => count + (metadata.has(token) ? 1 : 0), 0);
+      return { candidate, index, overlap };
+    })
+    .sort((left, right) => right.overlap - left.overlap || left.index - right.index)
+    .map(({ candidate }) => candidate);
+}
+
+function tokenize(value: string): string[] {
+  const normalized = value.toLocaleLowerCase().slice(0, 8_000);
+  const words = normalized.match(/[a-z0-9][a-z0-9._:-]*/g) ?? [];
+  const cjk = [...normalized.matchAll(/[\u3400-\u9fff]/g)].map(([character]) => character);
+  return [...new Set([...words, ...cjk])].slice(0, 512);
 }
 
 function currentBudget(): PlatformRouteBudget {
@@ -378,7 +466,9 @@ function isAllowedEndpoint(value: string): boolean {
   try {
     const url = new URL(value);
     if (url.username || url.password || url.hash) return false;
-    if (process.env.NODE_ENV === "production") return url.protocol === "https:";
+    if (isProductionEnvironment()) {
+      return url.protocol === "https:";
+    }
     return url.protocol === "https:" || url.hostname === "127.0.0.1" || url.hostname === "localhost";
   } catch {
     return false;

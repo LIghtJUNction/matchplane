@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, FileUp, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowRight, FileUp, Plus, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 
 import {
@@ -308,7 +308,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
           <h1>{copy("supplyTitle", "由你上传真实资料，平台帮你找到合适的需求。")}</h1>
           <p>{copy("supplyDescription", "根平台不预置任何样例内容。提交后先进入审核队列，审核通过才会进入 AI 撮合。")}</p>
         </div>
-        <span className="seller-mode-note"><ShieldCheck size={16} aria-hidden="true" /> {copy("identityProtectionLabel", "账号和联系方式由根平台保护")}</span>
+        <span className="seller-mode-note">{copy("identityProtectionLabel", "账号和联系方式由根平台保护")}</span>
       </section>
 
       <section className="seller-status-summary" aria-label={copy("supplyStatusLabel", "供给资料状态")}>
@@ -429,7 +429,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       <section className="surface seller-submissions" aria-labelledby="seller-introductions-title">
         <SectionHeading eyebrow={copy("contactRequestsEyebrow", "联系申请")} title={copy("contactRequestsTitle", "需要你明确同意，才会交换联系方式")} />
         {introductionsError ? (
-          <div className="seller-empty-state"><ShieldCheck size={24} aria-hidden="true" /><p>{introductionsError}</p></div>
+          <div className="seller-empty-state"><p>{introductionsError}</p></div>
         ) : introductions.length ? (
           <ol className="submission-list">
             {introductions.map((introduction) => (
@@ -460,7 +460,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
             ))}
           </ol>
         ) : (
-          <div className="seller-empty-state"><ShieldCheck size={24} aria-hidden="true" /><p>{copy("noContactRequestsLabel", "暂无待处理的联系申请。")}</p></div>
+          <div className="seller-empty-state"><p>{copy("noContactRequestsLabel", "暂无待处理的联系申请。")}</p></div>
         )}
       </section>
     </div>

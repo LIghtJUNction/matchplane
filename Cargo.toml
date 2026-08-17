@@ -15,6 +15,7 @@ members = [
   "services/matchplane-matcher",
   "services/matchplane-payment-service",
   "services/matchplane-projector",
+  "services/matchplane-subplatform-builder",
   "services/matchplane-vector-worker",
   "tools/xtask",
 ]
@@ -37,6 +38,7 @@ bigdecimal = { version = "0.4.10", features = ["serde"] }
 clap = { version = "4.6.6", features = ["derive", "env"] }
 config = "0.15.25"
 futures-util = "0.3.34"
+flate2 = "1.1.1"
 hex = "0.4.3"
 metrics = "0.24.6"
 metrics-exporter-prometheus = "0.18.3"
@@ -59,8 +61,9 @@ signature = "2.2.0"
 subtle = "2.6.1"
 sqlx = { version = "0.9.0", default-features = false, features = ["bigdecimal", "derive", "json", "macros", "migrate", "postgres", "runtime-tokio", "time", "tls-rustls-ring-webpki", "uuid"] }
 thiserror = "2.0.20"
+tar = "0.4.45"
 time = { version = "0.3.55", features = ["formatting", "parsing", "serde", "serde-human-readable"] }
-tokio = { version = "1.53.1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.53.1", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tonic = { version = "0.14.6", features = ["tls-ring"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
@@ -69,6 +72,8 @@ tracing = "0.1.44"
 tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 uuid = { version = "1.24.0", features = ["serde", "v5", "v7"] }
+walkdir = "2.5.0"
+zstd = "0.13.2"
 url = "2.5.8"
 
 matchplane-cache = { path = "crates/matchplane-cache" }

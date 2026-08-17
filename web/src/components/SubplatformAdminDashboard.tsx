@@ -14,6 +14,7 @@ import { getMarketplaceSession } from "../lib/marketplace-session";
 import type { SubplatformConfig } from "../subplatform";
 import { SectionHeading } from "./Primitives";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
+import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 
 export function SubplatformAdminDashboard({
   onNotice,
@@ -145,6 +146,12 @@ export function SubplatformAdminDashboard({
           <div className="seller-upload-actions seller-upload-wide"><p><Mail size={17} aria-hidden="true" /> {config?.credential_configured ? "服务器密钥已配置" : "尚未配置服务器密钥"}</p><button className="button button-dark" type="submit" disabled={saving}><Save size={17} aria-hidden="true" />{saving ? "保存中…" : "保存邮箱配置"}</button></div>
         </form>
       </section>
+      <PlatformSiteSettingsPanel
+        organizationId={subplatform.organizationId}
+        platformPath={subplatform.path}
+        platformName={subplatform.brandName}
+        onNotice={onNotice}
+      />
       <PlatformAccessPanel
         organizations={subplatform.organizationId ? [scopedOrganization(subplatform)] : []}
         rootRole="subplatform_admin"
