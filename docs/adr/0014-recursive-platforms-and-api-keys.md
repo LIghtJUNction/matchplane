@@ -17,6 +17,10 @@ system.
 1. A platform node is a Better Auth Organization with an optional `parentOrganizationId`. The node
    with no parent is the current deployment root; a child may create or register further children
    when its scoped role permits it.
+   When a deployment root is mounted into another deployment, the receiving deployment creates a
+   signed remote-node projection instead of reparenting the source root organization. This lets the
+   source keep its own local root and descendants while appearing as an ordinary child to the
+   receiving tree.
 2. Better Auth's Organization plugin remains the authority for human membership and roles. The
    parent relationship is checked before any ancestor manager acts on a descendant; target-node
    data, payment settings, contact consent and audit history are never merged across nodes.

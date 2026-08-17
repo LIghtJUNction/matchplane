@@ -41,6 +41,11 @@ PATCH /api/platform/federation/bindings   {"status":"revoked"}
 投影。生产环境要求激活请求填写 `tokenEnv`，实际 bearer 只从 web 进程的 secret 环境变量
 读取，永不写入数据库或 manifest。入驻 token 只返回一次，数据库只保存 SHA-256 摘要。
 
+远端节点可以是另一个部署的 root 平台。接收方不会把远端的本地 root Better Auth 组织直接
+改挂到自己的组织树（那会破坏远端继续管理自身子平台的本地根）；激活时创建的是本租户内
+`source_kind=remote` 的组织与注册投影。该投影在路径、路由、MCP allowlist、权限和撤销语义上
+与内嵌子平台相同，而远端自己的账户、数据和后代仍由远端部署管理。
+
 当前 web 控制面已经具备组织 API key、MCP 子节点工具和 OIDC 客户端边界：`agent:tool`、`retrieval:query`、`platform:manage_children` 等权限必须按用途分别签发；调用必须携带 `platform_path`、tenant/domain scope，并通过 manifest 的工具 allowlist。根不会把调用方 API key 转发给子平台，子平台凭证由部署管理员以 `tokenEnv` 配置在服务器端，生产 endpoint 必须 HTTPS。活动联邦绑定优先从数据库解析 endpoint；内嵌包仍可使用受限的 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 兼容配置。
 
 ## 推荐的绑定步骤
