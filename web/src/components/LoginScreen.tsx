@@ -18,6 +18,13 @@ type AuthMethod = "password" | "email-otp" | "magic-link";
 type SocialProvider = "google" | "wechat" | "qq" | "alipay";
 type OAuthProvider = SocialProvider | "national_identity";
 
+interface AuthCapabilities {
+  emailOtp: boolean;
+  phoneOtp: boolean;
+  magicLink: boolean;
+  passkey: boolean;
+}
+
 const socialLabels: Record<SocialProvider, Record<"zh" | "en", string>> = {
   google: { zh: "Google", en: "Google" },
   wechat: { zh: "微信", en: "WeChat" },
@@ -39,6 +46,14 @@ export function LoginScreen() {
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform());
   const [socialProviders, setSocialProviders] = useState<SocialProvider[]>([]);
   const [nationalIdentityEnabled, setNationalIdentityEnabled] = useState(false);
+  const [capabilities, setCapabilities] = useState<AuthCapabilities>({
+    // Password remains the deployment-independent fallback. Other methods are hidden until
+    // the server confirms that their delivery/credential adapter is configured.
+    emailOtp: false,
+    phoneOtp: false,
+    magicLink: false,
+    passkey: true,
+  });
   const [otpSent, setOtpSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -80,15 +95,29 @@ export function LoginScreen() {
       if (!cancelled) setSubplatform(loaded);
     });
     void fetch("/api/auth/providers", { headers: { accept: "application/json" } })
-      .then((response) => response.ok ? response.json() as Promise<{ primary?: string[]; social?: string[] }> : null)
+      .then((response) => response.ok ? response.json() as Promise<{
+        primary?: string[];
+        social?: string[];
+        emailOtp?: boolean;
+        phoneOtp?: boolean;
+        magicLink?: boolean;
+        passkey?: boolean;
+      }> : null)
       .then((providers) => {
         const configured = new Set(providers?.social ?? []);
         setNationalIdentityEnabled((providers?.primary ?? []).includes("national_identity"));
         setSocialProviders(["google", "wechat", "qq", "alipay"].filter((provider): provider is SocialProvider => configured.has(provider)));
+        setCapabilities({
+          emailOtp: providers?.emailOtp === true,
+          phoneOtp: providers?.phoneOtp === true,
+          magicLink: providers?.magicLink === true,
+          passkey: providers?.passkey !== false,
+        });
       })
       .catch(() => {
         setNationalIdentityEnabled(false);
         setSocialProviders([]);
+        setCapabilities({ emailOtp: false, phoneOtp: false, magicLink: false, passkey: true });
       });
     return () => {
       cancelled = true;
@@ -168,8 +197,20 @@ export function LoginScreen() {
       setError(copy.phonePasswordUnavailable);
       return;
     }
+    if (method === "email-otp" && resolvedIdentifier.kind === "email" && !capabilities.emailOtp) {
+      setError(copy.emailOtpUnavailable);
+      return;
+    }
+    if (method === "email-otp" && resolvedIdentifier.kind === "phone" && !capabilities.phoneOtp) {
+      setError(copy.phoneOtpUnavailable);
+      return;
+    }
     if (method === "magic-link" && resolvedIdentifier.kind === "phone") {
       setError(copy.phoneMagicLinkUnavailable);
+      return;
+    }
+    if (method === "magic-link" && !capabilities.magicLink) {
+      setError(copy.magicLinkUnavailable);
       return;
     }
     if (method === "password" && password.length < 8) {
@@ -328,6 +369,12 @@ export function LoginScreen() {
     setNotice(null);
   };
 
+  const availableMethods: AuthMethod[] = [
+    "password",
+    ...(capabilities.emailOtp || capabilities.phoneOtp ? ["email-otp" as const] : []),
+    ...(capabilities.magicLink ? ["magic-link" as const] : []),
+  ];
+
   return (
     <main className="login-page">
       <div className="login-topbar">
@@ -352,22 +399,24 @@ export function LoginScreen() {
           </div>
         ) : null}
 
-        <div className="login-methods" role="tablist" aria-label={copy.authMethods}>
+        <div className={`login-methods login-methods-count-${availableMethods.length}`} role="tablist" aria-label={copy.authMethods}>
           <button className={method === "password" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "password"} onClick={() => switchMethod("password")}>{copy.password}</button>
-          <button className={method === "email-otp" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "email-otp"} onClick={() => switchMethod("email-otp")}>{copy.emailOtp}</button>
-          <button className={method === "magic-link" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "magic-link"} onClick={() => switchMethod("magic-link")}>{copy.magicLink}</button>
+          {availableMethods.includes("email-otp") ? <button className={method === "email-otp" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "email-otp"} onClick={() => switchMethod("email-otp")}>{copy.emailOtp}</button> : null}
+          {availableMethods.includes("magic-link") ? <button className={method === "magic-link" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "magic-link"} onClick={() => switchMethod("magic-link")}>{copy.magicLink}</button> : null}
         </div>
 
         <form className="login-form" onSubmit={submit}>
-          <label htmlFor="login-identifier"><span>{copy.identifier}</span><input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="username webauthn" inputMode="email" placeholder={copy.identifierPlaceholder} autoFocus /></label>
+          <label htmlFor="login-identifier"><span>{copy.identifier}</span><input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="username webauthn" inputMode="text" placeholder={copy.identifierPlaceholder} autoFocus /></label>
           {method === "password" ? (
             <div className="login-password-field">
               <label htmlFor="login-password"><span>{copy.password}</span></label>
               <span className="login-password-control">
                 <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password webauthn" placeholder={copy.passwordPlaceholder} />
-                <button className="login-passkey-button" type="button" onClick={() => void startPasskeyLogin()} disabled={submitting} aria-label={copy.passkeyLogin} title={copy.passkeyLogin}>
-                  <KeyRound size={17} aria-hidden="true" />
-                </button>
+                {capabilities.passkey ? (
+                  <button className="login-passkey-button" type="button" onClick={() => void startPasskeyLogin()} disabled={submitting} aria-label={copy.passkeyLogin} title={copy.passkeyLogin}>
+                    <KeyRound size={17} aria-hidden="true" />
+                  </button>
+                ) : null}
               </span>
             </div>
           ) : null}
@@ -512,7 +561,10 @@ function loginCopy(locale: "zh" | "en") {
       authFailed: "Sign-in did not complete. Try again.",
       invalidIdentifier: "Enter a valid email address or phone number.",
       phonePasswordUnavailable: "Use the code method to sign in with a phone number.",
+      emailOtpUnavailable: "Email codes are not configured on this platform.",
+      phoneOtpUnavailable: "Phone codes are not configured on this platform.",
       phoneMagicLinkUnavailable: "Magic links are sent to email addresses. Use a code for phone sign-in.",
+      magicLinkUnavailable: "Magic links are not configured on this platform.",
       emailOtpSignUpUnavailable: "Create an email account with a password, or use a phone code.",
       phoneOtpSent: "Code sent to your phone.",
       passkeyLogin: "Use a passkey",
@@ -574,7 +626,10 @@ function loginCopy(locale: "zh" | "en") {
     authFailed: "登录没有完成，请再试一次。",
     invalidIdentifier: "请输入有效的邮箱或手机号。",
     phonePasswordUnavailable: "手机号请使用验证码登录。",
+    emailOtpUnavailable: "当前平台尚未配置邮箱验证码服务。",
+    phoneOtpUnavailable: "当前平台尚未配置手机验证码服务。",
     phoneMagicLinkUnavailable: "免密链接发送到邮箱，手机号请使用验证码。",
+    magicLinkUnavailable: "当前平台尚未配置免密链接服务。",
     emailOtpSignUpUnavailable: "邮箱注册请使用密码，手机号可以直接用验证码注册。",
     phoneOtpSent: "验证码已发送到手机。",
     passkeyLogin: "使用 Passkey",

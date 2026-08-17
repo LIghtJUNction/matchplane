@@ -96,6 +96,20 @@ export function rootEmailRouteFromEnv(environment = process.env.MATCHPLANE_ENVIR
 }
 
 /**
+ * Capability discovery for the login surface. Better Auth keeps the email methods enabled so
+ * an operator can turn them on without changing code, but the UI must not advertise a method
+ * when its deployment-owned SMTP route is absent or invalid.
+ */
+export function isRootEmailAuthConfigured(): boolean {
+  try {
+    const route = rootEmailRouteFromEnv();
+    return Boolean(route?.enabled);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Send Better Auth lifecycle messages through the deployment-owned root route.
  *
  * Better Auth is the federated account authority for the whole platform tree. The request object

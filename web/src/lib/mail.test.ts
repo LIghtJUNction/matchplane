@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { rootEmailRouteFromEnv } from "./mail";
+import { isRootEmailAuthConfigured, rootEmailRouteFromEnv } from "./mail";
 
 describe("rootEmailRouteFromEnv", () => {
   afterEach(() => {
@@ -34,5 +34,16 @@ describe("rootEmailRouteFromEnv", () => {
   it("fails closed when a partial root route is configured", () => {
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_HOST", "smtp.example.test");
     expect(() => rootEmailRouteFromEnv("production")).toThrow(/SMTP/);
+    expect(isRootEmailAuthConfigured()).toBe(false);
+  });
+
+  it("reports a complete enabled route as an available auth capability", () => {
+    vi.stubEnv("MATCHPLANE_ROOT_SMTP_HOST", "smtp.example.test");
+    vi.stubEnv("MATCHPLANE_ROOT_SMTP_PORT", "587");
+    vi.stubEnv("MATCHPLANE_ROOT_SMTP_TLS_MODE", "starttls");
+    vi.stubEnv("MATCHPLANE_ROOT_SMTP_USERNAME", "no-reply@example.test");
+    vi.stubEnv("MATCHPLANE_ROOT_SMTP_CREDENTIAL_SECRET_REF", "env://MATCHPLANE_TEST_SMTP_PASSWORD");
+    vi.stubEnv("MATCHPLANE_ROOT_SMTP_FROM_ADDRESS", "no-reply@example.test");
+    expect(isRootEmailAuthConfigured()).toBe(true);
   });
 });

@@ -4,6 +4,8 @@ import {
   configuredFallbackOAuthProviderIds,
   configuredPrimaryOAuthProviderIds,
 } from "../../../../src/lib/auth";
+import { isRootEmailAuthConfigured } from "../../../../src/lib/mail";
+import { isPhoneOtpConfigured } from "../../../../src/lib/sms";
 
 export const runtime = "nodejs";
 // Provider availability is deployment configuration. Do not let a build-time
@@ -12,6 +14,8 @@ export const dynamic = "force-dynamic";
 
 /** Public capability discovery for the login screen. Secrets and provider endpoints stay server-side. */
 export function GET(): Response {
+  const emailAuth = isRootEmailAuthConfigured();
+  const phoneAuth = isPhoneOtpConfigured();
   return NextResponse.json(
     {
       // National network identity is a promoted option only when the server has
@@ -19,10 +23,12 @@ export function GET(): Response {
       // voluntary; all fallback methods stay available to the same account.
       primary: configuredPrimaryOAuthProviderIds(),
       password: true,
-      emailOtp: true,
-      phoneOtp: true,
+      // Code and magic-link delivery are deployment capabilities, not merely Better Auth
+      // plugins. Keep the methods hidden until the corresponding gateway is configured.
+      emailOtp: emailAuth,
+      phoneOtp: phoneAuth,
       passkey: true,
-      magicLink: true,
+      magicLink: emailAuth,
       social: configuredFallbackOAuthProviderIds(),
     },
     { headers: { "cache-control": "public, max-age=60, stale-while-revalidate=300" } },

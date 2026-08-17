@@ -47,6 +47,12 @@ export async function sendConfiguredPhoneOtp({ phoneNumber, code }: SmsPayload):
   }
 }
 
+/** Return whether the deployment has supplied a valid SMS gateway URL. */
+export function isPhoneOtpConfigured(environment: Record<string, string | undefined> = process.env): boolean {
+  const endpoint = environment.MATCHPLANE_SMS_PROVIDER_URL?.trim();
+  return Boolean(endpoint && safeProviderUrl(endpoint));
+}
+
 function safeProviderUrl(value: string): string | null {
   try {
     const url = new URL(value);

@@ -2998,6 +2998,9 @@ body,
   background: var(--paper);
 }
 
+.login-methods-count-1 { grid-template-columns: 1fr; }
+.login-methods-count-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
 .login-methods button {
   min-height: 2.75rem;
   padding: 0 0.45rem;
