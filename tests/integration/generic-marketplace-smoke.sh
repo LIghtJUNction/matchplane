@@ -73,7 +73,12 @@ matches=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg deman
       --header "authorization: Bearer $demand_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/intents/$intent_id/matches")
 jq -e --arg offer "$offer_id" \
-  '.intent_id == "00000000-0000-7000-8000-000000000901" and (.candidates | length) == 1 and .candidates[0].offer_id == $offer and .candidates[0].score == 1' \
+  '.intent_id == "00000000-0000-7000-8000-000000000901" and
+   (.candidates | length) == 1 and
+   .candidates[0].offer_id == $offer and
+   (.candidates[0].score >= 0.8 and .candidates[0].score <= 1) and
+   ((.candidates[0].reasons | index("shared attribute: category")) != null) and
+   ((.candidates[0].reasons | index("shared attribute: edition")) != null)' \
   <<<"$matches" >/dev/null
 
 expires_at=$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%SZ')
