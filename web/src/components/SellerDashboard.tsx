@@ -8,11 +8,13 @@ import {
   consentMarketplaceContact,
   createMarketplaceOffer,
   getMarketplaceIntroductions,
+  getMarketplaceDemandMatches,
   getMarketplaceOffers,
   getSellerListingSubmissions,
   isLiveMarketplaceEnabled,
   retrieveMarketplaceContact,
   type MarketplaceIntroduction,
+  type MarketplaceDemandCandidate,
   type MarketplaceContactResponse,
   type MarketplaceOffer,
   submitSellerListing,
@@ -57,6 +59,9 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
   const [submissionsError, setSubmissionsError] = useState<string | null>(null);
   const [introductions, setIntroductions] = useState<MarketplaceIntroduction[]>([]);
   const [introductionsError, setIntroductionsError] = useState<string | null>(null);
+  const [demandMatches, setDemandMatches] = useState<Record<string, MarketplaceDemandCandidate[]>>({});
+  const [demandMatchesLoading, setDemandMatchesLoading] = useState<Record<string, boolean>>({});
+  const [demandMatchesError, setDemandMatchesError] = useState<Record<string, string>>({});
   const [consentingIntroductionId, setConsentingIntroductionId] = useState<string | null>(null);
   const [releasedContacts, setReleasedContacts] = useState<Record<string, MarketplaceContactResponse>>({});
   const [releasingContactId, setReleasingContactId] = useState<string | null>(null);
@@ -66,6 +71,9 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
     setIntroductions([]);
     setSubmissionsError(null);
     setIntroductionsError(null);
+    setDemandMatches({});
+    setDemandMatchesLoading({});
+    setDemandMatchesError({});
     if (!isLiveMarketplaceEnabled()) {
       setSubmissionsError("当前部署未启用真实供给 API");
       return;
@@ -101,6 +109,41 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       setSubmissionsLoading(false);
     }
   }, [subplatform.domainId, subplatform.marketplaceContract, subplatform.path, subplatform.slug, subplatform.tenantId, usesLegacyMarketplace]);
+
+  const findDemandMatches = async (record: MarketplaceOffer) => {
+    if (!subplatform.domainId || !subplatform.tenantId) return;
+    setDemandMatchesLoading((current) => ({ ...current, [record.offer_id]: true }));
+    setDemandMatchesError((current) => {
+      const next = { ...current };
+      delete next[record.offer_id];
+      return next;
+    });
+    try {
+      const session = await getMarketplaceSession({
+        subplatform: subplatform.slug,
+        platformPath: subplatform.path,
+        tenantId: subplatform.tenantId,
+        domainId: subplatform.domainId,
+        role: "seller",
+      });
+      if (!session) {
+        onNotice("请先登录后寻找已公开需求");
+        return;
+      }
+      const matches = await getMarketplaceDemandMatches({
+        session,
+        domainId: subplatform.domainId,
+        offerId: record.offer_id,
+        limit: 12,
+      });
+      setDemandMatches((current) => ({ ...current, [record.offer_id]: matches }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "需求匹配暂时无法读取";
+      setDemandMatchesError((current) => ({ ...current, [record.offer_id]: message }));
+    } finally {
+      setDemandMatchesLoading((current) => ({ ...current, [record.offer_id]: false }));
+    }
+  };
 
   const consent = async (introduction: MarketplaceIntroduction) => {
     if (!subplatform.domainId || consentingIntroductionId) return;
@@ -167,6 +210,11 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
   useEffect(() => {
     setCurrency(pricingCurrency ?? "");
   }, [pricingCurrency]);
+
+  const publishedOffers = useMemo(
+    () => submissions.filter(isMarketplaceOffer).filter((offer) => offer.status === "active"),
+    [submissions],
+  );
 
   const schemaFields = useMemo(() => {
     const configured = subplatform.ui?.supplyFields ?? [];
@@ -426,6 +474,71 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
         )}
       </section>
 
+      {!usesLegacyMarketplace ? (
+        <section className="surface seller-submissions seller-demand-discovery" aria-labelledby="seller-demand-title">
+          <SectionHeading
+            eyebrow={copy("demandDiscoveryEyebrow", "供需撮合")}
+            title={copy("demandDiscoveryTitle", "找到已公开的需求")}
+          />
+          <p className="seller-discovery-intro">
+            {copy("demandDiscoveryDescription", "只有主动允许供给方发现的需求会出现在这里。你可以先查看是否合适；需求方发起联系后，双方都同意才会交换联系方式。")}
+          </p>
+          {publishedOffers.length ? (
+            <div className="seller-demand-offers">
+              {publishedOffers.map((offer) => {
+                const matches = demandMatches[offer.offer_id];
+                const loading = demandMatchesLoading[offer.offer_id] === true;
+                const error = demandMatchesError[offer.offer_id];
+                return (
+                  <article className="seller-demand-offer" key={offer.offer_id}>
+                    <div className="seller-demand-offer-heading">
+                      <div>
+                        <strong>{offer.display_name}</strong>
+                        <small>{offer.external_key} · 已发布</small>
+                      </div>
+                      <button
+                        className="text-action"
+                        type="button"
+                        onClick={() => void findDemandMatches(offer)}
+                        disabled={loading}
+                      >
+                        {loading ? "寻找中…" : matches ? "重新寻找" : "寻找需求"}
+                        <ArrowRight size={15} aria-hidden="true" />
+                      </button>
+                    </div>
+                    {error ? <p className="seller-demand-error" role="alert">{error}</p> : null}
+                    {matches ? (
+                      matches.length ? (
+                        <ol className="seller-demand-list">
+                          {matches.map((demand) => {
+                            return (
+                              <li key={demand.intent_id}>
+                                <div>
+                                  <strong>{demand.narrative}</strong>
+                                  <small>
+                                    {Math.round(Math.max(0, Math.min(1, demand.score)) * 100)}% 相关
+                                    {demand.reasons.length ? ` · ${demand.reasons.slice(0, 2).join("、")}` : ""}
+                                  </small>
+                                </div>
+                                <span className="submission-status">等待需求方联系</span>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      ) : (
+                        <div className="seller-empty-state seller-demand-empty"><p>暂时没有符合条件的公开需求。</p></div>
+                      )
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="seller-empty-state seller-demand-empty"><p>供给审核通过并发布后，可以在这里寻找需求。</p></div>
+          )}
+        </section>
+      ) : null}
+
       <section className="surface seller-submissions" aria-labelledby="seller-introductions-title">
         <SectionHeading eyebrow={copy("contactRequestsEyebrow", "联系申请")} title={copy("contactRequestsTitle", "需要你明确同意，才会交换联系方式")} />
         {introductionsError ? (
@@ -473,6 +586,10 @@ function amountPlaceholder(scale: number): string {
 
 function sellerRecordId(record: SellerRecord): string {
   return "submission_id" in record ? record.submission_id : record.offer_id;
+}
+
+function isMarketplaceOffer(record: SellerRecord): record is MarketplaceOffer {
+  return "offer_id" in record;
 }
 
 function sellerRecordPrice(record: SellerRecord, pricing: { mode: string }): string {
