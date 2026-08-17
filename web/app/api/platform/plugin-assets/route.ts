@@ -116,14 +116,15 @@ async function readActiveArtifact(platformPath: string, rootTenantId: string): P
     const result = await authDatabase.query(
       `WITH RECURSIVE platform_tree AS (
          SELECT o.id, o.slug, o."parentOrganizationId", o."tenantId",
-                '/' || o.slug AS platform_path, true AS path_active, 0 AS depth
+                '/'::text AS platform_path, true AS path_active, 0 AS depth
            FROM "organization" o
           WHERE o."tenantId" = $1::text
             AND o."parentOrganizationId" IS NULL
             AND o."rootPlatform" = true
          UNION ALL
          SELECT child.id, child.slug, child."parentOrganizationId", child."tenantId",
-                platform_tree.platform_path || '/' || child.slug,
+                CASE WHEN platform_tree.platform_path = '/' THEN '/' || child.slug
+                     ELSE platform_tree.platform_path || '/' || child.slug END,
                 platform_tree.path_active AND EXISTS (
                   SELECT 1 FROM subplatform_registrations registration
                    WHERE registration.tenant_id = $1::uuid
