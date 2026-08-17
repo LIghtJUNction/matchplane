@@ -53,3 +53,23 @@ Create separate keys for demand and supply Agents with `marketplace:write` and t
 the active child capabilities;
 the handoff is caller-funded and never invokes MatchPlane's hosted model. The platform's own
 router remains bounded and is only used by the first-party chat when no external Agent is present.
+
+## Multi-step Skills
+
+The package also exports `runBoundedAgentSkill`. It is a provider-neutral local runner for a
+buyer's or seller's own Skill: the caller supplies its model decision function and MCP transport,
+while the runner enforces the `matchplane.agent/v1` envelope, caller-funded budget, maximum steps,
+serialized input/output bounds, and the manifest-declared `allowed_mcp_tools` allowlist. It never
+uses the MatchPlane provider key or turns a tool result into contact/payment authority.
+
+```ts
+const result = await runBoundedAgentSkill(request, {
+  provider: { id: "my-agent", version: "2026.08", model: "my-provider/model" },
+  decide: ({ request, history, remaining_steps }) => myModel.chooseTool({ request, history, remaining_steps }),
+  callTool: ({ tool, arguments: input }) => myMcp.call(tool, input),
+});
+```
+
+`result.steps` contains digests and bounded status metadata for the Agent's own audit log. A
+platform route or contact flow still has to pass through the authenticated MatchPlane MCP tools;
+the runner is orchestration glue, not a second authorization system.

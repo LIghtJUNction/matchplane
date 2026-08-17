@@ -127,6 +127,7 @@
         },
         "budget": { "$ref": "#/$defs/budget" },
         "degraded": { "type": "boolean" },
+        "reason": { "type": ["string", "null"], "maxLength": 500 },
         "generated_at": { "type": ["string", "null"], "format": "date-time" }
       }
     }

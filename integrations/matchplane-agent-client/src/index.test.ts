@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 
-import { MatchPlaneAgentClient, MatchPlaneMcpError } from "./index";
+import {
+  MatchPlaneAgentClient,
+  MatchPlaneMcpError,
+  runBoundedAgentSkill,
+  type AgentSkillRequest,
+} from "./index";
 
 function fakeFetch() {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -107,5 +112,93 @@ describe("MatchPlane external Agent client", () => {
       }), { status: 200 }),
     });
     await expect(client.listTools()).rejects.toBeInstanceOf(MatchPlaneMcpError);
+  });
+
+  it("runs a caller-funded multi-step Skill only through its advertised MCP tools", async () => {
+    const request: AgentSkillRequest = {
+      protocol: "matchplane.agent/v1",
+      request_id: "123e4567-e89b-12d3-a456-426614174000",
+      stage: "inventory",
+      scope: { platform_path: "/used-car" },
+      intent: { narrative: "找符合约束的供给", requirements: { budget: 100000 } },
+      skill: "matchplane.matching.v1",
+      allowed_mcp_tools: ["inventory.search"],
+      budget: { max_steps: 3, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+    };
+    const calls: string[] = [];
+    let decisionCount = 0;
+    const result = await runBoundedAgentSkill(request, {
+      provider: { id: "buyer.example", version: "1.0.0", model: "caller-model" },
+      decide: async ({ history }) => {
+        decisionCount += 1;
+        if (!history.length) return { type: "tool", tool: "inventory.search", arguments: { budget: 100000 } };
+        return { type: "complete", selected: [{ ref: "offer-1", score: 0.92, reasons: ["预算匹配"] }] };
+      },
+      callTool: async ({ tool }) => {
+        calls.push(tool);
+        return { refs: ["offer-1"] };
+      },
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.degraded).toBe(false);
+    expect(result.steps[0]?.status).toBe("completed");
+    expect(result.steps[0]?.input_digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.selected[0]?.ref).toBe("offer-1");
+    expect(decisionCount).toBe(2);
+    expect(calls).toEqual(["inventory.search"]);
+  });
+
+  it("rejects a tool outside the Skill allowlist before invoking the executor", async () => {
+    const request: AgentSkillRequest = {
+      protocol: "matchplane.agent/v1",
+      request_id: "123e4567-e89b-12d3-a456-426614174000",
+      stage: "merchant",
+      scope: { platform_path: "/used-car" },
+      intent: { narrative: "找供给方", requirements: {} },
+      skill: "matchplane.matching.v1",
+      allowed_mcp_tools: ["merchant.search"],
+      budget: { max_steps: 2, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+    };
+    let called = false;
+    const result = await runBoundedAgentSkill(request, {
+      provider: { id: "seller.example", version: "1.0.0" },
+      decide: async () => ({ type: "tool", tool: "payment.refund", arguments: {} }),
+      callTool: async () => {
+        called = true;
+        return {};
+      },
+    });
+
+    expect(result.status).toBe("rejected");
+    expect(result.reason).toBe("tool_not_allowed:payment.refund");
+    expect(called).toBe(false);
+  });
+
+  it("stops at the caller step budget and never exceeds the declared loop", async () => {
+    const request: AgentSkillRequest = {
+      protocol: "matchplane.agent/v1",
+      request_id: "123e4567-e89b-12d3-a456-426614174000",
+      stage: "platform",
+      scope: { platform_path: "/" },
+      intent: { narrative: "选择平台", requirements: {} },
+      skill: "matchplane.route.v1",
+      allowed_mcp_tools: ["platform.search"],
+      budget: { max_steps: 2, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+    };
+    let calls = 0;
+    const result = await runBoundedAgentSkill(request, {
+      provider: { id: "router.example", version: "1.0.0" },
+      decide: async () => ({ type: "tool", tool: "platform.search", arguments: { query: "供给" } }),
+      callTool: async () => {
+        calls += 1;
+        return { ok: true };
+      },
+    });
+
+    expect(result.status).toBe("degraded");
+    expect(result.reason).toBe("step_budget_exceeded");
+    expect(result.steps).toHaveLength(2);
+    expect(calls).toBe(2);
   });
 });
