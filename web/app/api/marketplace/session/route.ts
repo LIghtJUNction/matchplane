@@ -5,10 +5,12 @@ import { auth, authDatabase, rootPlatformReferenceId } from "../../../../src/lib
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
 import { isMountedPlatformPath, readActivePlatformScope } from "../../../../src/platform-mount";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
+import { readJsonBody, readJsonResponseBody, readResponseTextBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { isProductionEnvironment } from "../../../../src/lib/runtime";
 
 export const runtime = "nodejs";
+
+const MAX_GATEWAY_RESPONSE_BYTES = 256 * 1024;
 
 type RequestedRole = "buyer" | "seller" | "subplatform_admin";
 
@@ -203,19 +205,20 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "撮合会话服务暂时不可用" }, { status: 503 });
   }
   if (!gatewayResponse.ok) {
-    const message = await gatewayResponse.text();
+    const message = await readResponseTextBody(gatewayResponse, MAX_GATEWAY_RESPONSE_BYTES).catch(() => "");
     return NextResponse.json(
-      { error: message || "marketplace session bridge failed" },
+      { error: message.slice(0, 2_000) || "marketplace session bridge failed" },
       { status: gatewayResponse.status >= 500 ? 502 : gatewayResponse.status },
     );
   }
-  const body = (await gatewayResponse.json()) as {
+  const body = await readJsonResponseBody<{
     tenant_id: string;
     party_id: string;
     role: "buyer" | "seller" | "both";
     access_token: string;
     access_token_expires_at: string;
-  };
+  }>(gatewayResponse, MAX_GATEWAY_RESPONSE_BYTES).catch(() => null);
+  if (!body) return NextResponse.json({ error: "撮合会话服务返回了无效响应" }, { status: 502 });
   if (!isUuid(body.party_id) || body.tenant_id !== input.tenantId) {
     return NextResponse.json({ error: "撮合会话服务返回了无效的平台身份" }, { status: 502 });
   }
@@ -413,7 +416,7 @@ async function introspectRootAccessToken(
       body: new URLSearchParams({ token: accessToken, token_type_hint: "access_token" }).toString(),
     }));
     if (!response.ok) return null;
-    const body = await response.json() as unknown;
+    const body = await readJsonResponseBody<unknown>(response, 32 * 1024);
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     return body as {
       active?: boolean;

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
-import { readJsonBody } from "../../../../src/lib/body-limit";
+import { readJsonBody, readJsonResponseBody } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 import { isMountedPlatformPath, readActivePlatformScope } from "../../../../src/platform-mount";
 import { isActivePlatformPathVisible } from "../../../../src/platform-visibility";
@@ -170,7 +170,7 @@ export async function POST(request: Request): Promise<Response> {
       signal: controller.signal,
     });
     if (!response.ok) return jsonError("备案查询服务暂时不可用", 502);
-    const body = await response.json().catch(() => null);
+    const body = await readJsonResponseBody<unknown>(response, 256 * 1024).catch(() => null);
     const values = normalizeLookupResponse(body);
     if (!values.ok) return jsonError("备案查询服务没有返回可验证的备案字段", 502);
     return NextResponse.json({

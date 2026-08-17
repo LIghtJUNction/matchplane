@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "./auth";
-import { readJsonBody } from "./body-limit";
+import { readJsonBody, readResponseTextBody } from "./body-limit";
 import { loadInternalBearer } from "./internal-auth";
 import { hasTrustedBrowserOrigin } from "./request-origin";
 
@@ -85,10 +85,14 @@ export async function forwardPaymentAdmin(
     console.error("payment admin bridge unavailable", error);
     return NextResponse.json({ error: "支付管理服务暂时不可用" }, { status: 503 });
   }
-  return new Response(await response.text(), {
-    status: response.status,
-    headers: { "content-type": response.headers.get("content-type") ?? "application/json" },
-  });
+  try {
+    return new Response(await readResponseTextBody(response, 256 * 1024), {
+      status: response.status,
+      headers: { "content-type": response.headers.get("content-type") ?? "application/json" },
+    });
+  } catch {
+    return NextResponse.json({ error: "支付管理服务返回内容过大或无效" }, { status: 502 });
+  }
 }
 
 function pinnedTenantId(requested: string | null): string {

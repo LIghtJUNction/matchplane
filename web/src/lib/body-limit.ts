@@ -25,13 +25,18 @@ export async function readJsonBody<T>(request: Request, maximumBytes: number): P
 
 /** Read an upstream JSON response with a byte cap that also covers chunked transfer encoding. */
 export async function readJsonResponseBody<T>(response: Response, maximumBytes: number): Promise<T> {
+  return JSON.parse(await readResponseTextBody(response, maximumBytes)) as T;
+}
+
+/** Read an upstream response as text with a byte cap that also covers chunked transfer encoding. */
+export async function readResponseTextBody(response: Response, maximumBytes: number): Promise<string> {
   const declaredLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
   if (Number.isSafeInteger(declaredLength) && declaredLength > maximumBytes) {
     throw new ResponseBodyTooLargeError(maximumBytes);
   }
   if (!response.body) throw new SyntaxError("empty response body");
   const bytes = await readBoundedBytes(response.body, maximumBytes, () => new ResponseBodyTooLargeError(maximumBytes));
-  return JSON.parse(new TextDecoder().decode(bytes)) as T;
+  return new TextDecoder().decode(bytes);
 }
 
 async function readBoundedBytes(

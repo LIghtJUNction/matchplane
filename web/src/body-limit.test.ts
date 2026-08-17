@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   readJsonBody,
   readJsonResponseBody,
+  readResponseTextBody,
   RequestBodyTooLargeError,
   ResponseBodyTooLargeError,
 } from "./lib/body-limit";
@@ -52,5 +53,11 @@ describe("bounded JSON request bodies", () => {
     }));
 
     await expect(readJsonResponseBody(response, 128)).rejects.toBeInstanceOf(ResponseBodyTooLargeError);
+  });
+
+  it("reads a bounded upstream text response", async () => {
+    const response = new Response("gateway error", { status: 502 });
+
+    await expect(readResponseTextBody(response, 128)).resolves.toBe("gateway error");
   });
 });
