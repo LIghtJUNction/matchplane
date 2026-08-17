@@ -85,6 +85,26 @@ describe("platform Agent router", () => {
     expect(decision.costBearer).toBe("platform");
   });
 
+  it("fails closed when a provider response exceeds the bounded response budget", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ payload: "x".repeat(300 * 1024) }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "帮我找合适的供给",
+      candidates,
+    });
+
+    expect(decision.source).toBe("policy_fallback");
+    expect(decision.degraded).toBe(true);
+    expect(decision.rationale).toContain("AI 路由降级");
+  });
+
   it("reserves a provider call before paying for it", async () => {
     process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
     process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";

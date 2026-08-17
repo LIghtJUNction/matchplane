@@ -4,11 +4,13 @@ import { POST as establishAgentSession } from "../marketplace/agent-session/rout
 import { POST as matchPlatform } from "../platform/match/route";
 import { POST as handoffAgent } from "../platform/agent/handoff/route";
 import { hasTrustedBrowserOrigin } from "../../../src/lib/request-origin";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../src/lib/body-limit";
+import { readJsonBody, readJsonResponseBody, RequestBodyTooLargeError } from "../../../src/lib/body-limit";
 import { validateMcpToolArguments } from "../../../src/mcp-contract";
 import { executeAuthenticatedChildTool } from "../../../src/platform-child-tool";
 
 export const runtime = "nodejs";
+
+const MAX_UPSTREAM_RESPONSE_BYTES = 256 * 1024;
 
 /**
  * HTTP MCP facade for buyer/seller Agents. Authentication and platform-tree authorization remain
@@ -72,7 +74,7 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
     }),
   });
   const result = await (isHandoff ? handoffAgent(forwarded) : matchPlatform(forwarded));
-  const payload = await result.json().catch(() => ({ error: "platform tool returned invalid JSON" }));
+  const payload = await readUpstreamJson(result, "platform tool returned invalid JSON");
   const content = [{ type: "text", text: JSON.stringify(payload) }];
   return NextResponse.json({
     jsonrpc: "2.0",
@@ -227,7 +229,7 @@ async function callMarketplaceTool(
   } catch {
     return rpcError(id, -32003, "marketplace gateway is unavailable");
   }
-  const payload = await result.json().catch(() => ({ error: "marketplace tool returned invalid JSON" }));
+  const payload = await readUpstreamJson(result, "marketplace tool returned invalid JSON");
   return NextResponse.json({
     jsonrpc: "2.0",
     id,
@@ -280,6 +282,15 @@ function rpcToolResponse(
 
 function rpcToolError(id: JsonRpcId, status: number, message: string): Response {
   return rpcToolResponse(id, { error: message }, true, status);
+}
+
+async function readUpstreamJson(response: Response, fallback: string): Promise<Record<string, unknown>> {
+  try {
+    const payload = await readJsonResponseBody<unknown>(response, MAX_UPSTREAM_RESPONSE_BYTES);
+    return isRecord(payload) ? payload : { error: fallback };
+  } catch {
+    return { error: fallback };
+  }
 }
 
 function toolList(): Record<string, unknown> {

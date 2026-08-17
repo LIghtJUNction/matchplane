@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { readJsonBody, RequestBodyTooLargeError } from "./lib/body-limit";
+import {
+  readJsonBody,
+  readJsonResponseBody,
+  RequestBodyTooLargeError,
+  ResponseBodyTooLargeError,
+} from "./lib/body-limit";
 
 describe("bounded JSON request bodies", () => {
   it("accepts a body within the configured limit", async () => {
@@ -27,5 +32,25 @@ describe("bounded JSON request bodies", () => {
     } as RequestInit & { duplex: "half" });
 
     await expect(readJsonBody(request, 128)).rejects.toBeInstanceOf(RequestBodyTooLargeError);
+  });
+
+  it("accepts an upstream response within the configured limit", async () => {
+    const response = new Response(JSON.stringify({ ok: true }), {
+      headers: { "content-type": "application/json" },
+    });
+
+    await expect(readJsonResponseBody(response, 128)).resolves.toEqual({ ok: true });
+  });
+
+  it("rejects a chunked upstream response after the stream crosses the limit", async () => {
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"payload":"'));
+        controller.enqueue(new TextEncoder().encode("x".repeat(256)));
+        controller.close();
+      },
+    }));
+
+    await expect(readJsonResponseBody(response, 128)).rejects.toBeInstanceOf(ResponseBodyTooLargeError);
   });
 });

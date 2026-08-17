@@ -8,6 +8,7 @@
  */
 
 import { isProductionEnvironment } from "./lib/runtime";
+import { readJsonResponseBody } from "./lib/body-limit";
 
 export interface PlatformRouteCandidate {
   slug: string;
@@ -67,6 +68,7 @@ const DEFAULT_TIMEOUT_MS = 4_000;
 const DEFAULT_TOTAL_TIMEOUT_MS = 20_000;
 const MAX_TOTAL_TIMEOUT_MS = 60_000;
 const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
+const MAX_ROUTER_RESPONSE_BYTES = 256 * 1024;
 const DEFAULT_FALLBACK_CHILDREN = 4;
 const ROUTER_TOOL_NAME = "matchplane.platform.select_children";
 
@@ -163,7 +165,7 @@ export async function decidePlatformRoutes(input: {
       signal: AbortSignal.timeout(remaining ?? DEFAULT_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`router provider returned ${response.status}`);
-    const payload = await response.json() as unknown;
+    const payload = await readJsonResponseBody<unknown>(response, MAX_ROUTER_RESPONSE_BYTES);
     const providerDecision = readProviderDecision(payload, candidates);
     return {
       ...providerDecision.decision,
