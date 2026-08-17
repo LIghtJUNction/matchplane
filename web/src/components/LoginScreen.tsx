@@ -10,7 +10,7 @@ import {
 } from "../api";
 import { authClient, authFetchOptions } from "../lib/auth-client";
 import { useInterfacePreferences } from "../lib/preferences";
-import { resolveSubplatform, type SubplatformConfig } from "../subplatform";
+import { loadSubplatform, resolveSubplatform, type SubplatformConfig } from "../subplatform";
 import { PreferenceControls } from "./PreferenceControls";
 
 type AuthMethod = "password" | "email-otp" | "magic-link";
@@ -60,6 +60,15 @@ export function LoginScreen() {
     const nextPath = safeNext(params.get("next"));
     setNext(nextPath);
     setSubplatform(resolveSubplatform(nextPath));
+    // The path-only config is intentionally used for the first paint, but the
+    // capability exchange after login needs the server-owned tenant/domain
+    // scope. Hydrate the same manifest/setup data that App uses before
+    // finishSignIn runs; otherwise a successful production login would stop at
+    // "root tenant not configured" and the pending chat could not continue.
+    let cancelled = false;
+    void loadSubplatform(nextPath).then((loaded) => {
+      if (!cancelled) setSubplatform(loaded);
+    });
     void fetch("/api/auth/providers", { headers: { accept: "application/json" } })
       .then((response) => response.ok ? response.json() as Promise<{ social?: string[] }> : null)
       .then((providers) => {
@@ -67,20 +76,31 @@ export function LoginScreen() {
         setSocialProviders(["wechat", "qq", "alipay"].filter((provider): provider is SocialProvider => configured.has(provider)));
       })
       .catch(() => setSocialProviders([]));
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const finishSignIn = async () => {
+    // The user can submit before the background manifest fetch completes. Do a
+    // final synchronous-in-flow load so the capability exchange never uses the
+    // path-only placeholder config.
+    let targetSubplatform = subplatform;
+    if (isLiveMarketplaceEnabled() && role !== "platform" && !targetSubplatform.tenantId) {
+      targetSubplatform = await loadSubplatform(next);
+      setSubplatform(targetSubplatform);
+    }
     if (isLiveMarketplaceEnabled() && role !== "platform") {
-      if (!subplatform.tenantId) throw new Error("当前子平台尚未完成 root tenant 注册");
+      if (!targetSubplatform.tenantId) throw new Error("当前子平台尚未完成 root tenant 注册");
       const current = await authClient.getSession({
-        fetchOptions: authFetchOptions(subplatform.slug),
+        fetchOptions: authFetchOptions(targetSubplatform.slug),
       });
       if (current.error || !current.data) throw new Error("Better Auth 会话尚未建立");
       await establishMarketplaceSession({
-        tenantId: subplatform.tenantId,
-        domainId: subplatform.domainId,
-        subplatform: subplatform.slug,
-        platformPath: subplatform.path,
+        tenantId: targetSubplatform.tenantId,
+        domainId: targetSubplatform.domainId,
+        subplatform: targetSubplatform.slug,
+        platformPath: targetSubplatform.path,
         role,
         authUserId: current.data.user.id,
       });

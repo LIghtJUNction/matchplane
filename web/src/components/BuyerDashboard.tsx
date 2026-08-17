@@ -35,13 +35,25 @@ interface BuyerDashboardProps {
   subplatform: SubplatformConfig;
 }
 
+interface IntroductionScope {
+  tenantId: string;
+  domainId: string;
+  platformPath: string;
+  subplatform: string;
+}
+
+interface IntroductionEntry {
+  introduction: MarketplaceIntroduction;
+  scope: IntroductionScope;
+}
+
 export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform }: BuyerDashboardProps) {
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState<Set<string>>(() => readSavedItems(`matchplane.saved.${subplatform.path}`));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(() => new Set());
   const [childPlatforms, setChildPlatforms] = useState<PlatformChildSummary[]>([]);
-  const [introductions, setIntroductions] = useState<MarketplaceIntroduction[]>([]);
+  const [introductions, setIntroductions] = useState<IntroductionEntry[]>([]);
   const [contacts, setContacts] = useState<Record<string, MarketplaceContactResponse>>({});
   const [contactLoading, setContactLoading] = useState<string | null>(null);
   const isRoot = subplatform.slug === "root";
@@ -72,21 +84,54 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   }, [isRoot, subplatform.path]);
 
   const loadIntroductions = useCallback(async () => {
-    if (!subplatform.tenantId || !subplatform.domainId) return;
-    const session = await getCapability({
-      subplatform: subplatform.slug,
-      platformPath: subplatform.path,
-      tenantId: subplatform.tenantId,
-      domainId: subplatform.domainId,
-      role: "buyer",
-    });
-    if (!session) return;
-    try {
-      setIntroductions(await getMarketplaceIntroductions({ session, domainId: subplatform.domainId }));
-    } catch {
-      setIntroductions([]);
+    const scopes = new Map<string, IntroductionScope>();
+    const addScope = (scope: IntroductionScope | null) => {
+      if (!scope) return;
+      scopes.set(`${scope.tenantId}:${scope.domainId}:${scope.platformPath}`, scope);
+    };
+    if (subplatform.tenantId && subplatform.domainId) {
+      addScope({
+        tenantId: subplatform.tenantId,
+        domainId: subplatform.domainId,
+        platformPath: subplatform.path,
+        subplatform: subplatform.slug,
+      });
     }
-  }, [subplatform.domainId, subplatform.path, subplatform.slug, subplatform.tenantId]);
+    // Root chat recommendations carry the authoritative child scope. Read the
+    // inbox from those nodes as well, rather than querying only the page's
+    // domain and losing the contact handoff after a federated match.
+    for (const listing of listings) {
+      if (!listing.tenantId || !listing.domainId || !listing.platformPath) continue;
+      const pathSlug = listing.platformPath.split("/").filter(Boolean).at(-1);
+      addScope({
+        tenantId: listing.tenantId,
+        domainId: listing.domainId,
+        platformPath: listing.platformPath,
+        subplatform: listing.subplatform || pathSlug || subplatform.slug,
+      });
+    }
+    if (!scopes.size) {
+      setIntroductions([]);
+      return;
+    }
+    const entries = await Promise.all([...scopes.values()].map(async (scope): Promise<IntroductionEntry[]> => {
+      try {
+        const session = await getCapability({
+          subplatform: scope.subplatform,
+          platformPath: scope.platformPath,
+          tenantId: scope.tenantId,
+          domainId: scope.domainId,
+          role: "buyer",
+        });
+        if (!session) return [];
+        const records = await getMarketplaceIntroductions({ session, domainId: scope.domainId });
+        return records.map((introduction) => ({ introduction, scope }));
+      } catch {
+        return [];
+      }
+    }));
+    setIntroductions(entries.flat());
+  }, [listings, subplatform.domainId, subplatform.path, subplatform.slug, subplatform.tenantId]);
 
   useEffect(() => {
     void loadIntroductions();
@@ -95,15 +140,16 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
     return () => window.removeEventListener("matchplane.contact.updated", refresh);
   }, [loadIntroductions]);
 
-  const releaseContact = async (introduction: MarketplaceIntroduction) => {
-    if (!subplatform.tenantId || !subplatform.domainId || contactLoading) return;
+  const releaseContact = async (entry: IntroductionEntry) => {
+    const { introduction, scope } = entry;
+    if (contactLoading) return;
     setContactLoading(introduction.introduction_id);
     try {
       const session = await getCapability({
-        subplatform: subplatform.slug,
-        platformPath: subplatform.path,
-        tenantId: subplatform.tenantId,
-        domainId: subplatform.domainId,
+        subplatform: scope.subplatform,
+        platformPath: scope.platformPath,
+        tenantId: scope.tenantId,
+        domainId: scope.domainId,
         role: "buyer",
       });
       if (!session) {
@@ -112,7 +158,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
       }
       const response = await retrieveMarketplaceContact({
         session,
-        domainId: subplatform.domainId,
+        domainId: scope.domainId,
         introductionId: introduction.introduction_id,
       });
       setContacts((current) => ({ ...current, [introduction.introduction_id]: response }));
@@ -303,21 +349,22 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         )}
       </section>
 
-      {!isRoot && introductions.length ? (
+      {introductions.length ? (
         <section className="surface buyer-contact-inbox" aria-labelledby="buyer-contact-inbox-title">
           <SectionHeading eyebrow={copy("contactInboxEyebrow", "撮合进度")} title={copy("contactInboxTitle", "双方同意后，查看联系方式")} />
           <ol className="submission-list">
-            {introductions.map((introduction) => {
+            {introductions.map((entry) => {
+              const { introduction, scope } = entry;
               const contact = contacts[introduction.introduction_id];
               return (
                 <li key={introduction.introduction_id}>
                   <div>
                     <strong>{copy("contactRequestLabel", "一条撮合联系申请")}</strong>
-                    <small>{buyerIntroductionStatus(introduction.status, copy)}</small>
+                    <small>{buyerIntroductionStatus(introduction.status, copy)} · {scope.platformPath}</small>
                     {contact ? <div className="buyer-contact-values">{Object.entries(contact.counterpart.contact).map(([key, value]) => <span key={key}>{subplatformContactLabel(subplatform, key)}: {value}</span>)}</div> : null}
                   </div>
                   {contact ? <span className="submission-status">{copy("contactVisibleLabel", "已可联系")}</span> : introduction.supply_contact_consent_at ? (
-                    <button className="text-action" type="button" onClick={() => void releaseContact(introduction)} disabled={contactLoading === introduction.introduction_id}>
+                    <button className="text-action" type="button" onClick={() => void releaseContact(entry)} disabled={contactLoading === introduction.introduction_id}>
                       {contactLoading === introduction.introduction_id ? copy("contactReadingLabel", "读取中…") : copy("viewContactLabel", "查看联系方式")}
                     </button>
                   ) : <span className="submission-status">{copy("contactWaitingLabel", "等待供给方同意")}</span>}

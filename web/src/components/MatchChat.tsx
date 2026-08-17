@@ -272,7 +272,10 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
               })));
             }
           }
-          if (routedRecommendations.length) onRecommendations?.(routedRecommendations);
+          // A successful request with no candidates is still a new result. Clear
+          // the previous cards instead of leaving stale offers on screen and
+          // making them look like matches for the latest message.
+          onRecommendations?.(routedRecommendations);
         }
         setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
           ? {
@@ -302,7 +305,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, onNotice, onRecommendations, resizeInput, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, onNotice, onRecommendations, resizeInput, role, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
@@ -362,7 +365,7 @@ export function MatchChat({ onNotice, subplatform, role = "buyer", onRecommendat
       if (!session && !authState?.data) {
         const next = `${window.location.pathname}${window.location.search}`;
         window.sessionStorage.setItem(PENDING_CHAT_KEY, JSON.stringify({ text, next } satisfies PendingChat));
-        window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+        window.location.assign(`/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`);
         return;
       }
       setSignedIn(true);

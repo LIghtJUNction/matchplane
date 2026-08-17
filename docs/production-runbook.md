@@ -189,10 +189,12 @@ Provision the root identity before starting the web unit. Use the packaged CLI w
 values; omit the domain flags if the root should initially have no child domain:
 
 ```sh
+export MATCHPLANE_ROOT_TENANT_SLUG=your-root-slug
+export MATCHPLANE_ROOT_TENANT_NAME='Your platform name'
+export MATCHPLANE_ROOT_ADMIN_EMAIL=admin@example.com
 matchplane provision-root \
   --tenant-slug "$MATCHPLANE_ROOT_TENANT_SLUG" \
   --tenant-name "$MATCHPLANE_ROOT_TENANT_NAME" \
-  --tenant-id "$MATCHPLANE_ROOT_TENANT_ID" \
   --admin-email "$MATCHPLANE_ROOT_ADMIN_EMAIL"
 ```
 

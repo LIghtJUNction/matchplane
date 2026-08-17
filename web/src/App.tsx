@@ -86,21 +86,22 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         const requestedRole = roleFromLocation();
         const userRole = user?.role;
         const isRootManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
+        if ((requestedRole === "platform" || requestedRole === "subplatform_admin") && !user) {
+          const next = `${window.location.pathname}?role=${requestedRole}`;
+          window.location.assign(`/login?role=${requestedRole}&next=${encodeURIComponent(next)}`);
+          return;
+        }
         if (requestedRole === "platform" && !isRootManager) {
-          if (!user) {
-            const next = `${window.location.pathname}?role=platform`;
-            window.location.assign(`/login?role=platform&next=${encodeURIComponent(next)}`);
-            return;
-          }
           setRole("buyer");
           setNotice("当前账号没有根平台管理员权限");
         }
       })
       .catch(() => {
         setAuthUser(null);
-        if (roleFromLocation() === "platform") {
-          const next = `${window.location.pathname}?role=platform`;
-          window.location.assign(`/login?role=platform&next=${encodeURIComponent(next)}`);
+        const requestedRole = roleFromLocation();
+        if (requestedRole === "platform" || requestedRole === "subplatform_admin") {
+          const next = `${window.location.pathname}?role=${requestedRole}`;
+          window.location.assign(`/login?role=${requestedRole}&next=${encodeURIComponent(next)}`);
         }
       });
   }, [subplatform.slug]);

@@ -17,7 +17,10 @@ Environment=NODE_ENV=production
 Environment=HOSTNAME=127.0.0.1
 Environment=PORT=4173
 WorkingDirectory=/usr/share/matchplane/web
-Environment=MATCHPLANE_WEB_NODE=/usr/local/bin/node
+# Debian, Fedora, and Arch nodejs packages install the host binary here. The
+# container image has its own /usr/local/bin/node setting; this unit runs the
+# packaged standalone web release on the host and must not assume that layout.
+Environment=MATCHPLANE_WEB_NODE=/usr/bin/node
 # The web BFF needs only the two administrator bearer files, not the payment invoice key or
 # gateway contact-data key. The bootstrap/deployment flow mirrors these tokens into the web-only
 # secret directory with matchplane-web ownership.

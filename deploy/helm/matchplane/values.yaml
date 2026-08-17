@@ -23,7 +23,8 @@ web:
   # root-smtp-credential-ref. The payment-admin.token/gateway-admin.token keys are projected
   # separately from the payment/gateway secrets into the web BFF.
   existingSecret: matchplane-web-secrets
-  betterAuthUrl: https://matx.tech
+  # Required per deployment; keep domains out of the reusable chart defaults.
+  betterAuthUrl: ''
   trustedOrigins: ''
   rootTenantId: ''
   rootOrganizationId: ''

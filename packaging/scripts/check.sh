@@ -35,6 +35,12 @@ for service_user in relay matcher projector vector federation migration; do
   fi
 done
 
+if ! rg -q '^Environment=MATCHPLANE_WEB_NODE=/usr/bin/node$' \
+  packaging/systemd/matchplane-web.service; then
+  echo 'packaged web service must use the host nodejs path /usr/bin/node' >&2
+  exit 1
+fi
+
 if rg -n --glob '*.Dockerfile' --glob 'Dockerfile*' \
   '^FROM [^$@[:space:]]+:[^@[:space:]]+( |$)' deploy packaging; then
   echo 'container build bases must be pinned by digest' >&2
@@ -50,7 +56,7 @@ fi
 if command -v systemd-analyze >/dev/null 2>&1; then
   verify_output=$(systemd-analyze verify packaging/systemd/*.service 2>&1 || true)
   unexpected=$(printf '%s\n' "$verify_output" \
-    | grep -Ev 'Command (/usr/local/bin/node|/usr/bin/(matchplane|matchplane-[a-z-]+)) is not executable: No such file or directory' \
+    | grep -Ev 'Command (/usr/bin/node|/usr/bin/(matchplane|matchplane-[a-z-]+)) is not executable: No such file or directory' \
     || true)
   if [[ -n $unexpected ]]; then
     printf '%s\n' "$unexpected" >&2
