@@ -330,6 +330,23 @@ export interface MarketplaceContactActionInput {
   idempotency_key: string;
 }
 
+/** Input for the platform-tree router. The caller funds the routing Agent/model cost. */
+export interface PlatformMatchInput {
+  narrative: string;
+  platform_path?: string;
+  idempotency_key?: string;
+}
+
+/** Stable projection returned by the `platform.match` MCP tool. */
+export interface PlatformMatchResult {
+  requestId: string;
+  platformPath: string;
+  status: string;
+  routePlan: unknown[];
+  routing: unknown;
+  [key: string]: unknown;
+}
+
 export class MatchPlaneMcpError extends Error {
   readonly code: number;
   readonly details: unknown;
@@ -360,6 +377,18 @@ export class MatchPlaneAgentClient {
 
   async listTools(): Promise<Record<string, unknown>> {
     return this.callRpc("tools/list", undefined, undefined) as Promise<Record<string, unknown>>;
+  }
+
+  /** Route a natural-language request through the mounted platform tree. */
+  async routePlatformIntent(input: PlatformMatchInput): Promise<PlatformMatchResult> {
+    if (typeof input.narrative !== "string" || !input.narrative.trim()) {
+      throw new Error("platform.match narrative is required");
+    }
+    return this.callTool("platform.match", {
+      narrative: input.narrative,
+      ...(input.platform_path ? { platformPath: input.platform_path } : {}),
+      ...(input.idempotency_key ? { idempotency_key: input.idempotency_key } : {}),
+    }) as Promise<PlatformMatchResult>;
   }
 
   async handoff(envelope: AgentHandoff): Promise<AgentHandoffResult> {

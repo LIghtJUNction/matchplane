@@ -25,10 +25,21 @@ const client = new MatchPlaneAgentClient({
   apiKey: process.env.MATCHPLANE_AGENT_API_KEY!,
 });
 
+// The same client can first ask the platform-tree router to choose a mounted
+// marketplace. Routing and model usage remain caller-funded.
+const route = await client.routePlatformIntent({
+  narrative: "寻找适合通勤、预算明确的方案",
+  platform_path: "/",
+  idempotency_key: crypto.randomUUID(),
+});
+
+// Continue with the returned path, or use it to choose the capability scope.
+const routedPath = route.platformPath;
+
 const capability = await client.openMarketplaceSession({
   tenant_id: process.env.MATCHPLANE_TENANT_ID!,
   domain_id: process.env.MATCHPLANE_DOMAIN_ID!,
-  platform_path: process.env.MATCHPLANE_PLATFORM_PATH!,
+  platform_path: routedPath || process.env.MATCHPLANE_PLATFORM_PATH!,
   side: "demand",
 });
 

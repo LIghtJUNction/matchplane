@@ -264,7 +264,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 />
               ) : null}
               {subplatform.pluginArtifact ? (
-                <PluginHost role={role} onNotice={setNotice} subplatform={subplatform} fallback={genericWorkspace} />
+                <PluginHost
+                  role={role}
+                  onNotice={setNotice}
+                  subplatform={subplatform}
+                  listings={role === "buyer" ? listings : []}
+                  onOpenListing={setListing}
+                  fallback={genericWorkspace}
+                />
               ) : genericWorkspace}
             </motion.div>
           </AnimatePresence>

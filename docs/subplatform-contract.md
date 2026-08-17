@@ -372,15 +372,23 @@ release; it creates a new immutable version and requires an explicit activation.
   hosts that release in a `sandbox="allow-scripts"` iframe. Because this sandbox intentionally
   gives the frame an opaque `null` origin, the host uses a wildcard `postMessage` target but
   accepts messages only from the exact iframe window and its host-generated, per-iframe
-  `contextToken`. The host sends only a versioned `matchplane.plugin/v1` context message and
-  accepts bounded `chat.open`, `listing.select`, `listing.submit` and `navigation` requests.
-  Listing submissions include a `requestId` and receive a matching `listing.submit.result`. The
-  host validates the seller role, Better Auth session, active
+  `contextToken`. The host sends a versioned `matchplane.plugin/v1` context message and a bounded
+  `match.results` snapshot whenever the host-owned recommendation set changes. The plugin may
+  request `chat.open`, `listing.open`, `listing.select`, `listing.submit` and `navigation`; a
+  `listing.open` request contains only a result id, and the host resolves it against the last
+  snapshot before opening the host-owned detail/contact flow. Listing submissions include a
+  `requestId` and receive a matching `listing.submit.result`. The host validates the seller role, Better Auth session, active
   tenant/domain/schema and bounded JSON before calling the marketplace API. The artifact endpoint
   resolves host-local files under
   `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT`, checks the active build digest, rejects traversal and
   symlink escapes, and applies a restrictive CSP. It never fetches a plugin-supplied URL or runs
   plugin server code.
+- The result bridge is intentionally one-way for data and two-way for selection: the host sends
+  `{ protocol: "matchplane.plugin/v1", type: "match.results", version: 1, contextToken,
+  payload: { listings: [...] } }`, capped at 100 host-owned public result cards. The plugin sends
+  `{ type: "listing.open", contextToken, payload: { listingId } }`; the host ignores ids that
+  were not present in the current snapshot. This keeps vertical rendering in the plugin while
+  keeping scope, contact consent and payment actions in the root.
 - A path is activated only after manifest validation, API compatibility, CSP/resource checks,
   package scan, and an operator audit entry. Disable/revoke removes the path while preserving the
   root account and history.

@@ -28,6 +28,33 @@ function fakeFetch() {
 }
 
 describe("MatchPlane external Agent client", () => {
+  it("routes a caller-funded narrative through the platform tree", async () => {
+    const fake = fakeFetch();
+    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
+
+    const result = await client.routePlatformIntent({
+      narrative: "帮我找到适合通勤的方案",
+      platform_path: "/used-car",
+      idempotency_key: "route-1",
+    });
+
+    expect(result.ok).toBe(true);
+    const body = JSON.parse(String(fake.calls[0]?.init?.body)) as {
+      params?: { name?: string; arguments?: Record<string, unknown> };
+    };
+    expect(body.params?.name).toBe("platform.match");
+    expect(body.params?.arguments?.narrative).toBe("帮我找到适合通勤的方案");
+    expect(body.params?.arguments?.platformPath).toBe("/used-car");
+    expect(body.params?.arguments?.idempotency_key).toBe("route-1");
+  });
+
+  it("rejects an empty platform route before contacting the gateway", async () => {
+    const fake = fakeFetch();
+    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
+    await expect(client.routePlatformIntent({ narrative: "   " })).rejects.toThrow("narrative is required");
+    expect(fake.calls).toHaveLength(0);
+  });
+
   it("uses one MCP client shape for buyer and seller capability exchange", async () => {
     const fake = fakeFetch();
     const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });

@@ -7,13 +7,17 @@ import { ExternalLink, ShieldCheck } from "lucide-react";
 import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing, type ContactExchange } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
-import type { WorkspaceRole } from "../types";
+import type { AssetListing, WorkspaceRole } from "../types";
 
 interface PluginHostProps {
   subplatform: SubplatformConfig;
   role: WorkspaceRole;
   onNotice: (message: string) => void;
   fallback: ReactNode;
+  /** Public result cards owned by the host. The iframe receives a bounded snapshot only. */
+  listings?: AssetListing[];
+  /** Open a result in the host-owned detail sheet and contact flow. */
+  onOpenListing?: (listing: AssetListing) => void;
 }
 
 /**
@@ -22,15 +26,34 @@ interface PluginHostProps {
  * but it never receives a session token or payment authority. Contact updates are validated by
  * the host and forwarded through the same Better Auth session bridge as the generic workspace.
  */
-export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHostProps) {
+export function PluginHost({ subplatform, role, onNotice, fallback, listings = [], onOpenListing }: PluginHostProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const contextTokenRef = useRef<string | null>(null);
+  const pluginReadyRef = useRef(false);
+  const listingsRef = useRef<AssetListing[]>(listings);
   const [failed, setFailed] = useState(false);
   const artifact = subplatform.pluginArtifact;
   const copy = (key: string, fallbackText: string) => subplatformCopy(subplatform, key, fallbackText);
 
+  listingsRef.current = listings;
+
+  const postResults = () => {
+    const frame = frameRef.current?.contentWindow;
+    const contextToken = contextTokenRef.current;
+    if (!pluginReadyRef.current || !frame || !contextToken) return;
+    frame.postMessage({
+      protocol: "matchplane.plugin/v1",
+      type: "match.results",
+      version: 1,
+      contextToken,
+      payload: { listings: listingsRef.current.slice(0, 100) },
+    }, "*");
+  };
+
   const postContext = () => {
-    frameRef.current?.contentWindow?.postMessage({
+    const frame = frameRef.current?.contentWindow;
+    if (!frame) return;
+    frame.postMessage({
       protocol: "matchplane.plugin/v1",
       type: "platform.context",
       version: 1,
@@ -44,13 +67,18 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
         pricing: pricingFor(subplatform),
         assetSchema: subplatform.assetSchema,
         ui: subplatform.ui,
-        capabilities: ["chat.open", "listing.select", "listing.submit", "contact.update", "navigation"],
+        capabilities: ["chat.open", "match.results", "listing.open", "listing.select", "listing.submit", "contact.update", "navigation"],
       },
     }, "*");
+    // onLoad can precede plugin.ready. Messages are ordered, so the plugin can
+    // consume the context before the result snapshot in either case.
+    pluginReadyRef.current = true;
+    postResults();
   };
 
   useEffect(() => {
     contextTokenRef.current = createContextToken();
+    pluginReadyRef.current = false;
     const artifactOrigin = new URL(artifact?.url ?? window.location.href, window.location.href).origin;
     // `sandbox="allow-scripts"` deliberately gives the plugin an opaque `null` origin. Keep
     // that isolation instead of adding `allow-same-origin`; source + contextToken are the
@@ -70,6 +98,15 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
         onNotice(copy("pluginChatOpenedNotice", "已打开共享 AI 撮合输入框"));
       } else if (event.data.type === "listing.select") {
         onNotice(copy("pluginSelectionNotice", "插件已提交供给选择，平台会继续按权限撮合"));
+      } else if (event.data.type === "listing.open") {
+        const payload = isRecord(event.data.payload) ? event.data.payload : null;
+        const listingId = payload && typeof payload.listingId === "string" ? payload.listingId : null;
+        const selected = listingId ? listingsRef.current.find((item) => item.id === listingId) : null;
+        if (!selected) {
+          onNotice(copy("pluginListingUnavailableNotice", "这条供给已不在当前匹配结果中，请重新描述需求"));
+        } else if (onOpenListing) {
+          onOpenListing(selected);
+        }
       } else if (event.data.type === "listing.submit") {
         void submitPluginListing(event.data, {
           frame: frameRef.current?.contentWindow,
@@ -93,8 +130,15 @@ export function PluginHost({ subplatform, role, onNotice, fallback }: PluginHost
       }
     };
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [onNotice, role, subplatform]);
+    return () => {
+      pluginReadyRef.current = false;
+      window.removeEventListener("message", onMessage);
+    };
+  }, [onNotice, onOpenListing, role, subplatform]);
+
+  useEffect(() => {
+    postResults();
+  }, [listings]);
 
   if (!artifact) return null;
 
