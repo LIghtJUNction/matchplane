@@ -5,9 +5,14 @@
 !.env.example
 target
 dist
+node_modules
 web/node_modules
 web/.next
 web/out
+.turbo
+.playwright-cli
+output
+ci-artifacts-*
 subplatforms/auto/node_modules
 deploy/compose/data
 **/*.pkg.tar.*
