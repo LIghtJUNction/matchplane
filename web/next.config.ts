@@ -8,7 +8,11 @@ const nextConfig: NextConfig = {
   agentRules: false,
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   turbopack: {
-    root: path.resolve(__dirname),
+    // Bun's isolated workspace linker stores packages in the monorepo root and
+    // links them into `web/node_modules`. Turbopack must therefore use the
+    // monorepo root as its filesystem boundary, otherwise Next 16 rejects the
+    // linked `next/package.json` as being outside the workspace.
+    root: path.resolve(__dirname, ".."),
   },
   // Keep API URLs canonical. Better Auth's router intentionally owns the
   // `/api/auth/*` path and treats a trailing slash as a distinct endpoint;
