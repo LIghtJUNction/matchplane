@@ -1,0 +1,4 @@
+interface:
+  display_name: "MatchPlane UI Review"
+  short_description: "Design and audit MatchPlane UI without AI-template noise."
+  default_prompt: "Use the MatchPlane UI skill to build or review a clean, usable, mobile-first interface with Anthropic-art restraint and Apple-design interaction rules."
