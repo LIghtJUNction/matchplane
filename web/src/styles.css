@@ -3632,6 +3632,26 @@ body,
 .submission-status { padding: 0.35rem 0.55rem; border-radius: 999px; background: rgba(120, 140, 93, 0.14); color: var(--olive); font-size: 0.68rem; white-space: nowrap; }
 .seller-empty-state { min-height: 6rem; display: grid; place-items: center; gap: 0.45rem; color: var(--muted); text-align: center; }
 .seller-empty-state p { font-size: 0.74rem; }
+.seller-discovery-intro { max-width: 42rem; margin: -0.35rem 0 1rem; color: var(--muted); font-size: 0.74rem; line-height: 1.6; }
+.seller-demand-offers { display: grid; gap: 0.7rem; }
+.seller-demand-offer { padding: 0.85rem 0.9rem; border: 1px solid var(--line); border-radius: 0.95rem; background: var(--paper); }
+.seller-demand-offer-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.seller-demand-offer-heading > div { min-width: 0; }
+.seller-demand-offer-heading strong,
+.seller-demand-offer-heading small { display: block; }
+.seller-demand-offer-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; }
+.seller-demand-offer-heading small { margin-top: 0.22rem; color: var(--muted); font-size: 0.68rem; }
+.seller-demand-offer-heading .text-action,
+.seller-demand-list .text-action { display: inline-flex; align-items: center; gap: 0.28rem; flex: 0 0 auto; }
+.seller-demand-list { margin: 0.8rem 0 0; padding: 0; display: grid; list-style: none; }
+.seller-demand-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.72rem 0; border-top: 1px solid var(--line); }
+.seller-demand-list li > div { min-width: 0; }
+.seller-demand-list strong,
+.seller-demand-list small { display: block; }
+.seller-demand-list strong { overflow: hidden; color: var(--ink); font-size: 0.76rem; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.seller-demand-list small { margin-top: 0.2rem; color: var(--muted); font-size: 0.67rem; line-height: 1.4; }
+.seller-demand-error { margin: 0.75rem 0 0; color: #8c3e2a; font-size: 0.72rem; line-height: 1.45; }
+.seller-demand-empty { min-height: 4.5rem; }
 .email-enabled { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 0.5rem !important; color: var(--muted); font-size: 0.74rem; }
 .email-enabled input { width: 1rem; height: 1rem; accent-color: var(--olive); }
 .gateway-empty, .commission-empty, .finance-empty { min-height: 9rem; display: grid; place-items: center; gap: 0.45rem; color: var(--muted); text-align: center; }
