@@ -36,11 +36,19 @@
           "narrative": { "type": "string", "minLength": 1, "maxLength": 10000 },
           "attributes": { "type": "object" },
           "terms": { "type": "object" },
+          "supply_discovery_enabled": { "type": "boolean", "default": false, "description": "Explicitly allow a contact-free demand summary to be ranked by supply-side Agents." },
+          "supply_discovery_expires_at": { "type": ["string", "null"], "format": "date-time" },
           "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 240 },
           "expires_at": { "type": ["string", "null"], "format": "date-time" }
         }
       },
-      "read": { "method": "GET", "path": "/v1/marketplace/intents/{intent_id}" }
+      "read": { "method": "GET", "path": "/v1/marketplace/intents/{intent_id}" },
+      "discoveryUpdate": {
+        "method": "PATCH",
+        "path": "/v1/marketplace/intents/{intent_id}/discovery",
+        "required": ["tenant_id", "domain_id", "participant_id", "enabled"],
+        "description": "Owner-only enable/revoke for contact-free supply discovery. Revoking never revokes an already consented contact exchange."
+      }
     },
     "offer": {
       "create": {
@@ -61,6 +69,7 @@
         }
       },
       "match": { "method": "POST", "path": "/v1/marketplace/intents/{intent_id}/matches" },
+      "demandMatch": { "method": "POST", "path": "/v1/marketplace/offers/{offer_id}/demand-matches", "description": "Supply-side ranking of explicitly discoverable demand summaries; participant IDs and contacts are omitted." },
       "activate": { "method": "POST", "path": "/v1/admin/marketplace/offers/{offer_id}/activate" }
     },
     "introduction": {
@@ -109,12 +118,15 @@
     "Demand and supply capabilities are kernel sides; buyer/seller terminology remains a vertical adapter concern.",
     "Caller IDs and idempotency keys are replay-safe; a changed payload returns a conflict.",
     "Agent scores and reasons are advisory and cannot grant contact, payment, or transaction authority.",
+    "Supply discovery is opt-in per demand intent and returns an anonymous summary only; contact still requires the demand introduction and supply consent transitions.",
     "A vertical may implement retrieval with its own MCP/Skill and any vector database, or use the deterministic fallback."
   ],
   "mcpTools": [
     "marketplace.intent.create",
     "marketplace.offer.create",
     "marketplace.offer.match",
+    "marketplace.demand.match",
+    "marketplace.intent.discovery.update",
     "marketplace.introduction.create",
     "marketplace.introductions.list",
     "marketplace.introduction.contact.request",

@@ -16,12 +16,19 @@ export async function readJsonBody<T>(request: Request, maximumBytes: number): P
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maximumBytes) throw new RequestBodyTooLargeError(maximumBytes);
-      chunks.push(value);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maximumBytes) throw new RequestBodyTooLargeError(maximumBytes);
+        chunks.push(value);
+      }
+    } catch (error) {
+      // Stop a chunked/slow request as soon as its bounded budget is exceeded. Releasing the
+      // reader alone leaves an unread stream attached to the request in some runtimes.
+      await reader.cancel().catch(() => undefined);
+      throw error;
     }
   } finally {
     reader.releaseLock();

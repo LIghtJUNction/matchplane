@@ -2,16 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ExternalLink, ShieldCheck } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 
 import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing, type ContactExchange } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
+import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
 import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
 import type { AssetListing, WorkspaceRole } from "../types";
 
 interface PluginHostProps {
   subplatform: SubplatformConfig;
   role: WorkspaceRole;
+  theme: InterfaceTheme;
+  locale: InterfaceLocale;
   onNotice: (message: string) => void;
   fallback: ReactNode;
   /** Public result cards owned by the host. The iframe receives a bounded snapshot only. */
@@ -26,7 +29,7 @@ interface PluginHostProps {
  * but it never receives a session token or payment authority. Contact updates are validated by
  * the host and forwarded through the same Better Auth session bridge as the generic workspace.
  */
-export function PluginHost({ subplatform, role, onNotice, fallback, listings = [], onOpenListing }: PluginHostProps) {
+export function PluginHost({ subplatform, role, theme, locale, onNotice, fallback, listings = [], onOpenListing }: PluginHostProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const contextTokenRef = useRef<string | null>(null);
   const pluginReadyRef = useRef(false);
@@ -61,6 +64,8 @@ export function PluginHost({ subplatform, role, onNotice, fallback, listings = [
         path: subplatform.path,
         platform: subplatform.slug,
         role,
+        theme,
+        locale,
         contextToken: contextTokenRef.current,
         currency: subplatform.currency,
         currencyScale: subplatform.currencyScale,
@@ -134,7 +139,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback, listings = [
       pluginReadyRef.current = false;
       window.removeEventListener("message", onMessage);
     };
-  }, [onNotice, onOpenListing, role, subplatform]);
+  }, [locale, onNotice, onOpenListing, role, subplatform, theme]);
 
   useEffect(() => {
     postResults();
@@ -146,8 +151,7 @@ export function PluginHost({ subplatform, role, onNotice, fallback, listings = [
     <div className="plugin-workspace">
       <section className="plugin-host" aria-label={`${subplatform.brandName} 插件界面`}>
         <div className="plugin-host-bar">
-          <span><ShieldCheck size={15} aria-hidden="true" />{copy("verifiedPluginLabel", "已验证静态插件")}</span>
-          <small>{artifact.digest.slice(0, 12)}…</small>
+          <span>{subplatform.brandName}</span>
           <a href={artifact.url} target="_blank" rel="noreferrer">
             <ExternalLink size={14} aria-hidden="true" />{copy("openPluginLabel", "独立打开")}
           </a>

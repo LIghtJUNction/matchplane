@@ -1,8 +1,9 @@
 import { betterAuth } from "better-auth";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { Pool } from "pg";
 import { apiKey } from "@better-auth/api-key";
 import { oauthProvider } from "@better-auth/oauth-provider";
+import { passkey } from "@better-auth/passkey";
 import type { GenericOAuthConfig } from "better-auth/plugins";
 import {
   admin as adminPlugin,
@@ -11,6 +12,8 @@ import {
   jwt,
   magicLink,
   organization,
+  getOrgAdapter,
+  phoneNumber,
 } from "better-auth/plugins";
 
 import {
@@ -24,6 +27,8 @@ import {
   subplatformModerator,
 } from "./permissions";
 import { sendConfiguredAuthEmail } from "./mail";
+import { sendConfiguredPhoneOtp } from "./sms";
+import { isProductionEnvironment } from "./runtime";
 
 const database = new Pool({
   connectionString: process.env.MATCHPLANE_DATABASE_URL ?? process.env.DATABASE_URL,
@@ -34,18 +39,20 @@ const database = new Pool({
 // Better Auth APIs for credentials, sessions, roles, and API-key verification.
 export const authDatabase = database;
 
-const baseURL = (
-  process.env.BETTER_AUTH_URL ??
-  process.env.NEXT_PUBLIC_BETTER_AUTH_URL ??
-  "http://localhost:4173"
-).trim().replace(/\/$/, "");
+const configuredBaseURL = process.env.BETTER_AUTH_URL?.trim()
+  || process.env.NEXT_PUBLIC_BETTER_AUTH_URL?.trim()
+  || "http://localhost:4173";
+const baseURL = configuredBaseURL.replace(/\/$/, "");
 
 const configuredRootAdminEmail = process.env.MATCHPLANE_ROOT_ADMIN_EMAIL?.trim().toLowerCase();
 const configuredSecret = process.env.BETTER_AUTH_SECRET?.trim();
 const isProductionBuild = process.env.NEXT_PHASE === "phase-production-build";
 const secret = configuredSecret ?? (isProductionBuild ? randomBytes(32).toString("base64url") : undefined);
 const trustedOrigins = parseTrustedOrigins(baseURL, process.env.BETTER_AUTH_TRUSTED_ORIGINS);
-const isProductionRuntime = process.env.NODE_ENV === "production" && process.env.MATCHPLANE_ENVIRONMENT === "production";
+// MatchPlane's explicit deployment profile takes precedence over Next.js' build mode. Local
+// Compose intentionally uses NODE_ENV=production for an optimized bundle while retaining the
+// development profile and its local-only defaults.
+const isProductionRuntime = isProductionEnvironment();
 // Local Compose and test installations need a way to inspect the administrator workspace
 // before an SMTP route exists. This switch is deliberately explicit and environment-gated:
 // production always keeps Better Auth email verification enabled, even if an operator
@@ -203,6 +210,23 @@ export const auth = betterAuth({
           html: `<p>你的 MatchPlane 登录验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:0.3em">${escapeHtml(data.otp)}</p><p>验证码 5 分钟内有效，请勿转发给他人。</p>`,
         }),
     }),
+    phoneNumber({
+      otpLength: 6,
+      expiresIn: 5 * 60,
+      allowedAttempts: 3,
+      requireVerification: true,
+      phoneNumberValidator: (value) => /^\+[1-9]\d{7,14}$/.test(value),
+      sendOTP: sendConfiguredPhoneOtp,
+      signUpOnVerification: {
+        getTempEmail: (phoneNumber) => `phone-${createHash("sha256").update(phoneNumber).digest("hex").slice(0, 32)}@phone.matchplane.invalid`,
+        getTempName: (phoneNumber) => phoneNumber,
+      },
+    }),
+    passkey({
+      rpName: "MatchPlane",
+      rpID: new URL(baseURL).hostname,
+      origin: baseURL,
+    }),
     magicLink({
       expiresIn: 5 * 60,
       storeToken: "hashed",
@@ -283,13 +307,14 @@ export const auth = betterAuth({
     user: {
       create: {
         before: async (user) => {
+          const devFirstAccount = await shouldBootstrapDevelopmentAccount();
           if (
-            !configuredRootAdminEmail ||
-            user.email.toLowerCase() !== configuredRootAdminEmail ||
-            (user.emailVerified !== true && !allowDevAuthBootstrap)
+            (!configuredRootAdminEmail || user.email.toLowerCase() !== configuredRootAdminEmail)
+            && !devFirstAccount
           ) {
             return;
           }
+          if (user.emailVerified !== true && !allowDevAuthBootstrap) return;
           return { data: { ...user, role: "rootSuperAdmin" } };
         },
       },
@@ -317,6 +342,50 @@ export const auth = betterAuth({
     },
   },
 });
+
+/**
+ * Apply a previously verified, one-time operator invite without pretending that the invitee is
+ * already an administrator. The database adapter is still Better Auth's own adapter; this
+ * helper is kept server-only and is never exposed to browser callers directly.
+ */
+export async function applyPlatformAdminInviteRole(input: {
+  userId: string;
+  organizationId: string;
+  role: "rootAdmin" | "subplatform_admin";
+}): Promise<{ userId: string; organizationId: string; role: string }> {
+  const context = await auth.$context;
+  const user = await context.internalAdapter.findUserById(input.userId);
+  if (!user) throw new Error("invitee account no longer exists");
+  const userWithRole = user as typeof user & { role?: string | null };
+
+  if (input.role === "rootAdmin") {
+    if (userWithRole.role !== "rootSuperAdmin") {
+      await context.internalAdapter.updateUser(input.userId, { role: "rootAdmin" });
+    }
+    return { userId: input.userId, organizationId: input.organizationId, role: userWithRole.role === "rootSuperAdmin" ? "rootSuperAdmin" : "rootAdmin" };
+  }
+
+  // The plugin context returned by this Better Auth build is structurally compatible with
+  // AuthContext, but its generic options are intentionally narrower. Keep the cast at this
+  // server-only integration boundary rather than leaking Better Auth internals into routes.
+  const organizationAdapter = getOrgAdapter(context as never);
+  const member = await organizationAdapter.findMemberByOrgId({
+    userId: input.userId,
+    organizationId: input.organizationId,
+  });
+  if (!member) {
+    await organizationAdapter.createMember({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      role: "admin",
+    });
+    return { userId: input.userId, organizationId: input.organizationId, role: "admin" };
+  }
+  if (member.role !== "owner" && member.role !== "admin") {
+    await organizationAdapter.updateMember(member.id, "admin");
+  }
+  return { userId: input.userId, organizationId: input.organizationId, role: member.role === "owner" ? "owner" : "admin" };
+}
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) =>
@@ -363,50 +432,92 @@ export function configuredOAuthProviderIds(): string[] {
   return configuredSocialProviders.map((provider) => provider.providerId);
 }
 
+/**
+ * The national network identity provider is deliberately separate from the
+ * fallback/social list.  It is promoted by the login UI only when a complete
+ * operator-approved adapter is configured; an unset adapter keeps the normal
+ * login screen unchanged.
+ */
+export function configuredPrimaryOAuthProviderIds(): string[] {
+  return configuredSocialProviders
+    .filter((provider) => provider.providerId === "national_identity")
+    .map((provider) => provider.providerId);
+}
+
+export function configuredFallbackOAuthProviderIds(): string[] {
+  return configuredSocialProviders
+    .filter((provider) => provider.providerId !== "national_identity")
+    .map((provider) => provider.providerId);
+}
+
 function configuredOAuthProviders(): GenericOAuthConfig[] {
   const definitions = [
-    { providerId: "wechat", envKey: "WECHAT" },
-    { providerId: "qq", envKey: "QQ" },
-    { providerId: "alipay", envKey: "ALIPAY" },
+    { providerId: "national_identity", envKey: "NATIONAL_IDENTITY", defaultScopes: ["openid"] },
+    { providerId: "google", envKey: "GOOGLE", defaultScopes: ["openid", "profile", "email"] },
+    { providerId: "wechat", envKey: "WECHAT", defaultScopes: ["openid", "profile", "email"] },
+    { providerId: "qq", envKey: "QQ", defaultScopes: ["openid", "profile", "email"] },
+    { providerId: "alipay", envKey: "ALIPAY", defaultScopes: ["openid", "profile", "email"] },
   ] as const;
 
-  return definitions.flatMap(({ providerId, envKey }) => {
+  return definitions.flatMap(({ providerId, envKey, defaultScopes }) => {
     const prefix = `MATCHPLANE_${envKey}_OAUTH_`;
     const clientId = process.env[`${prefix}CLIENT_ID`]?.trim();
     const clientSecret = process.env[`${prefix}CLIENT_SECRET`]?.trim();
+    // Some approved identity gateways publish OIDC discovery, while others
+    // provide a fixed authorization/token/userinfo contract.  Never invent a
+    // public endpoint here: operators must supply the URLs from their signed
+    // application-access agreement or official SDK gateway.
+    const discoveryUrl = safeOAuthUrl(process.env[`${prefix}DISCOVERY_URL`]);
     const authorizationUrl = safeOAuthUrl(process.env[`${prefix}AUTHORIZATION_URL`]);
     const tokenUrl = safeOAuthUrl(process.env[`${prefix}TOKEN_URL`]);
     const userInfoUrl = safeOAuthUrl(process.env[`${prefix}USERINFO_URL`]);
-    if (!clientId || !clientSecret || !authorizationUrl || !tokenUrl || !userInfoUrl) {
-      const anyConfigured = [clientId, clientSecret, authorizationUrl, tokenUrl, userInfoUrl].some(Boolean);
+    const hasEndpointContract = Boolean(discoveryUrl || (authorizationUrl && tokenUrl && userInfoUrl));
+    if (!clientId || !clientSecret || !hasEndpointContract) {
+      const anyConfigured = [clientId, clientSecret, discoveryUrl, authorizationUrl, tokenUrl, userInfoUrl].some(Boolean);
       if (anyConfigured) console.warn(`${providerId} OAuth is not enabled: complete ${prefix} configuration is required`);
       return [];
     }
 
     return [{
       providerId,
+      name: providerId === "national_identity" ? "国家网络身份认证" : providerId,
       clientId,
       clientSecret,
+      ...(discoveryUrl ? { discoveryUrl, requireIdTokenVerification: true } : {
+        authorizationUrl,
+        tokenUrl,
+        userInfoUrl,
+      }),
       accountSubject: ({ profile }) => {
-        const subject = firstProfileString(profile, ["sub", "id", "openid", "unionid", "user_id", "uid"]);
+        const subject = firstProfileString(profile, providerId === "national_identity"
+          ? ["sub", "id", "network_id", "net_id", "user_id", "uid", "openid"]
+          : ["sub", "id", "openid", "unionid", "user_id", "uid"]);
         if (!subject) throw new Error(`${providerId} OAuth profile has no stable subject`);
-        return subject;
+        // The national service's subject is an opaque network identifier, but
+        // hashing it before persisting still keeps raw identity material out of
+        // the Better Auth account table while preserving stable linking.
+        return providerId === "national_identity" ? opaqueIdentitySubject(subject) : subject;
       },
-      authorizationUrl,
-      tokenUrl,
-      userInfoUrl,
-      scopes: parseOAuthScopes(process.env[`${prefix}SCOPES`]),
+      scopes: parseOAuthScopes(process.env[`${prefix}SCOPES`], defaultScopes),
       mapProfileToUser: (profile: Record<string, unknown>) => {
-        const subject = firstProfileString(profile, ["sub", "id", "openid", "unionid", "user_id", "uid"]);
-        const email = firstProfileString(profile, ["email", "email_address"])
-          ?? `${providerId}.${subject || "account"}@oauth.matchplane.invalid`;
+        const subject = firstProfileString(profile, providerId === "national_identity"
+          ? ["sub", "id", "network_id", "net_id", "user_id", "uid", "openid"]
+          : ["sub", "id", "openid", "unionid", "user_id", "uid"]);
+        const email = providerId === "national_identity"
+          ? `national-${opaqueIdentitySubject(subject || "account")}@identity.matchplane.invalid`
+          : firstProfileString(profile, ["email", "email_address"])
+            ?? `${providerId}.${subject || "account"}@oauth.matchplane.invalid`;
         return {
-          name: firstProfileString(profile, ["name", "nickname", "nick_name"]) ?? `${providerId} 用户`,
+          name: firstProfileString(profile, ["name", "nickname", "nick_name"]) ?? (providerId === "national_identity" ? "网络身份用户" : `${providerId} 用户`),
           email,
           // Never treat the mere presence of an email field as proof that the provider
           // verified it.  This keeps an unverified social profile from becoming the
           // configured root-admin identity or silently linking to a password account.
-          emailVerified: firstProfileBoolean(profile, ["email_verified", "emailVerified", "verified_email"]),
+          // The national provider normally does not return an email at all; its
+          // synthetic address is an internal Better Auth key, not a contact route.
+          emailVerified: providerId === "national_identity"
+            ? false
+            : firstProfileBoolean(profile, ["email_verified", "emailVerified", "verified_email"]),
           image: firstProfileString(profile, ["avatar", "avatar_url", "headimgurl", "picture"]),
         };
       },
@@ -426,12 +537,16 @@ function safeOAuthUrl(value: string | undefined): string | undefined {
   }
 }
 
-function parseOAuthScopes(value: string | undefined): string[] {
-  const scopes = (value ?? "openid,profile,email")
+function parseOAuthScopes(value: string | undefined, defaults: readonly string[] = ["openid", "profile", "email"]): string[] {
+  const scopes = (value ?? defaults.join(","))
     .split(",")
     .map((scope) => scope.trim())
     .filter((scope) => /^[a-zA-Z0-9._:-]{1,64}$/.test(scope));
   return scopes.length ? [...new Set(scopes)] : ["openid"];
+}
+
+function opaqueIdentitySubject(value: string): string {
+  return createHash("sha256").update(`matchplane:national-identity:${value}`).digest("hex");
 }
 
 function firstProfileString(profile: Record<string, unknown>, keys: string[]): string | undefined {
@@ -450,4 +565,25 @@ function firstProfileBoolean(profile: Record<string, unknown>, keys: string[]): 
     if (typeof value === "string" && /^(true|1|yes)$/i.test(value.trim())) return true;
   }
   return false;
+}
+
+/**
+ * Local Compose can be inspected before SMTP is configured.  In that explicitly enabled
+ * development mode only, the first account becomes the root administrator so the operator can
+ * open the workspace and finish tenant setup.  Production never enables this branch: it requires
+ * MATCHPLANE_ROOT_ADMIN_EMAIL plus normal Better Auth verification.
+ */
+async function shouldBootstrapDevelopmentAccount(): Promise<boolean> {
+  if (!allowDevAuthBootstrap || configuredRootAdminEmail) return false;
+  try {
+    const result = await authDatabase.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM "user"
+        WHERE role = ANY($1::text[])`,
+      [["rootSuperAdmin", "rootAdmin"]],
+    );
+    return Number.parseInt(result.rows[0]?.count ?? "1", 10) === 0;
+  } catch {
+    return false;
+  }
 }

@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { MailPlus, ShieldCheck, UserMinus, Users } from "lucide-react";
+import { Globe2, MailPlus, ShieldCheck, UserMinus, Users } from "lucide-react";
 
 import {
   createPlatformApiKey,
   createPlatformOidcClient,
+  activateFederationBinding,
+  createFederationInvite,
+  getFederationBindings,
+  getPlatformDomains,
   getPlatformAdministrators,
   getPlatformApiKeys,
   getPlatformMembers,
@@ -11,6 +15,8 @@ import {
   invitePlatformMember,
   removePlatformMember,
   revokePlatformApiKey,
+  revokeFederationBinding,
+  probeFederationBinding,
   updatePlatformMember,
   updatePlatformApiKey,
   updatePlatformOidcClient,
@@ -20,6 +26,7 @@ import {
   type PlatformOidcClientRecord,
   type PlatformMemberDirectory,
   type PlatformMemberRecord,
+  type FederationBindingRecord,
   type SubplatformOrganizationRecord,
 } from "../api";
 
@@ -53,6 +60,13 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
   const [oidcName, setOidcName] = useState("");
   const [oidcRedirectUri, setOidcRedirectUri] = useState("");
   const [newOidcSecret, setNewOidcSecret] = useState<string | null>(null);
+  const [federationBindings, setFederationBindings] = useState<FederationBindingRecord[]>([]);
+  const [federationDomains, setFederationDomains] = useState<Array<{ id: string; slug: string; name: string }>>([]);
+  const [federationDomainId, setFederationDomainId] = useState("");
+  const [federationExpiresHours, setFederationExpiresHours] = useState("24");
+  const [federationTokenEnv, setFederationTokenEnv] = useState<Record<string, string>>({});
+  const [newFederationInvite, setNewFederationInvite] = useState<{ token: string; url: string; expiresAt: string } | null>(null);
+  const [federationLoading, setFederationLoading] = useState(false);
 
   const selectedOrganization = useMemo(
     () => organizations.find((organization) => organization.id === organizationId) ?? null,
@@ -88,6 +102,22 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
       .then((next) => { if (mounted) setOidcClients(next); })
       .catch((error) => { if (mounted) onNotice(error instanceof Error ? error.message : "OIDC 客户端列表读取失败"); })
       .finally(() => { if (mounted) setOidcLoading(false); });
+    return () => { mounted = false; };
+  }, [onNotice, rootRole]);
+
+  useEffect(() => {
+    if (rootRole !== "rootSuperAdmin" && rootRole !== "rootAdmin") return;
+    let mounted = true;
+    setFederationLoading(true);
+    void Promise.all([getFederationBindings(), getPlatformDomains()])
+      .then(([bindings, domains]) => {
+        if (!mounted) return;
+        setFederationBindings(bindings);
+        setFederationDomains(domains);
+        setFederationDomainId((current) => current || domains[0]?.id || "");
+      })
+      .catch((error) => { if (mounted) onNotice(error instanceof Error ? error.message : "联邦节点列表读取失败"); })
+      .finally(() => { if (mounted) setFederationLoading(false); });
     return () => { mounted = false; };
   }, [onNotice, rootRole]);
 
@@ -192,7 +222,15 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
         name: apiKeyName.trim(),
         ...(apiKeySide === "none" ? {} : {
           agentSide: apiKeySide,
-          permissions: { marketplace: ["read", "write"], agent: ["handoff"] },
+          // The hosted platform router is a read-only tree lookup. Keep it explicit alongside the
+          // marketplace write capability so the generated key can run the documented buyer/seller
+          // flow without granting configuration or member-management actions.
+          permissions: {
+            platform: ["read"],
+            retrieval: ["query"],
+            marketplace: ["read", "write"],
+            agent: ["handoff", "tool"],
+          },
         }),
       });
       setApiKeyName("");
@@ -271,6 +309,75 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
     }
   };
 
+  const refreshFederation = async () => {
+    setFederationBindings(await getFederationBindings());
+  };
+
+  const issueFederationInvite = async () => {
+    if (!federationDomainId) {
+      onNotice("请先创建并选择一个启用中的 domain");
+      return;
+    }
+    setFederationLoading(true);
+    try {
+      const invite = await createFederationInvite({
+        domainId: federationDomainId,
+        ...(selectedOrganization && !selectedOrganization.isRoot ? { parentOrganizationId: selectedOrganization.id } : {}),
+        expiresInHours: Math.max(1, Math.min(168, Number.parseInt(federationExpiresHours, 10) || 24)),
+      });
+      setNewFederationInvite({ token: invite.enrollmentToken, url: invite.enrollmentUrl, expiresAt: invite.expiresAt });
+      await refreshFederation();
+      onNotice("联邦邀请已创建；token 只显示这一次");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "联邦邀请创建失败");
+    } finally {
+      setFederationLoading(false);
+    }
+  };
+
+  const activateFederation = async (binding: FederationBindingRecord) => {
+    setFederationLoading(true);
+    try {
+      await activateFederationBinding({
+        bindingId: binding.id,
+        tokenEnv: federationTokenEnv[binding.id]?.trim() || defaultFederationTokenEnv(binding.slug),
+        membershipPolicy: "invite",
+      });
+      await refreshFederation();
+      onNotice(`/${binding.slug} 已激活；现在可以由根平台路由到该节点`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "联邦节点激活失败");
+    } finally {
+      setFederationLoading(false);
+    }
+  };
+
+  const revokeFederation = async (binding: FederationBindingRecord) => {
+    setFederationLoading(true);
+    try {
+      await revokeFederationBinding(binding.id);
+      await refreshFederation();
+      onNotice(`/${binding.slug} 已撤销`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "联邦节点撤销失败");
+    } finally {
+      setFederationLoading(false);
+    }
+  };
+
+  const probeFederation = async (binding: FederationBindingRecord) => {
+    setFederationLoading(true);
+    try {
+      const result = await probeFederationBinding(binding.id);
+      await refreshFederation();
+      onNotice(result.status === "active" ? `/${binding.slug} 连接正常` : `/${binding.slug} 暂不可用，已标记 degraded`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "联邦节点健康检查失败");
+    } finally {
+      setFederationLoading(false);
+    }
+  };
+
   return (
     <section className="surface platform-access-panel" aria-labelledby="platform-access-title">
       <div className="subplatform-header">
@@ -339,6 +446,26 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
               </div>
             </div>
           ) : null}
+          {(rootRole === "rootSuperAdmin" || rootRole === "rootAdmin") ? (
+            <div className="platform-federation-panel platform-api-key-panel">
+              <div className="subsection-heading"><div><p className="eyebrow"><Globe2 size={14} aria-hidden="true" /> 远程平台</p><strong>接入另一台 MatchPlane</strong></div><small>{federationLoading ? "处理中…" : "一次性签名入驻，人工激活"}</small></div>
+              <p className="platform-access-empty">远端管理员使用一次性 token 提交签名清单；API Key 只负责运行时 MCP 授权，不代表平台身份。</p>
+              <div className="platform-federation-form">
+                <label><span>挂载 domain</span><select value={federationDomainId} onChange={(event) => setFederationDomainId(event.target.value)}><option value="">选择 domain</option>{federationDomains.map((domain) => <option key={domain.id} value={domain.id}>{domain.slug} · {domain.name}</option>)}</select></label>
+                <label><span>邀请有效期（小时）</span><input type="number" min={1} max={168} value={federationExpiresHours} onChange={(event) => setFederationExpiresHours(event.target.value)} /></label>
+                <button className="button button-dark" type="button" disabled={federationLoading} onClick={() => void issueFederationInvite()}>生成入驻 token</button>
+              </div>
+              {newFederationInvite ? <div className="api-key-secret"><div><strong>请立即交给远端管理员</strong><code>{newFederationInvite.token}</code><small>POST {newFederationInvite.url} · 到期 {new Date(newFederationInvite.expiresAt).toLocaleString()}</small></div><button type="button" onClick={() => void copySecret(newFederationInvite.token)}>复制 token</button><button type="button" onClick={() => setNewFederationInvite(null)}>关闭</button></div> : null}
+              <div className="platform-oidc-list" aria-label="远程平台绑定列表">
+                {federationBindings.length ? federationBindings.map((binding) => (
+                  <div className="platform-oidc-row platform-federation-row" key={binding.id}>
+                    <span><strong>/{binding.slug} · {binding.displayName}</strong><small>{binding.endpoint} · {binding.status}</small></span>
+                    {binding.status === "pending" ? <><input aria-label={`${binding.slug} 的 MCP token 环境变量`} value={federationTokenEnv[binding.id] ?? defaultFederationTokenEnv(binding.slug)} onChange={(event) => setFederationTokenEnv((current) => ({ ...current, [binding.id]: event.target.value }))} placeholder="MATCHPLANE_REMOTE_MCP_TOKEN" /><button type="button" disabled={federationLoading} onClick={() => void activateFederation(binding)}>激活</button></> : binding.status !== "revoked" ? <><button type="button" disabled={federationLoading} onClick={() => void probeFederation(binding)}>检查</button><button type="button" disabled={federationLoading} onClick={() => void revokeFederation(binding)}>撤销</button></> : <b className="status-chip">已撤销</b>}
+                  </div>
+                )) : <p className="platform-access-empty">还没有远程平台入驻。</p>}
+              </div>
+            </div>
+          ) : null}
         </>
       )}
       {rootRole === "rootSuperAdmin" || rootRole === "rootAdmin" ? (
@@ -348,7 +475,7 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
             {administrators.length ? administrators.map((administrator) => (
               <div className="root-administrator-row" key={administrator.id}>
                 <span><strong>{administrator.name || administrator.email}</strong><small>{administrator.email}{administrator.emailVerified ? " · 已验证" : " · 待验证"}</small></span>
-                {rootRole === "rootSuperAdmin" && administrator.role !== "rootSuperAdmin" ? <select value={administrator.role === "rootAdmin" ? "rootAdmin" : "user"} disabled={administratorLoading} aria-label={`${administrator.email} 的根平台权限`} onChange={(event) => void changeAdministratorRole(administrator, event.target.value as "rootAdmin" | "user")}><option value="user">普通账号</option><option value="rootAdmin">根平台管理员</option></select> : <b className="status-chip is-on">{administrator.role === "rootSuperAdmin" ? "超级管理员" : administrator.role === "rootAdmin" ? "管理员" : "普通账号"}</b>}
+                {rootRole === "rootSuperAdmin" && administrator.role !== "rootSuperAdmin" ? <select value={administrator.role === "rootAdmin" ? "rootAdmin" : "user"} disabled={administratorLoading || !administrator.emailVerified} title={administrator.emailVerified ? undefined : "先完成邮箱验证"} aria-label={`${administrator.email} 的根平台权限`} onChange={(event) => void changeAdministratorRole(administrator, event.target.value as "rootAdmin" | "user")}><option value="user">普通账号</option><option value="rootAdmin">根平台管理员</option></select> : <b className="status-chip is-on">{administrator.role === "rootSuperAdmin" ? "超级管理员" : administrator.role === "rootAdmin" ? "管理员" : "普通账号"}</b>}
               </div>
             )) : <p className="platform-access-empty">{administratorLoading ? "正在读取账号…" : "还没有可管理的账号"}</p>}
           </div>
@@ -392,4 +519,9 @@ async function copySecret(secret: string): Promise<void> {
   } catch {
     // Clipboard permission is optional; the secret remains visible until the operator closes it.
   }
+}
+
+function defaultFederationTokenEnv(slug: string): string {
+  const normalized = slug.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toUpperCase() || "REMOTE";
+  return `MATCHPLANE_${normalized}_MCP_TOKEN`;
 }

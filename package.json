@@ -1,0 +1,21 @@
+{
+  "name": "matchplane",
+  "private": true,
+  "version": "0.1.9",
+  "license": "MIT",
+  "packageManager": "bun@1.3.14",
+  "type": "module",
+  "workspaces": [
+    "web",
+    "integrations/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "check": "turbo check"
+  },
+  "devDependencies": {
+    "turbo": "2.8.14"
+  }
+}

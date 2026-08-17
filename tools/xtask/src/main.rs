@@ -10,7 +10,11 @@ use matchplane_storage::{
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use sqlx::Row;
+use time::{Duration as TimeDuration, OffsetDateTime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use url::Url;
 use uuid::{Uuid, Variant};
 
 #[derive(Debug, Parser)]
@@ -52,6 +56,38 @@ enum Command {
         #[arg(long, env = "MATCHPLANE_ROOT_ADMIN_EMAIL")]
         admin_email: Option<String>,
     },
+    /// Issue a one-time administrator registration URL for an existing platform organization.
+    AdminInvite {
+        /// Administrator scope. Root invitations use the provisioned root organization;
+        /// subplatform invitations require `--organization-id`.
+        #[arg(long, value_enum)]
+        role: AdminInviteRole,
+        /// Target Better Auth organization UUID. Omit only for a root administrator invite.
+        #[arg(long)]
+        organization_id: Option<Uuid>,
+        /// Link lifetime in hours. The CLI caps this at seven days.
+        #[arg(long, default_value_t = 24)]
+        expires_hours: u32,
+        /// Public web origin to place in the registration URL. Defaults to BETTER_AUTH_URL.
+        #[arg(long, env = "BETTER_AUTH_URL")]
+        base_url: Option<String>,
+    },
+    /// Issue a one-time invite for a signed remote MatchPlane platform enrollment.
+    #[command(name = "federation-invite")]
+    FederationInvite {
+        /// Active root-domain UUID where the remote node will be mounted.
+        #[arg(long)]
+        domain_id: Uuid,
+        /// Parent organization UUID. Omit to mount directly under the root organization.
+        #[arg(long)]
+        parent_organization_id: Option<Uuid>,
+        /// Link lifetime in hours. The CLI caps this at seven days.
+        #[arg(long, default_value_t = 24)]
+        expires_hours: u32,
+        /// Public web origin used as the remote enrollment endpoint base URL.
+        #[arg(long, env = "BETTER_AUTH_URL")]
+        base_url: Option<String>,
+    },
     /// Validate configuration and production safety gates.
     Doctor {
         /// Emit machine-readable JSON (the default output is also JSON for agent stability).
@@ -89,7 +125,17 @@ enum Service {
     Projector,
     VectorWorker,
     FederationHub,
+    #[value(name = "subplatform-builder")]
+    SubplatformBuilder,
     Web,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AdminInviteRole {
+    #[value(name = "root-admin")]
+    RootAdmin,
+    #[value(name = "subplatform-admin")]
+    SubplatformAdmin,
 }
 
 #[derive(Debug, Subcommand)]
@@ -122,6 +168,21 @@ async fn main() -> Result<()> {
                 admin_email,
             )
             .await
+        }
+        Command::AdminInvite {
+            role,
+            organization_id,
+            expires_hours,
+            base_url,
+        } => create_admin_invite(role, organization_id, expires_hours, base_url).await,
+        Command::FederationInvite {
+            domain_id,
+            parent_organization_id,
+            expires_hours,
+            base_url,
+        } => {
+            create_federation_invite(domain_id, parent_organization_id, expires_hours, base_url)
+                .await
         }
         Command::Doctor { json: _ } => doctor().await,
         Command::Status { json: _ } => status().await,
@@ -200,6 +261,285 @@ async fn provision_root(
     Ok(())
 }
 
+async fn create_admin_invite(
+    role: AdminInviteRole,
+    organization_id: Option<Uuid>,
+    expires_hours: u32,
+    base_url: Option<String>,
+) -> Result<()> {
+    if !(1..=168).contains(&expires_hours) {
+        bail!("--expires-hours must be between 1 and 168");
+    }
+    let root_tenant_id = env::var("MATCHPLANE_ROOT_TENANT_ID")
+        .context("MATCHPLANE_ROOT_TENANT_ID is required before issuing an administrator invite")?;
+    let root_tenant_id = Uuid::parse_str(root_tenant_id.trim())
+        .context("MATCHPLANE_ROOT_TENANT_ID must be a UUID")?;
+    validate_operator_uuid(root_tenant_id, "MATCHPLANE_ROOT_TENANT_ID")?;
+
+    if matches!(role, AdminInviteRole::RootAdmin) && organization_id.is_some() {
+        // An explicit target is useful for scripting only when it is still the root organization;
+        // resolve and verify it below rather than trusting a user-provided UUID.
+    }
+    if matches!(role, AdminInviteRole::SubplatformAdmin) && organization_id.is_none() {
+        bail!("--organization-id is required for --role subplatform-admin");
+    }
+
+    let config = AppConfig::load().context("administrator invite configuration is invalid")?;
+    let store = PgStore::connect(&config.database_url, 2)
+        .await
+        .context("administrator invite could not connect to PostgreSQL")?;
+    store
+        .migrate()
+        .await
+        .context("administrator invite could not apply database migrations")?;
+
+    let target = if let Some(organization_id) = organization_id {
+        sqlx::query(
+            r#"SELECT id, slug, "tenantId" AS tenant_id, "rootPlatform" AS root_platform
+                 FROM "organization"
+                WHERE id = $1::uuid AND "tenantId" = $2
+                LIMIT 1"#,
+        )
+        .bind(organization_id)
+        .bind(root_tenant_id.to_string())
+        .fetch_optional(store.pool())
+        .await
+        .context("administrator invite target lookup failed")?
+    } else {
+        sqlx::query(
+            r#"SELECT id, slug, "tenantId" AS tenant_id, "rootPlatform" AS root_platform
+                 FROM "organization"
+                WHERE "tenantId" = $1 AND "rootPlatform" = true
+                ORDER BY "createdAt" ASC
+                LIMIT 1"#,
+        )
+        .bind(root_tenant_id.to_string())
+        .fetch_optional(store.pool())
+        .await
+        .context("root organization lookup failed")?
+    };
+    let Some(target) = target else {
+        bail!(
+            "the requested platform organization does not exist under the configured root tenant"
+        );
+    };
+    let target_id: Uuid = target
+        .try_get("id")
+        .context("administrator invite target id is invalid")?;
+    let target_slug: String = target
+        .try_get("slug")
+        .context("administrator invite target slug is invalid")?;
+    let target_tenant: String = target
+        .try_get("tenant_id")
+        .context("administrator invite target tenant is invalid")?;
+    let is_root: bool = target
+        .try_get("root_platform")
+        .context("administrator invite target root flag is invalid")?;
+    if target_tenant != root_tenant_id.to_string() {
+        bail!("administrator invite target does not belong to the configured root tenant");
+    }
+    if matches!(role, AdminInviteRole::RootAdmin) && !is_root {
+        bail!("root-admin invitations must target the root organization");
+    }
+    if matches!(role, AdminInviteRole::SubplatformAdmin) && is_root {
+        bail!("subplatform-admin invitations must target a child organization");
+    }
+
+    let raw_token = format!("mpa_{}{}", Uuid::now_v7().simple(), Uuid::now_v7().simple());
+    let token_hash = sha256(&raw_token);
+    let invite_id = Uuid::now_v7();
+    let expires_at = OffsetDateTime::now_utc() + TimeDuration::hours(i64::from(expires_hours));
+    sqlx::query(
+        r#"INSERT INTO platform_admin_invites
+             (id, token_hash, organization_id, role, created_by, expires_at)
+           VALUES ($1::uuid, $2, $3::uuid, $4, 'cli', $5)"#,
+    )
+    .bind(invite_id)
+    .bind(&token_hash)
+    .bind(target_id)
+    .bind(admin_invite_role_value(role))
+    .bind(expires_at)
+    .execute(store.pool())
+    .await
+    .context("administrator invite could not be stored")?;
+
+    let base_url = normalize_admin_base_url(
+        base_url
+            .or_else(|| env::var("BETTER_AUTH_URL").ok())
+            .unwrap_or_else(|| "http://localhost:4173".to_owned()),
+    )?;
+    let next = match role {
+        AdminInviteRole::RootAdmin => "/?role=platform".to_owned(),
+        AdminInviteRole::SubplatformAdmin => format!("/{target_slug}?role=subplatform_admin"),
+    };
+    let encoded_next: String = url::form_urlencoded::byte_serialize(next.as_bytes()).collect();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "inviteId": invite_id,
+            "organizationId": target_id,
+            "role": admin_invite_role_value(role),
+            "expiresAt": expires_at,
+            "registrationUrl": format!("{base_url}/admin/register?token={raw_token}&next={encoded_next}"),
+            "next": next,
+            "expiresInHours": expires_hours,
+        }))
+        .context("administrator invite output failed")?
+    );
+    Ok(())
+}
+
+async fn create_federation_invite(
+    domain_id: Uuid,
+    parent_organization_id: Option<Uuid>,
+    expires_hours: u32,
+    base_url: Option<String>,
+) -> Result<()> {
+    if !(1..=168).contains(&expires_hours) {
+        bail!("--expires-hours must be between 1 and 168");
+    }
+    validate_operator_uuid(domain_id, "--domain-id")?;
+    if let Some(parent) = parent_organization_id {
+        validate_operator_uuid(parent, "--parent-organization-id")?;
+    }
+    let root_tenant_id = env::var("MATCHPLANE_ROOT_TENANT_ID")
+        .context("MATCHPLANE_ROOT_TENANT_ID is required before issuing a federation invite")?;
+    let root_tenant_id = Uuid::parse_str(root_tenant_id.trim())
+        .context("MATCHPLANE_ROOT_TENANT_ID must be a UUID")?;
+    validate_operator_uuid(root_tenant_id, "MATCHPLANE_ROOT_TENANT_ID")?;
+
+    let config = AppConfig::load().context("federation invite configuration is invalid")?;
+    let store = PgStore::connect(&config.database_url, 2)
+        .await
+        .context("federation invite could not connect to PostgreSQL")?;
+    store
+        .migrate()
+        .await
+        .context("federation invite could not apply database migrations")?;
+    let parent = if let Some(parent) = parent_organization_id {
+        parent
+    } else {
+        sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT id FROM "organization"
+                WHERE "tenantId" = $1 AND "rootPlatform" = true AND "parentOrganizationId" IS NULL
+                LIMIT 1"#,
+        )
+        .bind(root_tenant_id.to_string())
+        .fetch_optional(store.pool())
+        .await
+        .context("root organization lookup failed")?
+        .context("root organization does not exist; initialize Better Auth first")?
+    };
+    let parent_check = sqlx::query(
+        r#"WITH RECURSIVE chain(id, parent_id, depth, tenant_id, root_platform) AS (
+             SELECT id, "parentOrganizationId", 0, "tenantId", "rootPlatform"
+               FROM "organization" WHERE id = $1::uuid
+             UNION ALL
+             SELECT parent.id, parent."parentOrganizationId", chain.depth + 1,
+                    parent."tenantId", parent."rootPlatform"
+               FROM "organization" parent JOIN chain ON parent.id = chain.parent_id
+              WHERE chain.depth < 64
+           )
+           SELECT count(*)::int AS count,
+                  coalesce(bool_and(tenant_id = $2), false) AS same_tenant,
+                  coalesce(bool_or(root_platform AND parent_id IS NULL), false) AS reaches_root
+             FROM chain"#,
+    )
+    .bind(parent)
+    .bind(root_tenant_id.to_string())
+    .fetch_one(store.pool())
+    .await
+    .context("federation parent lookup failed")?;
+    let count: i32 = parent_check.try_get("count")?;
+    let same_tenant: bool = parent_check.try_get("same_tenant")?;
+    let reaches_root: bool = parent_check.try_get("reaches_root")?;
+    if count == 0 || !same_tenant || !reaches_root {
+        bail!("--parent-organization-id must belong to the configured root tree");
+    }
+    let domain_exists = sqlx::query(
+        "SELECT 1 FROM domains WHERE tenant_id = $1::uuid AND id = $2::uuid AND status = 'active' LIMIT 1",
+    )
+    .bind(root_tenant_id)
+    .bind(domain_id)
+    .fetch_optional(store.pool())
+    .await
+    .context("federation domain lookup failed")?;
+    if domain_exists.is_none() {
+        bail!("--domain-id must identify an active domain under the root tenant");
+    }
+
+    let raw_token = format!("mpf_{}{}", Uuid::now_v7().simple(), Uuid::now_v7().simple());
+    let token_hash = sha256(&raw_token);
+    let invite_id = Uuid::now_v7();
+    let expires_at = OffsetDateTime::now_utc() + TimeDuration::hours(i64::from(expires_hours));
+    sqlx::query(
+        r#"INSERT INTO platform_federation_invites
+             (id, tenant_id, parent_organization_id, domain_id, token_hash, expires_at, created_by)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, decode($5, 'hex'), $6, 'cli')"#,
+    )
+    .bind(invite_id)
+    .bind(root_tenant_id)
+    .bind(parent)
+    .bind(domain_id)
+    .bind(token_hash)
+    .bind(expires_at)
+    .execute(store.pool())
+    .await
+    .context("federation invite could not be stored")?;
+
+    let base_url = normalize_admin_base_url(
+        base_url
+            .or_else(|| env::var("BETTER_AUTH_URL").ok())
+            .unwrap_or_else(|| "http://localhost:4173".to_owned()),
+    )?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "inviteId": invite_id,
+            "tenantId": root_tenant_id,
+            "parentOrganizationId": parent,
+            "domainId": domain_id,
+            "expiresAt": expires_at,
+            "enrollmentToken": raw_token,
+            "enrollmentUrl": format!("{base_url}/api/platform/federation/enroll"),
+            "next": "remote_admin_submits_signed_matchplane_federation_v1_manifest_then_root_admin_activates"
+        }))
+        .context("federation invite output failed")?
+    );
+    Ok(())
+}
+
+fn admin_invite_role_value(role: AdminInviteRole) -> &'static str {
+    match role {
+        AdminInviteRole::RootAdmin => "rootAdmin",
+        AdminInviteRole::SubplatformAdmin => "subplatform_admin",
+    }
+}
+
+fn normalize_admin_base_url(value: String) -> Result<String> {
+    let value = value.trim().trim_end_matches('/');
+    let mut parsed = Url::parse(value).context("--base-url must be a valid http(s) URL")?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        bail!("--base-url must be an http(s) origin");
+    }
+    if env::var("MATCHPLANE_ENVIRONMENT").ok().as_deref() == Some("production")
+        && parsed.scheme() != "https"
+    {
+        bail!("--base-url must use HTTPS in production");
+    }
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    let path = parsed.path().trim_end_matches('/').to_owned();
+    parsed.set_path(&path);
+    Ok(parsed.to_string().trim_end_matches('/').to_owned())
+}
+
+fn sha256(value: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(value.as_bytes());
+    hex::encode(digest.finalize())
+}
+
 fn print_provisioned_root(
     provisioned: &ProvisionedRootPlatform,
     admin_email: Option<&str>,
@@ -215,6 +555,13 @@ fn print_provisioned_root(
                     provisioned.tenant.id
                 ),
                 "setRootAdminEmail": admin_email.map(|email| format!("MATCHPLANE_ROOT_ADMIN_EMAIL={email}")),
+                "firstAdminFlow": [
+                    "配置 MATCHPLANE_ROOT_ADMIN_EMAIL 与 root SMTP 后重启 web",
+                    "使用该邮箱在 /login?role=platform 注册并完成邮箱验证",
+                    "在根平台后台点击“初始化根平台组织”",
+                    "再执行 matchplane admin-invite --role root-admin 为其他管理员签发一次性链接"
+                ],
+                "adminInviteCommand": "matchplane admin-invite --role root-admin（根组织初始化后）",
                 "loginPath": "/login?role=platform",
                 "restartRequired": true
             }),
@@ -360,6 +707,7 @@ fn service_command(service: Service) -> (&'static str, &'static [&'static str]) 
         Service::Projector => ("matchplane-projector", &[]),
         Service::VectorWorker => ("matchplane-vector-worker", &[]),
         Service::FederationHub => ("matchplane-federation-hub", &[]),
+        Service::SubplatformBuilder => ("matchplane-subplatform-builder", &[]),
         Service::Web => ("node", &[]),
     }
 }
@@ -618,7 +966,10 @@ impl JsonRpcResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{Service, service_command, validate_operator_email, validate_operator_uuid};
+    use super::{
+        AdminInviteRole, Service, admin_invite_role_value, normalize_admin_base_url,
+        service_command, sha256, validate_operator_email, validate_operator_uuid,
+    };
     use uuid::Uuid;
 
     #[test]
@@ -664,5 +1015,34 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn admin_invite_token_hash_is_stable_and_hex() {
+        let hash = sha256("mpa_test");
+        assert_eq!(hash.len(), 64);
+        assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn admin_invite_roles_use_better_auth_role_names() {
+        assert_eq!(
+            admin_invite_role_value(AdminInviteRole::RootAdmin),
+            "rootAdmin"
+        );
+        assert_eq!(
+            admin_invite_role_value(AdminInviteRole::SubplatformAdmin),
+            "subplatform_admin"
+        );
+    }
+
+    #[test]
+    fn admin_base_url_strips_query_and_fragment() {
+        assert_eq!(
+            normalize_admin_base_url("https://matx.tech/console/?old=1#fragment".to_owned())
+                .unwrap(),
+            "https://matx.tech/console"
+        );
+        assert!(normalize_admin_base_url("ftp://matx.tech".to_owned()).is_err());
     }
 }

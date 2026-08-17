@@ -47,6 +47,15 @@ web:
   routerAiToolMode: auto
   routerAiMaxSteps: 8
   routerAiRequestsPerHour: 120
+  # Optional approved national network identity adapter. The client secret is
+  # read from existingWebSecret under national-identity-client-secret.
+  nationalIdentity:
+    clientId: ''
+    discoveryUrl: ''
+    authorizationUrl: ''
+    tokenUrl: ''
+    userInfoUrl: ''
+    scopes: openid
   # Root SMTP is needed only for first-run/admin auth. The credential itself stays in the
   # existing web secret under root-smtp-credential-ref (file:// or env:// reference).
   rootSmtp:
@@ -66,6 +75,32 @@ web:
     limits:
       cpu: '1'
       memory: 512Mi
+
+subplatformBuilder:
+  enabled: true
+  replicas: 1
+  image:
+    repository: ghcr.io/lightjunction/matchplane-subplatform-builder
+    # Production renders must provide the immutable builder image digest.
+    digest: ''
+  # Empty derives the release-local web service name in the Deployment template.
+  webUrl: ''
+  uploadRoot: /var/lib/matchplane/subplatform-uploads
+  artifactRoot: /var/lib/matchplane/subplatform-artifacts
+  workRoot: /var/lib/matchplane/subplatform-builder-work
+  uploadPvc: ''
+  artifactPvc: ''
+  pollSeconds: 5
+  buildSeconds: 900
+  gitAllowedHosts: github.com,gitlab.com
+  tokenFile: /run/secrets/subplatform-builder.token
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: '2'
+      memory: 1Gi
 
 networkPolicy:
   # Fail closed for pod egress. Add private database/broker CIDRs or selectors below when those

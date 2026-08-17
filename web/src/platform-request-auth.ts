@@ -17,20 +17,23 @@ export interface PlatformRequestActor {
 export async function authenticatePlatformRequest(
   request: Request,
   requiredPermissions: Record<string, string[]> = { platform: ["read"] },
+  options: { allowSession?: boolean } = {},
 ): Promise<PlatformRequestActor | null> {
-  try {
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (session) {
-      const role = (session.user as { role?: unknown }).role;
-      return {
-        subject: session.user.id,
-        access: "session",
-        organizationId: null,
-        isRootAdministrator: role === "rootSuperAdmin" || role === "rootAdmin",
-      };
+  if (options.allowSession !== false) {
+    try {
+      const session = await auth.api.getSession({ headers: request.headers });
+      if (session) {
+        const role = (session.user as { role?: unknown }).role;
+        return {
+          subject: session.user.id,
+          access: "session",
+          organizationId: null,
+          isRootAdministrator: role === "rootSuperAdmin" || role === "rootAdmin",
+        };
+      }
+    } catch {
+      // A malformed/expired session may still be accompanied by a valid machine key.
     }
-  } catch {
-    // A malformed/expired session may still be accompanied by a valid machine key.
   }
 
   const key = await verifyPlatformApiKey(request, requiredPermissions);

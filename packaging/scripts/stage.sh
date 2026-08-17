@@ -16,6 +16,7 @@ binaries=(
   matchplane-matcher
   matchplane-payment-service
   matchplane-projector
+  matchplane-subplatform-builder
   matchplane-vector-worker
   matchplane
 )
@@ -25,8 +26,13 @@ install -d "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" "$root/usr/shar
 install -d "$root/usr/share/licenses/matchplane"
 install -d "$root/usr/share/matchplane/web"
 install -d "$root/usr/share/matchplane/skills"
-if [[ ! -f $repository_root/web/.next/standalone/server.js ]]; then
-  echo 'web/.next/standalone/server.js is missing; run bun install and bun run build in web/' >&2
+standalone_root="$repository_root/web/.next/standalone"
+if [[ -f "$standalone_root/server.js" ]]; then
+  :
+elif [[ -f "$standalone_root/web/server.js" ]]; then
+  standalone_root="$standalone_root/web"
+else
+  echo 'Next standalone server.js is missing; run bun install and bun run build in web/' >&2
   exit 1
 fi
 for binary in "${binaries[@]}"; do
@@ -44,7 +50,7 @@ install -Dm0644 "$repository_root/docs/marketplace-payments.md" \
 install -Dm0644 "$repository_root/docs/cli-and-mcp.md" \
   "$root/usr/share/doc/matchplane/cli-and-mcp.md"
 cp -a "$repository_root/.agents/skills/." "$root/usr/share/matchplane/skills/"
-cp -a "$repository_root/web/.next/standalone/." "$root/usr/share/matchplane/web/"
+cp -a "$standalone_root/." "$root/usr/share/matchplane/web/"
 if [[ -d $repository_root/web/public ]]; then
   cp -a "$repository_root/web/public/." "$root/usr/share/matchplane/web/public/"
 fi

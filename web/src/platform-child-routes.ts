@@ -16,6 +16,8 @@ export interface PlatformChildRoute {
   agentStages: string[];
   agentSkills: string[];
   agentMcpTools: string[];
+  /** Stable operator-side key used to bind the child MCP server endpoint. */
+  mcpServerKey: string;
   depth: 1;
 }
 
@@ -90,7 +92,8 @@ export async function readActiveDirectChildRoutes(
             COALESCE(r.manifest -> 'capabilities', '[]'::jsonb) AS capabilities,
             COALESCE(r.manifest -> 'agent' -> 'stages', '[]'::jsonb) AS "agentStages",
             COALESCE(r.manifest -> 'agent' -> 'skills', '[]'::jsonb) AS "agentSkills",
-            COALESCE(r.manifest -> 'agent' -> 'mcpTools', '[]'::jsonb) AS "agentMcpTools"
+            COALESCE(r.manifest -> 'agent' -> 'mcpTools', '[]'::jsonb) AS "agentMcpTools",
+            COALESCE(NULLIF(federation.mcp_server_key, ''), NULLIF(r.manifest -> 'agent' ->> 'mcpServerKey', ''), r.slug) AS "mcpServerKey"
        FROM subplatform_registrations r
        JOIN "organization" o ON o.slug = r.slug
                             AND o."tenantId" = r.tenant_id::text
@@ -100,10 +103,16 @@ export async function readActiveDirectChildRoutes(
        JOIN platform_tree parent ON parent.id = o."parentOrganizationId"
                                 AND parent.path_active
        JOIN domains d ON d.id = r.domain_id AND d.tenant_id = r.tenant_id AND d.status = 'active'
+       LEFT JOIN platform_federation_bindings federation
+         ON federation.registration_id = r.id AND federation.status = 'active'
        JOIN current_node ON current_node.id = parent.id
       WHERE r.tenant_id = $2::uuid
         AND r.state = 'active'
         AND r.domain_id = NULLIF(o."domainId", '')::uuid
+        -- A remote registration is routable only while its signed federation
+        -- binding is healthy. Keep the registration row for recovery, but do
+        -- not broadcast a degraded node to the Agent router.
+        AND (r.source_kind <> 'remote' OR federation.id IS NOT NULL)
         AND (
           r.membership_policy = 'public'
           OR ($3::uuid IS NOT NULL AND EXISTS (
@@ -147,6 +156,7 @@ export async function readActiveDirectChildRoutes(
     agentStages: boundedStrings(row.agentStages, 8),
     agentSkills: boundedStrings(row.agentSkills, 32),
     agentMcpTools: boundedStrings(row.agentMcpTools, 64),
+    mcpServerKey: boundedMcpServerKey(row.mcpServerKey, String(row.slug)),
     depth: 1,
   }));
 }
@@ -159,4 +169,9 @@ function boundedStrings(value: unknown, maximum: number): string[] {
 
 function safeRoutePath(value: string, fallbackSlug: string): string {
   return /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(value) ? value : `/${fallbackSlug}`;
+}
+
+function boundedMcpServerKey(value: unknown, fallback: string): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  return /^[a-z0-9][a-z0-9._:-]{1,127}$/.test(candidate) ? candidate : fallback;
 }

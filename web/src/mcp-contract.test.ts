@@ -41,11 +41,52 @@ describe("HTTP MCP argument contract", () => {
     expect(validateMcpToolArguments("marketplace.intent.create", {
       tenant_id: tenantId,
       domain_id: domainId,
+      platform_path: "/used-car",
+      participant_id: partyId,
+      side: "demand",
+      narrative: "寻找适合我的供给",
+      supply_discovery_enabled: true,
+      supply_discovery_expires_at: new Date(Date.now() + 60_000).toISOString(),
+      idempotency_key: "intent-discoverable",
+    })).toBeNull();
+
+    expect(validateMcpToolArguments("marketplace.demand.match", {
+      tenant_id: tenantId,
+      domain_id: domainId,
+      platform_path: "/used-car",
+      participant_id: partyId,
+      offer_id: intentId,
+      limit: 10,
+    })).toBeNull();
+
+    expect(validateMcpToolArguments("marketplace.intent.discovery.update", {
+      tenant_id: tenantId,
+      domain_id: domainId,
+      platform_path: "/used-car",
+      participant_id: partyId,
+      intent_id: intentId,
+      enabled: false,
+    })).toBeNull();
+
+    expect(validateMcpToolArguments("marketplace.intent.create", {
+      tenant_id: tenantId,
+      domain_id: domainId,
       participant_id: partyId,
       side: "demand",
       narrative: "寻找适合我的供给",
       idempotency_key: "intent-1",
     })).toContain("platform_path");
+
+    expect(validateMcpToolArguments("marketplace.intent.create", {
+      tenant_id: tenantId,
+      domain_id: domainId,
+      platform_path: "/used-car",
+      participant_id: partyId,
+      side: "demand",
+      narrative: "寻找适合我的供给",
+      supply_discovery_enabled: "yes",
+      idempotency_key: "intent-invalid-discovery",
+    })).toContain("supply_discovery_enabled");
   });
 
   it("bounds Agent handoff budgets and keeps them caller-funded", () => {
@@ -67,6 +108,29 @@ describe("HTTP MCP argument contract", () => {
       ...valid,
       budget: { ...valid.budget, max_steps: 17 },
     })).toContain("max_steps");
+    expect(validateMcpToolArguments("platform.agent.handoff", {
+      ...valid,
+      stage: "profile.compatibility",
+    })).toBeNull();
+  });
+
+  it("validates child MCP tool calls without accepting arbitrary endpoints", () => {
+    expect(validateMcpToolArguments("platform.child.tool", {
+      platform_path: "/used-car",
+      tool_name: "inventory.search",
+      arguments: { narrative: "适合城市通勤" },
+    })).toBeNull();
+    expect(validateMcpToolArguments("platform.child.tool", {
+      platform_path: "/used-car",
+      tool_name: "inventory/search",
+      arguments: {},
+    })).toContain("tool_name");
+    expect(validateMcpToolArguments("platform.child.tool", {
+      platform_path: "/used-car",
+      tool_name: "inventory.search",
+      endpoint: "https://attacker.example/mcp",
+      arguments: {},
+    })).toBeNull();
   });
 
   it("rejects invalid generic introduction payloads", () => {

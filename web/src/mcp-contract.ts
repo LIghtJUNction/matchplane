@@ -20,6 +20,8 @@ export function validateMcpToolArguments(
       return validatePlatformMatch(args);
     case "platform.agent.handoff":
       return validateAgentHandoff(args);
+    case "platform.child.tool":
+      return validateChildTool(args);
     case "marketplace.agent.session":
       return validateAgentSession(args);
     case "marketplace.intent.create":
@@ -28,6 +30,10 @@ export function validateMcpToolArguments(
       return validateOffer(args);
     case "marketplace.offer.match":
       return validateOfferMatch(args);
+    case "marketplace.demand.match":
+      return validateDemandMatch(args);
+    case "marketplace.intent.discovery.update":
+      return validateDemandDiscoveryUpdate(args);
     case "marketplace.introduction.create":
       return validateIntroduction(args);
     case "marketplace.introductions.list":
@@ -39,6 +45,18 @@ export function validateMcpToolArguments(
     default:
       return "unsupported MatchPlane tool";
   }
+}
+
+function validateChildTool(args: Record<string, unknown>): string | null {
+  const platformPath = platformPathArgument(args, "platform_path");
+  if (platformPath) return platformPath;
+  const toolName = args.tool_name;
+  if (typeof toolName !== "string" || !/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(toolName)) {
+    return "tool_name must be a valid MCP tool name";
+  }
+  const toolArguments = recordArgument(args, "arguments");
+  if (typeof toolArguments === "string") return toolArguments;
+  return optionalString(args, "request_id", 200);
 }
 
 function validatePlatformMatch(args: Record<string, unknown>): string | null {
@@ -53,8 +71,8 @@ function validateAgentHandoff(args: Record<string, unknown>): string | null {
   if (args.protocol !== "matchplane.agent/v1") return "protocol must be matchplane.agent/v1";
   const requestId = uuidArgument(args, "request_id");
   if (requestId) return requestId;
-  if (args.stage !== "platform" && args.stage !== "merchant" && args.stage !== "inventory") {
-    return "stage must be platform, merchant, or inventory";
+  if (typeof args.stage !== "string" || !/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(args.stage)) {
+    return "stage must be a bounded lowercase taxonomy key";
   }
   const scope = recordArgument(args, "scope");
   if (typeof scope === "string") return scope;
@@ -114,6 +132,16 @@ function validateIntent(args: Record<string, unknown>): string | null {
   if (idempotency) return idempotency;
   const objects = validateOptionalObjects(args, ["attributes", "terms"]);
   if (objects) return objects;
+  if (args.supply_discovery_enabled !== undefined && typeof args.supply_discovery_enabled !== "boolean") {
+    return "supply_discovery_enabled must be a boolean";
+  }
+  if (args.supply_discovery_expires_at !== undefined && args.supply_discovery_expires_at !== null) {
+    const expiry = requiredString(args, "supply_discovery_expires_at", 64);
+    if (expiry) return expiry;
+    if (!Number.isFinite(Date.parse(args.supply_discovery_expires_at as string))) {
+      return "supply_discovery_expires_at must be a valid date-time";
+    }
+  }
   return optionalUuid(args, "intent_id");
 }
 
@@ -141,6 +169,32 @@ function validateOfferMatch(args: Record<string, unknown>): string | null {
   const participant = uuidArgument(args, "participant_id");
   if (participant) return participant;
   return optionalInteger(args, "limit", 1, 100);
+}
+
+function validateDemandMatch(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const offer = uuidArgument(args, "offer_id");
+  if (offer) return offer;
+  const participant = uuidArgument(args, "participant_id");
+  if (participant) return participant;
+  return optionalInteger(args, "limit", 1, 100);
+}
+
+function validateDemandDiscoveryUpdate(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const intent = uuidArgument(args, "intent_id");
+  if (intent) return intent;
+  const participant = uuidArgument(args, "participant_id");
+  if (participant) return participant;
+  if (typeof args.enabled !== "boolean") return "enabled must be a boolean";
+  if (args.expires_at !== undefined && args.expires_at !== null) {
+    const expiry = requiredString(args, "expires_at", 64);
+    if (expiry) return expiry;
+    if (!Number.isFinite(Date.parse(args.expires_at as string))) return "expires_at must be a valid date-time";
+  }
+  return null;
 }
 
 function validateIntroduction(args: Record<string, unknown>): string | null {

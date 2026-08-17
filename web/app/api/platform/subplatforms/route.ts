@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
+import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
@@ -31,7 +32,15 @@ export async function POST(request: Request): Promise<Response> {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
 
-  const input = await parseBody(request);
+  let input: RegistrationRequest;
+  try {
+    input = await parseBody(request);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof RequestBodyTooLargeError ? "子平台注册请求体过大" : "请求必须是有效 JSON" },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
   const manifest = validateManifest(input.manifest, input.slug, input.packageId);
   if (!manifest.ok) return NextResponse.json({ error: manifest.error }, { status: 400 });
   if (!input.tenantId || !isUuid(input.tenantId) || !input.domainId || !isUuid(input.domainId)) {
@@ -114,20 +123,26 @@ export async function POST(request: Request): Promise<Response> {
   try {
     client = await authDatabase.connect();
     await client.query("BEGIN");
-    await client.query(
+    const projected = await client.query(
       `UPDATE "organization"
           SET "tenantId" = $2,
               "domainId" = $3,
               "sourceRepository" = $4,
               "parentOrganizationId" = $5,
               "metadata" = $6
-        WHERE id = $1::uuid`,
+        WHERE id = $1::uuid
+          AND "rootPlatform" = false
+          AND ("tenantId" IS NULL OR "tenantId" = $2)
+          AND ("domainId" IS NULL OR "domainId" = $3)
+          AND ("parentOrganizationId" IS NULL OR "parentOrganizationId" = $5)
+        RETURNING id`,
       [organization.id, input.tenantId, input.domainId, input.sourceLocator, parentId, JSON.stringify({
         packageId: manifest.value.id,
         manifestDigest,
         sourceDigest,
       })],
     );
+    if (projected.rowCount !== 1) throw new Error("subplatform organization scope projection returned no row");
     await client.query(
       `INSERT INTO subplatform_registrations
         (id, tenant_id, domain_id, package_id, slug, source_kind, source_locator,
@@ -217,7 +232,9 @@ export async function GET(request: Request): Promise<Response> {
             registration.id AS "registrationId",
             registration.state AS "registrationState",
             encode(registration.build_digest, 'hex') AS "buildDigest",
-            encode(registration.manifest_digest, 'hex') AS "manifestDigest"
+            encode(registration.manifest_digest, 'hex') AS "manifestDigest",
+            registration.build_attempts AS "buildAttempts",
+            registration.build_error AS "buildError"
        FROM nodes
        LEFT JOIN LATERAL (
          SELECT r.id, r.state, r.build_digest, r.manifest_digest
@@ -255,12 +272,9 @@ interface RegistrationRequest {
 }
 
 async function parseBody(request: Request): Promise<RegistrationRequest> {
-  try {
-    const body = await request.json();
-    return body && typeof body === "object" && !Array.isArray(body) ? body as RegistrationRequest : {};
-  } catch {
-    return {};
-  }
+  const body = await readJsonBody<unknown>(request, 128 * 1024);
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new SyntaxError("object required");
+  return body as RegistrationRequest;
 }
 
 async function canManageParent(userId: string, role: string | null | undefined, parentId: string | null): Promise<boolean> {
@@ -469,12 +483,15 @@ function validateManifestUi(value: unknown): boolean {
 
 function validateAgentManifest(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const agent = value as { protocol?: unknown; stages?: unknown; skills?: unknown; mcpTools?: unknown };
-  if (Object.keys(agent).some((key) => !new Set(["protocol", "stages", "skills", "mcpTools"]).has(key))) return false;
+  const agent = value as { protocol?: unknown; stages?: unknown; skills?: unknown; mcpTools?: unknown; mcpServerKey?: unknown };
+  if (Object.keys(agent).some((key) => !new Set(["protocol", "stages", "skills", "mcpTools", "mcpServerKey"]).has(key))) return false;
   if (agent.protocol !== "matchplane.agent/v1") return false;
-  if (!Array.isArray(agent.stages) || agent.stages.length > 8 || agent.stages.some((stage) => stage !== "merchant" && stage !== "inventory")) return false;
+  if (!Array.isArray(agent.stages)
+    || agent.stages.length > 8
+    || agent.stages.some((stage) => !stringMatches(stage, /^[a-z0-9][a-z0-9._:-]{1,127}$/))) return false;
   if (!Array.isArray(agent.skills) || agent.skills.length > 32 || agent.skills.some((skill) => !stringMatches(skill, /^[a-z0-9][a-z0-9._:-]{1,127}$/))) return false;
   if (!Array.isArray(agent.mcpTools) || agent.mcpTools.length > 64 || agent.mcpTools.some((tool) => !stringMatches(tool, /^[a-z0-9][a-z0-9._:-]{1,127}$/))) return false;
+  if (agent.mcpServerKey !== undefined && !stringMatches(agent.mcpServerKey, /^[a-z0-9][a-z0-9._:-]{1,127}$/)) return false;
   return true;
 }
 
@@ -485,7 +502,7 @@ function sha256Hex(value: string): string {
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
   }
   return JSON.stringify(value);
 }
@@ -514,9 +531,10 @@ interface Manifest {
   assets: { staticDirectory: string; buildCommand: string };
   agent?: {
     protocol: "matchplane.agent/v1";
-    stages: Array<"merchant" | "inventory">;
+    stages: string[];
     skills: string[];
     mcpTools: string[];
+    mcpServerKey?: string;
   };
   retrieval?: { protocol: "matchplane.retrieval/v1"; owner: "subplatform" };
   [key: string]: unknown;

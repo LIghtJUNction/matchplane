@@ -7,6 +7,7 @@ import { authenticatePlatformRequest } from "../../../../../src/platform-request
 import { parseAgentHandoff, type AgentHandoffEnvelope } from "../../../../../src/platform-agent-handoff";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
 import { isActivePlatformPathVisible } from "../../../../../src/platform-visibility";
+import { readJsonBody, RequestBodyTooLargeError } from "../../../../../src/lib/body-limit";
 
 export const runtime = "nodejs";
 
@@ -25,7 +26,16 @@ export async function POST(request: Request): Promise<Response> {
   const actor = await authenticatePlatformRequest(request, { agent: ["handoff"] });
   if (!actor) return NextResponse.json({ error: "Better Auth session or agent API key is required" }, { status: 401 });
 
-  const parsed = parseAgentHandoff(await parseJson(request));
+  let body: unknown;
+  try {
+    body = await readJsonBody<unknown>(request, 128 * 1024);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof RequestBodyTooLargeError ? "Agent handoff 请求过大" : "请求必须是有效 JSON" },
+      { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
+  const parsed = parseAgentHandoff(body);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const handoff = parsed.value;
 
@@ -190,14 +200,6 @@ function handoffResponse(
       "handoff does not grant contact, payment, invoice, refund, or administrator authority",
     ],
   };
-}
-
-async function parseJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
 }
 
 function isUuid(value: unknown): value is string {

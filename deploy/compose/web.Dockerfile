@@ -25,6 +25,19 @@ COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY web/ ./
 RUN bun run build
+# Next 16 preserves the path relative to outputFileTracingRoot in the
+# standalone bundle. Normalize both the monorepo (`standalone/web`) and the
+# package-local (`standalone`) layouts before copying into the runtime image.
+RUN set -eux; \
+    mkdir -p /app/standalone; \
+    if [ -f /app/.next/standalone/server.js ]; then \
+      cp -a /app/.next/standalone/. /app/standalone/; \
+    elif [ -f /app/.next/standalone/web/server.js ]; then \
+      cp -a /app/.next/standalone/web/. /app/standalone/; \
+    else \
+      echo 'Next standalone server.js was not produced' >&2; \
+      exit 1; \
+    fi
 
 FROM node:22-trixie-slim@sha256:f4c1b09232a0ae8f765093968ec82107a1be65cb0bfb36fc831195794f139568 AS runner
 
@@ -33,7 +46,7 @@ ENV HOSTNAME=0.0.0.0
 ENV PORT=4173
 
 WORKDIR /app
-COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/standalone ./
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=cli-builder /build/out/matchplane /usr/local/bin/matchplane

@@ -24,10 +24,15 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
-      - name: Install locked web dependencies
+      - name: Install locked JavaScript workspaces
+        run: bun install --frozen-lockfile
+      # The web workspace keeps its own lockfile so it can also be built from
+      # `web/` in isolation. Install that workspace explicitly; a root install
+      # alone does not guarantee that Next is linked into web/node_modules.
+      - name: Install locked web workspace
         run: bun install --frozen-lockfile --cwd web
-      - name: Test and build web client
-        run: bun run --cwd web check
+      - name: Test and build JavaScript workspaces
+        run: bun run check
       - name: Test external Agent client
         run: bun test --cwd integrations/matchplane-agent-client
       - name: Type-check external Agent client

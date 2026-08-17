@@ -19,6 +19,10 @@ publishable client shape for both kernel sides and a bounded local Skill runner 
 calls; Agent owners can install it in their own server-side runtime without taking a platform token
 dependency.
 
+远程平台可使用 `matchplane federation-invite --domain-id <uuid>` 或根管理员面板生成一次性
+签名入驻 token。远端提交的节点会先保持 `pending`，只有根管理员激活后才进入递归平台树；
+激活节点与内嵌子平台共用组织、manifest、MCP allowlist 和路径路由模型。
+
 The repository is a Rust 2024 modular monorepo with independently deployable services. The root
 engine is domain-neutral; every vertical is a mounted adapter that supplies its own manifest, UI,
 Agent Skill, MCP tools, and optional retrieval implementation. The repository includes an
@@ -42,7 +46,11 @@ just migrate
 just smoke
 ```
 
-The core does not seed a tenant, domain, catalogue, vehicle, payment provider, or administrator.
+The core does not seed a tenant, domain, catalogue, vehicle, payment provider, or production
+administrator. Local Compose is an explicit development exception: when
+`MATCHPLANE_ENVIRONMENT=development` and `MATCHPLANE_ALLOW_DEMO_BOOTSTRAP=true`, the first
+account may enter the root workspace without SMTP so the operator can inspect the UI. Never carry
+that flag into a public deployment.
 Root contact channels are likewise operator configuration (`MATCHPLANE_ROOT_CONTACT_FIELDS_JSON`);
 mounted packages own their presentation fields in `ui.contactFields`. No vertical fields are
 compiled into the root UI.
@@ -58,8 +66,18 @@ cargo run --locked -p xtask -- provision-root \
   --admin-email <operator-email>
 ```
 
-Copy the returned root tenant and administrator assignments into the web service environment and
-restart it, then open the returned `/login?role=platform` path. Omit the domain flags when the
+Copy the returned root tenant assignment into the web service environment and
+restart it. First open `/login?role=platform`, create and verify the configured operator
+account, then initialize the root organization from the platform readiness panel. Only after
+that organization exists can you issue a one-time administrator URL from the server (never
+commit or log it):
+
+```sh
+cargo run --locked -p xtask -- admin-invite --role root-admin
+```
+
+Open the returned `/admin/register?token=...&next=...` link; it uses the same login/register page as every
+other account, returns to the requested administrator workspace, and promotes the signed-in user only after Better Auth verification. Omit the domain flags when the
 root should start without a child; to add a domain later, reuse the exact `--tenant-id` printed by
 the first invocation and pass the new domain flags. Omitting `--tenant-id` creates a new UUID rather
 than implicitly selecting an existing tenant. The command is idempotent for matching values and

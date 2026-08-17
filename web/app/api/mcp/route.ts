@@ -6,6 +6,7 @@ import { POST as handoffAgent } from "../platform/agent/handoff/route";
 import { hasTrustedBrowserOrigin } from "../../../src/lib/request-origin";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../src/lib/body-limit";
 import { validateMcpToolArguments } from "../../../src/mcp-contract";
+import { executeAuthenticatedChildTool } from "../../../src/platform-child-tool";
 
 export const runtime = "nodejs";
 
@@ -59,6 +60,7 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
   const argumentError = validateMcpToolArguments(params.name, args);
   if (argumentError) return rpcError(id, -32602, argumentError);
   const isHandoff = params.name === "platform.agent.handoff";
+  if (params.name === "platform.child.tool") return callChildTool(request, id, args);
   if (params.name.startsWith("marketplace.")) return callMarketplaceTool(request, id, params.name, args);
   const forwarded = new Request(new URL(isHandoff ? "/api/platform/agent/handoff" : "/api/platform/match", request.url), {
     method: "POST",
@@ -81,6 +83,35 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
       structuredContent: payload,
     },
   }, { status: 200, headers: { "cache-control": "no-store" } });
+}
+
+/**
+ * Invoke a tool owned by one active child node. The root only performs authorization, allowlist
+ * checking and bounded transport; the child MCP server owns retrieval/catalog semantics.
+ */
+async function callChildTool(
+  request: Request,
+  id: JsonRpcId,
+  args: Record<string, unknown>,
+): Promise<Response> {
+  const platformPath = typeof args.platform_path === "string" ? args.platform_path : "";
+  const toolName = typeof args.tool_name === "string" ? args.tool_name : "";
+  const toolArguments = isRecord(args.arguments) ? args.arguments : {};
+  const result = await executeAuthenticatedChildTool({
+    request,
+    platformPath,
+    toolName,
+    arguments: toolArguments,
+    requestId: typeof args.request_id === "string" ? args.request_id : undefined,
+    allowSession: false,
+  });
+  if (result.status === 401) {
+    const message = typeof result.payload.error === "string"
+      ? result.payload.error
+      : "Better Auth session or agent:tool API key is required";
+    return rpcError(id, -32002, message);
+  }
+  return rpcToolResponse(id, result.payload, !result.ok, result.status);
 }
 
 /**
@@ -118,6 +149,17 @@ async function callMarketplaceTool(
     const intentId = stringArgument(args, "intent_id");
     if (!intentId) return rpcError(id, -32602, "marketplace.offer.match requires intent_id");
     path = `/v1/marketplace/intents/${encodeURIComponent(intentId)}/matches`;
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.demand.match") {
+    const offerId = stringArgument(args, "offer_id");
+    if (!offerId) return rpcError(id, -32602, "marketplace.demand.match requires offer_id");
+    path = `/v1/marketplace/offers/${encodeURIComponent(offerId)}/demand-matches`;
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.intent.discovery.update") {
+    const intentId = stringArgument(args, "intent_id");
+    if (!intentId) return rpcError(id, -32602, "marketplace.intent.discovery.update requires intent_id");
+    method = "PATCH";
+    path = `/v1/marketplace/intents/${encodeURIComponent(intentId)}/discovery`;
     body = JSON.stringify(args);
   } else if (name === "marketplace.introduction.create") {
     path = "/v1/marketplace/introductions";
@@ -200,10 +242,13 @@ async function callMarketplaceTool(
 function supportedTool(name: unknown): name is string {
   return name === "platform.match"
     || name === "platform.agent.handoff"
+    || name === "platform.child.tool"
     || name === "marketplace.agent.session"
     || name === "marketplace.intent.create"
     || name === "marketplace.offer.create"
     || name === "marketplace.offer.match"
+    || name === "marketplace.demand.match"
+    || name === "marketplace.intent.discovery.update"
     || name === "marketplace.introduction.create"
     || name === "marketplace.introductions.list"
     || name === "marketplace.introduction.contact.request"
@@ -214,6 +259,27 @@ function supportedTool(name: unknown): name is string {
 function stringArgument(args: Record<string, unknown>, key: string): string | null {
   const value = args[key];
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function rpcToolResponse(
+  id: JsonRpcId,
+  payload: Record<string, unknown>,
+  isError: boolean,
+  status = 200,
+): Response {
+  return NextResponse.json({
+    jsonrpc: "2.0",
+    id,
+    result: {
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      isError,
+      structuredContent: payload,
+    },
+  }, { status: 200, headers: { "cache-control": "no-store", "x-matchplane-upstream-status": String(status) } });
+}
+
+function rpcToolError(id: JsonRpcId, status: number, message: string): Response {
+  return rpcToolResponse(id, { error: message }, true, status);
 }
 
 function toolList(): Record<string, unknown> {
@@ -241,7 +307,7 @@ function toolList(): Record<string, unknown> {
         properties: {
           protocol: { const: "matchplane.agent/v1" },
           request_id: { type: "string", format: "uuid" },
-          stage: { type: "string", enum: ["platform", "merchant", "inventory"] },
+          stage: { type: "string", pattern: "^[a-z0-9][a-z0-9._:-]{1,127}$", description: "Domain-owned stage taxonomy key." },
           scope: {
             type: "object",
             additionalProperties: false,
@@ -284,6 +350,20 @@ function toolList(): Record<string, unknown> {
         },
       },
     }, {
+      name: "platform.child.tool",
+      description: "Call one MCP tool declared by an active child platform through its operator-configured endpoint.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["platform_path", "tool_name", "arguments"],
+        properties: {
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)$", maxLength: 512 },
+          tool_name: { type: "string", pattern: "^[a-z0-9][a-z0-9._:-]{1,127}$", maxLength: 128 },
+          arguments: { type: "object", maxProperties: 256 },
+          request_id: { type: "string", minLength: 1, maxLength: 200 },
+        },
+      },
+    }, {
       name: "marketplace.agent.session",
       description: "Exchange a scoped Better Auth organization API key for a caller-funded demand/supply marketplace capability.",
       inputSchema: {
@@ -321,6 +401,39 @@ function toolList(): Record<string, unknown> {
           platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
           participant_id: { type: "string", format: "uuid" },
           limit: { type: "integer", minimum: 1, maximum: 100 },
+        },
+      },
+    }, {
+      name: "marketplace.demand.match",
+      description: "Rank demand summaries that explicitly opted into supply discovery against one active supply offer. Results never include participant IDs or contact values.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["offer_id", "tenant_id", "domain_id", "platform_path", "participant_id"],
+        properties: {
+          offer_id: { type: "string", format: "uuid" },
+          tenant_id: { type: "string", format: "uuid" },
+          domain_id: { type: "string", format: "uuid" },
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
+          participant_id: { type: "string", format: "uuid" },
+          limit: { type: "integer", minimum: 1, maximum: 100 },
+        },
+      },
+    }, {
+      name: "marketplace.intent.discovery.update",
+      description: "Enable or revoke anonymous supply-side discovery for a demand intent owned by the caller.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["intent_id", "tenant_id", "domain_id", "platform_path", "participant_id", "enabled"],
+        properties: {
+          intent_id: { type: "string", format: "uuid" },
+          tenant_id: { type: "string", format: "uuid" },
+          domain_id: { type: "string", format: "uuid" },
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
+          participant_id: { type: "string", format: "uuid" },
+          enabled: { type: "boolean" },
+          expires_at: { type: ["string", "null"], format: "date-time" },
         },
       },
     }, {
@@ -405,6 +518,8 @@ function marketplaceIntentSchema(): Record<string, unknown> {
       narrative: { type: "string", minLength: 1, maxLength: 10000 },
       attributes: { type: "object" },
       terms: { type: "object" },
+      supply_discovery_enabled: { type: "boolean", description: "Explicitly allow a contact-free summary of this demand to be ranked by supply Agents." },
+      supply_discovery_expires_at: { type: ["string", "null"], format: "date-time" },
       idempotency_key: { type: "string", minLength: 1, maxLength: 240 },
       expires_at: { type: ["string", "null"], format: "date-time" },
     },

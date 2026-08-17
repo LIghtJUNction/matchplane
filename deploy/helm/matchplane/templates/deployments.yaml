@@ -178,6 +178,24 @@ spec:
                 secretKeyRef:
                   name: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
                   key: better-auth-secret
+            - name: MATCHPLANE_NATIONAL_IDENTITY_OAUTH_CLIENT_ID
+              value: {{ $root.Values.web.nationalIdentity.clientId | quote }}
+            - name: MATCHPLANE_NATIONAL_IDENTITY_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
+                  key: national-identity-client-secret
+                  optional: true
+            - name: MATCHPLANE_NATIONAL_IDENTITY_OAUTH_DISCOVERY_URL
+              value: {{ $root.Values.web.nationalIdentity.discoveryUrl | quote }}
+            - name: MATCHPLANE_NATIONAL_IDENTITY_OAUTH_AUTHORIZATION_URL
+              value: {{ $root.Values.web.nationalIdentity.authorizationUrl | quote }}
+            - name: MATCHPLANE_NATIONAL_IDENTITY_OAUTH_TOKEN_URL
+              value: {{ $root.Values.web.nationalIdentity.tokenUrl | quote }}
+            - name: MATCHPLANE_NATIONAL_IDENTITY_OAUTH_USERINFO_URL
+              value: {{ $root.Values.web.nationalIdentity.userInfoUrl | quote }}
+            - name: MATCHPLANE_NATIONAL_IDENTITY_OAUTH_SCOPES
+              value: {{ $root.Values.web.nationalIdentity.scopes | quote }}
             - name: MATCHPLANE_ROOT_ADMIN_EMAIL
               valueFrom:
                 secretKeyRef:
@@ -331,3 +349,104 @@ spec:
           persistentVolumeClaim:
             claimName: {{ $root.Values.web.secretPvc | quote }}
       {{- end }}
+
+{{- if $root.Values.subplatformBuilder.enabled }}
+{{- if and (eq $root.Values.runtime.environment "production") (or (not $root.Values.subplatformBuilder.uploadPvc) (not $root.Values.subplatformBuilder.artifactPvc)) }}
+{{- fail "subplatformBuilder.uploadPvc and subplatformBuilder.artifactPvc are required in production" }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "matchplane.fullname" $root }}-subplatform-builder
+  labels:
+    {{- include "matchplane.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: subplatform-builder
+spec:
+  replicas: {{ $root.Values.subplatformBuilder.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "matchplane.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: subplatform-builder
+  template:
+    metadata:
+      labels:
+        {{- include "matchplane.selectorLabels" $root | nindent 8 }}
+        app.kubernetes.io/component: subplatform-builder
+    spec:
+      serviceAccountName: {{ include "matchplane.fullname" $root }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: subplatform-builder
+          image: {{ include "matchplane.builderImage" $root }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          env:
+            - name: MATCHPLANE_SUBPLATFORM_BUILDER_WEB_URL
+              value: {{ default (printf "http://%s-web:%v" (include "matchplane.fullname" $root) $root.Values.web.service.port) $root.Values.subplatformBuilder.webUrl | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE
+              value: {{ $root.Values.subplatformBuilder.tokenFile | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT
+              value: {{ $root.Values.subplatformBuilder.uploadRoot | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT
+              value: {{ $root.Values.subplatformBuilder.artifactRoot | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_BUILDER_WORK_ROOT
+              value: {{ $root.Values.subplatformBuilder.workRoot | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_BUILDER_POLL_SECONDS
+              value: {{ $root.Values.subplatformBuilder.pollSeconds | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_BUILDER_BUILD_SECONDS
+              value: {{ $root.Values.subplatformBuilder.buildSeconds | quote }}
+            - name: MATCHPLANE_SUBPLATFORM_GIT_ALLOWED_HOSTS
+              value: {{ $root.Values.subplatformBuilder.gitAllowedHosts | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: builder-token
+              mountPath: /run/secrets
+              readOnly: true
+            - name: builder-work
+              mountPath: {{ $root.Values.subplatformBuilder.workRoot | quote }}
+            - name: subplatform-uploads
+              mountPath: {{ $root.Values.subplatformBuilder.uploadRoot | quote }}
+              readOnly: true
+            - name: subplatform-artifacts
+              mountPath: {{ $root.Values.subplatformBuilder.artifactRoot | quote }}
+            - name: builder-tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml (default $root.Values.resources $root.Values.subplatformBuilder.resources) | nindent 12 }}
+      volumes:
+        - name: builder-token
+          secret:
+            secretName: {{ required "runtime.existingWebSecret is required" $root.Values.runtime.existingWebSecret }}
+            defaultMode: 0440
+            items:
+              - key: subplatform-builder-token
+                path: subplatform-builder.token
+        - name: builder-work
+          emptyDir: {}
+        - name: builder-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+        - name: subplatform-uploads
+          {{- if $root.Values.subplatformBuilder.uploadPvc }}
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.subplatformBuilder.uploadPvc | quote }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: subplatform-artifacts
+          {{- if $root.Values.subplatformBuilder.artifactPvc }}
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.subplatformBuilder.artifactPvc | quote }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

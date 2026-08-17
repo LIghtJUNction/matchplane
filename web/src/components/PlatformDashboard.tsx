@@ -32,7 +32,9 @@ import {
   activateSubplatform,
   createPlatformDomain,
   createRootPlatformOrganization,
+  discoverSubplatformSource,
   getPlatformDomains,
+  getSubplatformSourceIntake,
   registerSubplatform,
   saveInvoiceProvider,
   savePaymentGateway,
@@ -54,6 +56,7 @@ import {
 } from "../api";
 import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
+import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import { MetricCard, SectionHeading, spring } from "./Primitives";
 
 interface PlatformDashboardProps {
@@ -123,6 +126,7 @@ export function PlatformDashboard({
   const [subplatformMembershipPolicy, setSubplatformMembershipPolicy] = useState<"public" | "invite">("public");
   const [subplatformArchive, setSubplatformArchive] = useState<File | null>(null);
   const [subplatformUpload, setSubplatformUpload] = useState<SubplatformArchiveUpload | null>(null);
+  const [subplatformDiscoveryState, setSubplatformDiscoveryState] = useState("");
   const accessOrganizations: SubplatformOrganizationRecord[] = [
     ...(setup?.root.organization ? [
       {
@@ -147,13 +151,20 @@ export function PlatformDashboard({
   useEffect(() => {
     if (!rootRole) return;
     let mounted = true;
-    void Promise.all([getPlatformSetupStatus(), getPlatformDomains()])
-      .then(([status, records]) => {
+    void Promise.allSettled([getPlatformSetupStatus(), getPlatformDomains()])
+      .then(([statusResult, domainsResult]) => {
         if (!mounted) return;
-        setSetup(status);
-        setDomains(records);
-      })
-      .catch(() => { if (mounted) setSetupError(true); });
+        if (statusResult.status === "fulfilled") {
+          setSetup(statusResult.value);
+          setSetupError(false);
+        } else {
+          setSetupError(true);
+        }
+        // A fresh deployment can report its bounded setup state before a root tenant exists.
+        // Keep that useful state visible instead of turning the whole admin panel into a generic
+        // error just because the domain endpoint correctly returned 503.
+        setDomains(domainsResult.status === "fulfilled" ? domainsResult.value : []);
+      });
     return () => {
       mounted = false;
     };
@@ -313,6 +324,7 @@ export function PlatformDashboard({
     setSubplatformMembershipPolicy("public");
     setSubplatformArchive(null);
     setSubplatformUpload(null);
+    setSubplatformDiscoveryState("");
   };
 
   const submitSubplatform = async () => {
@@ -324,32 +336,20 @@ export function PlatformDashboard({
       onNotice("请先在根平台配置一个 active domain");
       return;
     }
-    const packageId = subplatformPackageId.trim();
-    const slug = subplatformSlug.trim();
-    if (!/^[a-z0-9][a-z0-9._-]{1,127}$/.test(packageId)) {
-      onNotice("package id 只能使用小写字母、数字、点、下划线或短横线");
-      return;
-    }
-    if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) {
-      onNotice("slug 只能使用小写字母、数字和短横线");
-      return;
-    }
-    let manifest: Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(subplatformManifest);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-      manifest = parsed as Record<string, unknown>;
-    } catch {
-      onNotice("manifest 必须是 JSON 对象");
-      return;
-    }
-    if (manifest.id !== packageId || manifest.slug !== slug) {
-      onNotice("manifest.id 和 manifest.slug 必须分别等于 package id 与 slug");
-      return;
-    }
+    let packageId = subplatformPackageId.trim();
+    let slug = subplatformSlug.trim();
+    let manifest: Record<string, unknown> | null = null;
     let sourceLocator = subplatformSourceLocator.trim();
     let sourceDigest = subplatformSourceDigest.trim().toLowerCase();
     let pinnedRevision = subplatformPinnedRevision.trim().toLowerCase();
+    const requestedScopes = [...new Set(subplatformScopes.split(",").map((scope) => scope.trim()).filter(Boolean))];
+    // Supplying the source URL/archive is enough. The isolated builder will read and validate
+    // package id, slug, immutable revision, digest and manifest. Manual metadata remains
+    // supported for operators who already have a builder-verified package record.
+    const hasManualRegistration = Boolean(
+      packageId && slug && subplatformManifest.trim() && pinnedRevision && sourceDigest,
+    );
+    setSubplatformDiscoveryState("");
     setSaving(true);
     try {
       if (subplatformSourceKind === "archive") {
@@ -367,7 +367,66 @@ export function PlatformDashboard({
         setSubplatformPinnedRevision(pinnedRevision);
       }
       if (!sourceLocator) {
-        onNotice("请填写 Git HTTPS/SSH 地址或先上传压缩包");
+        onNotice("请填写 Git HTTPS 地址或先上传压缩包");
+        return;
+      }
+
+      if (!hasManualRegistration) {
+        setSubplatformDiscoveryState("正在提交到隔离构建器…");
+        const intake = await discoverSubplatformSource({
+          domainId: subplatformDomainId,
+          parentOrganizationId: subplatformParentId || undefined,
+          sourceKind: subplatformSourceKind,
+          sourceLocator,
+          sourceDigest: sourceDigest || undefined,
+          requestedScopes: requestedScopes.length ? requestedScopes : undefined,
+          membershipPolicy: subplatformMembershipPolicy,
+        });
+        let discovered = null;
+        for (let attempt = 0; attempt < 90; attempt += 1) {
+          discovered = await getSubplatformSourceIntake(intake.intakeId);
+          if (discovered.state === "ready") break;
+          if (discovered.state === "rejected") {
+            throw new Error(discovered.error || "隔离构建器拒绝了这个子平台来源");
+          }
+          setSubplatformDiscoveryState(
+            discovered.state === "discovering" ? "隔离构建器正在读取 manifest…" : "等待隔离构建器接单…",
+          );
+          await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+        }
+        if (!discovered || discovered.state !== "ready") {
+          throw new Error(`隔离构建器尚未完成，请稍后重试（任务 ${intake.intakeId}）`);
+        }
+        if (!discovered.manifest || typeof discovered.manifest !== "object" || Array.isArray(discovered.manifest)) {
+          throw new Error("隔离构建器没有返回有效 manifest");
+        }
+        manifest = discovered.manifest;
+        packageId = discovered.packageId || String(manifest.id || "");
+        slug = discovered.slug || String(manifest.slug || "");
+        sourceDigest = discovered.sourceDigest?.toLowerCase() || sourceDigest;
+        pinnedRevision = discovered.pinnedRevision?.toLowerCase() || pinnedRevision;
+        setSubplatformDiscoveryState("manifest 已验证，正在登记平台节点…");
+      } else {
+        try {
+          const parsed = JSON.parse(subplatformManifest);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+          manifest = parsed as Record<string, unknown>;
+        } catch {
+          onNotice("manifest 必须是 JSON 对象");
+          return;
+        }
+      }
+
+      if (!/^[a-z0-9][a-z0-9._-]{1,127}$/.test(packageId)) {
+        onNotice("package id 只能使用小写字母、数字、点、下划线或短横线");
+        return;
+      }
+      if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) {
+        onNotice("slug 只能使用小写字母、数字和短横线");
+        return;
+      }
+      if (!manifest || manifest.id !== packageId || manifest.slug !== slug) {
+        onNotice("构建器返回的 manifest.id/slug 与平台节点不一致");
         return;
       }
       if (!/^[0-9a-f]{7,128}$/i.test(pinnedRevision)) {
@@ -378,7 +437,6 @@ export function PlatformDashboard({
         onNotice("source digest 必须是 64 位 SHA-256；不要提交未经验证的来源");
         return;
       }
-      const requestedScopes = [...new Set(subplatformScopes.split(",").map((scope) => scope.trim()).filter(Boolean))];
       const result = await registerSubplatform({
         tenantId: setup.root.tenantId,
         domainId: subplatformDomainId,
@@ -390,7 +448,7 @@ export function PlatformDashboard({
         pinnedRevision,
         sourceDigest,
         manifest,
-        requestedScopes,
+        requestedScopes: requestedScopes.length ? requestedScopes : undefined,
         membershipPolicy: subplatformMembershipPolicy,
       });
       await refreshSubplatforms();
@@ -398,6 +456,7 @@ export function PlatformDashboard({
       resetSubplatformEditor();
       onNotice(`子平台 ${result.slug} 已登记，等待隔离构建器附加 build digest`);
     } catch (error) {
+      setSubplatformDiscoveryState(error instanceof Error ? error.message : "子平台源码发现失败");
       onNotice(error instanceof Error ? error.message : "子平台注册失败");
     } finally {
       setSaving(false);
@@ -578,20 +637,31 @@ export function PlatformDashboard({
     ? "状态接口不可用"
     : setup?.firstRun.needsRootAccount
       ? "等待根管理员账号"
+      : setup && !setup.root.tenantConfigured
+        ? "等待 root tenant 配置"
+        : setup && !setup.root.tenantExists
+          ? "等待 root tenant 初始化"
+          : setup && !setup.root.organization
+            ? "等待根平台组织"
       : setup
         ? "身份已初始化"
         : "读取部署状态";
   const routingStatus = setupError
+      ? "状态接口不可用"
+        : setup
+          ? setup.routing.ready ? `${setup.routing.activeChildren} 个子平台已激活` : "等待子平台激活"
+          : "读取部署状态";
+  const hostedAgentStatus = setupError
     ? "状态接口不可用"
-      : setup
-        ? setup.routing.ready ? `${setup.routing.activeChildren} 个子平台已激活` : "等待子平台激活"
-        : "读取部署状态";
+    : setup?.hostedAgent.configured
+      ? "平台 Agent 已连接"
+      : "平台 Agent 使用受控降级";
   const subplatformStateLabel: Record<string, string> = {
     active: "已激活",
     ready: "构建完成",
     building: "构建中",
     validated: "已登记，待构建",
-    failed: "构建失败",
+    rejected: "构建失败",
   };
 
   return (
@@ -637,9 +707,17 @@ export function PlatformDashboard({
               <strong>{routingStatus}</strong>
               <small>{setup ? `${setup.domains.length} 个可用 domain` : "domain 与注册状态由 API 返回"}</small>
             </div>
+            <div className={setup?.hostedAgent.configured ? "readiness-item" : "readiness-item readiness-attention"}>
+              <span aria-hidden="true" />
+              <strong>{hostedAgentStatus}</strong>
+              <small>{setup?.hostedAgent.configured ? "托管模型负责没有自有 Agent 的买家和卖家" : "配置 MATCHPLANE_ROUTER_AI_URL、KEY、MODEL 后启用"}</small>
+            </div>
           </div>
           {setup?.firstRun.needsRootAccount ? (
             <a className="button button-dark readiness-action" href="/login?role=platform&next=%2F%3Frole%3Dplatform">去创建或登录根管理员</a>
+          ) : null}
+          {setup && !setup.root.tenantConfigured ? (
+            <p className="readiness-note">请先在服务端运行 <code>matchplane provision-root</code> 配置 root tenant；登录本身不替代租户初始化。</p>
           ) : null}
           {setup?.root.tenantExists && !setup.root.organization ? (
             <button className="button button-light readiness-action" type="button" disabled={saving} onClick={() => void initializeRootOrganization()}>
@@ -649,7 +727,13 @@ export function PlatformDashboard({
         </section>
 
         <section className="surface domain-panel" aria-labelledby="domain-title">
-          <SectionHeading eyebrow="平台范围" title="管理 domain" action={domainEditorOpen ? "关闭" : "新增 domain"} onAction={() => setDomainEditorOpen((open) => !open)} />
+          <SectionHeading
+            eyebrow="平台范围"
+            title="管理 domain"
+            action={setup?.root.tenantConfigured ? (domainEditorOpen ? "关闭" : "新增 domain") : undefined}
+            onAction={() => setDomainEditorOpen((open) => !open)}
+          />
+          {!setup?.root.tenantConfigured ? <p className="subplatform-intro">root tenant 尚未配置，domain 创建入口会在服务端初始化后出现。</p> : null}
           <p className="subplatform-intro">domain 是平台树挂载和权限隔离的稳定范围；创建后才能把子平台注册到对应路径。</p>
           {domains.length ? (
             <div className="subplatform-list" aria-label="根平台 domain 列表">
@@ -675,6 +759,13 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
+        <PlatformSiteSettingsPanel
+          organizationId={setup?.root.organization?.id}
+          platformPath="/"
+          platformName={setup?.root.organization?.name || "根平台"}
+          onNotice={onNotice}
+        />
+
         <section className="surface subplatform-panel" aria-labelledby="subplatform-title">
           <div className="subplatform-header">
             <div>
@@ -682,7 +773,13 @@ export function PlatformDashboard({
               <h2 id="subplatform-title">把任意市场接入同一个根平台。</h2>
               <p className="subplatform-intro">子平台只提交自己的 manifest、不可变来源和能力声明。根平台负责身份、路由与审计；领域数据、Agent 和检索实现仍由子平台拥有。</p>
             </div>
-            <button className="button button-dark" type="button" onClick={() => setSubplatformEditorOpen((open) => !open)}>
+            <button
+              className="button button-dark"
+              type="button"
+              disabled={saving || !setup?.root.organization?.id || !setup.domains.length}
+              title={!setup?.root.organization?.id ? "请先初始化根平台组织" : !setup.domains.length ? "请先创建 active domain" : undefined}
+              onClick={() => setSubplatformEditorOpen((open) => !open)}
+            >
               {subplatformEditorOpen ? "关闭登记" : "添加子平台"}
             </button>
           </div>
@@ -698,6 +795,7 @@ export function PlatformDashboard({
                   <span className={`subplatform-state state-${organization.registrationState || "unknown"}`}>
                     {subplatformStateLabel[organization.registrationState || ""] || "未登记"}
                   </span>
+                  {organization.buildError ? <small className="subplatform-build-error" title={organization.buildError}>最近失败：{organization.buildError.slice(0, 120)}</small> : null}
                   {organization.registrationState === "ready" && organization.buildDigest ? (
                     <button className="button button-dark subplatform-activate" type="button" disabled={saving} onClick={() => void activateRegisteredSubplatform(organization)}>
                       激活路由
@@ -715,14 +813,12 @@ export function PlatformDashboard({
           {subplatformEditorOpen ? (
             <div className="admin-editor subplatform-editor" aria-label="登记子平台">
               <div className="admin-editor-heading">
-                <div><strong>登记一个平台节点</strong><small>URL 和压缩包都不会在 Web 进程中执行。</small></div>
+                <div><strong>登记一个平台节点</strong><small>填 Git 地址或上传压缩包，隔离构建器会自动读取 manifest。</small></div>
                 <button type="button" onClick={() => setSubplatformEditorOpen(false)}>关闭</button>
               </div>
               <div className="subplatform-form-grid">
                 <label><span>挂载到</span><select value={subplatformParentId} onChange={(event) => setSubplatformParentId(event.target.value)}><option value="">根平台</option>{subplatforms.map((organization) => <option key={organization.id} value={organization.id}>/{organization.slug} · {organization.name}</option>)}</select></label>
                 <label><span>所属 domain</span><select value={subplatformDomainId} onChange={(event) => setSubplatformDomainId(event.target.value)}><option value="">选择 active domain</option>{setup?.domains.map((domain) => <option key={domain.id} value={domain.id}>{domain.name} · {domain.slug}</option>)}</select></label>
-                <label><span>package id</span><input value={subplatformPackageId} onChange={(event) => setSubplatformPackageId(event.target.value)} placeholder="包 manifest 中的 id" autoComplete="off" /></label>
-                <label><span>slug / 路径</span><input value={subplatformSlug} onChange={(event) => setSubplatformSlug(event.target.value)} placeholder="包 manifest 中的 slug" autoComplete="off" /></label>
               </div>
               <div className="subplatform-source-switch" role="group" aria-label="子平台来源类型">
                 <button type="button" className={subplatformSourceKind === "git" ? "is-selected" : ""} aria-pressed={subplatformSourceKind === "git"} onClick={() => setSubplatformSourceKind("git")}><GitBranch size={16} aria-hidden="true" />Git 仓库</button>
@@ -730,25 +826,32 @@ export function PlatformDashboard({
               </div>
               {subplatformSourceKind === "git" ? (
                 <div className="subplatform-form-grid">
-                  <label className="subplatform-form-wide"><span>Git HTTPS / SSH 地址（不含凭据）</span><input value={subplatformSourceLocator} onChange={(event) => setSubplatformSourceLocator(event.target.value)} placeholder="https://github.com/example/market.git" inputMode="url" /></label>
-                  <label><span>pinned revision</span><input value={subplatformPinnedRevision} onChange={(event) => setSubplatformPinnedRevision(event.target.value)} placeholder="40 位 commit SHA" spellCheck={false} /></label>
-                  <label><span>来源 SHA-256</span><input value={subplatformSourceDigest} onChange={(event) => setSubplatformSourceDigest(event.target.value)} placeholder="构建器验证的 64 位 digest" spellCheck={false} /></label>
+                  <label className="subplatform-form-wide"><span>Git HTTPS 地址（不含凭据）</span><input value={subplatformSourceLocator} onChange={(event) => setSubplatformSourceLocator(event.target.value)} placeholder="https://github.com/example/market.git" inputMode="url" /></label>
                 </div>
               ) : (
                 <div className="subplatform-upload-box">
                   <label className="file-picker"><Upload size={18} aria-hidden="true" /><span>{subplatformArchive?.name || "选择子平台压缩包"}</span><input type="file" accept=".tar.gz,.tgz,.tar.zst,.tzst" onChange={(event) => setSubplatformArchive(event.target.files?.[0] ?? null)} /></label>
                   <p>{subplatformUpload ? `已上传 ${subplatformUpload.originalName} · ${(subplatformUpload.size / 1024 / 1024).toFixed(1)} MiB · digest ${subplatformUpload.sourceDigest.slice(0, 12)}…` : "限制 64 MiB；服务端只保存随机 locator，隔离构建器负责解包与验证。"}</p>
-                  <label><span>pinned revision（压缩包可使用 source digest）</span><input value={subplatformPinnedRevision} onChange={(event) => setSubplatformPinnedRevision(event.target.value)} placeholder="上传后自动填入 source digest" spellCheck={false} /></label>
                 </div>
               )}
               <div className="subplatform-form-grid">
                 <label><span>请求 scopes（逗号分隔）</span><input value={subplatformScopes} onChange={(event) => setSubplatformScopes(event.target.value)} placeholder="marketplace:read,retrieval:query" /></label>
                 <label><span>成员加入策略</span><select value={subplatformMembershipPolicy} onChange={(event) => setSubplatformMembershipPolicy(event.target.value as "public" | "invite")}><option value="public">公开映射</option><option value="invite">邀请加入</option></select></label>
               </div>
-              <label><span>manifest（来自待注册仓库；根平台不提供示例）</span><textarea value={subplatformManifest} onChange={(event) => setSubplatformManifest(event.target.value)} rows={12} spellCheck={false} placeholder="粘贴仓库中的 matchplane.subplatform.json；业务字段由子平台自己声明。" /></label>
+              <details className="subplatform-advanced-fields">
+                <summary>高级：已有构建器验证信息（通常无需填写）</summary>
+                <div className="subplatform-form-grid">
+                  <label><span>package id</span><input value={subplatformPackageId} onChange={(event) => setSubplatformPackageId(event.target.value)} placeholder="manifest 中的 id" autoComplete="off" /></label>
+                  <label><span>slug / 路径</span><input value={subplatformSlug} onChange={(event) => setSubplatformSlug(event.target.value)} placeholder="manifest 中的 slug" autoComplete="off" /></label>
+                  <label><span>pinned revision</span><input value={subplatformPinnedRevision} onChange={(event) => setSubplatformPinnedRevision(event.target.value)} placeholder="commit SHA 或 archive digest" spellCheck={false} /></label>
+                  <label><span>来源 SHA-256</span><input value={subplatformSourceDigest} onChange={(event) => setSubplatformSourceDigest(event.target.value)} placeholder="构建器验证的 64 位 digest" spellCheck={false} /></label>
+                </div>
+                <label><span>manifest JSON</span><textarea value={subplatformManifest} onChange={(event) => setSubplatformManifest(event.target.value)} rows={8} spellCheck={false} placeholder="已有完整 manifest 时再粘贴；留空则由隔离构建器从来源读取。" /></label>
+              </details>
               <div className="subplatform-editor-footer">
-                <p><ShieldCheck size={16} aria-hidden="true" />登记不会立即进入路由；只有构建器签发 build digest 后才能激活。</p>
-                <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "提交中…" : "登记并进入构建"}</button>
+                <p><ShieldCheck size={16} aria-hidden="true" />源码会在隔离构建器中读取和校验；登记不会立即进入路由，需管理员在构建完成后激活。</p>
+                {subplatformDiscoveryState ? <small className="subplatform-discovery-state" role="status">{subplatformDiscoveryState}</small> : null}
+                <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup.root.organization?.id || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "提交中…" : "登记并进入构建"}</button>
               </div>
             </div>
           ) : null}

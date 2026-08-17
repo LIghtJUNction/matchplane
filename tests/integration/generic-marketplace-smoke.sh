@@ -61,7 +61,7 @@ curl --fail-with-body --silent --header "$admin_authorization" --header 'content
   | jq -e '.status == "active" and .offer_id == "00000000-0000-7000-8000-000000000902"' >/dev/null
 
 intent=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg demand "$demand_id" \
-  '{intent_id:"00000000-0000-7000-8000-000000000901",tenant_id:$tenant,domain_id:$domain,participant_id:$demand,side:"demand",narrative:"Integration demand",attributes:{category:"integration-item",edition:"v1"},terms:{budget:{min:"2000000",max:"3000000",currency:"USD"}},idempotency_key:"ci-generic-intent-v1"}' \
+  '{intent_id:"00000000-0000-7000-8000-000000000901",tenant_id:$tenant,domain_id:$domain,participant_id:$demand,side:"demand",narrative:"Integration demand",attributes:{category:"integration-item",edition:"v1"},terms:{budget:{min:"2000000",max:"3000000",currency:"USD"}},supply_discovery_enabled:true,idempotency_key:"ci-generic-intent-v1"}' \
   | curl --fail-with-body --silent --header 'content-type: application/json' \
       --header "authorization: Bearer $demand_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/intents")
@@ -73,8 +73,43 @@ matches=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg deman
       --header "authorization: Bearer $demand_token" --header "$platform_path_header" --data-binary @- \
       "$base_url/v1/marketplace/intents/$intent_id/matches")
 jq -e --arg offer "$offer_id" \
-  '.intent_id == "00000000-0000-7000-8000-000000000901" and (.candidates | length) == 1 and .candidates[0].offer_id == $offer and .candidates[0].score == 1' \
+  '.intent_id == "00000000-0000-7000-8000-000000000901" and
+   (.candidates | length) == 1 and
+   .candidates[0].offer_id == $offer and
+   (.candidates[0].score >= 0.8 and .candidates[0].score <= 1) and
+   ((.candidates[0].reasons | index("shared attribute: category")) != null) and
+   ((.candidates[0].reasons | index("shared attribute: edition")) != null)' \
   <<<"$matches" >/dev/null
+
+demand_matches=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg supply "$supply_id" --arg offer "$offer_id" \
+  '{tenant_id:$tenant,domain_id:$domain,participant_id:$supply,offer_id:$offer,limit:10}' \
+  | curl --fail-with-body --silent --header 'content-type: application/json' \
+      --header "authorization: Bearer $supply_token" --header "$platform_path_header" --data-binary @- \
+      "$base_url/v1/marketplace/offers/$offer_id/demand-matches")
+jq -e --arg intent "$intent_id" \
+  '.offer_id == "00000000-0000-7000-8000-000000000902" and
+   (.candidates | length) == 1 and
+   .candidates[0].intent_id == $intent and
+   (.candidates[0].score >= 0.8 and .candidates[0].score <= 1) and
+   (.candidates[0] | has("participant_id") | not)' \
+  <<<"$demand_matches" >/dev/null
+
+curl --fail-with-body --silent --header 'content-type: application/json' \
+  --header "authorization: Bearer $demand_token" --header "$platform_path_header" \
+  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"participant_id\":\"$demand_id\",\"enabled\":false}" \
+  -X PATCH "$base_url/v1/marketplace/intents/$intent_id/discovery" \
+  | jq -e '.supply_discovery_enabled == false' >/dev/null
+revoked_matches=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg supply "$supply_id" --arg offer "$offer_id" \
+  '{tenant_id:$tenant,domain_id:$domain,participant_id:$supply,offer_id:$offer,limit:10}' \
+  | curl --fail-with-body --silent --header 'content-type: application/json' \
+      --header "authorization: Bearer $supply_token" --header "$platform_path_header" --data-binary @- \
+      "$base_url/v1/marketplace/offers/$offer_id/demand-matches")
+jq -e '.candidates | length == 0' <<<"$revoked_matches" >/dev/null
+curl --fail-with-body --silent --header 'content-type: application/json' \
+  --header "authorization: Bearer $demand_token" --header "$platform_path_header" \
+  --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"participant_id\":\"$demand_id\",\"enabled\":true}" \
+  -X PATCH "$base_url/v1/marketplace/intents/$intent_id/discovery" \
+  | jq -e '.supply_discovery_enabled == true' >/dev/null
 
 expires_at=$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%SZ')
 introduction=$(jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg intent "$intent_id" \

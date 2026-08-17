@@ -15,7 +15,7 @@ if command -v systemctl >/dev/null 2>&1; then
     set -- matchplane-gateway.service matchplane-payment-service.service \
       matchplane-event-relay.service matchplane-matcher.service \
       matchplane-projector.service matchplane-vector-worker.service \
-      matchplane-federation-hub.service matchplane-web.service
+      matchplane-subplatform-builder.service matchplane-federation-hub.service matchplane-web.service
     if [ "$previous_version" = 0.1.0 ]; then
       # The first 0.1.0 prerm stopped units during upgrade. Recover only units
       # the administrator had enabled; later packages preserve active state.

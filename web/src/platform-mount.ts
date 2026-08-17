@@ -1,6 +1,8 @@
 import { authDatabase } from "./lib/auth";
+import { isProductionEnvironment } from "./lib/runtime";
 
 export interface MountedPlatformScope {
+  organizationId: string;
   tenantId: string;
   domainId: string;
   slug: string;
@@ -13,7 +15,7 @@ export interface MountedPlatformScope {
  * active.
  */
 export async function isMountedPlatformPath(platformPath: string): Promise<boolean> {
-  if (process.env.MATCHPLANE_ENVIRONMENT !== "production") return true;
+  if (!isProductionEnvironment()) return true;
   // The deployment root exists independently of a child registration. A
   // missing root tenant only disables recursive delegation; it must not make
   // the root chat itself unreachable.
@@ -84,7 +86,7 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
 export async function readActivePlatformScope(
   platformPath: string,
 ): Promise<MountedPlatformScope | null> {
-  if (process.env.MATCHPLANE_ENVIRONMENT !== "production" || platformPath === "/") return null;
+  if (!isProductionEnvironment() || platformPath === "/") return null;
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath)) return null;
   try {
@@ -129,7 +131,7 @@ export async function readActivePlatformScope(
            JOIN platform_tree ON child."parentOrganizationId" = platform_tree.id
           WHERE length(platform_tree.platform_path) < 4_096
        )
-       SELECT tenant_id AS "tenantId", domain_id AS "domainId", slug
+       SELECT id AS "organizationId", tenant_id AS "tenantId", domain_id AS "domainId", slug
          FROM platform_tree
         WHERE platform_path = $2
           AND path_active
@@ -138,7 +140,7 @@ export async function readActivePlatformScope(
       [rootTenantId, platformPath],
     );
     const row = result.rows[0];
-    return row && isUuid(row.tenantId) && isUuid(row.domainId)
+    return row && isUuid(row.organizationId) && isUuid(row.tenantId) && isUuid(row.domainId)
       ? row
       : null;
   } catch (error) {

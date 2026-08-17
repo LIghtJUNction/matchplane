@@ -32,6 +32,8 @@ spec:
         - protocol: TCP
           port: 8080
         - protocol: TCP
+          port: 4173
+        - protocol: TCP
           port: 4317
         - protocol: TCP
           port: 50051

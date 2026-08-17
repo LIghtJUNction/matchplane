@@ -7,7 +7,6 @@ import {
   Heart,
   MapPin,
   Search,
-  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   UserRoundCheck,
@@ -243,7 +242,6 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
               </motion.button>
             </div>
             <div className="hero-proof" aria-label={copy("trustLabel", "平台保障")}>
-              <span><ShieldCheck size={16} aria-hidden="true" /> {copy("contactProtectionLabel", "联系信息受控解锁")}</span>
               <span><BadgeCheck size={16} aria-hidden="true" /> {copy("explainableMatchLabel", "匹配理由可解释")}</span>
             </div>
           </div>

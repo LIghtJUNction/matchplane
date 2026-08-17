@@ -1,6 +1,7 @@
 export const AGENT_HANDOFF_PROTOCOL = "matchplane.agent/v1" as const;
 
-export type AgentHandoffStage = "platform" | "merchant" | "inventory";
+/** Domain-owned stage taxonomy. `platform`/`merchant`/`inventory` remain valid examples, not a root enum. */
+export type AgentHandoffStage = string;
 
 export interface AgentHandoffEnvelope {
   requestId: string;
@@ -37,8 +38,8 @@ export function parseAgentHandoff(value: unknown): ParseResult {
   if (!isUuid(value.request_id)) return { ok: false, error: "request_id must be a UUID" };
 
   const stage = value.stage;
-  if (stage !== "platform" && stage !== "merchant" && stage !== "inventory") {
-    return { ok: false, error: "stage must be platform, merchant, or inventory" };
+  if (!stringMatches(stage, /^[a-z0-9][a-z0-9._:-]{1,127}$/)) {
+    return { ok: false, error: "stage must be a bounded lowercase taxonomy key" };
   }
 
   const scope = value.scope;

@@ -40,6 +40,9 @@ export async function PATCH(request: Request): Promise<Response> {
   try {
     const target = await auth.api.getUser({ query: { id: userId }, headers: request.headers });
     const configuredRootEmail = process.env.MATCHPLANE_ROOT_ADMIN_EMAIL?.trim().toLowerCase();
+    if (role === "rootAdmin" && target.emailVerified !== true) {
+      return jsonError("目标账号必须先完成邮箱验证，才能获得根平台管理员权限", 409);
+    }
     if (role === "user" && configuredRootEmail && target.email.toLowerCase() === configuredRootEmail) {
       return jsonError("配置的根管理员账号不能被降级", 400);
     }

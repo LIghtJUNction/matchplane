@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { authDatabase } from "../../../../src/lib/auth";
+import { isPlatformRouterConfigured } from "../../../../src/platform-router";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 interface RootContactField {
   key: string;
@@ -10,6 +12,11 @@ interface RootContactField {
   type?: "text" | "tel" | "email";
   required?: boolean;
   placeholder?: string;
+}
+
+interface RootChatConfig {
+  buyerHeadlines?: string[];
+  sellerHeadlines?: string[];
 }
 
 /**
@@ -73,9 +80,8 @@ export async function GET(): Promise<Response> {
         `SELECT count(*)::text AS count
            FROM "user"
           WHERE "emailVerified" = true
-            AND lower(email) = lower($1)
-            AND role = ANY($2::text[])`,
-        [process.env.MATCHPLANE_ROOT_ADMIN_EMAIL?.trim() ?? "", ["rootSuperAdmin", "rootAdmin"]],
+            AND role = ANY($1::text[])`,
+        [["rootSuperAdmin", "rootAdmin"]],
       ),
     ]);
 
@@ -88,6 +94,7 @@ export async function GET(): Promise<Response> {
     const rootAdminAccounts = Number.parseInt(rootAdminResult.rows[0]?.count ?? "0", 10) || 0;
     const activeChildren = registrations.active ?? 0;
     const contactFields = readRootContactFields();
+    const chat = readRootChatConfig();
 
     return NextResponse.json(
       {
@@ -101,14 +108,23 @@ export async function GET(): Promise<Response> {
           rootAdminConfigured,
           identityAccounts,
           rootAdminAccounts,
-          ...(contactFields ? { ui: { contactFields } } : {}),
+          ...(contactFields || chat ? { ui: { ...(contactFields ? { contactFields } : {}), ...(chat ? { chat } : {}) } } : {}),
         },
         domains: domainsResult.rows,
         registrations,
         routing: { activeChildren, ready: activeChildren > 0 },
+        hostedAgent: {
+          configured: isPlatformRouterConfigured(),
+          // The deterministic policy path remains available as an explicit degradation, but
+          // administrators should be able to see that no platform-owned model is connected.
+          status: isPlatformRouterConfigured() ? "ready" : "fallback",
+        },
         firstRun: {
           needsRootAccount: rootAdminAccounts === 0,
-          readyForAdmin: rootAdminConfigured && Boolean(tenant),
+          // An operator may bootstrap the first account either through the configured
+          // root-admin address or through a one-time CLI invitation. Count the verified
+          // role projection rather than treating the env var as proof that an account exists.
+          readyForAdmin: Boolean(tenant) && rootAdminAccounts > 0,
         },
       },
       { headers: { "cache-control": "no-store" } },
@@ -116,8 +132,26 @@ export async function GET(): Promise<Response> {
   } catch (error) {
     console.error("platform setup status failed", error);
     return NextResponse.json(
-      { status: "degraded", error: "platform setup status unavailable" },
-      { status: 503, headers: { "cache-control": "no-store" } },
+      {
+        status: "degraded",
+        error: "platform setup status unavailable",
+        root: {
+          tenantConfigured,
+          tenantExists: false,
+          tenantId: tenantConfigured ? configuredTenantId : null,
+          tenant: null,
+          organization: null,
+          rootAdminConfigured,
+          identityAccounts: 0,
+          rootAdminAccounts: 0,
+        },
+        domains: [],
+        registrations: {},
+        routing: { activeChildren: 0, ready: false },
+        hostedAgent: { configured: false, status: "fallback" },
+        firstRun: { needsRootAccount: true, readyForAdmin: false },
+      },
+      { headers: { "cache-control": "no-store" } },
     );
   }
 }
@@ -151,6 +185,33 @@ function readRootContactFields(): RootContactField[] | undefined {
       }];
     }).slice(0, 32);
     return fields.length ? fields : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Root headline rotation is operator configuration, not a hard-coded vertical label. */
+function readRootChatConfig(): RootChatConfig | undefined {
+  const raw = process.env.MATCHPLANE_ROOT_CHAT_HEADLINES_JSON?.trim();
+  if (!raw || raw.length > 32_768) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const value = parsed as Record<string, unknown>;
+    const headlines = (candidate: unknown): string[] | undefined => {
+      if (!Array.isArray(candidate)) return undefined;
+      const items = candidate
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0 && item.length <= 160)
+        .map((item) => item.trim())
+        .slice(0, 12);
+      return items.length ? items : undefined;
+    };
+    const buyerHeadlines = headlines(value.buyer ?? value.buyerHeadlines);
+    const sellerHeadlines = headlines(value.seller ?? value.sellerHeadlines);
+    return buyerHeadlines || sellerHeadlines ? {
+      ...(buyerHeadlines ? { buyerHeadlines } : {}),
+      ...(sellerHeadlines ? { sellerHeadlines } : {}),
+    } : undefined;
   } catch {
     return undefined;
   }

@@ -7,6 +7,7 @@ import { isMountedPlatformPath } from "../../../../src/platform-mount";
 import { readActivePlatformManifest } from "../../../../src/platform-manifest";
 import { authenticatePlatformRequest } from "../../../../src/platform-request-auth";
 import { isActivePlatformPathVisible } from "../../../../src/platform-visibility";
+import { isProductionEnvironment } from "../../../../src/lib/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ export async function GET(request: Request): Promise<Response> {
       },
     });
   }
-  if (process.env.MATCHPLANE_ENVIRONMENT === "production") {
+  if (isProductionEnvironment()) {
     return NextResponse.json({ error: "platform manifest is not available" }, { status: 404 });
   }
   const segments = requestedPath.slice(1).split("/");

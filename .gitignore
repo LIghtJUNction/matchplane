@@ -6,9 +6,12 @@
 *.pid
 *.swp
 deploy/compose/data/
+/var/
 dist/
 result/
 /web/node_modules/
+/node_modules/
+*.tsbuildinfo
 /web/dist/
 /web/.next/
 /web/out/

@@ -81,4 +81,46 @@ describe("bounded recursive platform orchestrator", () => {
     expect(result.routePlan).toHaveLength(2);
     expect(result.truncated).toBe(true);
   });
+
+  it("bounds fanout and loads selected child registries in parallel", async () => {
+    const loadChildren = vi.fn(async (path: string) => {
+      await new Promise((resolve) => setTimeout(resolve, path === "/one" ? 5 : 1));
+      return [candidate(`${path.slice(1)}-child`, `${path}/child`)] as PlatformRouteCandidate[];
+    });
+    const result = await expandPlatformRouteTree({
+      platformPath: "/",
+      narrative: "控制分支",
+      candidates: [candidate("one", "/one"), candidate("two", "/two"), candidate("three", "/three")],
+      loadChildren,
+      decide: async () => decision(["one", "two", "three"]),
+      maxSteps: 1,
+      maxDepth: 2,
+      maxFanout: 2,
+    });
+
+    expect(result.routePlan.map((item) => item.path)).toEqual(["/one", "/two"]);
+    expect(loadChildren).toHaveBeenCalledTimes(2);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("marks a route truncated when the shared wall-clock budget expires", async () => {
+    const loadChildren = vi.fn(async () => [candidate("child", "/child")]);
+    const decide = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return decision(["one"]);
+    });
+
+    const result = await expandPlatformRouteTree({
+      platformPath: "/",
+      narrative: "快速路由",
+      candidates: [candidate("one", "/one")],
+      loadChildren,
+      decide,
+      maxSteps: 4,
+      maxDurationMs: 1,
+    });
+
+    expect(result.trace).toHaveLength(1);
+    expect(result.truncated).toBe(true);
+  });
 });

@@ -6,7 +6,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use matchplane_cache::{CachedBook, ValkeyCache};
 use matchplane_config::{AppConfig, BearerToken, Environment};
@@ -195,6 +195,14 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/v1/marketplace/intents/{intent_id}/matches",
             post(generic_marketplace::matches),
+        )
+        .route(
+            "/v1/marketplace/intents/{intent_id}/discovery",
+            patch(generic_marketplace::update_demand_discovery),
+        )
+        .route(
+            "/v1/marketplace/offers/{offer_id}/demand-matches",
+            post(generic_marketplace::demand_matches),
         )
         .route(
             "/v1/marketplace/offers",
