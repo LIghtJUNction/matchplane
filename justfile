@@ -22,8 +22,10 @@ web-image-check:
     docker build --file deploy/compose/web.Dockerfile --tag matchplane/web:check .
 
 agent-check:
+    bun run --cwd integrations/matchplane-agent-client build
     bun test --cwd integrations/matchplane-agent-client
     web/node_modules/.bin/tsc -p integrations/matchplane-agent-client/tsconfig.json --noEmit
+    cd integrations/matchplane-agent-client && npm pack --dry-run --ignore-scripts --json >/dev/null
 
 dev:
     env_file=.env.example; if [ -f .env ]; then env_file=.env; fi; docker compose --env-file "$env_file" -f deploy/compose/compose.yaml up --build -d

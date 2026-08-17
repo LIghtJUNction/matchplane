@@ -1,8 +1,17 @@
 # MatchPlane Agent client
 
-This is a small, dependency-free Bun/Node 22 client for a demand or supply Agent. It uses the
+This is a small, dependency-free, publishable Bun/Node 22 client for a demand or supply Agent. It uses the
 same class and MCP contract for both sides; the mounted platform owns the meaning of the
 attribute/term payloads and the caller chooses the side at the capability boundary.
+
+Install it in the server-side Agent process (never in browser code):
+
+```sh
+bun add @matchplane/agent-client
+```
+
+The package exposes ESM at `dist/index.js` and keeps its TypeScript source as the type entrypoint.
+Run `bun run build` before publishing a fork or an internal mirror.
 
 Keep the API key and returned party capability in the Agent's server-side secret store. Do not
 bundle this package into a browser application. Treat `access_token_expires_at` as a hard 15-minute
