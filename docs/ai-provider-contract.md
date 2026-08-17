@@ -39,6 +39,12 @@ MATCHPLANE_ROUTER_AI_KEY=server-side-secret
 MATCHPLANE_ROUTER_AI_MODEL=openai/gpt-4o-mini
 MATCHPLANE_ROUTER_AI_TOOL_MODE=required
 MATCHPLANE_ROUTER_AI_MAX_TOKENS=512
+MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS=20000
 ```
+
+`MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS` controls the total wall-clock budget for one recursive
+platform route (default 20 seconds, hard maximum 60 seconds). Each provider request remains
+bounded to four seconds, and once the shared deadline is reached the router records an explicit
+policy fallback instead of waiting through every remaining platform hop.
 
 外部买家/卖家 Agent 的模型由调用方自己选择并承担 token 成本；它们只使用 `matchplane.agent/v1` handoff、平台 MCP 和短期能力凭证，不共享根平台的模型 key。

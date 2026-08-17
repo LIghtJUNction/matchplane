@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 
 import { authDatabase } from "../../../../src/lib/auth";
 import {
+  configuredPlatformRouterTotalTimeoutMs,
   decidePlatformRoutes,
   isPlatformRouterConfigured,
   PlatformRouterQuotaExceededError,
@@ -158,11 +159,12 @@ export async function POST(request: Request): Promise<Response> {
         narrative,
         candidates,
         loadChildren: async (childPath) => readActiveDirectChildRoutes(childPath, rootTenantId ?? "", viewer),
-        decide: ({ platformPath: currentPath, narrative: currentNarrative, candidates: currentCandidates }) =>
+        decide: ({ platformPath: currentPath, narrative: currentNarrative, candidates: currentCandidates, deadlineAt }) =>
           decidePlatformRoutes({
             platformPath: currentPath,
             narrative: currentNarrative,
             candidates: currentCandidates.map(({ tenantId: _tenantId, domainId: _domainId, ...candidate }) => candidate),
+            deadlineAt,
             admitCall: isPlatformRouterConfigured()
               ? async () => {
                   if (!(await admitPlatformAiCall({
@@ -180,6 +182,7 @@ export async function POST(request: Request): Promise<Response> {
         maxSteps: configuredAiMaxSteps(),
         maxDepth: configuredAiMaxSteps(),
         maxFanout: configuredAiMaxFanout(),
+        maxDurationMs: configuredPlatformRouterTotalTimeoutMs(),
       });
     } catch (error) {
       if (error instanceof PlatformRouterQuotaExceededError) {

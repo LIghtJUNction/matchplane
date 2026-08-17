@@ -102,4 +102,25 @@ describe("bounded recursive platform orchestrator", () => {
     expect(loadChildren).toHaveBeenCalledTimes(2);
     expect(result.truncated).toBe(true);
   });
+
+  it("marks a route truncated when the shared wall-clock budget expires", async () => {
+    const loadChildren = vi.fn(async () => [candidate("child", "/child")]);
+    const decide = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return decision(["one"]);
+    });
+
+    const result = await expandPlatformRouteTree({
+      platformPath: "/",
+      narrative: "快速路由",
+      candidates: [candidate("one", "/one")],
+      loadChildren,
+      decide,
+      maxSteps: 4,
+      maxDurationMs: 1,
+    });
+
+    expect(result.trace).toHaveLength(1);
+    expect(result.truncated).toBe(true);
+  });
 });

@@ -191,6 +191,25 @@ describe("platform Agent router", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("uses the shared request deadline before admitting another provider call", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "找商品",
+      candidates,
+      deadlineAt: Date.now() - 1,
+    });
+
+    expect(decision.source).toBe("policy_fallback");
+    expect(decision.rationale).toContain("总时限");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not call an insecure provider endpoint in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     process.env.MATCHPLANE_ROUTER_AI_URL = "http://router.internal/v1/chat/completions";

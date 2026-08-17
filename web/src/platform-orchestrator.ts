@@ -21,6 +21,8 @@ const PROTOCOL_MAX_STEPS = 16;
 const DEFAULT_MAX_STEPS = 8;
 const PROTOCOL_MAX_HOPS = 32;
 const DEFAULT_MAX_FANOUT = 4;
+const PROTOCOL_MAX_DURATION_MS = 60_000;
+const DEFAULT_MAX_DURATION_MS = 20_000;
 
 /**
  * Expand only authorized direct-child candidates. The orchestrator never
@@ -36,14 +38,19 @@ export async function expandPlatformRouteTree(input: {
     platformPath: string;
     narrative: string;
     candidates: PlatformRouteCandidate[];
+    deadlineAt?: number;
   }) => Promise<PlatformRouteDecision>;
   maxSteps?: number;
   maxDepth?: number;
   maxFanout?: number;
+  /** Total wall-clock budget shared by all recursive model decisions. */
+  maxDurationMs?: number;
 }): Promise<RecursivePlatformRouting> {
   const maxSteps = boundedPositiveInteger(input.maxSteps, DEFAULT_MAX_STEPS, PROTOCOL_MAX_STEPS);
   const maxDepth = boundedPositiveInteger(input.maxDepth, maxSteps, PROTOCOL_MAX_STEPS);
   const maxFanout = boundedPositiveInteger(input.maxFanout, DEFAULT_MAX_FANOUT, DEFAULT_MAX_FANOUT * 4);
+  const maxDurationMs = boundedPositiveInteger(input.maxDurationMs, DEFAULT_MAX_DURATION_MS, PROTOCOL_MAX_DURATION_MS);
+  const deadlineAt = Date.now() + maxDurationMs;
   const trace: PlatformRouteTrace[] = [];
   const routePlan: PlatformRouteCandidate[] = [];
   const queue: PendingNode[] = [{
@@ -54,7 +61,7 @@ export async function expandPlatformRouteTree(input: {
   const visited = new Set([input.platformPath]);
   let truncated = false;
 
-  while (queue.length > 0 && trace.length < maxSteps) {
+  while (queue.length > 0 && trace.length < maxSteps && Date.now() < deadlineAt) {
     const node = queue.shift();
     if (!node) break;
 
@@ -62,6 +69,7 @@ export async function expandPlatformRouteTree(input: {
       platformPath: node.platformPath,
       narrative: input.narrative,
       candidates: node.candidates,
+      deadlineAt,
     });
     trace.push({ platformPath: node.platformPath, decision });
 
@@ -84,7 +92,7 @@ export async function expandPlatformRouteTree(input: {
         return {
           candidate,
           childDepth,
-          children: await input.loadChildren(candidate.path),
+          children: await untilDeadline(input.loadChildren(candidate.path), deadlineAt),
           failed: false,
         };
       } catch {
@@ -109,7 +117,7 @@ export async function expandPlatformRouteTree(input: {
     }
   }
 
-  if (queue.length > 0) truncated = true;
+  if (queue.length > 0 || Date.now() >= deadlineAt) truncated = true;
   return { routePlan, trace, truncated };
 }
 
@@ -117,4 +125,20 @@ function boundedPositiveInteger(value: number | undefined, fallback: number, max
   return Number.isSafeInteger(value) && value !== undefined
     ? Math.max(1, Math.min(maximum, value))
     : fallback;
+}
+
+async function untilDeadline<T>(promise: Promise<T>, deadlineAt: number): Promise<T> {
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) throw new Error("platform route deadline exceeded");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("platform route deadline exceeded")), remaining);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }

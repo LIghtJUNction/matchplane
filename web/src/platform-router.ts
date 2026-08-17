@@ -64,6 +64,8 @@ export class PlatformRouterQuotaExceededError extends Error {
 const MAX_CANDIDATES = 32;
 const MAX_RATIONALE_LENGTH = 1_000;
 const DEFAULT_TIMEOUT_MS = 4_000;
+const DEFAULT_TOTAL_TIMEOUT_MS = 20_000;
+const MAX_TOTAL_TIMEOUT_MS = 60_000;
 const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
 const DEFAULT_FALLBACK_CHILDREN = 4;
 const ROUTER_TOOL_NAME = "matchplane.platform.select_children";
@@ -74,6 +76,8 @@ export async function decidePlatformRoutes(input: {
   platformPath: string;
   narrative: string;
   candidates: PlatformRouteCandidate[];
+  /** Absolute deadline shared by every recursive hop in one routing request. */
+  deadlineAt?: number;
   /** Atomically reserve one provider call immediately before it is made. */
   admitCall?: () => Promise<void>;
 }): Promise<PlatformRouteDecision> {
@@ -106,7 +110,15 @@ export async function decidePlatformRoutes(input: {
   }
 
   try {
+    const remainingBeforeAdmission = remainingDeadlineMs(input.deadlineAt);
+    if (remainingBeforeAdmission === 0) {
+      return policyFallback(candidates, input.narrative, "平台路由达到本次请求的总时限，使用受控相关性降级。", model);
+    }
     await input.admitCall?.();
+    const remaining = remainingDeadlineMs(input.deadlineAt);
+    if (remaining === 0) {
+      return policyFallback(candidates, input.narrative, "平台路由达到本次请求的总时限，使用受控相关性降级。", model);
+    }
     const toolMode = configuredToolMode();
     const requestBody: Record<string, unknown> = {
       model,
@@ -148,7 +160,7 @@ export async function decidePlatformRoutes(input: {
         "content-type": "application/json",
       },
       body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(remaining ?? DEFAULT_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`router provider returned ${response.status}`);
     const payload = await response.json() as unknown;
@@ -214,6 +226,14 @@ export function isPlatformRouterConfigured(): boolean {
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
   const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim();
   return Boolean(endpoint && apiKey && model && isAllowedEndpoint(endpoint));
+}
+
+/** Total wall-clock budget for one recursive platform routing request. */
+export function configuredPlatformRouterTotalTimeoutMs(): number {
+  const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS ?? String(DEFAULT_TOTAL_TIMEOUT_MS), 10);
+  return Number.isSafeInteger(parsed)
+    ? Math.max(DEFAULT_TIMEOUT_MS, Math.min(MAX_TOTAL_TIMEOUT_MS, parsed))
+    : DEFAULT_TOTAL_TIMEOUT_MS;
 }
 
 function policyFallback(
@@ -337,6 +357,13 @@ function finiteNonNegativeInteger(value: unknown): number | null {
 function configuredMaxTokens(): number {
   const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_MAX_TOKENS ?? "512", 10);
   return Number.isSafeInteger(parsed) ? Math.max(64, Math.min(2_048, parsed)) : 512;
+}
+
+function remainingDeadlineMs(deadlineAt: number | undefined): number | null {
+  if (deadlineAt === undefined) return null;
+  if (!Number.isFinite(deadlineAt)) return 0;
+  const remaining = Math.floor(deadlineAt - Date.now());
+  return remaining > 0 ? remaining : 0;
 }
 
 function configuredToolMode(): RouterToolMode {
