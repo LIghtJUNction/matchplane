@@ -54,6 +54,7 @@
           "additionalProperties": { "type": "string", "maxLength": 500 },
           "properties": {
             "buyerHeadlines": { "type": "array", "maxItems": 12, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+            "demandDiscoveryDefault": { "type": "boolean", "default": false, "description": "Initial checkbox state for anonymous supply-side demand discovery; keep false unless the platform has separately collected consent." },
             "sellerHeadlines": { "type": "array", "maxItems": 12, "items": { "type": "string", "minLength": 1, "maxLength": 160 } }
           },
           "maxProperties": 64

@@ -16,12 +16,14 @@ export interface ContactField {
 }
 
 export interface ChatUiConfig {
-  /** Optional rotating typewriter headlines owned by the mounted platform package. */
+  /** Optional headline copy owned by the mounted platform package. */
   buyerHeadlines?: string[];
   sellerHeadlines?: string[];
+  /** Initial consent choice for contact-free supply discovery. */
+  demandDiscoveryDefault?: boolean;
   listingEyebrow?: string;
   listingLabel?: string;
-  [key: string]: string | string[] | undefined;
+  [key: string]: string | string[] | boolean | undefined;
 }
 
 /**
@@ -293,9 +295,13 @@ function validUi(value: SubplatformConfig["ui"] | undefined): SubplatformConfig[
   if (!value || typeof value !== "object") return undefined;
   const chat = value.chat && typeof value.chat === "object"
     ? (() => {
-        const entries: Array<[string, string | string[]]> = [];
+        const entries: Array<[string, string | string[] | boolean]> = [];
         for (const [key, item] of Object.entries(value.chat)) {
           if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key)) continue;
+          if (key === "demandDiscoveryDefault" && typeof item === "boolean") {
+            entries.push([key, item]);
+            continue;
+          }
           if (typeof item === "string" && item.length <= 500) {
             entries.push([key, item]);
             continue;

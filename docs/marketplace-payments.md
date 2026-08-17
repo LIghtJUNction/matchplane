@@ -53,6 +53,8 @@ MatchPlane 将需求/供给发现、联系方式交换与平台收益作为独�
 - `GET /v1/marketplace/intents/{id}`
 - `POST /v1/marketplace/intents/{id}/matches`
 - `POST /v1/marketplace/offers`
+- `POST /v1/marketplace/offers/{id}/demand-matches`
+- `PATCH /v1/marketplace/intents/{id}/discovery`
 - `POST /v1/admin/marketplace/offers/{id}/activate`
 - `GET|POST /v1/marketplace/introductions`
 

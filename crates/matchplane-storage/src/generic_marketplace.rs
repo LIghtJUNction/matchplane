@@ -41,6 +41,10 @@ pub struct CreateMarketplaceIntent {
     pub attributes: Value,
     /// Domain-owned non-price terms and constraints.
     pub terms: Value,
+    /// Explicit opt-in for contact-free discovery by supply-side Agents.
+    pub supply_discovery_enabled: bool,
+    /// Optional deadline for the discovery opt-in.
+    pub supply_discovery_expires_at: Option<OffsetDateTime>,
     /// Caller retry key.
     pub idempotency_key: String,
     /// Optional expiry for a time-bounded intent.
@@ -76,6 +80,11 @@ pub struct MarketplaceIntent {
     pub attributes: Value,
     /// Domain-owned terms.
     pub terms: Value,
+    /// Whether a bounded, contact-free summary may be ranked for supply-side Agents.
+    pub supply_discovery_enabled: bool,
+    /// Optional deadline for the discovery opt-in.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub supply_discovery_expires_at: Option<OffsetDateTime>,
     /// Idempotency key retained for audit/replay.
     pub idempotency_key: String,
     /// `active`, `matched`, `closed`, or `expired`.
@@ -181,6 +190,40 @@ pub struct MarketplaceOfferCandidate {
     pub reasons: Vec<String>,
 }
 
+/// Contact-free demand projection returned to a supply-side Agent after explicit opt-in.
+///
+/// The participant identifier and idempotency key are intentionally omitted.  A seller may rank
+/// an interested demand, but must not use discovery as a way to enumerate identities or bypass
+/// the introduction/contact-consent state machine.
+#[derive(Debug, Clone, Serialize)]
+pub struct MarketplaceDemandCandidate {
+    /// Canonical demand intent identifier.
+    pub intent_id: MarketplaceIntentId,
+    /// Tenant scope.
+    pub tenant_id: TenantId,
+    /// Domain scope.
+    pub domain_id: DomainId,
+    /// Demand narrative supplied by the participant.
+    pub narrative: String,
+    /// Domain-owned structured attributes.
+    pub attributes: Value,
+    /// Domain-owned terms.
+    pub terms: Value,
+    /// Advisory score captured at query time.
+    pub score: f64,
+    /// Bounded, explainable reasons.
+    pub reasons: Vec<String>,
+    /// Demand expiry, if any.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub expires_at: Option<OffsetDateTime>,
+    /// Creation time.
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    /// Last update time.
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+}
+
 /// Authenticated candidate query for one demand intent.
 #[derive(Debug)]
 pub struct MatchMarketplaceOffers {
@@ -192,6 +235,38 @@ pub struct MatchMarketplaceOffers {
     pub participant_id: MarketplacePartyId,
     /// Maximum candidates.
     pub limit: usize,
+}
+
+/// Authenticated candidate query for one active supply offer.
+#[derive(Debug)]
+pub struct MatchMarketplaceDemands {
+    /// Tenant scope.
+    pub tenant_id: TenantId,
+    /// Domain scope.
+    pub domain_id: DomainId,
+    /// Active offer used as the supply-side ranking reference.
+    pub offer_id: MarketplaceOfferId,
+    /// Authenticated supply participant.
+    pub participant_id: MarketplacePartyId,
+    /// Maximum candidates.
+    pub limit: usize,
+}
+
+/// Owner-only change to the contact-free demand discovery choice.
+#[derive(Debug)]
+pub struct UpdateMarketplaceDemandDiscovery {
+    /// Tenant scope.
+    pub tenant_id: TenantId,
+    /// Domain scope.
+    pub domain_id: DomainId,
+    /// Demand participant that owns the intent.
+    pub participant_id: MarketplacePartyId,
+    /// Intent being changed.
+    pub intent_id: MarketplaceIntentId,
+    /// New explicit discovery choice.
+    pub enabled: bool,
+    /// Optional deadline for the new choice.
+    pub expires_at: Option<OffsetDateTime>,
 }
 
 /// Command to create a consent-controlled introduction between an intent and an offer.
@@ -340,10 +415,11 @@ impl PgStore {
         let row = sqlx::query(
             "INSERT INTO marketplace_intents
              (id, tenant_id, domain_id, participant_id, side, narrative, attributes, terms,
-              idempotency_key, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              supply_discovery_enabled, supply_discovery_expires_at, idempotency_key, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
              RETURNING id, tenant_id, domain_id, participant_id, side, narrative, attributes,
-                       terms, idempotency_key, status, expires_at, version, created_at, updated_at",
+                       terms, supply_discovery_enabled, supply_discovery_expires_at,
+                       idempotency_key, status, expires_at, version, created_at, updated_at",
         )
         .bind(command.intent_id.into_uuid())
         .bind(command.tenant_id.into_uuid())
@@ -353,6 +429,8 @@ impl PgStore {
         .bind(&command.narrative)
         .bind(&command.attributes)
         .bind(&command.terms)
+        .bind(command.supply_discovery_enabled)
+        .bind(command.supply_discovery_expires_at)
         .bind(&command.idempotency_key)
         .bind(command.expires_at)
         .fetch_one(self.pool())
@@ -600,6 +678,127 @@ impl PgStore {
         });
         candidates.truncate(command.limit.clamp(1, 100));
         Ok(candidates)
+    }
+
+    /// Ranks explicitly discoverable demand summaries against one active supply offer.
+    ///
+    /// This query never returns the demand participant id or contact data.  It is a discovery
+    /// surface for a seller Agent, not an alternate introduction path.
+    pub async fn match_marketplace_demands(
+        &self,
+        command: &MatchMarketplaceDemands,
+    ) -> Result<Vec<MarketplaceDemandCandidate>, StorageError> {
+        let offer = sqlx::query(OFFER_SELECT_BY_ID)
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.domain_id.into_uuid())
+            .bind(command.offer_id.into_uuid())
+            .fetch_optional(self.pool())
+            .await?
+            .ok_or(StorageError::NotFound("marketplace offer"))
+            .and_then(|row| offer_from_row(&row))?;
+        if offer.supply_party_id != command.participant_id {
+            return Err(StorageError::Forbidden(
+                "marketplace offer does not belong to the authenticated participant".to_owned(),
+            ));
+        }
+        if offer.status != "active"
+            || offer
+                .expires_at
+                .is_some_and(|expiry| expiry <= OffsetDateTime::now_utc())
+        {
+            return Err(StorageError::Conflict(
+                "marketplace offer is not open for demand discovery".to_owned(),
+            ));
+        }
+
+        let rows = sqlx::query(INTENT_SELECT_DISCOVERABLE_DEMANDS)
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.domain_id.into_uuid())
+            .bind(command.participant_id.into_uuid())
+            .fetch_all(self.pool())
+            .await?;
+        let mut candidates: Vec<MarketplaceDemandCandidate> = rows
+            .iter()
+            .map(|row| {
+                let intent = intent_from_row(row)?;
+                let (score, reasons) = generic_match_score(
+                    &intent.narrative,
+                    &intent.attributes,
+                    &offer.display_name,
+                    &offer.attributes,
+                );
+                if score <= 0.0 {
+                    return Ok(None);
+                }
+                Ok(Some(MarketplaceDemandCandidate {
+                    intent_id: intent.intent_id,
+                    tenant_id: intent.tenant_id,
+                    domain_id: intent.domain_id,
+                    narrative: intent.narrative,
+                    attributes: intent.attributes,
+                    terms: intent.terms,
+                    score,
+                    reasons,
+                    expires_at: intent.expires_at,
+                    created_at: intent.created_at,
+                    updated_at: intent.updated_at,
+                }))
+            })
+            .collect::<Result<Vec<_>, StorageError>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+        candidates.sort_by(|left, right| {
+            right
+                .score
+                .total_cmp(&left.score)
+                .then_with(|| right.created_at.cmp(&left.created_at))
+                .then_with(|| left.intent_id.as_uuid().cmp(right.intent_id.as_uuid()))
+        });
+        candidates.truncate(command.limit.clamp(1, 100));
+        Ok(candidates)
+    }
+
+    /// Changes the owner-controlled discovery choice without changing the demand narrative.
+    pub async fn update_marketplace_demand_discovery(
+        &self,
+        command: &UpdateMarketplaceDemandDiscovery,
+    ) -> Result<MarketplaceIntent, StorageError> {
+        if command
+            .expires_at
+            .is_some_and(|expiry| expiry <= OffsetDateTime::now_utc())
+        {
+            return Err(StorageError::InvalidData(
+                "supply discovery expiry must be in the future".to_owned(),
+            ));
+        }
+        if command.expires_at.is_some() && !command.enabled {
+            return Err(StorageError::InvalidData(
+                "supply discovery expiry requires explicit discovery opt-in".to_owned(),
+            ));
+        }
+        let row = sqlx::query(
+            "UPDATE marketplace_intents
+             SET supply_discovery_enabled = $4,
+                 supply_discovery_expires_at = $5,
+                 version = version + 1
+             WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
+               AND participant_id = $6 AND side = 'demand'
+               AND status IN ('active', 'matched')
+             RETURNING id, tenant_id, domain_id, participant_id, side, narrative, attributes,
+                       terms, supply_discovery_enabled, supply_discovery_expires_at,
+                       idempotency_key, status, expires_at, version, created_at, updated_at",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.intent_id.into_uuid())
+        .bind(command.enabled)
+        .bind(command.expires_at)
+        .bind(command.participant_id.into_uuid())
+        .fetch_optional(self.pool())
+        .await?
+        .ok_or(StorageError::NotFound("marketplace demand intent"))?;
+        intent_from_row(&row)
     }
 
     /// Creates an introduction from canonical Agent-selected references idempotently.
@@ -1053,6 +1252,24 @@ fn validate_intent(command: &CreateMarketplaceIntent) -> Result<(), StorageError
             "intent expiry must be in the future".to_owned(),
         ));
     }
+    if command
+        .supply_discovery_expires_at
+        .is_some_and(|expiry| expiry <= OffsetDateTime::now_utc())
+    {
+        return Err(StorageError::InvalidData(
+            "supply discovery expiry must be in the future".to_owned(),
+        ));
+    }
+    if command.supply_discovery_expires_at.is_some() && !command.supply_discovery_enabled {
+        return Err(StorageError::InvalidData(
+            "supply discovery expiry requires explicit discovery opt-in".to_owned(),
+        ));
+    }
+    if command.supply_discovery_enabled && command.side != "demand" {
+        return Err(StorageError::InvalidData(
+            "supply discovery is available only for demand intents".to_owned(),
+        ));
+    }
     Ok(())
 }
 
@@ -1137,6 +1354,8 @@ fn ensure_same_intent(
         || existing.narrative != command.narrative
         || existing.attributes != command.attributes
         || existing.terms != command.terms
+        || existing.supply_discovery_enabled != command.supply_discovery_enabled
+        || existing.supply_discovery_expires_at != command.supply_discovery_expires_at
         || existing.expires_at != command.expires_at
     {
         return Err(StorageError::IdempotencyConflict);
@@ -1249,19 +1468,39 @@ fn generic_match_tokens(value: &str) -> Vec<String> {
 }
 
 const INTENT_SELECT: &str = "SELECT id, tenant_id, domain_id, participant_id, side, narrative,
-    attributes, terms, idempotency_key, status, expires_at, version, created_at, updated_at
+    attributes, terms, supply_discovery_enabled, supply_discovery_expires_at,
+    idempotency_key, status, expires_at, version, created_at, updated_at
     FROM marketplace_intents WHERE tenant_id = $1 AND participant_id = $2
       AND idempotency_key = $3";
 
 const INTENT_SELECT_BY_ID: &str =
     "SELECT id, tenant_id, domain_id, participant_id, side, narrative,
-    attributes, terms, idempotency_key, status, expires_at, version, created_at, updated_at
+    attributes, terms, supply_discovery_enabled, supply_discovery_expires_at,
+    idempotency_key, status, expires_at, version, created_at, updated_at
     FROM marketplace_intents WHERE tenant_id = $1 AND id = $2";
+
+const INTENT_SELECT_DISCOVERABLE_DEMANDS: &str =
+    "SELECT id, tenant_id, domain_id, participant_id, side, narrative,
+    attributes, terms, supply_discovery_enabled, supply_discovery_expires_at,
+    idempotency_key, status, expires_at, version, created_at, updated_at
+    FROM marketplace_intents
+    WHERE tenant_id = $1 AND domain_id = $2 AND side = 'demand' AND status = 'active'
+      AND supply_discovery_enabled = true
+      AND (supply_discovery_expires_at IS NULL OR supply_discovery_expires_at > clock_timestamp())
+      AND (expires_at IS NULL OR expires_at > clock_timestamp())
+      AND participant_id <> $3
+    ORDER BY created_at DESC
+    LIMIT 500";
 
 const OFFER_SELECT: &str = "SELECT id, tenant_id, domain_id, supply_party_id, asset_id,
     external_key, display_name, attributes, terms, status, published_at, expires_at, version,
     created_at, updated_at FROM marketplace_offers
     WHERE tenant_id = $1 AND domain_id = $2 AND external_key = $3";
+
+const OFFER_SELECT_BY_ID: &str = "SELECT id, tenant_id, domain_id, supply_party_id, asset_id,
+    external_key, display_name, attributes, terms, status, published_at, expires_at, version,
+    created_at, updated_at FROM marketplace_offers
+    WHERE tenant_id = $1 AND domain_id = $2 AND id = $3";
 
 const INTRODUCTION_SELECT_BY_KEY: &str = "SELECT id, tenant_id, demand_intent_id, supply_offer_id,
     demand_party_id, supply_party_id, score, reasons, status, supply_contact_consent_at,
@@ -1303,6 +1542,8 @@ fn intent_from_row(row: &PgRow) -> Result<MarketplaceIntent, StorageError> {
         narrative: row.try_get("narrative")?,
         attributes: row.try_get("attributes")?,
         terms: row.try_get("terms")?,
+        supply_discovery_enabled: row.try_get("supply_discovery_enabled")?,
+        supply_discovery_expires_at: row.try_get("supply_discovery_expires_at")?,
         idempotency_key: row.try_get("idempotency_key")?,
         status: row.try_get("status")?,
         expires_at: row.try_get("expires_at")?,

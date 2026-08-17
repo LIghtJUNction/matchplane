@@ -730,6 +730,21 @@ export interface MarketplaceOfferCandidate extends MarketplaceOffer {
   reasons: string[];
 }
 
+/** Contact-free demand projection returned only after the demand participant opts in. */
+export interface MarketplaceDemandCandidate {
+  intent_id: string;
+  tenant_id: string;
+  domain_id: string;
+  narrative: string;
+  attributes: Record<string, unknown>;
+  terms: Record<string, unknown>;
+  score: number;
+  reasons: string[];
+  expires_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type MarketplaceOfferOutcome = MarketplaceOffer & { duplicate: boolean };
 
 export interface MarketplaceIntroduction {
@@ -1623,6 +1638,8 @@ export function createMarketplaceIntent(input: {
   narrative: string;
   attributes?: Record<string, unknown>;
   terms?: Record<string, unknown>;
+  supplyDiscoveryEnabled?: boolean;
+  supplyDiscoveryExpiresAt?: string | null;
   idempotencyKey: string;
 }): Promise<{ intent_id: string; [key: string]: unknown }> {
   return request<{ intent_id: string; [key: string]: unknown }>(
@@ -1637,6 +1654,8 @@ export function createMarketplaceIntent(input: {
         narrative: input.narrative,
         attributes: input.attributes ?? {},
         terms: input.terms ?? {},
+        supply_discovery_enabled: input.supplyDiscoveryEnabled ?? false,
+        supply_discovery_expires_at: input.supplyDiscoveryExpiresAt ?? null,
         idempotency_key: input.idempotencyKey,
       }),
     },
@@ -1663,6 +1682,51 @@ export function getMarketplaceOfferMatches(input: {
     },
     input.session,
   ).then((response) => response.candidates);
+}
+
+export function getMarketplaceDemandMatches(input: {
+  session: PartySession;
+  domainId: string;
+  offerId: string;
+  limit?: number;
+}): Promise<MarketplaceDemandCandidate[]> {
+  return request<{ offer_id: string; candidates: MarketplaceDemandCandidate[] }>(
+    `/v1/marketplace/offers/${encodeURIComponent(input.offerId)}/demand-matches`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        offer_id: input.offerId,
+        limit: input.limit ?? 20,
+      }),
+    },
+    input.session,
+  ).then((response) => response.candidates);
+}
+
+export function updateMarketplaceDemandDiscovery(input: {
+  session: PartySession;
+  domainId: string;
+  intentId: string;
+  enabled: boolean;
+  expiresAt?: string | null;
+}): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(
+    `/v1/marketplace/intents/${encodeURIComponent(input.intentId)}/discovery`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        enabled: input.enabled,
+        expires_at: input.expiresAt ?? null,
+      }),
+    },
+    input.session,
+  );
 }
 
 export function createMarketplaceIntroduction(input: {

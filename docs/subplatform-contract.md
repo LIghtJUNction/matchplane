@@ -144,13 +144,14 @@ Rust 网关暴露一套小型、与垂直无关的持久化合同。它是平台
 | intent（意向） | `GET /v1/marketplace/intents/{id}?tenant_id=&participant_id=` | 参与方读取自己的意向。 |
 | offer（供给） | `POST /v1/marketplace/offers` | 已认证供给方创建草稿供给意向；对于服务或其他垂直 `asset_id` 可选。 |
 | offer（供给） | `POST /v1/marketplace/intents/{id}/matches` | 持有方（需求方）获取活跃供给候选。若未配置检索 provider，可走确定性属性回退。 |
+| demand（需求发现） | `POST /v1/marketplace/offers/{offer_id}/demand-matches` | 持有方（供给方）只能检索已明确允许供给方发现的需求摘要；结果不含需求参与者 ID 或联系方式。需求方可通过 `PATCH /v1/marketplace/intents/{intent_id}/discovery` 随时撤回后续发现。 |
 | offer（供给） | `POST /v1/admin/marketplace/offers/{id}/activate` | 运营者或垂直审核流程发布草稿。 |
 | introduction（引入） | `POST /v1/marketplace/introductions` | 持有方（需求方）记录单个 Agent 选中的供给意向、分数与受限原因。不会释放联系人信息。 |
 | introduction（引入） | `GET /v1/marketplace/introductions?tenant_id=&participant_id=` | 双方可读取引入投影，但不含联系人值。 |
 
 所有写入接受 caller 生成的 id 和幂等键。每个 party-auth 请求还必须携带 `x-matchplane-platform-path`（由 capability exchange 返回的规范路径）。网关会校验短期 party bearer token、精确递归节点路径、tenant/domain 作用域、需求/供给角色、激活生命周期、过期时间以及跨方不变式。`attributes` 与 `terms` 必须是 JSON 对象，不会被根解释为车辆字段。分数和理由是 AI 建议输出，联系人释放仍是独立的、需同意的状态转换，受现有 `introduction/contact` 合约约束。
 
-同一资源也可通过已认证 HTTP MCP 门面 `/api/mcp` 给外部 Agent 使用，工具包括 `marketplace.intent.create`、`marketplace.offer.create`、`marketplace.offer.match`、`marketplace.introduction.create` 与 `marketplace.introductions.list`。子平台自有检索/Skill 工具通过通用 `platform.child.tool` 调用，调用方必须持有 `agent:tool` 且工具名必须在目标 active manifest 的白名单中；根仅做递归路径授权和有界转发，不把调用方 API Key 传给子平台 endpoint。MCP 门面会把调用方的 party capability 转给 Rust 网关，不会保存第二套 schema 或 token。由调用方自费的 Agent 自行承担其模型和向量库成本；MatchPlane 仅执行受限且可审计的状态变更。
+同一资源也可通过已认证 HTTP MCP 门面 `/api/mcp` 给外部 Agent 使用，工具包括 `marketplace.intent.create`、`marketplace.offer.create`、`marketplace.offer.match`、`marketplace.demand.match`、`marketplace.intent.discovery.update`、`marketplace.introduction.create` 与 `marketplace.introductions.list`。需求创建时只有显式设置 `supply_discovery_enabled: true` 才会进入供给发现索引；该查询只返回匿名摘要，不能替代需求方发起引介。需求方可以通过 discovery update 工具撤回后续发现。子平台自有检索/Skill 工具通过通用 `platform.child.tool` 调用，调用方必须持有 `agent:tool` 且工具名必须在目标 active manifest 的白名单中；根仅做递归路径授权和有界转发，不把调用方 API Key 传给子平台 endpoint。MCP 门面会把调用方的 party capability 转给 Rust 网关，不会保存第二套 schema 或 token。由调用方自费的 Agent 自行承担其模型和向量库成本；MatchPlane 仅执行受限且可审计的状态变更。
 
 稳定边界携带标准 ID 与分数，不携带向量：
 

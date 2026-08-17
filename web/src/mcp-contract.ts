@@ -30,6 +30,10 @@ export function validateMcpToolArguments(
       return validateOffer(args);
     case "marketplace.offer.match":
       return validateOfferMatch(args);
+    case "marketplace.demand.match":
+      return validateDemandMatch(args);
+    case "marketplace.intent.discovery.update":
+      return validateDemandDiscoveryUpdate(args);
     case "marketplace.introduction.create":
       return validateIntroduction(args);
     case "marketplace.introductions.list":
@@ -128,6 +132,16 @@ function validateIntent(args: Record<string, unknown>): string | null {
   if (idempotency) return idempotency;
   const objects = validateOptionalObjects(args, ["attributes", "terms"]);
   if (objects) return objects;
+  if (args.supply_discovery_enabled !== undefined && typeof args.supply_discovery_enabled !== "boolean") {
+    return "supply_discovery_enabled must be a boolean";
+  }
+  if (args.supply_discovery_expires_at !== undefined && args.supply_discovery_expires_at !== null) {
+    const expiry = requiredString(args, "supply_discovery_expires_at", 64);
+    if (expiry) return expiry;
+    if (!Number.isFinite(Date.parse(args.supply_discovery_expires_at as string))) {
+      return "supply_discovery_expires_at must be a valid date-time";
+    }
+  }
   return optionalUuid(args, "intent_id");
 }
 
@@ -155,6 +169,32 @@ function validateOfferMatch(args: Record<string, unknown>): string | null {
   const participant = uuidArgument(args, "participant_id");
   if (participant) return participant;
   return optionalInteger(args, "limit", 1, 100);
+}
+
+function validateDemandMatch(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const offer = uuidArgument(args, "offer_id");
+  if (offer) return offer;
+  const participant = uuidArgument(args, "participant_id");
+  if (participant) return participant;
+  return optionalInteger(args, "limit", 1, 100);
+}
+
+function validateDemandDiscoveryUpdate(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const intent = uuidArgument(args, "intent_id");
+  if (intent) return intent;
+  const participant = uuidArgument(args, "participant_id");
+  if (participant) return participant;
+  if (typeof args.enabled !== "boolean") return "enabled must be a boolean";
+  if (args.expires_at !== undefined && args.expires_at !== null) {
+    const expiry = requiredString(args, "expires_at", 64);
+    if (expiry) return expiry;
+    if (!Number.isFinite(Date.parse(args.expires_at as string))) return "expires_at must be a valid date-time";
+  }
+  return null;
 }
 
 function validateIntroduction(args: Record<string, unknown>): string | null {

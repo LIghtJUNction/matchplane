@@ -17,9 +17,10 @@ use matchplane_domain::{
 };
 use matchplane_storage::{
     AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,
-    CreateMarketplaceOffer, MarketplaceContactEnvelope, MarketplaceIntent, MarketplaceIntroduction,
-    MarketplaceIntroductionOutcome, MarketplaceOfferCandidate, MarketplaceOfferOutcome,
-    MatchMarketplaceOffers, RequestMarketplaceContact,
+    CreateMarketplaceOffer, MarketplaceContactEnvelope, MarketplaceDemandCandidate,
+    MarketplaceIntent, MarketplaceIntroduction, MarketplaceIntroductionOutcome,
+    MarketplaceOfferCandidate, MarketplaceOfferOutcome, MatchMarketplaceDemands,
+    MatchMarketplaceOffers, RequestMarketplaceContact, UpdateMarketplaceDemandDiscovery,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -39,6 +40,10 @@ pub(super) struct CreateIntentRequest {
     attributes: Value,
     #[serde(default = "empty_object")]
     terms: Value,
+    #[serde(default)]
+    supply_discovery_enabled: bool,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    supply_discovery_expires_at: Option<OffsetDateTime>,
     idempotency_key: String,
     #[serde(default, with = "time::serde::rfc3339::option")]
     expires_at: Option<OffsetDateTime>,
@@ -66,6 +71,25 @@ pub(super) struct MatchOffersRequest {
     domain_id: String,
     participant_id: String,
     limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct MatchDemandsRequest {
+    tenant_id: String,
+    domain_id: String,
+    participant_id: String,
+    offer_id: String,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct UpdateDemandDiscoveryRequest {
+    tenant_id: String,
+    domain_id: String,
+    participant_id: String,
+    enabled: bool,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    expires_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,6 +142,12 @@ pub(super) struct ContactActionRequest {
 pub(super) struct MatchOffersResponse {
     intent_id: MarketplaceIntentId,
     candidates: Vec<MarketplaceOfferCandidate>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct MatchDemandsResponse {
+    offer_id: MarketplaceOfferId,
+    candidates: Vec<MarketplaceDemandCandidate>,
 }
 
 #[derive(Debug, Serialize)]
@@ -183,6 +213,8 @@ pub(super) async fn create_intent(
         narrative: request.narrative,
         attributes: request.attributes,
         terms: request.terms,
+        supply_discovery_enabled: request.supply_discovery_enabled,
+        supply_discovery_expires_at: request.supply_discovery_expires_at,
         idempotency_key: request.idempotency_key,
         expires_at: request.expires_at,
     };
@@ -271,6 +303,80 @@ pub(super) async fn matches(
         intent_id,
         candidates,
     }))
+}
+
+pub(super) async fn demand_matches(
+    State(state): State<Arc<AppState>>,
+    Path(path_offer_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<MatchDemandsRequest>,
+) -> Result<Json<MatchDemandsResponse>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        participant_id,
+        domain_id,
+    )
+    .await?;
+    super::marketplace::require_marketplace_side(&party, "supply")?;
+    let offer_id = parse_id::<MarketplaceOfferId>(&path_offer_id)?;
+    if request.offer_id != path_offer_id {
+        return Err(ApiError::bad_request(
+            "offer_id in the path and request body must match".to_owned(),
+        ));
+    }
+    let candidates = state
+        .store
+        .match_marketplace_demands(&MatchMarketplaceDemands {
+            tenant_id,
+            domain_id,
+            offer_id,
+            participant_id,
+            limit: request.limit.unwrap_or(20),
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(MatchDemandsResponse {
+        offer_id,
+        candidates,
+    }))
+}
+
+pub(super) async fn update_demand_discovery(
+    State(state): State<Arc<AppState>>,
+    Path(intent_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateDemandDiscoveryRequest>,
+) -> Result<Json<MarketplaceIntent>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        participant_id,
+        domain_id,
+    )
+    .await?;
+    super::marketplace::require_marketplace_side(&party, "demand")?;
+    let intent = state
+        .store
+        .update_marketplace_demand_discovery(&UpdateMarketplaceDemandDiscovery {
+            tenant_id,
+            domain_id,
+            participant_id,
+            intent_id: parse_id::<MarketplaceIntentId>(&intent_id)?,
+            enabled: request.enabled,
+            expires_at: request.expires_at,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(intent))
 }
 
 pub(super) async fn create_offer(

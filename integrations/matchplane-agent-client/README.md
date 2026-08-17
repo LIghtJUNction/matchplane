@@ -53,6 +53,8 @@ const intent = await client.createIntent(capability, {
   narrative: "寻找符合我约束条件的合适供给",
   attributes: { /* subplatform-owned fields */ },
   terms: { /* subplatform-owned terms */ },
+  // Optional and explicit: sellers may rank an anonymous summary, never contact details.
+  supply_discovery_enabled: true,
   idempotency_key: crypto.randomUUID(),
 });
 
@@ -101,7 +103,8 @@ active child capabilities;
 the handoff is caller-funded and never invokes MatchPlane's hosted model. The platform's own
 router remains bounded and is only used by the first-party chat when no external Agent is present.
 
-完整的 buyer/seller 服务器端示例见 [`examples/buyer-agent.ts`](examples/buyer-agent.ts) 和
+供给 Agent 发布 offer 后，可以调用 `matchDemands(capability, { offer_id, ... })` 查看已明确
+公开的匿名需求摘要；该查询不会返回参与者 ID 或联系方式，也不会代替需求方发起引介。完整的 buyer/seller 服务器端示例见 [`examples/buyer-agent.ts`](examples/buyer-agent.ts) 和
 [`examples/seller-agent.ts`](examples/seller-agent.ts)。两者共享同一个 SDK 和 MCP 协议：买方用
 `side: "demand"` 创建 intent、选择 offer、发起 introduction；供给方用 `side: "supply"` 发布
 offer、读取自己可见的 introductions，并在人工或 Agent 策略确认后调用 `consentContact`。只有双方

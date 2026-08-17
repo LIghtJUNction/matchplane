@@ -150,6 +150,17 @@ async function callMarketplaceTool(
     if (!intentId) return rpcError(id, -32602, "marketplace.offer.match requires intent_id");
     path = `/v1/marketplace/intents/${encodeURIComponent(intentId)}/matches`;
     body = JSON.stringify(args);
+  } else if (name === "marketplace.demand.match") {
+    const offerId = stringArgument(args, "offer_id");
+    if (!offerId) return rpcError(id, -32602, "marketplace.demand.match requires offer_id");
+    path = `/v1/marketplace/offers/${encodeURIComponent(offerId)}/demand-matches`;
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.intent.discovery.update") {
+    const intentId = stringArgument(args, "intent_id");
+    if (!intentId) return rpcError(id, -32602, "marketplace.intent.discovery.update requires intent_id");
+    method = "PATCH";
+    path = `/v1/marketplace/intents/${encodeURIComponent(intentId)}/discovery`;
+    body = JSON.stringify(args);
   } else if (name === "marketplace.introduction.create") {
     path = "/v1/marketplace/introductions";
     body = JSON.stringify(args);
@@ -236,6 +247,8 @@ function supportedTool(name: unknown): name is string {
     || name === "marketplace.intent.create"
     || name === "marketplace.offer.create"
     || name === "marketplace.offer.match"
+    || name === "marketplace.demand.match"
+    || name === "marketplace.intent.discovery.update"
     || name === "marketplace.introduction.create"
     || name === "marketplace.introductions.list"
     || name === "marketplace.introduction.contact.request"
@@ -391,6 +404,39 @@ function toolList(): Record<string, unknown> {
         },
       },
     }, {
+      name: "marketplace.demand.match",
+      description: "Rank demand summaries that explicitly opted into supply discovery against one active supply offer. Results never include participant IDs or contact values.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["offer_id", "tenant_id", "domain_id", "platform_path", "participant_id"],
+        properties: {
+          offer_id: { type: "string", format: "uuid" },
+          tenant_id: { type: "string", format: "uuid" },
+          domain_id: { type: "string", format: "uuid" },
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
+          participant_id: { type: "string", format: "uuid" },
+          limit: { type: "integer", minimum: 1, maximum: 100 },
+        },
+      },
+    }, {
+      name: "marketplace.intent.discovery.update",
+      description: "Enable or revoke anonymous supply-side discovery for a demand intent owned by the caller.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["intent_id", "tenant_id", "domain_id", "platform_path", "participant_id", "enabled"],
+        properties: {
+          intent_id: { type: "string", format: "uuid" },
+          tenant_id: { type: "string", format: "uuid" },
+          domain_id: { type: "string", format: "uuid" },
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
+          participant_id: { type: "string", format: "uuid" },
+          enabled: { type: "boolean" },
+          expires_at: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+    }, {
       name: "marketplace.introduction.create",
       description: "Create a consent-gated introduction from one demand intent to one selected offer; no contact is released.",
       inputSchema: {
@@ -472,6 +518,8 @@ function marketplaceIntentSchema(): Record<string, unknown> {
       narrative: { type: "string", minLength: 1, maxLength: 10000 },
       attributes: { type: "object" },
       terms: { type: "object" },
+      supply_discovery_enabled: { type: "boolean", description: "Explicitly allow a contact-free summary of this demand to be ranked by supply Agents." },
+      supply_discovery_expires_at: { type: ["string", "null"], format: "date-time" },
       idempotency_key: { type: "string", minLength: 1, maxLength: 240 },
       expires_at: { type: ["string", "null"], format: "date-time" },
     },

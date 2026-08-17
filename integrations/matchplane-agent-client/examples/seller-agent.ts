@@ -28,6 +28,19 @@ const offer = await client.createOffer(capability, {
   terms: {},
 });
 
+const offerId = readString(offer, "offer_id");
+const demandLeads = await client.matchDemands(capability, {
+  tenant_id: capability.tenant_id,
+  domain_id: capability.domain_id,
+  participant_id: capability.party_id,
+  offer_id: offerId,
+  limit: 10,
+});
+console.log("已获取买方主动公开的匿名需求摘要；后续引介仍需需求方发起并由供给方同意联系人交换。", {
+  offerId,
+  demandLeads,
+});
+
 // Sellers can review introductions visible to this party. Publishing an offer alone never
 // grants access to buyer contact details.
 const introductions = await client.listIntroductions(capability, {
@@ -46,7 +59,7 @@ if (introductionId) {
     idempotency_key: `contact-consent:${introductionId}`,
   });
   console.log("已同意一次联系方式交换；平台会按双方 consent policy 决定是否释放联系方式。", {
-    offerId: readString(offer, "offer_id"),
+    offerId,
     introductionId,
   });
 } else {

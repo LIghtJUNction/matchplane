@@ -48,6 +48,8 @@ interface ChatCopy {
   buyerDescription: string;
   sellerDescription: string;
   buyerPlaceholder: string;
+  buyerDiscoveryLabel: string;
+  buyerDiscoveryDefault: boolean;
   sellerPlaceholder: string;
   buyerFootnote: string;
   sellerFootnote: string;
@@ -67,6 +69,8 @@ const defaultChatCopy: ChatCopy = {
   buyerDescription: "说出目标、预算和不能妥协的条件。",
   sellerDescription: "说出你能提供的内容、条件和限制。",
   buyerPlaceholder: "例如：我想解决一个具体问题，预算、时间和不能妥协的条件是……",
+  buyerDiscoveryLabel: "允许供给方看到这条需求摘要（不含联系方式）",
+  buyerDiscoveryDefault: false,
   sellerPlaceholder: "例如：我能提供什么，交付条件和限制是……",
   buyerFootnote: "Enter 发送 · Shift + Enter 换行",
   sellerFootnote: "Enter 发送 · Shift + Enter 换行",
@@ -86,6 +90,8 @@ const defaultChatCopyEn: ChatCopy = {
   buyerDescription: "Share your goal, budget, and non-negotiable constraints.",
   sellerDescription: "Share what you offer, the terms, and any constraints.",
   buyerPlaceholder: "For example: I need to solve a specific problem, with this budget, timing, and constraints…",
+  buyerDiscoveryLabel: "Let supply agents see this request summary (no contact details)",
+  buyerDiscoveryDefault: false,
   sellerPlaceholder: "For example: I can offer this, under these terms and constraints…",
   buyerFootnote: "Enter to send · Shift + Enter for a new line",
   sellerFootnote: "Enter to send · Shift + Enter for a new line",
@@ -123,6 +129,9 @@ function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale
   const configuredSellerHeadlines = headlines("sellerHeadlines", []);
   const buyerTitle = text("buyerTitle", configuredBuyerHeadlines[0] ?? defaults.buyerTitle);
   const sellerTitle = text("sellerTitle", configuredSellerHeadlines[0] ?? defaults.sellerTitle);
+  const buyerDiscoveryDefault = typeof configured.demandDiscoveryDefault === "boolean"
+    ? configured.demandDiscoveryDefault
+    : defaults.buyerDiscoveryDefault;
   return {
     ...defaults,
     buyerEyebrow: text("buyerEyebrow", defaults.buyerEyebrow),
@@ -134,6 +143,8 @@ function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale
     buyerDescription: text("buyerDescription", defaults.buyerDescription),
     sellerDescription: text("sellerDescription", defaults.sellerDescription),
     buyerPlaceholder: text("buyerPlaceholder", defaults.buyerPlaceholder),
+    buyerDiscoveryLabel: text("buyerDiscoveryLabel", defaults.buyerDiscoveryLabel),
+    buyerDiscoveryDefault,
     sellerPlaceholder: text("sellerPlaceholder", defaults.sellerPlaceholder),
     buyerFootnote: text("buyerFootnote", defaults.buyerFootnote),
     sellerFootnote: text("sellerFootnote", defaults.sellerFootnote),
@@ -155,10 +166,12 @@ interface MatchChatProps {
 }
 
 export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer", onRecommendations, onSellerPlatformSelected }: MatchChatProps) {
+  const copy = resolveChatCopy(subplatform, locale);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const [supplyDiscoveryEnabled, setSupplyDiscoveryEnabled] = useState(copy.buyerDiscoveryDefault);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const conversationIdRef = useRef<string | null>(null);
@@ -166,7 +179,6 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   const [sellerRouteChoices, setSellerRouteChoices] = useState<PlatformRouteHop[]>([]);
   const isRoot = subplatform.slug === "root";
   const isSeller = role === "seller";
-  const copy = resolveChatCopy(subplatform, locale);
   const label = (key: string, fallback: string) => subplatformCopy(subplatform, key, locale === "en" ? (englishChatLabels[key] ?? fallback) : fallback);
   // Keep the primary action visually stable. A changing/typewriter headline delays
   // scanning and makes a marketplace feel like a demo; merchants may still
@@ -208,8 +220,9 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     // conversation identifier or transcript into another node or role by accident.
     setMessages([]);
     setSellerRouteChoices([]);
+    setSupplyDiscoveryEnabled(copy.buyerDiscoveryDefault);
     conversationIdRef.current = null;
-  }, [role, subplatform.path]);
+  }, [copy.buyerDiscoveryDefault, role, subplatform.path]);
 
   const chooseSellerRoute = useCallback(async (target: PlatformRouteHop) => {
     if (!onSellerPlatformSelected || sending) return;
@@ -401,6 +414,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                   ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
                   ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
                 },
+                supplyDiscoveryEnabled,
                 idempotencyKey: `chat-${requestId}-${targetKey}`,
               });
               let retrievalCandidates: RecommendedBackendListing[] = [];
@@ -523,7 +537,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, messages, onNotice, onRecommendations, onSellerPlatformSelected, resizeInput, role, sending, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, messages, onNotice, onRecommendations, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
@@ -669,6 +683,17 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           {sending ? <LoaderCircle className="match-chat-spinner" size={18} aria-hidden="true" /> : <ArrowUp size={18} aria-hidden="true" />}
         </button>
       </form>
+      {!isSeller ? (
+        <label className="match-chat-discovery">
+          <input
+            type="checkbox"
+            checked={supplyDiscoveryEnabled}
+            onChange={(event) => setSupplyDiscoveryEnabled(event.currentTarget.checked)}
+            disabled={sending}
+          />
+          <span>{copy.buyerDiscoveryLabel}</span>
+        </label>
+      ) : null}
       <p id="match-chat-footnote" className="match-chat-footnote">{isSeller ? copy.sellerFootnote : copy.buyerFootnote}</p>
     </section>
   );

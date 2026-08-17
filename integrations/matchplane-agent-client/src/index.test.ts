@@ -122,6 +122,43 @@ describe("MatchPlane external Agent client", () => {
     expect(fake.calls).toHaveLength(0);
   });
 
+  it("exposes contact-free demand discovery to a supply Agent", async () => {
+    const fake = fakeFetch();
+    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
+    const capability = await client.openMarketplaceSession({
+      tenant_id: "tenant",
+      domain_id: "domain",
+      platform_path: "/used-car",
+      side: "supply",
+    });
+    await client.matchDemands(capability, {
+      tenant_id: "tenant",
+      domain_id: "domain",
+      participant_id: "p",
+      offer_id: "123e4567-e89b-12d3-a456-426614174003",
+      limit: 5,
+    });
+    const body = JSON.parse(String(fake.calls[1]?.init?.body)) as {
+      params?: { name?: string; arguments?: Record<string, unknown> };
+    };
+    expect(body.params?.name).toBe("marketplace.demand.match");
+    expect(body.params?.arguments?.platform_path).toBe("/used-car");
+    expect(body.params?.arguments?.offer_id).toBe("123e4567-e89b-12d3-a456-426614174003");
+
+    await client.updateDemandDiscovery(capability, {
+      tenant_id: "tenant",
+      domain_id: "domain",
+      participant_id: "p",
+      intent_id: "123e4567-e89b-12d3-a456-426614174004",
+      enabled: false,
+    });
+    const updateBody = JSON.parse(String(fake.calls[2]?.init?.body)) as {
+      params?: { name?: string; arguments?: Record<string, unknown> };
+    };
+    expect(updateBody.params?.name).toBe("marketplace.intent.discovery.update");
+    expect(updateBody.params?.arguments?.enabled).toBe(false);
+  });
+
   it("uses one MCP client shape for buyer and seller capability exchange", async () => {
     const fake = fakeFetch();
     const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });

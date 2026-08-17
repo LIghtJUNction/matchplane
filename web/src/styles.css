@@ -2738,6 +2738,26 @@ body,
   to { transform: rotate(360deg); }
 }
 
+.match-chat-discovery {
+  margin-top: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.match-chat-discovery input {
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.match-chat-discovery:has(input:disabled) { cursor: not-allowed; opacity: 0.55; }
+
 .match-chat-footnote {
   margin-top: 0.75rem;
   color: var(--muted);

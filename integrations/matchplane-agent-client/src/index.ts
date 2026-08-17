@@ -290,6 +290,9 @@ export interface MarketplaceIntentInput {
   narrative: string;
   attributes?: Record<string, unknown>;
   terms?: Record<string, unknown>;
+  /** Explicit opt-in for a contact-free demand summary to be discoverable by supply Agents. */
+  supply_discovery_enabled?: boolean;
+  supply_discovery_expires_at?: string | null;
   idempotency_key: string;
   expires_at?: string | null;
 }
@@ -305,6 +308,27 @@ export interface MarketplaceOfferInput {
   display_name: string;
   attributes?: Record<string, unknown>;
   terms?: Record<string, unknown>;
+  expires_at?: string | null;
+}
+
+export interface MarketplaceDemandMatchInput {
+  tenant_id: string;
+  domain_id: string;
+  /** Overwritten with the capability's path before the request is sent. */
+  platform_path?: string;
+  offer_id: string;
+  participant_id: string;
+  limit?: number;
+}
+
+export interface MarketplaceDemandDiscoveryUpdateInput {
+  tenant_id: string;
+  domain_id: string;
+  /** Overwritten with the capability's path before the request is sent. */
+  platform_path?: string;
+  intent_id: string;
+  participant_id: string;
+  enabled: boolean;
   expires_at?: string | null;
 }
 
@@ -563,6 +587,16 @@ export class MatchPlaneAgentClient {
     limit?: number;
   }): Promise<unknown> {
     return this.callTool("marketplace.offer.match", this.scope(capability, input), capability.access_token);
+  }
+
+  /** Rank explicitly discoverable demand summaries without exposing identities or contact data. */
+  async matchDemands(capability: PartyCapability, input: MarketplaceDemandMatchInput): Promise<unknown> {
+    return this.callTool("marketplace.demand.match", this.scope(capability, input), capability.access_token);
+  }
+
+  /** Revoke or renew the owner-controlled anonymous demand discovery choice. */
+  async updateDemandDiscovery(capability: PartyCapability, input: MarketplaceDemandDiscoveryUpdateInput): Promise<unknown> {
+    return this.callTool("marketplace.intent.discovery.update", this.scope(capability, input), capability.access_token);
   }
 
   async createIntroduction(capability: PartyCapability, input: MarketplaceIntroductionInput): Promise<unknown> {
