@@ -143,6 +143,27 @@ impl AppConfig {
     ///
     /// Returns [`ConfigError`] when decoding or validation fails.
     pub fn load() -> Result<ValidatedConfig, ConfigError> {
+        Self::load_raw()?.validate()
+    }
+
+    /// Loads raw configuration and returns every validation message without weakening the
+    /// fail-closed [`Self::load`] path.  Operator tooling uses this to report all production
+    /// blockers in one invocation instead of making an operator fix one variable at a time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] when the environment cannot be decoded into the raw shape.  A
+    /// successfully decoded configuration may still contain validation messages.
+    pub fn load_diagnostics() -> Result<ConfigurationDiagnostics, ConfigError> {
+        let config = Self::load_raw()?;
+        Ok(ConfigurationDiagnostics {
+            environment: config.environment,
+            service_role: config.service_role.clone(),
+            errors: config.validation_messages(),
+        })
+    }
+
+    fn load_raw() -> Result<Self, ConfigError> {
         let config = Config::builder()
             .set_default("environment", "development")?
             .set_default("service_role", "generic")?
@@ -174,7 +195,7 @@ impl AppConfig {
             )
             .build()?
             .try_deserialize::<Self>()?;
-        config.validate()
+        Ok(config)
     }
 
     /// Parses and applies production safety checks.
@@ -183,114 +204,8 @@ impl AppConfig {
     ///
     /// Returns [`ConfigError`] for malformed or insecure values.
     pub fn validate(self) -> Result<ValidatedConfig, ConfigError> {
-        for (field, value) in [
-            ("MATCHPLANE_DATABASE_URL", self.database_url.as_str()),
-            ("MATCHPLANE_KAFKA_BROKERS", self.kafka_brokers.as_str()),
-            ("MATCHPLANE_VALKEY_URL", self.valkey_url.as_str()),
-            ("MATCHPLANE_OTLP_ENDPOINT", self.otlp_endpoint.as_str()),
-        ] {
-            if value.trim().is_empty() {
-                return Err(ConfigError::Empty(field));
-            }
-        }
-
-        if self.environment == Environment::Production {
-            if !matches!(
-                self.service_role.as_str(),
-                "web"
-                    | "gateway"
-                    | "payment-service"
-                    | "event-relay"
-                    | "matcher"
-                    | "projector"
-                    | "vector-worker"
-                    | "federation-hub"
-                    | "migration"
-            ) {
-                return Err(ConfigError::InsecureProduction(
-                    "MATCHPLANE_SERVICE_ROLE must identify a known workload in production",
-                ));
-            }
-            if !self.require_tls {
-                return Err(ConfigError::InsecureProduction(
-                    "MATCHPLANE_REQUIRE_TLS must be true",
-                ));
-            }
-            if self.node_id == "00000000-0000-7000-8000-00000000000a" {
-                return Err(ConfigError::InsecureProduction(
-                    "MATCHPLANE_NODE_ID must be unique and cannot use the development default",
-                ));
-            }
-            let valkey_url = Url::parse(&self.valkey_url).map_err(|_| {
-                ConfigError::InsecureProduction("MATCHPLANE_VALKEY_URL must be a valid URL")
-            })?;
-            if valkey_url.scheme() != "rediss" || valkey_url.fragment().is_some() {
-                return Err(ConfigError::InsecureProduction(
-                    "Valkey must use rediss:// with certificate verification enabled",
-                ));
-            }
-            let database_url = Url::parse(&self.database_url).map_err(|_| {
-                ConfigError::InsecureProduction("MATCHPLANE_DATABASE_URL must be a valid URL")
-            })?;
-            if database_url.fragment().is_some() {
-                return Err(ConfigError::InsecureProduction(
-                    "MATCHPLANE_DATABASE_URL must not contain a fragment",
-                ));
-            }
-            reject_placeholder_credentials(&database_url, "database")?;
-            reject_placeholder_credentials(&valkey_url, "Valkey")?;
-            let sslmodes: Vec<_> = database_url
-                .query_pairs()
-                .filter(|(key, _)| key == "sslmode" || key == "ssl-mode")
-                .collect();
-            if sslmodes.len() != 1 || sslmodes[0].0 != "sslmode" || sslmodes[0].1 != "verify-full" {
-                return Err(ConfigError::InsecureProduction(
-                    "PostgreSQL must use exactly one canonical sslmode=verify-full option in production",
-                ));
-            }
-            if matches!(
-                self.service_role.as_str(),
-                "event-relay" | "matcher" | "projector"
-            ) && (self.kafka_security_protocol != "SSL"
-                || self.kafka_ssl_ca_location.trim().is_empty()
-                || self.kafka_ssl_certificate_location.trim().is_empty()
-                || self.kafka_ssl_key_location.trim().is_empty())
-            {
-                return Err(ConfigError::InsecureProduction(
-                    "Kafka workloads must use mTLS with security.protocol=SSL and CA, certificate, and key paths",
-                ));
-            }
-            if self.service_role == "federation-hub" {
-                for (field, value) in [
-                    (
-                        "MATCHPLANE_TLS_CERTIFICATE_PATH",
-                        self.tls_certificate_path.as_str(),
-                    ),
-                    (
-                        "MATCHPLANE_TLS_PRIVATE_KEY_PATH",
-                        self.tls_private_key_path.as_str(),
-                    ),
-                    (
-                        "MATCHPLANE_TLS_CLIENT_CA_PATH",
-                        self.tls_client_ca_path.as_str(),
-                    ),
-                ] {
-                    if value.trim().is_empty() {
-                        return Err(ConfigError::Empty(field));
-                    }
-                }
-            }
-            if !self.otlp_endpoint.starts_with("https://") {
-                return Err(ConfigError::InsecureProduction(
-                    "MATCHPLANE_OTLP_ENDPOINT must use HTTPS",
-                ));
-            }
-            if self.log_filter.contains("debug") || self.log_filter.contains("trace") {
-                return Err(ConfigError::InsecureProduction(
-                    "production log filter must not enable debug or trace logging",
-                ));
-            }
-            validate_payment_callback_origin(&self.payment_callback_origin)?;
+        if let Some(error) = self.validation_errors().into_iter().next() {
+            return Err(error);
         }
 
         Ok(ValidatedConfig {
@@ -327,6 +242,182 @@ impl AppConfig {
             payment_callback_origin: self.payment_callback_origin,
         })
     }
+
+    fn validation_messages(&self) -> Vec<String> {
+        self.validation_errors()
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect()
+    }
+
+    fn validation_errors(&self) -> Vec<ConfigError> {
+        let mut errors = Vec::new();
+        for (field, value) in [
+            ("MATCHPLANE_DATABASE_URL", self.database_url.as_str()),
+            ("MATCHPLANE_KAFKA_BROKERS", self.kafka_brokers.as_str()),
+            ("MATCHPLANE_VALKEY_URL", self.valkey_url.as_str()),
+            ("MATCHPLANE_OTLP_ENDPOINT", self.otlp_endpoint.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                errors.push(ConfigError::Empty(field));
+            }
+        }
+
+        if self.environment == Environment::Production {
+            if !matches!(
+                self.service_role.as_str(),
+                "web"
+                    | "gateway"
+                    | "payment-service"
+                    | "event-relay"
+                    | "matcher"
+                    | "projector"
+                    | "vector-worker"
+                    | "federation-hub"
+                    | "migration"
+            ) {
+                errors.push(ConfigError::InsecureProduction(
+                    "MATCHPLANE_SERVICE_ROLE must identify a known workload in production",
+                ));
+            }
+            if !self.require_tls {
+                errors.push(ConfigError::InsecureProduction(
+                    "MATCHPLANE_REQUIRE_TLS must be true",
+                ));
+            }
+            if self.node_id == "00000000-0000-7000-8000-00000000000a" {
+                errors.push(ConfigError::InsecureProduction(
+                    "MATCHPLANE_NODE_ID must be unique and cannot use the development default",
+                ));
+            }
+            let valkey_url = match Url::parse(&self.valkey_url) {
+                Ok(url) => Some(url),
+                Err(_) if !self.valkey_url.trim().is_empty() => {
+                    errors.push(ConfigError::InsecureProduction(
+                        "MATCHPLANE_VALKEY_URL must be a valid URL",
+                    ));
+                    None
+                }
+                Err(_) => None,
+            };
+            if let Some(valkey_url) = valkey_url {
+                if valkey_url.scheme() != "rediss" || valkey_url.fragment().is_some() {
+                    errors.push(ConfigError::InsecureProduction(
+                        "Valkey must use rediss:// with certificate verification enabled",
+                    ));
+                }
+                if let Err(error) = reject_placeholder_credentials(&valkey_url, "Valkey") {
+                    errors.push(error);
+                }
+            }
+
+            let database_url = match Url::parse(&self.database_url) {
+                Ok(url) => Some(url),
+                Err(_) if !self.database_url.trim().is_empty() => {
+                    errors.push(ConfigError::InsecureProduction(
+                        "MATCHPLANE_DATABASE_URL must be a valid URL",
+                    ));
+                    None
+                }
+                Err(_) => None,
+            };
+            if let Some(database_url) = database_url {
+                if database_url.fragment().is_some() {
+                    errors.push(ConfigError::InsecureProduction(
+                        "MATCHPLANE_DATABASE_URL must not contain a fragment",
+                    ));
+                }
+                if let Err(error) = reject_placeholder_credentials(&database_url, "database") {
+                    errors.push(error);
+                }
+                let sslmodes: Vec<_> = database_url
+                    .query_pairs()
+                    .filter(|(key, _)| key == "sslmode" || key == "ssl-mode")
+                    .collect();
+                if sslmodes.len() != 1
+                    || sslmodes[0].0 != "sslmode"
+                    || sslmodes[0].1 != "verify-full"
+                {
+                    errors.push(ConfigError::InsecureProduction(
+                        "PostgreSQL must use exactly one canonical sslmode=verify-full option in production",
+                    ));
+                }
+            }
+            if matches!(
+                self.service_role.as_str(),
+                "event-relay" | "matcher" | "projector"
+            ) && (self.kafka_security_protocol != "SSL"
+                || self.kafka_ssl_ca_location.trim().is_empty()
+                || self.kafka_ssl_certificate_location.trim().is_empty()
+                || self.kafka_ssl_key_location.trim().is_empty())
+            {
+                errors.push(ConfigError::InsecureProduction(
+                    "Kafka workloads must use mTLS with security.protocol=SSL and CA, certificate, and key paths",
+                ));
+            }
+            if self.service_role == "federation-hub" {
+                for (field, value) in [
+                    (
+                        "MATCHPLANE_TLS_CERTIFICATE_PATH",
+                        self.tls_certificate_path.as_str(),
+                    ),
+                    (
+                        "MATCHPLANE_TLS_PRIVATE_KEY_PATH",
+                        self.tls_private_key_path.as_str(),
+                    ),
+                    (
+                        "MATCHPLANE_TLS_CLIENT_CA_PATH",
+                        self.tls_client_ca_path.as_str(),
+                    ),
+                ] {
+                    if value.trim().is_empty() {
+                        errors.push(ConfigError::Empty(field));
+                    }
+                }
+            }
+            if !self.otlp_endpoint.starts_with("https://") {
+                errors.push(ConfigError::InsecureProduction(
+                    "MATCHPLANE_OTLP_ENDPOINT must use HTTPS",
+                ));
+            }
+            if self.log_filter.contains("debug") || self.log_filter.contains("trace") {
+                errors.push(ConfigError::InsecureProduction(
+                    "production log filter must not enable debug or trace logging",
+                ));
+            }
+            if let Err(error) = validate_payment_callback_origin(&self.payment_callback_origin) {
+                errors.push(error);
+            }
+        }
+
+        if let Err(error) = FederationNodeId::from_str(&self.node_id) {
+            errors.push(ConfigError::NodeId(error));
+        }
+        if let Err(source) = self.http_addr.parse::<SocketAddr>() {
+            errors.push(ConfigError::SocketAddress {
+                field: "MATCHPLANE_HTTP_ADDR",
+                source,
+            });
+        }
+        if let Err(source) = self.grpc_addr.parse::<SocketAddr>() {
+            errors.push(ConfigError::SocketAddress {
+                field: "MATCHPLANE_GRPC_ADDR",
+                source,
+            });
+        }
+        errors
+    }
+}
+
+/// Non-secret configuration diagnostics for operator tooling and the read-only MCP server.
+#[derive(Debug, Clone)]
+pub struct ConfigurationDiagnostics {
+    /// Parsed deployment environment.
+    pub environment: Environment,
+    /// Parsed workload role.
+    pub service_role: String,
+    /// Every validation blocker, with secrets excluded by the error vocabulary.
+    pub errors: Vec<String>,
 }
 
 fn reject_placeholder_credentials(url: &Url, service: &'static str) -> Result<(), ConfigError> {
@@ -516,5 +607,34 @@ mod tests {
             .expect_err("unknown workloads must not inherit generic production checks");
 
         assert!(matches!(error, ConfigError::InsecureProduction(_)));
+    }
+
+    #[test]
+    fn diagnostics_should_report_all_production_blockers() {
+        let mut config = production_config();
+        config.require_tls = false;
+        config.database_url =
+            "postgres://matchplane:secret@db/matchplane?sslmode=disable".to_owned();
+        config.valkey_url = "redis://valkey:6379/".to_owned();
+        config.payment_callback_origin.clear();
+
+        let messages = config.validation_messages();
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("MATCHPLANE_REQUIRE_TLS"))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("PostgreSQL"))
+        );
+        assert!(messages.iter().any(|message| message.contains("Valkey")));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("MATCHPLANE_PAYMENT_CALLBACK_ORIGIN"))
+        );
     }
 }

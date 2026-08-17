@@ -41,6 +41,10 @@ users, resource limits, restart policy, and signal/termination policy.
 - `platform.status` — probes gateway, payment, and web readiness URLs;
 - `platform.health` — the same bounded health report for simple clients;
 - `platform.doctor` — validates the loaded `MATCHPLANE_*` configuration and production gates.
+  The result keeps the first `error` field for compatibility and also includes an `errors` array
+  with every detected blocker, so an operator or Agent can prepare one change set instead of
+  iterating through one failed check at a time. Values are redacted and the configuration loader
+  still fails closed when a workload starts.
 
 The URLs are operator configuration (`MATCHPLANE_GATEWAY_HEALTH_URL`,
 `MATCHPLANE_PAYMENT_HEALTH_URL`, and `MATCHPLANE_WEB_HEALTH_URL`) and default to loopback. Output
@@ -73,4 +77,6 @@ and kernel `side` (`demand` or `supply`). The response is a tenant/side-scoped 1
 caller-selected participant ID, or expose contact values.
 
 Exit code is non-zero when a doctor check or any readiness probe fails. This makes the CLI suitable
-for CI, systemd preflight, and an Agent's bounded tool loop.
+for CI, systemd preflight, and an Agent's bounded tool loop. In production, treat every entry in
+`errors` as a required gate; do not promote the test Compose environment by merely making the web
+health endpoint return 200.

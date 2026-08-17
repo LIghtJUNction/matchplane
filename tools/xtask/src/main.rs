@@ -2,7 +2,7 @@ use std::{env, process::Command as ProcessCommand, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
-use matchplane_config::{AppConfig, Environment};
+use matchplane_config::{AppConfig, ConfigurationDiagnostics, Environment};
 use matchplane_domain::{DomainId, TenantId};
 use matchplane_storage::{
     PgStore, ProvisionRootDomain, ProvisionRootPlatform, ProvisionedRootPlatform,
@@ -270,20 +270,7 @@ fn validate_operator_uuid(value: Uuid, flag: &str) -> Result<()> {
 }
 
 async fn doctor() -> Result<()> {
-    let report = match AppConfig::load() {
-        Ok(config) => DoctorReport {
-            ok: true,
-            environment: Some(environment_name(config.environment).to_owned()),
-            service_role: Some(config.service_role),
-            error: None,
-        },
-        Err(error) => DoctorReport {
-            ok: false,
-            environment: env::var("MATCHPLANE_ENVIRONMENT").ok(),
-            service_role: env::var("MATCHPLANE_SERVICE_ROLE").ok(),
-            error: Some(safe_error(&error.to_string())),
-        },
-    };
+    let report = doctor_report();
     println!(
         "{}",
         serde_json::to_string_pretty(&report).context("doctor result encoding failed")?
@@ -292,6 +279,34 @@ async fn doctor() -> Result<()> {
         Ok(())
     } else {
         bail!("configuration doctor found a blocking error")
+    }
+}
+
+fn doctor_report() -> DoctorReport {
+    match AppConfig::load_diagnostics() {
+        Ok(diagnostics) => doctor_report_from_diagnostics(diagnostics),
+        Err(error) => DoctorReport {
+            ok: false,
+            environment: env::var("MATCHPLANE_ENVIRONMENT").ok(),
+            service_role: env::var("MATCHPLANE_SERVICE_ROLE").ok(),
+            error: Some(safe_error(&error.to_string())),
+            errors: vec![safe_error(&error.to_string())],
+        },
+    }
+}
+
+fn doctor_report_from_diagnostics(diagnostics: ConfigurationDiagnostics) -> DoctorReport {
+    let errors = diagnostics
+        .errors
+        .iter()
+        .map(|error| safe_error(error))
+        .collect::<Vec<_>>();
+    DoctorReport {
+        ok: errors.is_empty(),
+        environment: Some(environment_name(diagnostics.environment).to_owned()),
+        service_role: Some(diagnostics.service_role),
+        error: errors.first().cloned(),
+        errors,
     }
 }
 
@@ -394,23 +409,7 @@ async fn handle_mcp_request(request: JsonRpcRequest) -> Result<Option<JsonRpcRes
             Some("platform.status") => {
                 JsonRpcResponse::success(id, tool_result(probe_status().await))
             }
-            Some("platform.doctor") => {
-                let report = match AppConfig::load() {
-                    Ok(config) => DoctorReport {
-                        ok: true,
-                        environment: Some(environment_name(config.environment).to_owned()),
-                        service_role: Some(config.service_role),
-                        error: None,
-                    },
-                    Err(error) => DoctorReport {
-                        ok: false,
-                        environment: env::var("MATCHPLANE_ENVIRONMENT").ok(),
-                        service_role: env::var("MATCHPLANE_SERVICE_ROLE").ok(),
-                        error: Some(safe_error(&error.to_string())),
-                    },
-                };
-                JsonRpcResponse::success(id, tool_result(report))
-            }
+            Some("platform.doctor") => JsonRpcResponse::success(id, tool_result(doctor_report())),
             Some("platform.health") => {
                 JsonRpcResponse::success(id, tool_result(probe_status().await))
             }
@@ -529,13 +528,22 @@ fn environment_name(environment: Environment) -> &'static str {
 }
 
 fn safe_error(error: &str) -> String {
-    error
-        .replace("postgres://", "postgres://[redacted]@")
-        .replace("redis://", "redis://[redacted]@")
-        .replace("rediss://", "rediss://[redacted]@")
-        .chars()
-        .take(500)
-        .collect()
+    let mut redacted = error.to_owned();
+    for scheme in ["postgres://", "redis://", "rediss://"] {
+        let mut search_from = 0;
+        while let Some(relative_start) = redacted[search_from..].find(scheme) {
+            let scheme_start = search_from + relative_start;
+            let authority_start = scheme_start + scheme.len();
+            let Some(relative_at) = redacted[authority_start..].find('@') else {
+                search_from = authority_start;
+                continue;
+            };
+            let authority_end = authority_start + relative_at + 1;
+            redacted.replace_range(authority_start..authority_end, "[redacted]@");
+            search_from = authority_start + "[redacted]@".len();
+        }
+    }
+    redacted.chars().take(500).collect()
 }
 
 #[derive(Debug, Serialize)]
@@ -544,6 +552,7 @@ struct DoctorReport {
     environment: Option<String>,
     service_role: Option<String>,
     error: Option<String>,
+    errors: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
