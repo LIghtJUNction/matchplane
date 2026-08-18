@@ -63,8 +63,15 @@ jobs:
             [ -f "$source" ] || continue
             sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$source"
           done
+          # GitHub's Ubuntu image normally has package indexes ready. Try the
+          # bounded install first so a slow mirror does not block every Rust
+          # check; refresh indexes only when the cached metadata is insufficient.
+          install_cmd=(sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=1 -o Acquire::ConnectTimeout=10 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install --yes cmake libcurl4-openssl-dev libprotobuf-dev protobuf-compiler)
+          if "${install_cmd[@]}"; then
+            exit 0
+          fi
           sudo apt-get -o Acquire::Retries=1 -o Acquire::ConnectTimeout=10 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=1 -o Acquire::ConnectTimeout=10 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install --yes cmake libcurl4-openssl-dev libprotobuf-dev protobuf-compiler
+          "${install_cmd[@]}"
       - name: Install current pinned Rust toolchain
         run: rustup toolchain install 1.97.0 --profile minimal --component clippy,rustfmt
       - name: Check formatting
