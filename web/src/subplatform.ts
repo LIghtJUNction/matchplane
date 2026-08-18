@@ -306,7 +306,7 @@ function validUi(value: SubplatformConfig["ui"] | undefined): SubplatformConfig[
             entries.push([key, item]);
             continue;
           }
-          if (key === "buyerHeadlines" || key === "sellerHeadlines") {
+          if (key === "buyerHeadlines" || key === "sellerHeadlines" || key === "buyerHeadlinesEn" || key === "sellerHeadlinesEn") {
             if (!Array.isArray(item)) continue;
             const headlines = item
               .filter((headline): headline is string => typeof headline === "string" && headline.trim().length > 0 && headline.length <= 160)
