@@ -447,26 +447,53 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             const targetUsesLegacy = target.marketplaceContract === "legacy-v1";
             const targetKey = target.path.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 96) || "root";
             if (isSeller) {
-              const supplyIntent = await createMarketplaceIntent({
-                session: targetSession,
-                domainId: targetDomainId,
-                side: "supply",
-                narrative,
-                attributes: {
-                  source: "conversation",
-                  conversation_id: conversationId,
-                  platform_path: target.path,
-                  delegated_route_count: route?.routePlan.length ?? 0,
-                  routing_source: route?.routing.source ?? null,
-                  routing_degraded: route?.routing.degraded ?? false,
-                },
-                terms: {
-                  pricing_mode: targetPricing.mode,
-                  ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
-                  ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
-                },
-                idempotencyKey: `chat-${requestId}-${targetKey}`,
-              });
+              // Keep seller conversations durable in the same intent as the buyer flow. A
+              // seller may describe the same offer over several turns; creating a new supply
+              // intent on every turn would fragment the listing and make the later editable
+              // draft depend on whichever request happened to finish last.
+              const supplyIntentState = intentByTargetRef.current.get(targetKey);
+              const supplyIntent = supplyIntentState
+                ? await updateMarketplaceIntent({
+                    session: targetSession,
+                    domainId: targetDomainId,
+                    intentId: supplyIntentState.intentId,
+                    narrative,
+                    attributes: {
+                      source: "conversation",
+                      conversation_id: conversationId,
+                      latest_turn: text,
+                      platform_path: target.path,
+                    },
+                    terms: {
+                      pricing_mode: targetPricing.mode,
+                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
+                    },
+                    expectedVersion: supplyIntentState.version,
+                  })
+                : await createMarketplaceIntent({
+                    session: targetSession,
+                    domainId: targetDomainId,
+                    side: "supply",
+                    narrative,
+                    attributes: {
+                      source: "conversation",
+                      conversation_id: conversationId,
+                      platform_path: target.path,
+                      delegated_route_count: route?.routePlan.length ?? 0,
+                      routing_source: route?.routing.source ?? null,
+                      routing_degraded: route?.routing.degraded ?? false,
+                    },
+                    terms: {
+                      pricing_mode: targetPricing.mode,
+                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
+                    },
+                    idempotencyKey: `chat-${requestId}-${targetKey}`,
+                  });
+              if (typeof supplyIntent.intent_id === "string" && typeof supplyIntent.version === "number") {
+                intentByTargetRef.current.set(targetKey, { intentId: supplyIntent.intent_id, version: supplyIntent.version });
+              }
               // Keep the same opaque, scoped profile contract for supply as for demand. The
               // vertical Agent may later replace this conversation projection with typed fields;
               // the root never assumes that a supply is a vehicle, service, or another domain.
