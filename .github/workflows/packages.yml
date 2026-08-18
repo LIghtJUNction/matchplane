@@ -219,15 +219,23 @@ jobs:
           release_tag="v${VERSION#v}"
           echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
           if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "release $release_tag already exists; refusing to overwrite immutable assets" >&2
-            exit 1
+            # AUR publishing is intentionally allowed to resume after a release
+            # asset job has succeeded but the AUR job failed.  Never overwrite
+            # the immutable release; later steps skip publishing it and only
+            # rebuild/push the AUR recipes.
+            echo "RELEASE_EXISTS=true" >> "$GITHUB_ENV"
+            echo "release $release_tag already exists; reusing immutable assets"
+          else
+            echo "RELEASE_EXISTS=false" >> "$GITHUB_ENV"
           fi
           (cd dist && sha256sum -- * | sort -k2 > SHA256SUMS)
       - name: Attest release assets
+        if: env.RELEASE_EXISTS != 'true'
         uses: actions/attest-build-provenance@520d128f165991a6c774bcb264f323e3d70747f4 # v2.2.0
         with:
           subject-checksums: dist/SHA256SUMS
       - name: Publish GitHub release assets
+        if: env.RELEASE_EXISTS != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -247,7 +255,21 @@ jobs:
         # privileges for makepkg.  `makepkg --syncdeps` runs pacman through sudo when a package
         # is missing; the container intentionally has no password-capable sudo, so a missing
         # dependency would otherwise fail before either AUR package is built.
-        run: pacman -Syu --noconfirm base-devel bubblewrap bun cargo cmake curl git nodejs openssh protobuf rust zstd
+        run: |
+          set -euo pipefail
+          packages=(base-devel bubblewrap bun cargo cmake curl git nodejs openssh protobuf rust zstd)
+          # Arch mirrors can briefly publish a sync database before every package
+          # referenced by it has reached the same mirror.  Force a fresh database
+          # and retry the complete transaction so a transient 404 never prevents
+          # an otherwise reproducible AUR release.
+          for attempt in 1 2 3; do
+            if pacman -Syyu --noconfirm --disable-download-timeout "${packages[@]}"; then
+              exit 0
+            fi
+            echo "Arch package transaction failed (attempt ${attempt}/3); refreshing mirrors before retry" >&2
+            sleep "$((attempt * 5))"
+          done
+          exit 1
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -308,8 +330,9 @@ jobs:
           export GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/root/.ssh/known_hosts'
           git config --global user.name 'LIghtJUNction'
           git config --global user.email 'lightjunction.me@gmail.com'
+          mkdir -p "$GITHUB_WORKSPACE/.aur-checkouts"
           for package in matchplane-git matchplane-bin; do
-            checkout="/tmp/aur-${package}"
+            checkout="$GITHUB_WORKSPACE/.aur-checkouts/${package}"
             git clone "ssh://aur@aur.archlinux.org/${package}.git" "$checkout"
             cp "packaging/aur/${package}/PKGBUILD" "packaging/aur/${package}/.SRCINFO" \
               "packaging/aur/${package}/matchplane.install" "$checkout/"
