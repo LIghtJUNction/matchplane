@@ -49,6 +49,16 @@ jobs:
       - name: Install native build dependencies
         run: |
           set -euo pipefail
+          # ubuntu-latest already ships the native toolchain used by this
+          # workspace. Avoid an unnecessary apt transaction: the hosted apt
+          # mirror can occasionally stall for many minutes and the build does
+          # not need the package manager when these probes are present.
+          if command -v cmake >/dev/null 2>&1 \
+            && command -v protoc >/dev/null 2>&1 \
+            && pkg-config --exists libcurl; then
+            echo 'cmake, protoc, and libcurl development metadata are already available'
+            exit 0
+          fi
           for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
             [ -f "$source" ] || continue
             sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$source"
