@@ -11,7 +11,10 @@ ConditionPathExists=/etc/matchplane/secrets/builder/builder.token
 Type=simple
 User=matchplane-builder
 Group=matchplane-builder
-SupplementaryGroups=matchplane-web
+# The builder needs to traverse the shared secret root (group `matchplane`) and
+# read only the web-owned upload mount (group `matchplane-web`).  Its own token
+# remains protected by the `matchplane-builder` group on the leaf file.
+SupplementaryGroups=matchplane matchplane-web
 EnvironmentFile=/etc/matchplane/matchplane.env
 EnvironmentFile=/etc/matchplane/services/subplatform-builder.env
 Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchplane/secrets/builder/builder.token
