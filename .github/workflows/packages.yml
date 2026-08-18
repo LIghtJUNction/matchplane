@@ -292,9 +292,9 @@ jobs:
             packaging/aur/matchplane-git/PKGBUILD.in > packaging/aur/matchplane-git/PKGBUILD
           useradd --create-home builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
-          su builder -c 'cd packaging/aur/matchplane-git && makepkg --syncdeps --noconfirm --cleanbuild'
+          su builder -c 'cd packaging/aur/matchplane-git && env GITHUB_ACTIONS=false makepkg --syncdeps --noconfirm --cleanbuild'
           su builder -c 'cd packaging/aur/matchplane-git && makepkg --printsrcinfo > .SRCINFO'
-          su builder -c 'cd packaging/aur/matchplane-bin && makepkg --syncdeps --noconfirm --cleanbuild'
+          su builder -c 'cd packaging/aur/matchplane-bin && env GITHUB_ACTIONS=false makepkg --syncdeps --noconfirm --cleanbuild'
           su builder -c 'cd packaging/aur/matchplane-bin && makepkg --printsrcinfo > .SRCINFO'
       - name: Publish matchplane-git and matchplane-bin to AUR
         env:
