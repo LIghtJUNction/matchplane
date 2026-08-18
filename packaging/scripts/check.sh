@@ -10,6 +10,7 @@ bash -n packaging/fedora/build-rpm.sh
 bash -n deploy/scripts/configure-ubuntu-host.sh
 bash -n deploy/scripts/install-kafka.sh
 bash -n deploy/scripts/install-nginx-certbot-hook.sh
+bash -n deploy/scripts/install-bun.sh
 bash -n packaging/aur/matchplane-git/PKGBUILD.in
 bash -n packaging/aur/matchplane-git/matchplane.install
 bash -n packaging/aur/matchplane-bin/PKGBUILD.in
