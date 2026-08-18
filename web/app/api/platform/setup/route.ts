@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 
 import { authDatabase } from "../../../../src/lib/auth";
 import { isPlatformRouterConfigured } from "../../../../src/platform-router";
@@ -183,9 +183,40 @@ function readBuilderStatus(): PlatformBuilderStatus {
   }
   const bwrap = process.env.MATCHPLANE_SUBPLATFORM_BUILDER_BWRAP?.trim();
   const runtimeAvailable = bwrap
-    ? existsSync(bwrap)
-    : ["/usr/bin/bwrap", "/usr/bin/bubblewrap", "/usr/local/bin/bwrap"].some(existsSync);
-  return { configured: true, status: runtimeAvailable ? "ready" : "degraded" };
+    ? isExecutableFile(bwrap)
+    : ["/usr/bin/bwrap", "/usr/bin/bubblewrap", "/usr/local/bin/bwrap"].some(isExecutableFile);
+  const packageManagerAvailable = readBuilderPackageManagerPaths().some(isExecutableFile);
+  return { configured: true, status: runtimeAvailable && packageManagerAvailable ? "ready" : "degraded" };
+}
+
+function readBuilderPackageManagerPaths(): string[] {
+  const configuredBun = process.env.MATCHPLANE_SUBPLATFORM_BUILDER_BUN?.trim();
+  if (configuredBun) return [configuredBun];
+  return [
+    "/usr/local/bin/bun",
+    "/usr/local/bin/npm",
+    "/usr/local/bin/pnpm",
+    "/usr/local/bin/yarn",
+    "/usr/bin/bun",
+    "/usr/bin/npm",
+    "/usr/bin/pnpm",
+    "/usr/bin/yarn",
+    "/bin/bun",
+    "/bin/npm",
+    "/bin/pnpm",
+    "/bin/yarn",
+    "/opt/bun/bin/bun",
+  ];
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    const stat = statSync(path);
+    if (!stat.isFile()) return false;
+    return process.platform === "win32" || (stat.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
 }
 
 function hasNonEmptyFile(path: string): boolean {
