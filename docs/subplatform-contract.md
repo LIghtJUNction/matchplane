@@ -67,7 +67,7 @@ Key 不会创建被冒充的用户会话。轮换方式是创建替代 key、更
 
 领域文案、定价能力、筛选器与商家字段属于软件包，不属于根实现。软件包可在清单中声明 `pricing`、`ui.chat`、`ui.copy`、`ui.filters`、`ui.supplyFields` 与 `ui.contactFields`；根服务会校验并传递给通用 shell/plugin。默认走领域中立 marketplace 合约。仍需使用旧垂直适配器的软件包必须显式声明 `marketplaceContract: "legacy-v1"`；仅定价或存在 schema 并不隐式选择该适配器。网关的 legacy HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明或默认业务货币。卖家提交由激活包 schema 定义的值，根服务仅保存并转发其结构化属性。
 
-`ui.copy` 的键默认是中文或平台的主语言；需要英文界面时，包可以为同一个键提供 `<key>En` 覆盖，例如 `contactProfileTitleEn`。没有覆盖时，根通用 shell 使用自己的英文 fallback；它不会翻译或重写 `supplyFields`、`contactFields`、资产属性和商家内容。这样语言切换不会把领域术语硬编码进根平台，同时保留商家对文案的控制权。
+`ui.copy` 和 `ui.chat` 的键默认是中文或平台的主语言；需要英文界面时，包可以为同一个键提供 `<key>En` 覆盖，例如 `contactProfileTitleEn` 或 `buyerTitleEn`。没有覆盖时，根通用 shell 使用自己的英文 fallback；它不会翻译或重写 `supplyFields`、`contactFields`、资产属性和商家内容。这样语言切换不会把领域术语硬编码进根平台，同时保留商家对文案的控制权。
 
 内置注册入口是 `POST /api/platform/subplatforms`。该接口要求 Better Auth 根/父管理员会话、已存在的 `tenantId`/`domainId`、锁定的 Git commit 或不可变 archive 定位符，以及 manifest JSON。它会创建 Better Auth 组织，记录递归父子关系和不可变 digest 到 `subplatform_registrations`，并返回 `state: validated`。在另一次激活前，隔离构建器必须先附加签名后的 `build_digest`；web 请求不会克隆或执行不受信任的包代码。注册请求不能自报 `buildDigest`。生产激活还会对 manifest 中声明的 MCP 工具执行 endpoint 配置与 `initialize` 健康门禁；开发环境可以先激活静态包再配置工具服务。构建回调为
 `POST /api/platform/subplatforms/build`，由部署端独占 token `MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN` 认证；对同一不可变 digest 幂等。根或父管理员仍负责最终激活；builder 不可独立发布软件包。浏览器包可额外提交 `artifactPath`（位于 `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT` 下的相对 digest 目录）和 `artifactEntry`（相对 HTML 文件，默认 `index.html`）。这些值与 build digest 一并不可变，不能从公开注册接口注入。

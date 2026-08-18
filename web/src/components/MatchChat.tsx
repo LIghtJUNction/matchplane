@@ -112,15 +112,92 @@ const englishChatLabels: Record<string, string> = {
   sendDemandLabel: "Send request",
 };
 
+interface RuntimeChatCopy {
+  sellerLocated: (name: string) => string;
+  sellerSwitched: (name: string) => string;
+  routeOpenError: string;
+  unavailableSupply: string;
+  unavailableDemand: string;
+  multiplePlatforms: string;
+  choosePlatform: string;
+  targetPlatform: string;
+  authDisconnected: string;
+  routeNode: string;
+  routeOverflow: string;
+  routeDegraded: (names: string, overflow: string) => string;
+  routeSelected: (names: string, overflow: string) => string;
+  noMatch: string;
+  noChildren: string;
+  recorded: string;
+  retrievalDegraded: string;
+  retrievalDegradedNotice: string;
+  sendFailed: string;
+  authFailed: string;
+  routeChoicesAria: string;
+}
+
+function runtimeChatCopy(locale: InterfaceLocale): RuntimeChatCopy {
+  if (locale === "en") {
+    return {
+      sellerLocated: (name) => `Located ${name}. You can submit your offer details now.`,
+      sellerSwitched: (name) => `Switched to ${name}. Continue with your offer details.`,
+      routeOpenError: "The target platform could not be opened. Try again shortly.",
+      unavailableSupply: "This environment is not connected to the live supply API, so nothing was saved. Enable the platform API before sending.",
+      unavailableDemand: "This environment is not connected to the live matching API, so nothing was saved. Enable the platform API before sending.",
+      multiplePlatforms: "I found several suitable platforms for this offer. Choose one to continue.",
+      choosePlatform: "Choose a platform for this offer.",
+      targetPlatform: "target subplatform",
+      authDisconnected: "The Better Auth session is not connected to this platform node.",
+      routeNode: "the current platform node",
+      routeOverflow: " and other platforms",
+      routeDegraded: (names, overflow) => `Routing is temporarily degraded. Your request was sent to ${names}${overflow} under the bounded fallback; downstream platforms will continue looking for supply.`,
+      routeSelected: (names, overflow) => `The routing Agent selected ${names}${overflow}. Downstream platforms will now look for merchants and specific offers, with an explanation for each match.`,
+      noMatch: "Your request was recorded here, but the routing Agent did not find a suitable active platform. Add a goal, budget, or constraint and try again.",
+      noChildren: "Your request was recorded here. There are no active child platforms yet; an administrator can enable one to continue routing.",
+      recorded: "Your request was recorded on this platform node.",
+      retrievalDegraded: " A child retrieval service is temporarily unavailable, so basic condition matching is being used. It will recover when the administrator configures the service.",
+      retrievalDegradedNotice: "Child retrieval is temporarily unavailable; basic condition matching is being used.",
+      sendFailed: "Your request could not be sent. Try again shortly.",
+      authFailed: "The Better Auth session check did not complete.",
+      routeChoicesAria: "Choose a platform for publishing an offer",
+    };
+  }
+  return {
+    sellerLocated: (name) => `已定位到${name}，现在可以提交你的供给资料。`,
+    sellerSwitched: (name) => `已切换到${name}，请继续填写供给资料`,
+    routeOpenError: "目标平台暂时无法打开，请稍后重试",
+    unavailableSupply: "当前环境未连接真实供给 API，内容没有写入系统。请先启用平台 API 后再发送。",
+    unavailableDemand: "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。",
+    multiplePlatforms: "我找到了多个适合发布供给的平台，请先选择一个。",
+    choosePlatform: "请选择供给发布的平台",
+    targetPlatform: "目标子平台",
+    authDisconnected: "Better Auth 会话尚未连接到当前平台节点",
+    routeNode: "当前平台节点",
+    routeOverflow: " 等平台",
+    routeDegraded: (names, overflow) => `AI 路由暂时不可用，已按受控策略把需求交给 ${names}${overflow}；下级平台会继续筛选商家与具体供给。`,
+    routeSelected: (names, overflow) => `AI 已从当前节点的候选平台中选出 ${names}${overflow}，接下来由下级平台继续挑选商家与具体供给，并解释匹配理由。`,
+    noMatch: "需求已记录在当前平台节点；AI 判断当前候选平台暂时没有合适的匹配。你可以补充目标、预算或限制条件后重试。",
+    noChildren: "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。",
+    recorded: "需求已记录在当前平台节点。",
+    retrievalDegraded: " 子平台智能检索暂时不可用，已先使用基础条件匹配；管理员配置检索服务后会自动恢复。",
+    retrievalDegradedNotice: "子平台智能检索暂时不可用，已先使用基础条件匹配",
+    sendFailed: "需求暂时没有发送成功，请稍后再试。",
+    authFailed: "Better Auth 会话校验失败",
+    routeChoicesAria: "选择供给发布平台",
+  };
+}
+
 function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale): ChatCopy {
   const configured = subplatform.ui?.chat ?? {};
   const defaults = locale === "en" ? defaultChatCopyEn : defaultChatCopy;
   const text = (key: keyof ChatCopy, fallback: string): string => {
-    const value = configured[key];
+    const localizedKey = locale === "en" ? `${key}En` : key;
+    const value = configured[localizedKey];
     return typeof value === "string" && value.trim() ? value.trim() : fallback;
   };
   const headlines = (key: "buyerHeadlines" | "sellerHeadlines", fallback: string[]): string[] => {
-    const value = configured[key];
+    const localizedKey = locale === "en" ? `${key}En` : key;
+    const value = configured[localizedKey];
     if (!Array.isArray(value)) return fallback;
     const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 12);
     return items.length ? items : fallback;
@@ -167,6 +244,7 @@ interface MatchChatProps {
 
 export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer", onRecommendations, onSellerPlatformSelected }: MatchChatProps) {
   const copy = resolveChatCopy(subplatform, locale);
+  const runtime = runtimeChatCopy(locale);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
@@ -232,15 +310,15 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       setSellerRouteChoices([]);
       setMessages((current) => [
         ...current,
-        { id: `route-${crypto.randomUUID()}`, role: "assistant", text: `已定位到${target.displayName}，现在可以提交你的供给资料。` },
+        { id: `route-${crypto.randomUUID()}`, role: "assistant", text: runtime.sellerLocated(target.displayName) },
       ]);
-      onNotice(`已切换到${target.displayName}，请继续填写供给资料`);
+      onNotice(runtime.sellerSwitched(target.displayName));
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "目标平台暂时无法打开，请稍后重试");
+      onNotice(error instanceof Error ? error.message : runtime.routeOpenError);
     } finally {
       setSending(false);
     }
-  }, [onNotice, onSellerPlatformSelected, sending]);
+  }, [locale, onNotice, onSellerPlatformSelected, sending]);
 
   const submitMessage = useCallback(
     async (rawText: string, session?: PartySession) => {
@@ -268,9 +346,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       try {
         const live = isLiveMarketplaceEnabled();
         if (!live) {
-          const message = isSeller
-            ? "当前环境未连接真实供给 API，内容没有写入系统。请先启用平台 API 后再发送。"
-            : "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。";
+          const message = isSeller ? runtime.unavailableSupply : runtime.unavailableDemand;
           setMessages((current) => current.map((item) => item.id === `${requestId}-assistant` ? { ...item, text: message } : item));
           setMessage(text);
           onNotice(message);
@@ -292,20 +368,20 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           if (terminals.length > 1) {
             setSellerRouteChoices(terminals);
             setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-              ? { ...item, text: "我找到了多个适合发布供给的平台，请先选择一个。" }
+              ? { ...item, text: runtime.multiplePlatforms }
               : item));
-            onNotice("请选择供给发布的平台");
+            onNotice(runtime.choosePlatform);
             return;
           }
           const target = terminals[0] ?? route.routePlan.at(-1) ?? null;
           if (target && onSellerPlatformSelected) {
             await onSellerPlatformSelected(target);
           }
-          const selectedName = target?.displayName || route.routePlan.at(-1)?.displayName || "目标子平台";
+          const selectedName = target?.displayName || route.routePlan.at(-1)?.displayName || runtime.targetPlatform;
           setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-            ? { ...item, text: `已定位到${selectedName}，现在可以提交你的供给资料。` }
+            ? { ...item, text: runtime.sellerLocated(selectedName) }
             : item));
-          onNotice(`已切换到${selectedName}，请继续填写供给资料`);
+          onNotice(runtime.sellerSwitched(selectedName));
           return;
         }
         const routedRecommendations: RecommendedBackendListing[] = [];
@@ -346,7 +422,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                   domainId: targetDomainId,
                   role,
                 });
-            if (!targetSession) throw new Error("Better Auth 会话尚未连接到当前平台节点");
+            if (!targetSession) throw new Error(runtime.authDisconnected);
             const targetPricing = pricingFor(target);
             const targetUsesLegacy = target.marketplaceContract === "legacy-v1";
             const targetKey = target.path.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 96) || "root";
@@ -504,32 +580,32 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         const visibleRouteNames = route?.routePlan
           .slice(0, MAX_CHAT_TARGETS)
           .map((hop) => hop.displayName)
-          .join("、") || "当前平台节点";
-        const routeOverflowSuffix = route && route.routePlan.length > MAX_CHAT_TARGETS ? " 等平台" : "";
+          .join(locale === "en" ? ", " : "、") || runtime.routeNode;
+        const routeOverflowSuffix = route && route.routePlan.length > MAX_CHAT_TARGETS ? runtime.routeOverflow : "";
         const assistantText = isSeller
           ? copy.sellerSuccess
           : live
             ? route?.status === "degraded" && route.routePlan.length
-              ? `AI 路由暂时不可用，已按受控策略把需求交给 ${visibleRouteNames}${routeOverflowSuffix}；下级平台会继续筛选商家与具体供给。`
+              ? runtime.routeDegraded(visibleRouteNames, routeOverflowSuffix)
               : route?.routePlan.length
-                ? `AI 已从当前节点的候选平台中选出 ${visibleRouteNames}${routeOverflowSuffix}，接下来由下级平台继续挑选商家与具体供给，并解释匹配理由。`
+                ? runtime.routeSelected(visibleRouteNames, routeOverflowSuffix)
                 : route?.routing.source === "ai"
-                  ? "需求已记录在当前平台节点；AI 判断当前候选平台暂时没有合适的匹配。你可以补充目标、预算或限制条件后重试。"
-                  : "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。"
-            : "需求已记录在当前平台节点。";
+                  ? runtime.noMatch
+                  : runtime.noChildren
+            : runtime.recorded;
         const degradedSuffix = retrievalDegraded
-          ? " 子平台智能检索暂时不可用，已先使用基础条件匹配；管理员配置检索服务后会自动恢复。"
+          ? runtime.retrievalDegraded
           : "";
         setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
           ? { ...item, text: `${assistantText}${isSeller ? "" : degradedSuffix}` }
           : item));
         onNotice(retrievalDegraded
-          ? "子平台智能检索暂时不可用，已先使用基础条件匹配"
+          ? runtime.retrievalDegradedNotice
           : isSeller ? copy.sellerSuccess : copy.buyerSuccess);
         if (isSeller) window.setTimeout(() => document.getElementById("seller-display-name")?.focus(), 0);
       } catch (error) {
         setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-          ? { ...item, text: error instanceof Error ? error.message : "需求暂时没有发送成功，请稍后再试。" }
+          ? { ...item, text: error instanceof Error ? error.message : runtime.sendFailed }
           : item));
         setMessage(text);
         focusInputAfterErrorRef.current = true;
@@ -537,7 +613,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, messages, onNotice, onRecommendations, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
@@ -602,7 +678,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       }
       setSignedIn(true);
       void submitMessage(text, session ?? undefined);
-    })().catch((error) => onNotice(error instanceof Error ? error.message : "Better Auth 会话校验失败"));
+    })().catch((error) => onNotice(error instanceof Error ? error.message : runtime.authFailed));
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -646,7 +722,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       ) : null}
 
       {sellerRouteChoices.length ? (
-        <div className="match-chat-route-choices" role="group" aria-label="选择供给发布平台">
+        <div className="match-chat-route-choices" role="group" aria-label={runtime.routeChoicesAria}>
           {sellerRouteChoices.map((target) => (
             <button
               key={target.path}
