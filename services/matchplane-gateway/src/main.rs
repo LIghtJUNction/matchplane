@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{path::Path as FsPath, str::FromStr, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use axum::{
@@ -146,7 +146,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .await
         .context("gateway local federation node registration failed")?;
-    let cache = ValkeyCache::connect(&config.valkey_url)
+    let valkey_ca_file =
+        (!config.valkey_ca_file.is_empty()).then(|| FsPath::new(config.valkey_ca_file.as_str()));
+    let cache = ValkeyCache::connect_with_ca(&config.valkey_url, valkey_ca_file)
         .await
         .context("gateway could not connect to Valkey")?;
     let state = Arc::new(AppState {

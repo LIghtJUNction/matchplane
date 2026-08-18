@@ -7,7 +7,7 @@
 安装 PostgreSQL（含 TimescaleDB 与 pgvector）、启用 TLS 的 Valkey、Nginx、`curl`、`openssl`、Node.js 22.12.0 及以上版本，以及发布包。创建 `matchplane` 系统用户/组，并安装 `packaging/systemd/` 下的 systemd 单元。PostgreSQL 连接字符串必须要求 `sslmode=verify-full`。`/etc/matchplane/matchplane.env` 文件应由 `root:matchplane` 持有；`/etc/matchplane/services/` 下各服务专用密钥文件由 `root:<service-group>` 持有，权限为 `0640`。
 
 在启用生产服务前，为 web 进程、网关、支付服务、event relay（事件转发器）、matcher（匹配器）、projector（投影服务）、vector worker（向量工作器）和 federation hub（联邦枢纽）分别预置 PostgreSQL 角色与 Valkey ACL 用户；迁移脚本应使用独立的 owner（所有者）角色。子平台 builder 不得获得数据库或 Valkey 凭据，它只通过 web 的短权限 callback token 工作。每个运行时角色只授予其必需的表和函数权限，不要将其设置为数据库 owner 或 `CREATEROLE`/`CREATEDB`。把生成的连接串按服务单独写入一个文件，例如
-`/etc/matchplane/services/payment-service.env`，仅包含 `MATCHPLANE_DATABASE_URL`、`MATCHPLANE_VALKEY_URL` 以及该服务实例的 Kafka TLS 路径。`event-relay`、`matcher`、`projector` 需要 Kafka 客户端路径；`federation-hub` 需要服务端证书、私钥与 client CA 路径。仓库内置的单机初始化引导（bootstrap）使用测试角色，不能用于生产。
+`/etc/matchplane/services/payment-service.env`，仅包含 `MATCHPLANE_DATABASE_URL`、`MATCHPLANE_VALKEY_URL` 以及该服务实例的 Kafka TLS 路径。若 Valkey 使用部署专用 CA 而不是主机信任库，在同一文件中设置 `MATCHPLANE_VALKEY_CA_FILE`；客户端会以该 PEM CA 作为信任锚，不会降级到不校验证书。`event-relay`、`matcher`、`projector` 需要 Kafka 客户端路径；`federation-hub` 需要服务端证书、私钥与 client CA 路径。仓库内置的单机初始化引导（bootstrap）使用测试角色，不能用于生产。
 
 请勿将支付提供商凭据放入通用环境文件；应使用支付专用密钥目录或外部密钥管理系统。
 
