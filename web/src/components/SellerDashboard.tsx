@@ -21,19 +21,71 @@ import {
   type ListingSubmission,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
-import { pricingFor, subplatformContactLabel, subplatformCopy, type SubplatformConfig } from "../subplatform";
+import type { InterfaceLocale } from "../lib/preferences";
+import { localizedSubplatformCopy } from "../lib/localized-copy";
+import { pricingFor, subplatformContactLabel, type SubplatformConfig } from "../subplatform";
 import { SectionHeading, spring } from "./Primitives";
 import { ContactProfileCard } from "./ContactProfileCard";
 
 interface SellerDashboardProps {
+  locale: InterfaceLocale;
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
 }
 
 type SellerRecord = ListingSubmission | MarketplaceOffer;
 
+const sellerEnglishFallbacks: Record<string, string> = {
+  supplyWorkspaceLabel: "Supply workspace",
+  currentPlatformLabel: "Current platform",
+  supplyTitle: "Upload real information and let the platform find the right demand.",
+  supplyDescription: "The root platform does not seed sample content. Submissions enter review before matching.",
+  identityProtectionLabel: "Your account and contact details stay protected by the root platform",
+  supplyStatusLabel: "Supply status",
+  submittedPrefix: "Submitted",
+  submittedSuffix: "items",
+  noSubmissionsLabel: "No items submitted yet",
+  submissionWorkflowLabel: "Submissions enter this platform's review workflow",
+  uploadEyebrow: "Upload",
+  uploadTitle: "Submit a new offer",
+  uploadDescription: "Fields come from this platform's schema. The root stores structured JSON without guessing domain data.",
+  offerNameLabel: "Offer name",
+  offerNamePlaceholder: "Describe it yourself",
+  externalKeyLabel: "Internal reference",
+  externalKeyPlaceholder: "Leave blank to generate one",
+  priceLabel: "Price",
+  priceMinLabel: "Minimum price",
+  priceMaxLabel: "Maximum price",
+  currencyLabel: "Currency",
+  currencyPlaceholder: "Waiting for platform configuration",
+  pricingNoteLabel: "Negotiation terms",
+  pricingNotePlaceholder: "Explain the price, terms, or negotiable range",
+  advancedAttributesLabel: "Advanced attributes (JSON)",
+  reviewNotice: "New submissions start in review; the platform will not publish unconfirmed information.",
+  submittingLabel: "Submitting…",
+  submitForReviewLabel: "Submit for review",
+  submissionHistoryEyebrow: "Submission history",
+  submissionHistoryTitle: "Your offers on this platform",
+  noSubmissionHistoryLabel: "No uploads yet. Define your first offer.",
+  demandDiscoveryEyebrow: "Matching",
+  demandDiscoveryTitle: "Find published demand",
+  demandDiscoveryDescription: "Only people who opted in to discovery appear here. Contact details are exchanged only after both sides agree.",
+  contactRequestsEyebrow: "Contact requests",
+  contactRequestsTitle: "Both sides must agree before contact details are exchanged",
+  contactRequestLabel: "A matching contact request",
+  contactVisibleLabel: "Ready to contact",
+  contactReadingLabel: "Loading…",
+  viewContactLabel: "View contact details",
+  processingLabel: "Processing…",
+  consentContactLabel: "Agree to exchange",
+  noContactRequestsLabel: "No pending contact requests.",
+  contactLoginNotice: "Sign in to view contact details after both sides agree",
+  contactReleasedNotice: "Contact details are unlocked; use the channel provided",
+  contactReleaseError: "Contact details are temporarily unavailable",
+};
+
 /** Generic seller surface. The active subplatform owns the meaning of `attributes`. */
-export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps) {
+export function SellerDashboard({ locale, onNotice, subplatform }: SellerDashboardProps) {
   const [externalKey, setExternalKey] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [askingAmount, setAskingAmount] = useState("");
@@ -41,7 +93,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
   const [askingAmountMax, setAskingAmountMax] = useState("");
   const [pricingNote, setPricingNote] = useState("");
   const pricing = pricingFor(subplatform);
-  const copy = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
+  const copy = (key: string, fallbackZh: string, fallbackEn = sellerEnglishFallbacks[key] ?? fallbackZh) => localizedSubplatformCopy(subplatform, locale, key, fallbackZh, fallbackEn);
   const isFixedPrice = pricing.mode === "fixed";
   const isRangePrice = pricing.mode === "range";
   const isNegotiablePrice = pricing.mode === "negotiable";
@@ -75,11 +127,11 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
     setDemandMatchesLoading({});
     setDemandMatchesError({});
     if (!isLiveMarketplaceEnabled()) {
-      setSubmissionsError("当前部署未启用真实供给 API");
+      setSubmissionsError(copy("supplyApiUnavailable", "当前部署未启用真实供给 API", "The live supply API is not enabled for this deployment"));
       return;
     }
     if (!subplatform.domainId || !subplatform.tenantId) {
-      setSubmissionsError("当前子平台还没有完成身份配置");
+      setSubmissionsError(copy("platformIdentityIncomplete", "当前子平台还没有完成身份配置", "This platform has not finished its identity setup"));
       return;
     }
     setSubmissionsLoading(true);
@@ -92,7 +144,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
         role: "seller",
       });
       if (!session) {
-        setSubmissionsError("请先登录后查看你的提交记录");
+        setSubmissionsError(copy("signInToViewSubmissions", "请先登录后查看你的提交记录", "Sign in to view your submissions"));
         return;
       }
       if (usesLegacyMarketplace) {
@@ -102,7 +154,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       }
       setIntroductions(await getMarketplaceIntroductions({ session, domainId: subplatform.domainId }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "提交记录读取失败";
+      const message = error instanceof Error ? error.message : copy("submissionLoadError", "提交记录读取失败", "Could not load submissions");
       setSubmissionsError(message);
       setIntroductionsError(message);
     } finally {
@@ -127,7 +179,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
         role: "seller",
       });
       if (!session) {
-        onNotice("请先登录后寻找已公开需求");
+        onNotice(copy("signInToFindDemand", "请先登录后寻找已公开需求", "Sign in to find published demand"));
         return;
       }
       const matches = await getMarketplaceDemandMatches({
@@ -138,7 +190,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       });
       setDemandMatches((current) => ({ ...current, [record.offer_id]: matches }));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "需求匹配暂时无法读取";
+      const message = error instanceof Error ? error.message : copy("demandMatchLoadError", "需求匹配暂时无法读取", "Demand matching is temporarily unavailable");
       setDemandMatchesError((current) => ({ ...current, [record.offer_id]: message }));
     } finally {
       setDemandMatchesLoading((current) => ({ ...current, [record.offer_id]: false }));
@@ -157,7 +209,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
         role: "seller",
       });
       if (!session) {
-        onNotice("请先登录后处理联系申请");
+        onNotice(copy("signInToProcessContact", "请先登录后处理联系申请", "Sign in to process contact requests"));
         return;
       }
       const updated = await consentMarketplaceContact({
@@ -166,9 +218,9 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
         introductionId: introduction.introduction_id,
       });
       setIntroductions((current) => current.map((item) => item.introduction_id === updated.introduction_id ? updated : item));
-      onNotice("已同意交换联系方式，买方可以查看你提供的联系渠道");
+      onNotice(copy("contactConsentSaved", "已同意交换联系方式，买方可以查看你提供的联系渠道", "Contact exchange approved; the buyer can view your channels"));
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "联系申请处理失败");
+      onNotice(error instanceof Error ? error.message : copy("contactConsentError", "联系申请处理失败", "Could not process the contact request"));
     } finally {
       setConsentingIntroductionId(null);
     }
@@ -246,36 +298,40 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
     const normalizedMin = isRangePrice ? toMinorUnits(askingAmountMin, pricingScale ?? 0) : null;
     const normalizedMax = isRangePrice ? toMinorUnits(askingAmountMax, pricingScale ?? 0) : null;
     if (!normalizedName || (isFixedPrice && (!normalizedAmount || !normalizedCurrency)) || (isRangePrice && (!normalizedMin || !normalizedMax || !normalizedCurrency))) {
-      onNotice(isFixedPrice ? "请完整填写名称、报价和结算币种" : isRangePrice ? "请完整填写价格区间和结算币种" : "请填写供给名称");
+      onNotice(isFixedPrice
+        ? copy("fixedPriceRequired", "请完整填写名称、报价和结算币种", "Enter a name, price, and currency")
+        : isRangePrice
+          ? copy("rangePriceRequired", "请完整填写价格区间和结算币种", "Enter a price range and currency")
+          : copy("offerNameRequired", "请填写供给名称", "Enter an offer name"));
       return;
     }
     if (isRangePrice && BigInt(normalizedMin as string) > BigInt(normalizedMax as string)) {
-      onNotice("价格区间的最低值不能高于最高值");
+      onNotice(copy("rangePriceOrderError", "价格区间的最低值不能高于最高值", "The minimum price cannot exceed the maximum"));
       return;
     }
     if (!isLiveMarketplaceEnabled()) {
-      onNotice("当前环境未启用真实供给 API，资料没有写入系统");
+      onNotice(copy("supplyApiUnavailableNotice", "当前环境未启用真实供给 API，资料没有写入系统", "The live supply API is disabled; nothing was saved"));
       return;
     }
     if (!subplatform.domainId) {
-      onNotice("当前子平台尚未完成身份配置");
+      onNotice(copy("platformIdentityIncompleteNotice", "当前子平台尚未完成身份配置", "This platform has not finished its identity setup"));
       return;
     }
     if (usesLegacyMarketplace && (pricing.mode !== "fixed" || !subplatform.assetSchemaId || !pricingCurrency
       || typeof pricingScale !== "number"
       || !Number.isInteger(pricingScale)
       || pricingScale < 0 || pricingScale > 18)) {
-      onNotice("当前子平台尚未配置完整的资料 schema、结算币种和价格精度");
+      onNotice(copy("platformSchemaIncomplete", "当前子平台尚未配置完整的资料 schema、结算币种和价格精度", "This platform has incomplete schema, currency, or price precision settings"));
       return;
     }
     const missing = schemaFields.find((field) => field.required && !fieldValues[field.key]?.trim());
     if (missing) {
-      onNotice(`请填写${missing.label}`);
+      onNotice(locale === "en" ? `Enter ${missing.label}` : `请填写${missing.label}`);
       return;
     }
     const parsedAttributes = attributesFromForm(fieldValues, customFields, schemaFields, advancedOpen ? advancedAttributes : null);
     if (!parsedAttributes) {
-      onNotice("高级资料必须是有效的 JSON 对象");
+      onNotice(copy("advancedJsonError", "高级资料必须是有效的 JSON 对象", "Advanced attributes must be a valid JSON object"));
       return;
     }
 
@@ -289,7 +345,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
         role: "seller",
       });
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "当前子平台身份配置不完整");
+      onNotice(error instanceof Error ? error.message : copy("platformSessionError", "当前子平台身份配置不完整", "This platform's identity configuration is incomplete"));
       return;
     }
     if (!session) {
@@ -340,9 +396,9 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       setCustomFields([]);
       setAdvancedAttributes("{}");
       setAdvancedOpen(false);
-      onNotice("供给已提交，等待平台审核后展示");
+      onNotice(copy("offerSubmittedNotice", "供给已提交，等待平台审核后展示", "Offer submitted; it will appear after platform review"));
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "供给提交失败，请稍后重试");
+      onNotice(error instanceof Error ? error.message : copy("offerSubmitError", "供给提交失败，请稍后重试", "Could not submit the offer; try again"));
     } finally {
       setSubmitting(false);
     }
@@ -364,7 +420,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
         <div><strong>{submissions.length ? `${copy("submittedPrefix", "已提交")} ${submissions.length} ${copy("submittedSuffix", "份资料")}` : copy("noSubmissionsLabel", "还没有提交资料")}</strong><small>{copy("submissionWorkflowLabel", "提交后会进入当前子平台的审核流程")}</small></div>
       </section>
 
-      <ContactProfileCard subplatform={subplatform} role="seller" onNotice={onNotice} />
+      <ContactProfileCard locale={locale} subplatform={subplatform} role="seller" onNotice={onNotice} />
 
       <section className="surface seller-upload" aria-labelledby="seller-upload-title">
         <SectionHeading eyebrow={copy("uploadEyebrow", "资料上传")} title={copy("uploadTitle", "提交一份新的供给资料")} />
@@ -384,11 +440,11 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
             <>
               <label htmlFor="seller-asking-amount">
                 <span>{copy("priceLabel", "报价")}{currency ? `（${currency}）` : ""}</span>
-                <input id="seller-asking-amount" value={askingAmount} onChange={(event) => setAskingAmount(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0)} required />
+                <input id="seller-asking-amount" value={askingAmount} onChange={(event) => setAskingAmount(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0, locale)} required />
               </label>
               <label htmlFor="seller-currency">
                 <span>{copy("currencyLabel", "币种")}</span>
-                <input id="seller-currency" value={currency} onChange={(event) => setCurrency(event.target.value.toUpperCase())} placeholder="等待子平台配置" maxLength={3} readOnly={Boolean(pricingCurrency)} required />
+                <input id="seller-currency" value={currency} onChange={(event) => setCurrency(event.target.value.toUpperCase())} placeholder={copy("currencyPlaceholder", "等待子平台配置")} maxLength={3} readOnly={Boolean(pricingCurrency)} required />
               </label>
             </>
           ) : null}
@@ -396,11 +452,11 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
             <>
               <label htmlFor="seller-asking-amount-min">
                 <span>{copy("priceMinLabel", "最低报价")}{currency ? `（${currency}）` : ""}</span>
-                <input id="seller-asking-amount-min" value={askingAmountMin} onChange={(event) => setAskingAmountMin(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0)} required />
+                <input id="seller-asking-amount-min" value={askingAmountMin} onChange={(event) => setAskingAmountMin(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0, locale)} required />
               </label>
               <label htmlFor="seller-asking-amount-max">
                 <span>{copy("priceMaxLabel", "最高报价")}{currency ? `（${currency}）` : ""}</span>
-                <input id="seller-asking-amount-max" value={askingAmountMax} onChange={(event) => setAskingAmountMax(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0)} required />
+                <input id="seller-asking-amount-max" value={askingAmountMax} onChange={(event) => setAskingAmountMax(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0, locale)} required />
               </label>
               <label htmlFor="seller-currency-range">
                 <span>{copy("currencyLabel", "币种")}</span>
@@ -419,7 +475,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
               <span>{field.label}{field.required ? " *" : ""}</span>
               {field.type === "select" ? (
                 <select id={`seller-attribute-${field.key}`} value={fieldValues[field.key] ?? ""} onChange={(event) => setFieldValues((current) => ({ ...current, [field.key]: event.target.value }))}>
-                  <option value="">请选择</option>
+                  <option value="">{copy("selectFieldPlaceholder", "请选择", "Select")}</option>
                   {field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
               ) : (
@@ -429,14 +485,14 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
           ))}
           {customFields.map((field) => (
             <div className="seller-custom-field" key={field.id}>
-              <input aria-label="自定义字段名" value={field.key} onChange={(event) => setCustomFields((current) => current.map((item) => item.id === field.id ? { ...item, key: event.target.value } : item))} placeholder="字段名" />
-              <input aria-label="自定义字段值" value={field.value} onChange={(event) => setCustomFields((current) => current.map((item) => item.id === field.id ? { ...item, value: event.target.value } : item))} placeholder="字段值" />
-              <button type="button" aria-label="删除自定义字段" onClick={() => setCustomFields((current) => current.filter((item) => item.id !== field.id))}><Trash2 size={16} aria-hidden="true" /></button>
+              <input aria-label={copy("customFieldNameLabel", "自定义字段名", "Custom field name")} value={field.key} onChange={(event) => setCustomFields((current) => current.map((item) => item.id === field.id ? { ...item, key: event.target.value } : item))} placeholder={copy("customFieldNamePlaceholder", "字段名", "Field name")} />
+              <input aria-label={copy("customFieldValueLabel", "自定义字段值", "Custom field value")} value={field.value} onChange={(event) => setCustomFields((current) => current.map((item) => item.id === field.id ? { ...item, value: event.target.value } : item))} placeholder={copy("customFieldValuePlaceholder", "字段值", "Field value")} />
+              <button type="button" aria-label={copy("removeCustomFieldLabel", "删除自定义字段", "Remove custom field")} onClick={() => setCustomFields((current) => current.filter((item) => item.id !== field.id))}><Trash2 size={16} aria-hidden="true" /></button>
             </div>
           ))}
           <div className="seller-upload-wide seller-form-tools">
-            <button className="text-action" type="button" onClick={() => setCustomFields((current) => [...current, { id: crypto.randomUUID(), key: "", value: "" }])}><Plus size={16} aria-hidden="true" /> 添加字段</button>
-            <button className="text-action" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "收起高级资料" : "使用高级 JSON"}</button>
+            <button className="text-action" type="button" onClick={() => setCustomFields((current) => [...current, { id: crypto.randomUUID(), key: "", value: "" }])}><Plus size={16} aria-hidden="true" /> {copy("addCustomFieldLabel", "添加字段", "Add field")}</button>
+            <button className="text-action" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? copy("collapseAdvancedLabel", "收起高级资料", "Hide advanced attributes") : copy("advancedJsonToggleLabel", "使用高级 JSON", "Use advanced JSON")}</button>
           </div>
           {advancedOpen ? (
             <label className="seller-upload-wide" htmlFor="seller-attributes">
@@ -457,15 +513,15 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
       <section className="surface seller-submissions" aria-labelledby="seller-submissions-title">
         <SectionHeading eyebrow={copy("submissionHistoryEyebrow", "提交记录")} title={copy("submissionHistoryTitle", "当前子平台的资料")} />
         {submissionsLoading ? (
-          <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>正在读取你的提交记录…</p></div>
+          <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>{copy("loadingSubmissionsLabel", "正在读取你的提交记录…", "Loading your submissions…")}</p></div>
         ) : submissionsError ? (
-          <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>{submissionsError}</p><button type="button" onClick={() => void loadSubmissions()}>重新读取</button></div>
+          <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>{submissionsError}</p><button type="button" onClick={() => void loadSubmissions()}>{copy("reloadSubmissionsLabel", "重新读取", "Reload")}</button></div>
         ) : submissions.length ? (
           <ol className="submission-list">
             {submissions.map((submission) => (
               <li key={sellerRecordId(submission)}>
-                <div><strong>{submission.display_name}</strong><small>{submission.external_key} · {sellerRecordPrice(submission, pricing)} · {formatSubmissionDate(submission.updated_at)}</small>{"review_reason" in submission && submission.review_reason ? <small className="submission-review-reason">{submission.review_reason}</small> : null}</div>
-                <span className="submission-status">{submissionStatusLabel(submission.status)}</span>
+                <div><strong>{submission.display_name}</strong><small>{submission.external_key} · {sellerRecordPrice(submission, pricing, locale)} · {formatSubmissionDate(submission.updated_at, locale)}</small>{"review_reason" in submission && submission.review_reason ? <small className="submission-review-reason">{submission.review_reason}</small> : null}</div>
+                <span className="submission-status">{submissionStatusLabel(submission.status, locale)}</span>
               </li>
             ))}
           </ol>
@@ -494,7 +550,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
                     <div className="seller-demand-offer-heading">
                       <div>
                         <strong>{offer.display_name}</strong>
-                        <small>{offer.external_key} · 已发布</small>
+                        <small>{offer.external_key} · {copy("publishedLabel", "已发布", "Published")}</small>
                       </div>
                       <button
                         className="text-action"
@@ -502,7 +558,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
                         onClick={() => void findDemandMatches(offer)}
                         disabled={loading}
                       >
-                        {loading ? "寻找中…" : matches ? "重新寻找" : "寻找需求"}
+                        {loading ? copy("findingDemandLabel", "寻找中…", "Finding demand…") : matches ? copy("refindDemandLabel", "重新寻找", "Search again") : copy("findDemandLabel", "寻找需求", "Find demand")}
                         <ArrowRight size={15} aria-hidden="true" />
                       </button>
                     </div>
@@ -516,17 +572,17 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
                                 <div>
                                   <strong>{demand.narrative}</strong>
                                   <small>
-                                    {Math.round(Math.max(0, Math.min(1, demand.score)) * 100)}% 相关
+                                    {Math.round(Math.max(0, Math.min(1, demand.score)) * 100)}% {copy("relevanceLabel", "相关", "relevant")}
                                     {demand.reasons.length ? ` · ${demand.reasons.slice(0, 2).join("、")}` : ""}
                                   </small>
                                 </div>
-                                <span className="submission-status">等待需求方联系</span>
+                                <span className="submission-status">{copy("waitingDemandContactLabel", "等待需求方联系", "Waiting for the buyer to make contact")}</span>
                               </li>
                             );
                           })}
                         </ol>
                       ) : (
-                        <div className="seller-empty-state seller-demand-empty"><p>暂时没有符合条件的公开需求。</p></div>
+                        <div className="seller-empty-state seller-demand-empty"><p>{copy("noDemandMatchesLabel", "暂时没有符合条件的公开需求。", "No matching published demand yet.")}</p></div>
                       )
                     ) : null}
                   </article>
@@ -534,7 +590,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
               })}
             </div>
           ) : (
-            <div className="seller-empty-state seller-demand-empty"><p>供给审核通过并发布后，可以在这里寻找需求。</p></div>
+            <div className="seller-empty-state seller-demand-empty"><p>{copy("demandDiscoveryEmptyLabel", "供给审核通过并发布后，可以在这里寻找需求。", "Once an offer is approved and published, you can find demand here.")}</p></div>
           )}
         </section>
       ) : null}
@@ -549,7 +605,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
               <li key={introduction.introduction_id}>
                 <div>
                   <strong>{copy("contactRequestLabel", "一条撮合联系申请")}</strong>
-                  <small>{introductionStatusLabel(introduction.status)} · {formatSubmissionDate(introduction.created_at)}</small>
+                  <small>{introductionStatusLabel(introduction.status, locale)} · {formatSubmissionDate(introduction.created_at, locale)}</small>
                   {releasedContacts[introduction.introduction_id] ? (
                     <div className="buyer-contact-values">
                       {Object.entries(releasedContacts[introduction.introduction_id].counterpart.contact).map(([key, value]) => <span key={key}>{subplatformContactLabel(subplatform, key)}: {value}</span>)}
@@ -567,7 +623,7 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
                     {consentingIntroductionId === introduction.introduction_id ? copy("processingLabel", "处理中…") : copy("consentContactLabel", "同意交换")}
                   </button>
                 ) : (
-                  <span className="submission-status">等待需求方确认</span>
+                  <span className="submission-status">{copy("waitingBuyerConfirmationLabel", "等待需求方确认", "Waiting for the buyer to confirm")}</span>
                 )}
               </li>
             ))}
@@ -580,8 +636,10 @@ export function SellerDashboard({ onNotice, subplatform }: SellerDashboardProps)
   );
 }
 
-function amountPlaceholder(scale: number): string {
-  return scale > 0 ? `例如 1000.${"0".repeat(Math.min(scale, 2))}` : "例如 1000";
+function amountPlaceholder(scale: number, locale: InterfaceLocale = "zh"): string {
+  return locale === "en"
+    ? (scale > 0 ? `e.g. 1000.${"0".repeat(Math.min(scale, 2))}` : "e.g. 1000")
+    : (scale > 0 ? `例如 1000.${"0".repeat(Math.min(scale, 2))}` : "例如 1000");
 }
 
 function sellerRecordId(record: SellerRecord): string {
@@ -592,7 +650,7 @@ function isMarketplaceOffer(record: SellerRecord): record is MarketplaceOffer {
   return "offer_id" in record;
 }
 
-function sellerRecordPrice(record: SellerRecord, pricing: { mode: string }): string {
+function sellerRecordPrice(record: SellerRecord, pricing: { mode: string }, locale: InterfaceLocale = "zh"): string {
   if ("asking_amount" in record) {
     return formatMinorUnits(record.asking_amount, record.currency, record.currency_scale);
   }
@@ -609,7 +667,7 @@ function sellerRecordPrice(record: SellerRecord, pricing: { mode: string }): str
     return `${formatMinorUnits(min, currency, scale)} – ${formatMinorUnits(max, currency, scale)}`;
   }
   if (typeof record.terms.pricing_note === "string" && record.terms.pricing_note.trim()) return record.terms.pricing_note.trim();
-  return display || (pricing.mode === "none" ? "—" : "待补充");
+  return display || (pricing.mode === "none" ? "—" : locale === "en" ? "To be added" : "待补充");
 }
 
 function stringAttribute(value: Record<string, unknown>, keys: string[]): string | undefined {
@@ -632,12 +690,22 @@ function formatMinorUnits(amount: string, currency: string, scale: number): stri
   }
 }
 
-function formatSubmissionDate(value: string): string {
+function formatSubmissionDate(value: string, locale: InterfaceLocale = "zh"): string {
   const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? "时间未知" : date.toLocaleDateString("zh-CN");
+  return Number.isNaN(date.valueOf())
+    ? (locale === "en" ? "Unknown time" : "时间未知")
+    : date.toLocaleDateString(locale === "en" ? "en-US" : "zh-CN");
 }
 
-function submissionStatusLabel(status: string): string {
+function submissionStatusLabel(status: string, locale: InterfaceLocale = "zh"): string {
+  if (locale === "en") {
+    return {
+      pending_review: "In review",
+      approved: "Approved",
+      rejected: "Needs changes",
+      withdrawn: "Withdrawn",
+    }[status] ?? status;
+  }
   return {
     pending_review: "待审核",
     approved: "已通过",
@@ -646,7 +714,18 @@ function submissionStatusLabel(status: string): string {
   }[status] ?? status;
 }
 
-function introductionStatusLabel(status: string): string {
+function introductionStatusLabel(status: string, locale: InterfaceLocale = "zh"): string {
+  if (locale === "en") {
+    return {
+      proposed: "Match created",
+      contact_requested: "Waiting for your approval",
+      contact_released: "Exchange approved",
+      completed: "Completed",
+      declined: "Declined",
+      expired: "Expired",
+      disputed: "Under review",
+    }[status] ?? "Matching in progress";
+  }
   return {
     proposed: "已建立撮合",
     contact_requested: "等待你的同意",

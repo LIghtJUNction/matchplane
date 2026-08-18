@@ -205,4 +205,14 @@ describe("MatchPlane workspaces", () => {
     expect(document.documentElement.lang).toBe("en");
     expect(screen.getByRole("menuitem", { name: "Buyer workspace" })).toBeInTheDocument();
   });
+
+  it("passes the selected language into the generic buyer workspace", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "EN" }));
+
+    expect(await screen.findByRole("heading", { name: "Start with one sentence.", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "I can provide" })).toBeInTheDocument();
+  });
 });

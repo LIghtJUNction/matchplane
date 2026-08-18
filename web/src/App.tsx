@@ -212,9 +212,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   };
 
   const genericWorkspace: ReactNode = role === "buyer" ? (
-    <BuyerDashboard listings={listings} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
+    <BuyerDashboard listings={listings} locale={locale} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
   ) : role === "seller" ? (
-    <SellerDashboard onNotice={setNotice} subplatform={subplatform} />
+    <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} />
   ) : role === "subplatform_admin" ? (
     <SubplatformAdminDashboard onNotice={setNotice} subplatform={subplatform} />
   ) : (

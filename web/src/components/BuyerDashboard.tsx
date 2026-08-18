@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 
-import { subplatformContactLabel, subplatformCopy, type SubplatformConfig } from "../subplatform";
+import { subplatformContactLabel, type SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 import {
   getMarketplaceIntroductions,
@@ -24,11 +24,14 @@ import {
   type PlatformChildSummary,
 } from "../api";
 import { getMarketplaceSession as getCapability } from "../lib/marketplace-session";
+import type { InterfaceLocale } from "../lib/preferences";
+import { localizedSubplatformCopy } from "../lib/localized-copy";
 import { ListingVisual, SectionHeading, spring } from "./Primitives";
 import { ContactProfileCard } from "./ContactProfileCard";
 
 interface BuyerDashboardProps {
   listings: AssetListing[];
+  locale: InterfaceLocale;
   onOpenListing: (listing: AssetListing) => void;
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
@@ -46,7 +49,7 @@ interface IntroductionEntry {
   scope: IntroductionScope;
 }
 
-export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform }: BuyerDashboardProps) {
+export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subplatform }: BuyerDashboardProps) {
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState<Set<string>>(() => readSavedItems(`matchplane.saved.${subplatform.path}`));
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -58,7 +61,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   const isRoot = subplatform.slug === "root";
   const savedKey = `matchplane.saved.${subplatform.path}`;
   const filterDefinitions = subplatform.ui?.filters ?? [];
-  const copy = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
+  const copy = (key: string, fallbackZh: string, fallbackEn = fallbackZh) => localizedSubplatformCopy(subplatform, locale, key, fallbackZh, fallbackEn);
 
   useEffect(() => {
     window.localStorage.setItem(savedKey, JSON.stringify([...saved]));
@@ -201,7 +204,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
   return (
     <div className="dashboard buyer-dashboard">
       {isRoot ? (
-        <RootFlow subplatform={subplatform} childPlatforms={childPlatforms} />
+        <RootFlow subplatform={subplatform} childPlatforms={childPlatforms} locale={locale} />
       ) : (
         <section className="buyer-hero" aria-labelledby="buyer-hero-title">
           <div className="hero-copy">
@@ -264,7 +267,7 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         </section>
       )}
 
-      <ContactProfileCard subplatform={subplatform} role="buyer" onNotice={onNotice} />
+      <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={onNotice} />
 
       {listings.length ? (
         <section className="discovery-panel" aria-label={copy("searchOffersLabel", "搜索供给")}>
@@ -304,7 +307,9 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
                         else next.add(filter.key);
                         return next;
                       });
-                      onNotice(active ? `已移除筛选：${filter.label}` : `已启用筛选：${filter.label}`);
+                      onNotice(active
+                        ? copy("filterRemovedNotice", `已移除筛选：${filter.label}`, `Removed filter: ${filter.label}`)
+                        : copy("filterAddedNotice", `已启用筛选：${filter.label}`, `Added filter: ${filter.label}`));
                     }}
                   >
                     {filter.label}
@@ -318,7 +323,12 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
       ) : null}
 
       <section id="recommendations" className={`content-section${isRoot ? " root-content" : ""}`}>
-        <SectionHeading eyebrow={subplatform.ui?.chat?.listingEyebrow} title={`${visible.length} ${subplatform.ui?.chat?.listingLabel || copy("listingCountLabel", "个可用供给")}`} />
+        <SectionHeading
+          eyebrow={subplatform.ui?.chat?.listingEyebrow}
+          title={`${visible.length} ${locale === "zh" && subplatform.ui?.chat?.listingLabel
+            ? subplatform.ui.chat.listingLabel
+            : copy("listingCountLabel", "个可用供给", "available offers")}`}
+        />
         {visible.length ? (
           <div className="listing-grid">
             {visible.map((listing, index) => (
@@ -329,6 +339,10 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
                 saved={saved.has(listing.id)}
                 onSave={() => toggleSaved(listing.id)}
                 onOpen={() => onOpenListing(listing)}
+                matchLabel={copy("matchLabel", "匹配", "match")}
+                viewLabel={copy("viewOfferLabel", "查看", "View")}
+                saveLabel={copy("saveOfferLabel", "收藏", "Save")}
+                unsaveLabel={copy("unsaveOfferLabel", "取消收藏", "Remove from saved")}
               />
             ))}
           </div>
@@ -384,15 +398,15 @@ export function BuyerDashboard({ listings, onOpenListing, onNotice, subplatform 
         <ol className="offline-steps">
           <li>
             <span><UserRoundCheck aria-hidden="true" /></span>
-            <div><small>01</small><strong>匹配并解锁联系</strong><p>仅双方可见，访问留有审计记录。</p></div>
+            <div><small>01</small><strong>{copy("offlineStepOneTitle", "匹配并解锁联系", "Match and unlock contact")}</strong><p>{copy("offlineStepOneDescription", "仅双方可见，访问留有审计记录。", "Visible only to both parties, with access recorded.")}</p></div>
           </li>
           <li>
             <span><CalendarDays aria-hidden="true" /></span>
-            <div><small>02</small><strong>预约或线下协商</strong><p>地点和时间在双方确认后生效。</p></div>
+            <div><small>02</small><strong>{copy("offlineStepTwoTitle", "预约或线下协商", "Arrange a meeting or continue offline")}</strong><p>{copy("offlineStepTwoDescription", "地点和时间在双方确认后生效。", "Place and time take effect after both sides confirm.")}</p></div>
           </li>
           <li>
             <span><BadgeCheck aria-hidden="true" /></span>
-            <div><small>03</small><strong>确认结果与平台提成</strong><p>成交后按披露规则结算平台服务费。</p></div>
+            <div><small>03</small><strong>{copy("offlineStepThreeTitle", "确认结果与平台提成", "Confirm the outcome and platform fee")}</strong><p>{copy("offlineStepThreeDescription", "成交后按披露规则结算平台服务费。", "The platform fee follows the disclosed terms after completion.")}</p></div>
           </li>
         </ol>
       </section> : null}
@@ -423,20 +437,29 @@ function matchesFilter(
   return filter.value === undefined || fact.value === filter.value;
 }
 
-function RootFlow({ subplatform, childPlatforms }: { subplatform: SubplatformConfig; childPlatforms: PlatformChildSummary[] }) {
-  const copy = (key: string, fallback: string) => subplatformCopy(subplatform, key, fallback);
+function RootFlow({
+  subplatform,
+  childPlatforms,
+  locale,
+}: {
+  subplatform: SubplatformConfig;
+  childPlatforms: PlatformChildSummary[];
+  locale: InterfaceLocale;
+}) {
+  const copy = (key: string, fallbackZh: string, fallbackEn = fallbackZh) => localizedSubplatformCopy(subplatform, locale, key, fallbackZh, fallbackEn);
+  const description = locale === "zh" && subplatform.description ? subplatform.description : copy("rootRoutingDescription", "描述目标，平台会把请求交给已激活的匹配节点。", "Describe your goal and the platform will route it through active matching nodes.");
   return (
     <section className="root-routing-strip" aria-labelledby="root-routing-title">
       <div className="root-routing-copy">
-        <h2 id="root-routing-title">{copy("rootRoutingTitle", "从一句话开始。")}</h2>
-        <p>{subplatform.description || copy("rootRoutingDescription", "描述目标，平台会把请求交给已激活的匹配节点。")}</p>
+        <h2 id="root-routing-title">{copy("rootRoutingTitle", "从一句话开始。", "Start with one sentence.")}</h2>
+        <p>{description}</p>
       </div>
       <a className="button button-quiet root-routing-seller-link" href={`${subplatform.path}?role=seller`}>
-        {copy("supplyActionLabel", "我来提供")}
+        {copy("supplyActionLabel", "我来提供", "I can provide")}
         <ArrowRight size={17} aria-hidden="true" />
       </a>
       {childPlatforms.length ? (
-        <div className="root-platform-links" aria-label={copy("activePlatformsLabel", "已激活的平台")}>
+        <div className="root-platform-links" aria-label={copy("activePlatformsLabel", "已激活的平台", "Active platforms")}>
           {childPlatforms.map((child) => (
             <a className="root-platform-link-card" key={child.path} href={child.path}>
               <strong>{child.displayName}</strong>
@@ -454,16 +477,24 @@ function AssetCard({
   listing,
   index,
   saved,
+  matchLabel,
+  viewLabel,
+  saveLabel,
+  unsaveLabel,
   onSave,
   onOpen,
 }: {
   listing: AssetListing;
   index: number;
   saved: boolean;
+  matchLabel: string;
+  viewLabel: string;
+  saveLabel: string;
+  unsaveLabel: string;
   onSave: () => void;
   onOpen: () => void;
 }) {
-  const viewLabel = `查看 ${listing.title}`;
+  const offerViewLabel = `${viewLabel} ${listing.title}`;
   return (
     <motion.article
       className="listing-card"
@@ -472,14 +503,14 @@ function AssetCard({
       transition={{ ...spring, delay: index * 0.045 }}
       layout
     >
-      <button className="listing-open" type="button" onClick={onOpen} aria-label={viewLabel}>
+      <button className="listing-open" type="button" onClick={onOpen} aria-label={offerViewLabel}>
         <ListingVisual accent={listing.accent} label={listing.trust?.[0]} />
       </button>
       <motion.button
         type="button"
         className={`save-button${saved ? " is-saved" : ""}`}
         onClick={onSave}
-        aria-label={saved ? `取消收藏 ${listing.title}` : `收藏 ${listing.title}`}
+        aria-label={saved ? `${unsaveLabel} ${listing.title}` : `${saveLabel} ${listing.title}`}
         aria-pressed={saved}
         whileTap={{ scale: 0.86 }}
         transition={spring}
@@ -488,10 +519,10 @@ function AssetCard({
       </motion.button>
       <div className="listing-content">
         <div className="match-row">
-          {listing.matchScore !== undefined ? <span className="match-score">{listing.matchScore}% 匹配</span> : null}
+          {listing.matchScore !== undefined ? <span className="match-score">{listing.matchScore}% {matchLabel}</span> : null}
           {listing.location ? <span><MapPin size={14} aria-hidden="true" /> {listing.location}</span> : null}
         </div>
-        <button className="listing-title-button" type="button" onClick={onOpen}>
+        <button className="listing-title-button" type="button" onClick={onOpen} aria-label={offerViewLabel}>
           <h3>{listing.title}</h3>
         </button>
         {listing.subtitle ? <p className="listing-subtitle">{listing.subtitle}</p> : null}
@@ -508,7 +539,7 @@ function AssetCard({
         ) : null}
         <div className="price-row">
           <div><strong>{listing.price}</strong>{listing.priceLabel ? <small>{listing.priceLabel}</small> : null}</div>
-          <motion.button className="round-arrow" type="button" aria-label={viewLabel} onClick={onOpen} whileTap={{ scale: 0.88 }} transition={spring}>
+          <motion.button className="round-arrow" type="button" aria-label={offerViewLabel} onClick={onOpen} whileTap={{ scale: 0.88 }} transition={spring}>
             <ArrowRight size={18} aria-hidden="true" />
           </motion.button>
         </div>
