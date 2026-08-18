@@ -12,15 +12,18 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
 };
 use matchplane_domain::{
-    AssetId, DomainId, MarketplaceIntentId, MarketplaceOfferId, MarketplacePartyId,
-    MatchIntroductionId, TenantId,
+    AssetId, DomainId, MarketplaceBehaviorEventId, MarketplaceIntentId, MarketplaceOfferId,
+    MarketplacePartyId, MarketplaceSalesHandoffId, MatchIntroductionId, TenantId,
 };
 use matchplane_storage::{
     AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,
-    CreateMarketplaceOffer, MarketplaceContactEnvelope, MarketplaceDemandCandidate,
-    MarketplaceIntent, MarketplaceIntroduction, MarketplaceIntroductionOutcome,
-    MarketplaceOfferCandidate, MarketplaceOfferOutcome, MatchMarketplaceDemands,
-    MatchMarketplaceOffers, RequestMarketplaceContact, UpdateMarketplaceDemandDiscovery,
+    CreateMarketplaceOffer, CreateMarketplaceSalesHandoff, MarketplaceContactEnvelope,
+    MarketplaceDemandCandidate, MarketplaceIntent, MarketplaceIntroduction,
+    MarketplaceIntroductionOutcome, MarketplaceOfferCandidate, MarketplaceOfferOutcome,
+    MarketplaceOfferPreference, MarketplaceSalesHandoff, MatchMarketplaceDemands,
+    MatchMarketplaceOffers, RecordMarketplaceBehaviorEvent, RequestMarketplaceContact,
+    SetMarketplaceOfferPreference, UpdateMarketplaceDemandDiscovery, UpdateMarketplaceIntent,
+    UpsertMarketplaceIntentProfile,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -80,6 +83,66 @@ pub(super) struct MatchDemandsRequest {
     participant_id: String,
     offer_id: String,
     limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct UpdateIntentRequest {
+    tenant_id: String,
+    domain_id: String,
+    participant_id: String,
+    narrative: String,
+    #[serde(default = "empty_object")]
+    attributes: Value,
+    #[serde(default = "empty_object")]
+    terms: Value,
+    expected_version: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ProfileRequest {
+    tenant_id: String,
+    domain_id: String,
+    participant_id: String,
+    #[serde(default = "empty_object")]
+    profile: Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct BehaviorEventRequest {
+    event_id: Option<String>,
+    tenant_id: String,
+    domain_id: String,
+    participant_id: String,
+    intent_id: Option<String>,
+    offer_id: Option<String>,
+    event_type: String,
+    reason: Option<String>,
+    #[serde(default = "empty_object")]
+    metadata: Value,
+    idempotency_key: String,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    occurred_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PreferenceRequest {
+    tenant_id: String,
+    domain_id: String,
+    participant_id: String,
+    offer_id: String,
+    state: String,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct SalesHandoffRequest {
+    handoff_id: Option<String>,
+    tenant_id: String,
+    domain_id: String,
+    participant_id: String,
+    intent_id: Option<String>,
+    summary: Value,
+    idempotency_key: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,6 +211,11 @@ pub(super) struct MatchOffersResponse {
 pub(super) struct MatchDemandsResponse {
     offer_id: MarketplaceOfferId,
     candidates: Vec<MarketplaceDemandCandidate>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct PreferencesResponse {
+    preferences: Vec<MarketplaceOfferPreference>,
 }
 
 #[derive(Debug, Serialize)]
@@ -268,6 +336,227 @@ pub(super) async fn intent(
         ));
     }
     Ok(Json(intent))
+}
+
+pub(super) async fn update_intent(
+    State(state): State<Arc<AppState>>,
+    Path(intent_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateIntentRequest>,
+) -> Result<Json<MarketplaceIntent>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    super::marketplace::authenticate_domain(&state, &headers, tenant_id, participant_id, domain_id)
+        .await?;
+    let intent = state
+        .store
+        .update_marketplace_intent(&UpdateMarketplaceIntent {
+            tenant_id,
+            domain_id,
+            participant_id,
+            intent_id: parse_id::<MarketplaceIntentId>(&intent_id)?,
+            narrative: request.narrative,
+            attributes: request.attributes,
+            terms: request.terms,
+            expected_version: request.expected_version,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(intent))
+}
+
+pub(super) async fn profile(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PartyQuery>,
+    headers: HeaderMap,
+) -> Result<Json<Option<matchplane_storage::MarketplaceIntentProfile>>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&query.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(
+        query
+            .domain_id
+            .as_deref()
+            .ok_or_else(|| ApiError::bad_request("profile requires domain_id".to_owned()))?,
+    )?;
+    let participant_id = parse_id::<MarketplacePartyId>(&query.participant_id)?;
+    super::marketplace::authenticate_domain(&state, &headers, tenant_id, participant_id, domain_id)
+        .await?;
+    Ok(Json(
+        state
+            .store
+            .marketplace_intent_profile(tenant_id, domain_id, participant_id)
+            .await
+            .map_err(ApiError::from)?,
+    ))
+}
+
+pub(super) async fn upsert_profile(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<ProfileRequest>,
+) -> Result<Json<matchplane_storage::MarketplaceIntentProfile>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    super::marketplace::authenticate_domain(&state, &headers, tenant_id, participant_id, domain_id)
+        .await?;
+    let profile = state
+        .store
+        .upsert_marketplace_intent_profile(&UpsertMarketplaceIntentProfile {
+            tenant_id,
+            domain_id,
+            participant_id,
+            profile: request.profile,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(profile))
+}
+
+pub(super) async fn behavior_event(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<BehaviorEventRequest>,
+) -> Result<
+    (
+        StatusCode,
+        Json<matchplane_storage::MarketplaceBehaviorEventOutcome>,
+    ),
+    ApiError,
+> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    super::marketplace::authenticate_domain(&state, &headers, tenant_id, participant_id, domain_id)
+        .await?;
+    let outcome = state
+        .store
+        .record_marketplace_behavior_event(&RecordMarketplaceBehaviorEvent {
+            event_id: request
+                .event_id
+                .as_deref()
+                .map(parse_id::<MarketplaceBehaviorEventId>)
+                .transpose()?
+                .unwrap_or_default(),
+            tenant_id,
+            domain_id,
+            participant_id,
+            intent_id: request
+                .intent_id
+                .as_deref()
+                .map(parse_id::<MarketplaceIntentId>)
+                .transpose()?,
+            offer_id: request
+                .offer_id
+                .as_deref()
+                .map(parse_id::<MarketplaceOfferId>)
+                .transpose()?,
+            event_type: request.event_type,
+            reason: request.reason,
+            metadata: request.metadata,
+            idempotency_key: request.idempotency_key,
+            occurred_at: request.occurred_at,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok((
+        if outcome.duplicate {
+            StatusCode::OK
+        } else {
+            StatusCode::CREATED
+        },
+        Json(outcome),
+    ))
+}
+
+pub(super) async fn preferences(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<PartyQuery>,
+    headers: HeaderMap,
+) -> Result<Json<PreferencesResponse>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&query.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(
+        query
+            .domain_id
+            .as_deref()
+            .ok_or_else(|| ApiError::bad_request("preferences requires domain_id".to_owned()))?,
+    )?;
+    let participant_id = parse_id::<MarketplacePartyId>(&query.participant_id)?;
+    super::marketplace::authenticate_domain(&state, &headers, tenant_id, participant_id, domain_id)
+        .await?;
+    let preferences = state
+        .store
+        .marketplace_offer_preferences_for_party(tenant_id, domain_id, participant_id)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(PreferencesResponse { preferences }))
+}
+
+pub(super) async fn set_preference(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<PreferenceRequest>,
+) -> Result<Json<MarketplaceOfferPreference>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        participant_id,
+        domain_id,
+    )
+    .await?;
+    super::marketplace::require_marketplace_side(&party, "demand")?;
+    let preference = state
+        .store
+        .set_marketplace_offer_preference(&SetMarketplaceOfferPreference {
+            tenant_id,
+            domain_id,
+            participant_id,
+            offer_id: parse_id::<MarketplaceOfferId>(&request.offer_id)?,
+            state: request.state,
+            reason: request.reason,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(preference))
+}
+
+pub(super) async fn create_sales_handoff(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<SalesHandoffRequest>,
+) -> Result<(StatusCode, Json<MarketplaceSalesHandoff>), ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let participant_id = parse_id::<MarketplacePartyId>(&request.participant_id)?;
+    super::marketplace::authenticate_domain(&state, &headers, tenant_id, participant_id, domain_id)
+        .await?;
+    let handoff = state
+        .store
+        .create_marketplace_sales_handoff(&CreateMarketplaceSalesHandoff {
+            handoff_id: request
+                .handoff_id
+                .as_deref()
+                .map(parse_id::<MarketplaceSalesHandoffId>)
+                .transpose()?
+                .unwrap_or_default(),
+            tenant_id,
+            domain_id,
+            participant_id,
+            intent_id: request
+                .intent_id
+                .as_deref()
+                .map(parse_id::<MarketplaceIntentId>)
+                .transpose()?,
+            summary: request.summary,
+            idempotency_key: request.idempotency_key,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok((StatusCode::CREATED, Json(handoff)))
 }
 
 pub(super) async fn matches(

@@ -25,6 +25,7 @@ import {
   getPaymentGateways,
   getPaymentRoutes,
   getPlatformSetupStatus,
+  getPlatformAiStatus,
   getSubplatformOrganizations,
   getRefundAdminRecords,
   createAdminRefund,
@@ -49,6 +50,7 @@ import {
   type PaymentGatewayRecord,
   type PaymentRouteRecord,
   type PlatformSetupStatus,
+  type PlatformAiStatus,
   type PlatformDomainRecord,
   type RefundAdminRecord,
   type SubplatformArchiveUpload,
@@ -73,6 +75,7 @@ export function PlatformDashboard({
   onNotice,
 }: PlatformDashboardProps) {
   const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
+  const [aiStatus, setAiStatus] = useState<PlatformAiStatus | null>(null);
   const [setupError, setSetupError] = useState(false);
   const [domains, setDomains] = useState<PlatformDomainRecord[]>([]);
   const [subplatforms, setSubplatforms] = useState<SubplatformOrganizationRecord[]>([]);
@@ -151,8 +154,8 @@ export function PlatformDashboard({
   useEffect(() => {
     if (!rootRole) return;
     let mounted = true;
-    void Promise.allSettled([getPlatformSetupStatus(), getPlatformDomains()])
-      .then(([statusResult, domainsResult]) => {
+    void Promise.allSettled([getPlatformSetupStatus(), getPlatformDomains(), getPlatformAiStatus()])
+      .then(([statusResult, domainsResult, aiResult]) => {
         if (!mounted) return;
         if (statusResult.status === "fulfilled") {
           setSetup(statusResult.value);
@@ -164,6 +167,7 @@ export function PlatformDashboard({
         // Keep that useful state visible instead of turning the whole admin panel into a generic
         // error just because the domain endpoint correctly returned 503.
         setDomains(domainsResult.status === "fulfilled" ? domainsResult.value : []);
+        if (aiResult.status === "fulfilled") setAiStatus(aiResult.value);
       });
     return () => {
       mounted = false;
@@ -726,6 +730,34 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
+        <section className="surface platform-agent-config" aria-label="AI 与登录配置">
+          <SectionHeading eyebrow="AI 与登录" title="把真实服务接到这一个管理员入口" />
+          <div className="readiness-grid">
+            <div className={aiStatus?.router.configured ? "readiness-item" : "readiness-item readiness-attention"}>
+              <span aria-hidden="true" />
+              <strong>{aiStatus?.router.configured ? `托管 Agent 已连接${aiStatus.router.model ? ` · ${aiStatus.router.model}` : ""}` : "托管 Agent 尚未连接"}</strong>
+              <small>{aiStatus?.router.configured ? `OpenAI-compatible · ${aiStatus.router.endpointOrigin || "服务端端点"}` : "把模型网关配置在 web 服务端，浏览器不会接触密钥"}</small>
+            </div>
+            <div className="readiness-item">
+              <span aria-hidden="true" />
+              <strong>统一登录已就绪</strong>
+              <small>{authCapabilitySummary(aiStatus)}</small>
+            </div>
+          </div>
+          <div className="platform-agent-config-body">
+            <p>模型由根平台负责有限路由；子平台检索和领域 Agent 仍由各自 manifest/MCP 端点提供。管理员页面只显示状态，不保存 OAuth 或模型密钥。</p>
+            <div className="platform-agent-config-snippets" aria-label="服务端配置项">
+              <code>MATCHPLANE_ROUTER_AI_URL=https://your-gateway.example/v1/chat/completions</code>
+              <code>MATCHPLANE_ROUTER_AI_KEY=server-secret</code>
+              <code>MATCHPLANE_ROUTER_AI_MODEL=provider/model</code>
+            </div>
+            <div className="platform-agent-config-actions">
+              <a className="button button-light" href="/?role=buyer">打开买方对话测试</a>
+              <span>{aiStatus?.router.configured ? `每小时上限 ${aiStatus.router.globalRequestsPerHour} 次 · 单次最长 ${Math.round(aiStatus.router.totalTimeoutMs / 1000)} 秒` : "配置后刷新此页，再用买方对话发送一句真实需求"}</span>
+            </div>
+          </div>
+        </section>
+
         <section className="surface domain-panel" aria-labelledby="domain-title">
           <SectionHeading
             eyebrow="平台范围"
@@ -1020,4 +1052,16 @@ export function PlatformDashboard({
       />
     </div>
   );
+}
+
+function authCapabilitySummary(status: PlatformAiStatus | null): string {
+  if (!status) return "正在读取已配置的密码、验证码、Passkey 与第三方登录";
+  const labels: string[] = [];
+  if (status.auth.password) labels.push("密码");
+  if (status.auth.emailOtp) labels.push("邮箱验证码");
+  if (status.auth.phoneOtp) labels.push("手机验证码");
+  if (status.auth.magicLink) labels.push("免密链接");
+  if (status.auth.passkey) labels.push("Passkey");
+  labels.push(...status.auth.primary, ...status.auth.fallback);
+  return labels.length ? `${labels.join("、")} 可用` : "尚未配置额外登录方式";
 }

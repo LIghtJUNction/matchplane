@@ -43,6 +43,12 @@
         }
       },
       "read": { "method": "GET", "path": "/v1/marketplace/intents/{intent_id}" },
+      "update": {
+        "method": "PATCH",
+        "path": "/v1/marketplace/intents/{intent_id}",
+        "required": ["tenant_id", "domain_id", "participant_id", "narrative", "expected_version"],
+        "description": "Optimistic continuation of one open demand conversation; avoids creating one intent per turn."
+      },
       "discoveryUpdate": {
         "method": "PATCH",
         "path": "/v1/marketplace/intents/{intent_id}/discovery",
@@ -71,6 +77,16 @@
       "match": { "method": "POST", "path": "/v1/marketplace/intents/{intent_id}/matches" },
       "demandMatch": { "method": "POST", "path": "/v1/marketplace/offers/{offer_id}/demand-matches", "description": "Supply-side ranking of explicitly discoverable demand summaries; participant IDs and contacts are omitted." },
       "activate": { "method": "POST", "path": "/v1/admin/marketplace/offers/{offer_id}/activate" }
+    },
+    "profile": {
+      "read": { "method": "GET", "path": "/v1/marketplace/profile" },
+      "upsert": { "method": "PUT", "path": "/v1/marketplace/profile", "required": ["tenant_id", "domain_id", "participant_id", "profile"], "description": "Opaque, versioned profile projection owned by the active vertical Agent." }
+    },
+    "signals": {
+      "behavior": { "method": "POST", "path": "/v1/marketplace/events", "required": ["tenant_id", "domain_id", "participant_id", "event_type", "idempotency_key"], "description": "Append-only evidence; it does not immediately rewrite the profile." },
+      "preferenceList": { "method": "GET", "path": "/v1/marketplace/preferences" },
+      "preferenceSet": { "method": "PUT", "path": "/v1/marketplace/preferences", "required": ["tenant_id", "domain_id", "participant_id", "offer_id", "state"] },
+      "salesHandoff": { "method": "POST", "path": "/v1/marketplace/sales-handoffs", "required": ["tenant_id", "domain_id", "participant_id", "summary", "idempotency_key"], "description": "Contact-free context snapshot for human sales handoff." }
     },
     "introduction": {
       "create": {
@@ -123,6 +139,13 @@
   ],
   "mcpTools": [
     "marketplace.intent.create",
+    "marketplace.intent.update",
+    "marketplace.profile.get",
+    "marketplace.profile.upsert",
+    "marketplace.behavior.record",
+    "marketplace.preferences.list",
+    "marketplace.preference.set",
+    "marketplace.sales.handoff",
     "marketplace.offer.create",
     "marketplace.offer.match",
     "marketplace.demand.match",

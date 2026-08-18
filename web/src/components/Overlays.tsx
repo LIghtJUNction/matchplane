@@ -93,7 +93,7 @@ export function ListingSheet({ listing, subplatform, onClose, onContact, contact
             </div>
             <div className="sheet-scroll">
               <ListingVisual accent={listing.accent} label={listing.trust?.[0]} />
-              {listing.matchScore !== undefined ? <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {listing.matchScore}% {subplatformCopy(subplatform, "matchLabel", "匹配")}</div> : null}
+              {listing.matchScore !== undefined ? <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {matchLevelForScore(listing.matchScore)} · {subplatformCopy(subplatform, "matchLabel", "匹配")}</div> : null}
               <h2 id="listing-sheet-title">{listing.title}</h2>
               <p className="sheet-subtitle">{listing.subtitle}</p>
               <div className="sheet-price"><strong>{listing.price}</strong>{listing.priceLabel ? <span>{listing.priceLabel}</span> : null}</div>
@@ -107,6 +107,15 @@ export function ListingSheet({ listing, subplatform, onClose, onContact, contact
                 <ul className="reason-list">
                   {listing.reasons.map((reason) => (
                     <li key={reason}><span><Check size={14} aria-hidden="true" /></span>{reason}</li>
+                  ))}
+                </ul>
+              </section> : null}
+
+              {listing.risks?.length ? <section className="sheet-section risk-section">
+                <h3>需要留意</h3>
+                <ul className="reason-list">
+                  {listing.risks.map((risk) => (
+                    <li key={risk}><span>!</span>{risk}</li>
                   ))}
                 </ul>
               </section> : null}
@@ -165,6 +174,10 @@ interface ModeDialogProps {
   onClose: () => void;
   onConfirm: () => void;
   resourceLabel?: string;
+}
+
+function matchLevelForScore(score: number): string {
+  return score >= 80 ? "非常适合" : score >= 60 ? "比较适合" : score >= 40 ? "一般" : "不太适合";
 }
 
 export function ModeDialog({ open, currentMode, onClose, onConfirm, resourceLabel = "" }: ModeDialogProps) {

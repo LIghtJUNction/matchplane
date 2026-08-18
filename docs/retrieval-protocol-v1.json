@@ -71,6 +71,12 @@
           "maxItems": 32,
           "items": { "type": "string", "minLength": 1, "maxLength": 500 }
         },
+        "risks": {
+          "type": "array",
+          "maxItems": 32,
+          "description": "与候选供给相关的不足、限制或需要人工确认的权衡。",
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        },
         "metadata": { "type": "object" }
       }
     },

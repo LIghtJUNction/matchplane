@@ -144,6 +144,34 @@ async function callMarketplaceTool(
   } else if (name === "marketplace.intent.create") {
     path = "/v1/marketplace/intents";
     body = JSON.stringify(args);
+  } else if (name === "marketplace.intent.update") {
+    const intentId = stringArgument(args, "intent_id");
+    if (!intentId) return rpcError(id, -32602, "marketplace.intent.update requires intent_id");
+    method = "PATCH";
+    path = `/v1/marketplace/intents/${encodeURIComponent(intentId)}`;
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.profile.get") {
+    method = "GET";
+    const scope = marketplacePartyQuery(args);
+    if (!scope) return rpcError(id, -32602, "marketplace.profile.get requires tenant_id, domain_id, and participant_id");
+    path = `/v1/marketplace/profile?${scope}`;
+  } else if (name === "marketplace.profile.upsert") {
+    path = "/v1/marketplace/profile";
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.behavior.record") {
+    path = "/v1/marketplace/events";
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.preferences.list") {
+    method = "GET";
+    const scope = marketplacePartyQuery(args);
+    if (!scope) return rpcError(id, -32602, "marketplace.preferences.list requires tenant_id, domain_id, and participant_id");
+    path = `/v1/marketplace/preferences?${scope}`;
+  } else if (name === "marketplace.preference.set") {
+    path = "/v1/marketplace/preferences";
+    body = JSON.stringify(args);
+  } else if (name === "marketplace.sales.handoff") {
+    path = "/v1/marketplace/sales-handoffs";
+    body = JSON.stringify(args);
   } else if (name === "marketplace.offer.create") {
     path = "/v1/marketplace/offers";
     body = JSON.stringify(args);
@@ -247,6 +275,13 @@ function supportedTool(name: unknown): name is string {
     || name === "platform.child.tool"
     || name === "marketplace.agent.session"
     || name === "marketplace.intent.create"
+    || name === "marketplace.intent.update"
+    || name === "marketplace.profile.get"
+    || name === "marketplace.profile.upsert"
+    || name === "marketplace.behavior.record"
+    || name === "marketplace.preferences.list"
+    || name === "marketplace.preference.set"
+    || name === "marketplace.sales.handoff"
     || name === "marketplace.offer.create"
     || name === "marketplace.offer.match"
     || name === "marketplace.demand.match"
@@ -395,6 +430,34 @@ function toolList(): Record<string, unknown> {
       description: "Create a domain-neutral demand or supply intent using the caller's party capability.",
       inputSchema: marketplaceIntentSchema(),
     }, {
+      name: "marketplace.intent.update",
+      description: "Continue a demand conversation with an optimistic version so one chat does not create duplicate intents.",
+      inputSchema: marketplaceIntentUpdateSchema(),
+    }, {
+      name: "marketplace.profile.get",
+      description: "Read the scoped, versioned opaque understanding owned by the active subplatform Agent.",
+      inputSchema: marketplaceProfileGetSchema(),
+    }, {
+      name: "marketplace.profile.upsert",
+      description: "Persist a subplatform-owned profile projection; the root stores it without interpreting vertical fields.",
+      inputSchema: marketplaceProfileUpsertSchema(),
+    }, {
+      name: "marketplace.behavior.record",
+      description: "Record an idempotent buyer or seller behavior signal as evidence without rewriting the profile.",
+      inputSchema: marketplaceBehaviorSchema(),
+    }, {
+      name: "marketplace.preferences.list",
+      description: "List saved, dismissed, or neutral offer preferences for the scoped participant.",
+      inputSchema: marketplacePreferencesListSchema(),
+    }, {
+      name: "marketplace.preference.set",
+      description: "Save or dismiss one canonical offer with an optional human reason.",
+      inputSchema: marketplacePreferenceSchema(),
+    }, {
+      name: "marketplace.sales.handoff",
+      description: "Create a contact-free sales handoff snapshot so a human does not repeat already gathered context.",
+      inputSchema: marketplaceSalesHandoffSchema(),
+    }, {
       name: "marketplace.offer.create",
       description: "Create a supply-owned draft offer; a platform moderator must activate it before matching.",
       inputSchema: marketplaceOfferSchema(),
@@ -511,6 +574,96 @@ function contactActionSchema(): Record<string, unknown> {
       introduction_id: { type: "string", format: "uuid" },
       idempotency_key: { type: "string", minLength: 1, maxLength: 240 },
     },
+  };
+}
+
+function marketplacePartyQuery(args: Record<string, unknown>): string | null {
+  const tenantId = stringArgument(args, "tenant_id");
+  const domainId = stringArgument(args, "domain_id");
+  const participantId = stringArgument(args, "participant_id");
+  if (!tenantId || !domainId || !participantId) return null;
+  return `tenant_id=${encodeURIComponent(tenantId)}&domain_id=${encodeURIComponent(domainId)}&participant_id=${encodeURIComponent(participantId)}`;
+}
+
+function marketplaceIntentUpdateSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["intent_id", "tenant_id", "domain_id", "platform_path", "participant_id", "narrative", "expected_version"],
+    properties: {
+      intent_id: { type: "string", format: "uuid" },
+      tenant_id: { type: "string", format: "uuid" },
+      domain_id: { type: "string", format: "uuid" },
+      platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
+      participant_id: { type: "string", format: "uuid" },
+      narrative: { type: "string", minLength: 1, maxLength: 10000 },
+      attributes: { type: "object" },
+      terms: { type: "object" },
+      expected_version: { type: "integer", minimum: 1 },
+    },
+  };
+}
+
+function marketplaceProfileGetSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["tenant_id", "domain_id", "platform_path", "participant_id"],
+    properties: {
+      tenant_id: { type: "string", format: "uuid" },
+      domain_id: { type: "string", format: "uuid" },
+      platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
+      participant_id: { type: "string", format: "uuid" },
+    },
+  };
+}
+
+function marketplaceProfileUpsertSchema(): Record<string, unknown> {
+  return {
+    ...marketplaceProfileGetSchema(),
+    required: ["tenant_id", "domain_id", "platform_path", "participant_id", "profile"],
+    properties: { ...marketplaceProfileGetSchema().properties as Record<string, unknown>, profile: { type: "object" } },
+  };
+}
+
+function marketplaceBehaviorSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["tenant_id", "domain_id", "platform_path", "participant_id", "event_type", "idempotency_key"],
+    properties: {
+      event_id: { type: "string", format: "uuid" },
+      tenant_id: { type: "string", format: "uuid" },
+      domain_id: { type: "string", format: "uuid" },
+      platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$", maxLength: 512 },
+      participant_id: { type: "string", format: "uuid" },
+      intent_id: { type: "string", format: "uuid" },
+      offer_id: { type: "string", format: "uuid" },
+      event_type: { type: "string", pattern: "^[a-z][a-z0-9._:-]{1,63}$" },
+      reason: { type: "string", maxLength: 500 },
+      metadata: { type: "object" },
+      idempotency_key: { type: "string", minLength: 1, maxLength: 240 },
+    },
+  };
+}
+
+function marketplacePreferencesListSchema(): Record<string, unknown> {
+  return marketplaceProfileGetSchema();
+}
+
+function marketplacePreferenceSchema(): Record<string, unknown> {
+  return {
+    ...marketplaceProfileGetSchema(),
+    required: ["tenant_id", "domain_id", "platform_path", "participant_id", "offer_id", "state"],
+    properties: { ...marketplaceProfileGetSchema().properties as Record<string, unknown>, offer_id: { type: "string", format: "uuid" }, state: { type: "string", enum: ["saved", "dismissed", "neutral"] }, reason: { type: "string", maxLength: 500 } },
+  };
+}
+
+function marketplaceSalesHandoffSchema(): Record<string, unknown> {
+  return {
+    ...marketplaceProfileGetSchema(),
+    required: ["tenant_id", "domain_id", "platform_path", "participant_id", "summary", "idempotency_key"],
+    properties: { ...marketplaceProfileGetSchema().properties as Record<string, unknown>, intent_id: { type: "string", format: "uuid" }, summary: { type: "object" }, idempotency_key: { type: "string", minLength: 1, maxLength: 240 } },
   };
 }
 

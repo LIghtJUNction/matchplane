@@ -190,7 +190,23 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/v1/marketplace/intents/{intent_id}",
-            get(generic_marketplace::intent),
+            get(generic_marketplace::intent).patch(generic_marketplace::update_intent),
+        )
+        .route(
+            "/v1/marketplace/profile",
+            get(generic_marketplace::profile).put(generic_marketplace::upsert_profile),
+        )
+        .route(
+            "/v1/marketplace/events",
+            post(generic_marketplace::behavior_event),
+        )
+        .route(
+            "/v1/marketplace/preferences",
+            get(generic_marketplace::preferences).put(generic_marketplace::set_preference),
+        )
+        .route(
+            "/v1/marketplace/sales-handoffs",
+            post(generic_marketplace::create_sales_handoff),
         )
         .route(
             "/v1/marketplace/intents/{intent_id}/matches",

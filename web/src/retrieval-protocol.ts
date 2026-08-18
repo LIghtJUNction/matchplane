@@ -30,6 +30,8 @@ export interface RetrievalCandidate {
   terms?: Record<string, unknown>;
   score: number;
   reasons: string[];
+  /** Explicit limitations or trade-offs; ranking providers must not hide them. */
+  risks?: string[];
   metadata?: Record<string, unknown>;
 }
 
@@ -175,13 +177,14 @@ export function extractMcpRetrievalResult(payload: Record<string, unknown>): Par
 
 function parseCandidate(value: unknown, index: number): ParseResult<RetrievalCandidate> {
   if (!isRecord(value)) return failure(`retrieval candidate ${index} must be an object`);
-  const unsupported = Object.keys(value).find((key) => !new Set(["asset_id", "offer_id", "display_name", "attributes", "terms", "score", "reasons", "metadata"]).has(key));
+  const unsupported = Object.keys(value).find((key) => !new Set(["asset_id", "offer_id", "display_name", "attributes", "terms", "score", "reasons", "risks", "metadata"]).has(key));
   if (unsupported) return failure(`retrieval candidate contains an unsupported field: ${unsupported}`);
   if (!isUuid(value.asset_id)) return failure(`retrieval candidate ${index} asset_id must be a UUID`);
   if (value.offer_id !== undefined && !isUuid(value.offer_id)) return failure(`retrieval candidate ${index} offer_id must be a UUID`);
   if (value.display_name !== undefined && !isBoundedString(value.display_name, 500)) return failure(`retrieval candidate ${index} display_name is invalid`);
   if (typeof value.score !== "number" || !Number.isFinite(value.score) || value.score < -1 || value.score > 1) return failure(`retrieval candidate ${index} score is invalid`);
   if (!Array.isArray(value.reasons) || value.reasons.length > 32 || value.reasons.some((reason) => !isBoundedString(reason, 500) || reason.trim().length === 0)) return failure(`retrieval candidate ${index} reasons are invalid`);
+  if (value.risks !== undefined && (!Array.isArray(value.risks) || value.risks.length > 32 || value.risks.some((risk) => !isBoundedString(risk, 500) || risk.trim().length === 0))) return failure(`retrieval candidate ${index} risks are invalid`);
   for (const field of ["attributes", "terms"] as const) {
     if (value[field] !== undefined && (!isRecord(value[field]) || !isWithinJsonBytes(value[field], MAX_METADATA_BYTES))) {
       return failure(`retrieval candidate ${index} ${field} is invalid`);
@@ -198,6 +201,7 @@ function parseCandidate(value: unknown, index: number): ParseResult<RetrievalCan
       ...(value.terms === undefined ? {} : { terms: value.terms }),
       score: value.score,
       reasons: value.reasons,
+      ...(value.risks === undefined ? {} : { risks: value.risks }),
       ...(value.metadata === undefined ? {} : { metadata: value.metadata }),
     },
   };

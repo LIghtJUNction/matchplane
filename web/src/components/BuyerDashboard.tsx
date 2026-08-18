@@ -9,6 +9,8 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
+  ThumbsDown,
+  Scale,
   UserRoundCheck,
 } from "lucide-react";
 import { motion } from "motion/react";
@@ -17,8 +19,11 @@ import { subplatformContactLabel, type SubplatformConfig } from "../subplatform"
 import type { AssetListing } from "../types";
 import {
   getMarketplaceIntroductions,
+  getMarketplaceOfferPreferences,
   getPlatformChildren,
+  recordMarketplaceBehaviorEvent,
   retrieveMarketplaceContact,
+  setMarketplaceOfferPreference,
   type MarketplaceContactResponse,
   type MarketplaceIntroduction,
   type PlatformChildSummary,
@@ -52,6 +57,8 @@ interface IntroductionEntry {
 export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subplatform }: BuyerDashboardProps) {
   const [query, setQuery] = useState("");
   const [saved, setSaved] = useState<Set<string>>(() => readSavedItems(`matchplane.saved.${subplatform.path}`));
+  const [dismissed, setDismissed] = useState<Set<string>>(() => readSavedItems(`matchplane.dismissed.${subplatform.path}`));
+  const [compareIds, setCompareIds] = useState<Set<string>>(() => new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(() => new Set());
   const [childPlatforms, setChildPlatforms] = useState<PlatformChildSummary[]>([]);
@@ -60,12 +67,38 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
   const [contactLoading, setContactLoading] = useState<string | null>(null);
   const isRoot = subplatform.slug === "root";
   const savedKey = `matchplane.saved.${subplatform.path}`;
+  const dismissedKey = `matchplane.dismissed.${subplatform.path}`;
   const filterDefinitions = subplatform.ui?.filters ?? [];
   const copy = (key: string, fallbackZh: string, fallbackEn = fallbackZh) => localizedSubplatformCopy(subplatform, locale, key, fallbackZh, fallbackEn);
 
   useEffect(() => {
     window.localStorage.setItem(savedKey, JSON.stringify([...saved]));
   }, [saved, savedKey]);
+
+  useEffect(() => {
+    window.localStorage.setItem(dismissedKey, JSON.stringify([...dismissed]));
+  }, [dismissed, dismissedKey]);
+
+  useEffect(() => {
+    let active = true;
+    if (!subplatform.tenantId || !subplatform.domainId) return () => { active = false; };
+    void getCapability({
+      subplatform: subplatform.slug,
+      platformPath: subplatform.path,
+      tenantId: subplatform.tenantId,
+      domainId: subplatform.domainId,
+      role: "buyer",
+    }).then((session) => session ? getMarketplaceOfferPreferences({ session, domainId: subplatform.domainId! }) : null)
+      .then((preferences) => {
+        if (!active || !preferences) return;
+        const savedIds = preferences.filter((item) => item.state === "saved").map((item) => item.offer_id);
+        const dismissedIds = preferences.filter((item) => item.state === "dismissed").map((item) => item.offer_id);
+        if (savedIds.length) setSaved((current) => new Set([...current, ...savedIds]));
+        if (dismissedIds.length) setDismissed((current) => new Set([...current, ...dismissedIds]));
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [subplatform.domainId, subplatform.path, subplatform.slug, subplatform.tenantId]);
 
   useEffect(() => {
     if (!isRoot) {
@@ -175,6 +208,7 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return listings.filter((listing) => {
+      if (dismissed.has(listing.id)) return false;
       const searchable = [listing.title, listing.subtitle, listing.location, listing.price, listing.trust?.join(" "), ...listing.facts.map((fact) => `${fact.label} ${fact.value}`)]
         .filter(Boolean)
         .join(" ")
@@ -186,15 +220,98 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
       }
       return true;
     });
-  }, [activeFilters, filterDefinitions, listings, query]);
+  }, [activeFilters, dismissed, filterDefinitions, listings, query]);
 
-  const toggleSaved = (id: string) => {
+  const recordBehavior = useCallback(async (listing: AssetListing, eventType: string, reason?: string) => {
+    if (!listing.offerId || !listing.tenantId || !listing.domainId) return;
+    const scopePath = listing.platformPath || subplatform.path;
+    const scopeSlug = listing.subplatform || scopePath.split("/").filter(Boolean).at(-1) || subplatform.slug;
+    try {
+      const session = await getCapability({
+        subplatform: scopeSlug,
+        platformPath: scopePath,
+        tenantId: listing.tenantId,
+        domainId: listing.domainId,
+        role: "buyer",
+      });
+      if (!session) return;
+      await recordMarketplaceBehaviorEvent({
+        session,
+        domainId: listing.domainId,
+        offerId: listing.offerId,
+        intentId: listing.intentId,
+        eventType,
+        reason,
+        metadata: { source: "buyer_dashboard", platform_path: scopePath },
+        idempotencyKey: `ui-${eventType}-${listing.offerId}-${crypto.randomUUID()}`,
+      });
+    } catch {
+      // Analytics must never block a buyer action.
+    }
+  }, [subplatform.path, subplatform.slug]);
+
+  const toggleSaved = (listing: AssetListing) => {
+    const id = listing.id;
     setSaved((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    if (listing.offerId && listing.tenantId && listing.domainId) {
+      const scopePath = listing.platformPath || subplatform.path;
+      const scopeSlug = listing.subplatform || scopePath.split("/").filter(Boolean).at(-1) || subplatform.slug;
+      void getCapability({
+        subplatform: scopeSlug,
+        platformPath: scopePath,
+        tenantId: listing.tenantId,
+        domainId: listing.domainId,
+        role: "buyer",
+      }).then((session) => session ? setMarketplaceOfferPreference({
+        session,
+        domainId: listing.domainId!,
+        offerId: listing.offerId!,
+        state: saved.has(id) ? "neutral" : "saved",
+      }) : undefined).catch(() => undefined);
+    }
+    void recordBehavior(listing, saved.has(id) ? "offer.unsave" : "offer.save");
+  };
+
+  const dismissListing = (listing: AssetListing) => {
+    setDismissed((current) => new Set(current).add(listing.id));
+    void recordBehavior(listing, "offer.dismiss", "not_a_fit");
+    if (listing.offerId && listing.tenantId && listing.domainId) {
+      const scopePath = listing.platformPath || subplatform.path;
+      const scopeSlug = listing.subplatform || scopePath.split("/").filter(Boolean).at(-1) || subplatform.slug;
+      void getCapability({
+        subplatform: scopeSlug,
+        platformPath: scopePath,
+        tenantId: listing.tenantId,
+        domainId: listing.domainId,
+        role: "buyer",
+      }).then((session) => session ? setMarketplaceOfferPreference({
+        session,
+        domainId: listing.domainId!,
+        offerId: listing.offerId!,
+        state: "dismissed",
+        reason: "not_a_fit",
+      }) : undefined).catch(() => undefined);
+    }
+    onNotice(copy("dismissedOfferNotice", "已隐藏这条供给，后续推荐会参考你的反馈"));
+  };
+
+  const toggleCompare = (listing: AssetListing) => {
+    setCompareIds((current) => {
+      const next = new Set(current);
+      if (next.has(listing.id)) next.delete(listing.id);
+      else if (next.size < 3) next.add(listing.id);
+      else {
+        onNotice(copy("compareLimitNotice", "最多同时比较 3 条供给"));
+        return current;
+      }
+      return next;
+    });
+    void recordBehavior(listing, "offer.compare");
   };
 
   const scrollToListings = () => {
@@ -337,12 +454,21 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
                 listing={listing}
                 index={index}
                 saved={saved.has(listing.id)}
-                onSave={() => toggleSaved(listing.id)}
-                onOpen={() => onOpenListing(listing)}
+                compared={compareIds.has(listing.id)}
+                onSave={() => toggleSaved(listing)}
+                onDismiss={() => dismissListing(listing)}
+                onCompare={() => toggleCompare(listing)}
+                onOpen={() => {
+                  void recordBehavior(listing, "offer.open");
+                  onOpenListing(listing);
+                }}
+                locale={locale}
                 matchLabel={copy("matchLabel", "匹配", "match")}
                 viewLabel={copy("viewOfferLabel", "查看", "View")}
                 saveLabel={copy("saveOfferLabel", "收藏", "Save")}
                 unsaveLabel={copy("unsaveOfferLabel", "取消收藏", "Remove from saved")}
+                dismissLabel={copy("dismissOfferLabel", "不太合适", "Not a fit")}
+                compareLabel={compareIds.has(listing.id) ? copy("removeCompareLabel", "取消比较", "Remove") : copy("compareLabel", "比较", "Compare")}
               />
             ))}
           </div>
@@ -362,6 +488,21 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
           </div>
         )}
       </section>
+
+      {compareIds.size ? (
+        <section className="surface compare-panel" aria-label={copy("compareLabel", "比较", "Compare")}>
+          <div className="compare-panel-heading">
+            <div><Scale size={18} aria-hidden="true" /><strong>{copy("compareTitle", "正在比较", "Comparing")}</strong><span>{compareIds.size}/3</span></div>
+            <button type="button" className="text-action" onClick={() => setCompareIds(new Set())}>{copy("clearCompareLabel", "清空", "Clear")}</button>
+          </div>
+          <div className="compare-items">
+            {[...compareIds].map((id) => {
+              const listing = listings.find((candidate) => candidate.id === id);
+              return listing ? <button key={id} type="button" onClick={() => onOpenListing(listing)}>{listing.title}</button> : null;
+            })}
+          </div>
+        </section>
+      ) : null}
 
       {introductions.length ? (
         <section className="surface buyer-contact-inbox" aria-labelledby="buyer-contact-inbox-title">
@@ -439,6 +580,13 @@ function matchesFilter(
   return filter.value === undefined || fact.value === filter.value;
 }
 
+function matchLevelForScore(score: number, locale: InterfaceLocale): string {
+  if (locale === "en") {
+    return score >= 80 ? "Strong fit" : score >= 60 ? "Good fit" : score >= 40 ? "Possible fit" : "Weak fit";
+  }
+  return score >= 80 ? "非常适合" : score >= 60 ? "比较适合" : score >= 40 ? "一般" : "不太适合";
+}
+
 function RootFlow({
   subplatform,
   childPlatforms,
@@ -479,21 +627,33 @@ function AssetCard({
   listing,
   index,
   saved,
+  compared,
+  locale,
   matchLabel,
   viewLabel,
   saveLabel,
   unsaveLabel,
+  dismissLabel,
+  compareLabel,
   onSave,
+  onDismiss,
+  onCompare,
   onOpen,
 }: {
   listing: AssetListing;
   index: number;
   saved: boolean;
+  compared: boolean;
+  locale: InterfaceLocale;
   matchLabel: string;
   viewLabel: string;
   saveLabel: string;
   unsaveLabel: string;
+  dismissLabel: string;
+  compareLabel: string;
   onSave: () => void;
+  onDismiss: () => void;
+  onCompare: () => void;
   onOpen: () => void;
 }) {
   const offerViewLabel = `${viewLabel} ${listing.title}`;
@@ -521,7 +681,7 @@ function AssetCard({
       </motion.button>
       <div className="listing-content">
         <div className="match-row">
-          {listing.matchScore !== undefined ? <span className="match-score">{listing.matchScore}% {matchLabel}</span> : null}
+          {listing.matchScore !== undefined ? <span className="match-score">{matchLevelForScore(listing.matchScore, locale)} · {matchLabel}</span> : null}
           {listing.location ? <span><MapPin size={14} aria-hidden="true" /> {listing.location}</span> : null}
         </div>
         <button className="listing-title-button" type="button" onClick={onOpen} aria-label={offerViewLabel}>
@@ -539,6 +699,10 @@ function AssetCard({
             <span>{listing.reasons[0]}</span>
           </div>
         ) : null}
+        <div className="listing-feedback-actions">
+          <button type="button" className="text-action" onClick={onDismiss}><ThumbsDown size={14} aria-hidden="true" />{dismissLabel}</button>
+          <button type="button" className={`text-action${compared ? " is-active" : ""}`} onClick={onCompare}><Scale size={14} aria-hidden="true" />{compareLabel}</button>
+        </div>
         <div className="price-row">
           <div><strong>{listing.price}</strong>{listing.priceLabel ? <small>{listing.priceLabel}</small> : null}</div>
           <motion.button className="round-arrow" type="button" aria-label={offerViewLabel} onClick={onOpen} whileTap={{ scale: 0.88 }} transition={spring}>

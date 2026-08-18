@@ -21,6 +21,8 @@ import { PlatformFooter } from "./components/PlatformFooter";
 import { loadSubplatform, resolveSubplatform, subplatformCopy, subplatformFieldLabel, type SubplatformConfig } from "./subplatform";
 import {
   createMarketplaceIntroduction,
+  createMarketplaceSalesHandoff,
+  getMarketplaceProfile,
   requestMarketplaceContact,
   createBuyerIntroduction,
   clearPartySessionCache,
@@ -49,6 +51,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform(initialPath));
   const [listings, setListings] = useState<AssetListing[]>([]);
+  const [sellerDraft, setSellerDraft] = useState<{
+    narrative: string;
+    intentId?: string;
+    attributes: Record<string, unknown>;
+    terms: Record<string, unknown>;
+  } | null>(null);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
@@ -58,6 +66,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (role !== "seller") setSellerDraft(null);
+  }, [role, subplatform.path]);
 
   const closeListing = useCallback(() => setListing(null), []);
   const closeModeDialog = useCallback(() => setModeDialogOpen(false), []);
@@ -214,7 +226,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const genericWorkspace: ReactNode = role === "buyer" ? (
     <BuyerDashboard listings={listings} locale={locale} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
   ) : role === "seller" ? (
-    <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} />
+    <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} agentDraft={sellerDraft} />
   ) : role === "subplatform_admin" ? (
     <SubplatformAdminDashboard onNotice={setNotice} subplatform={subplatform} />
   ) : (
@@ -294,6 +306,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   locale={locale}
                   onNotice={setNotice}
                   onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform))}
+                  onSellerDraft={role === "seller" ? setSellerDraft : undefined}
                   onSellerPlatformSelected={selectSellerPlatform}
                   subplatform={subplatform}
                 />
@@ -360,6 +373,34 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 return;
               }
               if (isGenericOffer && selected.offerId && selected.intentId) {
+                const profile = await getMarketplaceProfile({
+                  session,
+                  domainId: selectedDomainId,
+                }).catch(() => null);
+                try {
+                  await createMarketplaceSalesHandoff({
+                    session,
+                    domainId: selectedDomainId,
+                    intentId: selected.intentId,
+                    summary: {
+                      source: "buyer_contact_request",
+                      offer_id: selected.offerId,
+                      offer_title: selected.title,
+                      platform_path: selectedPath,
+                      profile: profile?.profile ?? null,
+                      match_level: selected.matchScore === undefined
+                        ? null
+                        : selected.matchScore >= 80 ? "very_suitable" : selected.matchScore >= 60 ? "suitable" : selected.matchScore >= 40 ? "possible" : "weak",
+                      reasons: selected.reasons ?? [],
+                      risks: selected.risks ?? [],
+                      recent_offer_ids: listings.filter((item) => item.platformPath === selectedPath).map((item) => item.offerId ?? item.id).slice(0, 32),
+                      saved_offer_ids: readSavedOfferIds(selectedPath),
+                    },
+                    idempotencyKey: `web-handoff-${selected.intentId}-${selected.offerId}`,
+                  });
+                } catch {
+                  // A missing optional handoff migration must not prevent a consent-gated contact request.
+                }
                 const introduction = await createMarketplaceIntroduction({
                   session,
                   domainId: selectedDomainId,
@@ -495,6 +536,18 @@ function listingFromLocation(): AssetListing | null {
   return null;
 }
 
+function readSavedOfferIds(platformPath: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const value = JSON.parse(window.localStorage.getItem(`matchplane.saved.${platformPath}`) ?? "[]") as unknown;
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string").slice(0, 32)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function mapRecommendations(items: RecommendedBackendListing[], subplatform: SubplatformConfig): AssetListing[] {
   return items.flatMap((item, index) => {
     const id = item.listing_id ?? item.offer_id;
@@ -556,6 +609,7 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
       accent: (["cactus", "clay", "heather", "oat"] as const)[index % 4],
       facts,
       reasons: item.match_reasons ?? (typeof item.reasons === "object" && Array.isArray(item.reasons) ? item.reasons.filter((reason): reason is string => typeof reason === "string") : undefined),
+      risks: item.match_risks ?? (typeof item.risks === "object" && Array.isArray(item.risks) ? item.risks.filter((risk): risk is string => typeof risk === "string") : undefined),
       trust: stringArrayAttribute(item, ["trust", "verification_labels", "verificationLabels"]),
       response: stringAttribute(item, ["response", "seller_response", "sellerResponse"]),
       offerId: item.offer_id,

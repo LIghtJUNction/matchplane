@@ -54,6 +54,7 @@ describe("retrieval protocol v1", () => {
             terms: { pricing_mode: "negotiable" },
             score: 0.87,
             reasons: ["预算匹配"],
+            risks: ["需要确认交付时间"],
           }],
           degraded: false,
         }) }],
@@ -63,7 +64,10 @@ describe("retrieval protocol v1", () => {
     if (!extracted.ok) return;
     const parsed = parseRetrievalResult(extracted.value, requestId, 10);
     expect(parsed).toMatchObject({ ok: true });
-    if (parsed.ok) expect(parsed.value.candidates[0]?.offerId).toBe(offerId);
+    if (parsed.ok) {
+      expect(parsed.value.candidates[0]?.offerId).toBe(offerId);
+      expect(parsed.value.candidates[0]?.risks).toEqual(["需要确认交付时间"]);
+    }
   });
 
   it("rejects a provider response that changes request scope or exceeds the limit", () => {

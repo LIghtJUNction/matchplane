@@ -6,8 +6,8 @@
 //! idempotency, lifecycle and introduction invariants.
 
 use matchplane_domain::{
-    AssetId, DomainId, MarketplaceIntentId, MarketplaceOfferId, MarketplacePartyId,
-    MatchIntroductionId, TenantId,
+    AssetId, DomainId, MarketplaceBehaviorEventId, MarketplaceIntentId, MarketplaceOfferId,
+    MarketplacePartyId, MarketplaceSalesHandoffId, MatchIntroductionId, TenantId,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -102,6 +102,116 @@ pub struct MarketplaceIntent {
     pub updated_at: OffsetDateTime,
 }
 
+/// Replaces the latest durable state for one open intent.  The caller supplies the prior
+/// version so a second tab or Agent cannot silently overwrite newer requirements.
+#[derive(Debug)]
+pub struct UpdateMarketplaceIntent {
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub participant_id: MarketplacePartyId,
+    pub intent_id: MarketplaceIntentId,
+    pub narrative: String,
+    pub attributes: Value,
+    pub terms: Value,
+    pub expected_version: i64,
+}
+
+/// Domain-neutral latest user understanding.  The JSON profile is owned by the active
+/// subplatform/Agent; the root only versions and scopes it.
+#[derive(Debug, Clone, Serialize)]
+pub struct MarketplaceIntentProfile {
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub participant_id: MarketplacePartyId,
+    pub profile: Value,
+    pub version: i64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug)]
+pub struct UpsertMarketplaceIntentProfile {
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub participant_id: MarketplacePartyId,
+    pub profile: Value,
+}
+
+#[derive(Debug)]
+pub struct RecordMarketplaceBehaviorEvent {
+    pub event_id: MarketplaceBehaviorEventId,
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub participant_id: MarketplacePartyId,
+    pub intent_id: Option<MarketplaceIntentId>,
+    pub offer_id: Option<MarketplaceOfferId>,
+    pub event_type: String,
+    pub reason: Option<String>,
+    pub metadata: Value,
+    pub idempotency_key: String,
+    pub occurred_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MarketplaceBehaviorEventOutcome {
+    pub event_id: MarketplaceBehaviorEventId,
+    pub duplicate: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MarketplaceOfferPreference {
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub participant_id: MarketplacePartyId,
+    pub offer_id: MarketplaceOfferId,
+    pub state: String,
+    pub reason: Option<String>,
+    pub version: i64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug)]
+pub struct SetMarketplaceOfferPreference {
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub participant_id: MarketplacePartyId,
+    pub offer_id: MarketplaceOfferId,
+    pub state: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct CreateMarketplaceSalesHandoff {
+    pub handoff_id: MarketplaceSalesHandoffId,
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub participant_id: MarketplacePartyId,
+    pub intent_id: Option<MarketplaceIntentId>,
+    pub summary: Value,
+    pub idempotency_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MarketplaceSalesHandoff {
+    pub handoff_id: MarketplaceSalesHandoffId,
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub participant_id: MarketplacePartyId,
+    pub intent_id: Option<MarketplaceIntentId>,
+    pub summary: Value,
+    pub status: String,
+    pub idempotency_key: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+}
+
 /// A supply-side offer.  `asset_id` is optional so a vertical may represent a service or other
 /// non-catalogue supply while still reusing the same introduction kernel.
 #[derive(Debug)]
@@ -188,6 +298,8 @@ pub struct MarketplaceOfferCandidate {
     pub score: f64,
     /// Bounded explainable reasons.
     pub reasons: Vec<String>,
+    /// Bounded risk/trade-off notes supplied by the vertical or retrieval Agent.
+    pub risks: Vec<String>,
 }
 
 /// Contact-free demand projection returned to a supply-side Agent after explicit opt-in.
@@ -658,6 +770,7 @@ impl PgStore {
                     offer,
                     score,
                     reasons,
+                    risks: Vec::new(),
                 }))
             })
             .collect::<Result<Vec<_>, StorageError>>()?
@@ -1228,6 +1341,327 @@ impl PgStore {
             .await?;
         rows.iter().map(introduction_from_row).collect()
     }
+
+    /// Returns the latest domain-owned understanding for one participant.
+    pub async fn marketplace_intent_profile(
+        &self,
+        tenant_id: TenantId,
+        domain_id: DomainId,
+        participant_id: MarketplacePartyId,
+    ) -> Result<Option<MarketplaceIntentProfile>, StorageError> {
+        let row = sqlx::query(
+            "SELECT tenant_id, domain_id, participant_id, profile, version, created_at, updated_at
+               FROM marketplace_intent_profiles
+              WHERE tenant_id = $1 AND domain_id = $2 AND participant_id = $3",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(domain_id.into_uuid())
+        .bind(participant_id.into_uuid())
+        .fetch_optional(self.pool())
+        .await?;
+        row.map(|row| profile_from_row(&row)).transpose()
+    }
+
+    /// Upserts the latest profile state.  The profile is intentionally opaque to the root.
+    pub async fn upsert_marketplace_intent_profile(
+        &self,
+        command: &UpsertMarketplaceIntentProfile,
+    ) -> Result<MarketplaceIntentProfile, StorageError> {
+        validate_object(&command.profile, "intent profile")?;
+        validate_json_bytes(&command.profile, 64 * 1024, "intent profile")?;
+        let row = sqlx::query(
+            "INSERT INTO marketplace_intent_profiles
+                (tenant_id, domain_id, participant_id, profile)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (tenant_id, domain_id, participant_id)
+             DO UPDATE SET profile = EXCLUDED.profile,
+                           version = marketplace_intent_profiles.version + 1
+             RETURNING tenant_id, domain_id, participant_id, profile, version, created_at, updated_at",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.participant_id.into_uuid())
+        .bind(&command.profile)
+        .fetch_one(self.pool())
+        .await?;
+        profile_from_row(&row)
+    }
+
+    /// Updates one open demand or supply intent with a caller-supplied optimistic version.
+    pub async fn update_marketplace_intent(
+        &self,
+        command: &UpdateMarketplaceIntent,
+    ) -> Result<MarketplaceIntent, StorageError> {
+        validate_text(&command.narrative, MAX_NARRATIVE_BYTES, "intent narrative")?;
+        validate_object(&command.attributes, "intent attributes")?;
+        validate_object(&command.terms, "intent terms")?;
+        if command.expected_version < 1 {
+            return Err(StorageError::InvalidData(
+                "intent expected version must be positive".to_owned(),
+            ));
+        }
+        let row = sqlx::query(
+            "UPDATE marketplace_intents
+                SET narrative = $5, attributes = $6, terms = $7,
+                    version = version + 1
+              WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
+                AND participant_id = $4
+                AND status IN ('active', 'matched') AND version = $8
+             RETURNING id, tenant_id, domain_id, participant_id, side, narrative,
+                       attributes, terms, supply_discovery_enabled,
+                       supply_discovery_expires_at, idempotency_key, status, expires_at,
+                       version, created_at, updated_at",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.intent_id.into_uuid())
+        .bind(command.participant_id.into_uuid())
+        .bind(&command.narrative)
+        .bind(&command.attributes)
+        .bind(&command.terms)
+        .bind(command.expected_version)
+        .fetch_optional(self.pool())
+        .await?
+        .ok_or(StorageError::Conflict(
+            "intent is stale, closed, or not owned by this participant".to_owned(),
+        ))?;
+        intent_from_row(&row)
+    }
+
+    /// Records a bounded behavior signal idempotently.  Signals are evidence for ranking, not
+    /// an immediate rewrite of the participant profile.
+    pub async fn record_marketplace_behavior_event(
+        &self,
+        command: &RecordMarketplaceBehaviorEvent,
+    ) -> Result<MarketplaceBehaviorEventOutcome, StorageError> {
+        validate_behavior_event(command)?;
+        if let Some(intent_id) = command.intent_id {
+            let owned = sqlx::query(
+                "SELECT domain_id, participant_id FROM marketplace_intents
+                  WHERE tenant_id = $1 AND id = $2",
+            )
+            .bind(command.tenant_id.into_uuid())
+            .bind(intent_id.into_uuid())
+            .fetch_optional(self.pool())
+            .await?;
+            let Some(row) = owned else {
+                return Err(StorageError::Forbidden(
+                    "behavior event intent is not available in this tenant".to_owned(),
+                ));
+            };
+            if row.try_get::<Uuid, _>("domain_id")? != command.domain_id.into_uuid()
+                || row.try_get::<Uuid, _>("participant_id")? != command.participant_id.into_uuid()
+            {
+                return Err(StorageError::Forbidden(
+                    "behavior event intent is outside the participant scope".to_owned(),
+                ));
+            }
+        }
+        if let Some(offer_id) = command.offer_id {
+            let scoped = sqlx::query(
+                "SELECT domain_id FROM marketplace_offers
+                  WHERE tenant_id = $1 AND id = $2",
+            )
+            .bind(command.tenant_id.into_uuid())
+            .bind(offer_id.into_uuid())
+            .fetch_optional(self.pool())
+            .await?;
+            let Some(row) = scoped else {
+                return Err(StorageError::Forbidden(
+                    "behavior event offer is not available in this tenant".to_owned(),
+                ));
+            };
+            if row.try_get::<Uuid, _>("domain_id")? != command.domain_id.into_uuid() {
+                return Err(StorageError::Forbidden(
+                    "behavior event offer is outside the domain scope".to_owned(),
+                ));
+            }
+        }
+        let existing = sqlx::query(
+            "SELECT id, domain_id, event_type, reason, metadata, intent_id, offer_id
+               FROM marketplace_behavior_events
+              WHERE tenant_id = $1 AND participant_id = $2 AND idempotency_key = $3",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.participant_id.into_uuid())
+        .bind(&command.idempotency_key)
+        .fetch_optional(self.pool())
+        .await?;
+        if let Some(row) = existing {
+            let same = row.try_get::<Uuid, _>("domain_id")? == command.domain_id.into_uuid()
+                && row.try_get::<String, _>("event_type")? == command.event_type
+                && row.try_get::<Option<String>, _>("reason")? == command.reason
+                && row.try_get::<Value, _>("metadata")? == command.metadata
+                && row.try_get::<Option<Uuid>, _>("intent_id")?
+                    == command.intent_id.map(MarketplaceIntentId::into_uuid)
+                && row.try_get::<Option<Uuid>, _>("offer_id")?
+                    == command.offer_id.map(MarketplaceOfferId::into_uuid);
+            if !same {
+                return Err(StorageError::IdempotencyConflict);
+            }
+            return Ok(MarketplaceBehaviorEventOutcome {
+                event_id: MarketplaceBehaviorEventId::from_uuid(row.try_get("id")?),
+                duplicate: true,
+            });
+        }
+        let row = sqlx::query(
+            "INSERT INTO marketplace_behavior_events
+                (id, tenant_id, domain_id, participant_id, intent_id, offer_id,
+                 event_type, reason, metadata, idempotency_key, occurred_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, clock_timestamp()))
+             RETURNING id",
+        )
+        .bind(command.event_id.into_uuid())
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.participant_id.into_uuid())
+        .bind(command.intent_id.map(MarketplaceIntentId::into_uuid))
+        .bind(command.offer_id.map(MarketplaceOfferId::into_uuid))
+        .bind(&command.event_type)
+        .bind(&command.reason)
+        .bind(&command.metadata)
+        .bind(&command.idempotency_key)
+        .bind(command.occurred_at)
+        .fetch_one(self.pool())
+        .await?;
+        Ok(MarketplaceBehaviorEventOutcome {
+            event_id: MarketplaceBehaviorEventId::from_uuid(row.try_get("id")?),
+            duplicate: false,
+        })
+    }
+
+    /// Saves or dismisses one canonical offer for the authenticated participant.
+    pub async fn set_marketplace_offer_preference(
+        &self,
+        command: &SetMarketplaceOfferPreference,
+    ) -> Result<MarketplaceOfferPreference, StorageError> {
+        if !matches!(command.state.as_str(), "saved" | "dismissed" | "neutral") {
+            return Err(StorageError::InvalidData(
+                "offer preference state must be saved, dismissed, or neutral".to_owned(),
+            ));
+        }
+        if let Some(reason) = &command.reason {
+            validate_text(reason, 500, "offer preference reason")?;
+        }
+        let offer_domain: Option<Uuid> = sqlx::query_scalar(
+            "SELECT domain_id FROM marketplace_offers
+              WHERE tenant_id = $1 AND id = $2",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.offer_id.into_uuid())
+        .fetch_optional(self.pool())
+        .await?;
+        if offer_domain != Some(command.domain_id.into_uuid()) {
+            return Err(StorageError::Forbidden(
+                "offer preference is outside the domain scope".to_owned(),
+            ));
+        }
+        let row = sqlx::query(
+            "INSERT INTO marketplace_offer_preferences
+                (tenant_id, domain_id, participant_id, offer_id, state, reason)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (tenant_id, domain_id, participant_id, offer_id)
+             DO UPDATE SET state = EXCLUDED.state, reason = EXCLUDED.reason,
+                           version = marketplace_offer_preferences.version + 1
+             RETURNING tenant_id, domain_id, participant_id, offer_id, state, reason,
+                       version, created_at, updated_at",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.participant_id.into_uuid())
+        .bind(command.offer_id.into_uuid())
+        .bind(&command.state)
+        .bind(&command.reason)
+        .fetch_one(self.pool())
+        .await?;
+        preference_from_row(&row)
+    }
+
+    /// Reads saved/dismissed state for one participant; offer payloads are re-read through the
+    /// canonical matching query so stale preference rows cannot expose removed data.
+    pub async fn marketplace_offer_preferences_for_party(
+        &self,
+        tenant_id: TenantId,
+        domain_id: DomainId,
+        participant_id: MarketplacePartyId,
+    ) -> Result<Vec<MarketplaceOfferPreference>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT tenant_id, domain_id, participant_id, offer_id, state, reason,
+                    version, created_at, updated_at
+               FROM marketplace_offer_preferences
+              WHERE tenant_id = $1 AND domain_id = $2 AND participant_id = $3
+              ORDER BY updated_at DESC, offer_id",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(domain_id.into_uuid())
+        .bind(participant_id.into_uuid())
+        .fetch_all(self.pool())
+        .await?;
+        rows.iter().map(preference_from_row).collect()
+    }
+
+    /// Creates a durable, contact-free sales handoff snapshot idempotently.
+    pub async fn create_marketplace_sales_handoff(
+        &self,
+        command: &CreateMarketplaceSalesHandoff,
+    ) -> Result<MarketplaceSalesHandoff, StorageError> {
+        validate_text(
+            &command.idempotency_key,
+            MAX_IDEMPOTENCY_KEY_BYTES,
+            "sales handoff idempotency key",
+        )?;
+        validate_object(&command.summary, "sales handoff summary")?;
+        validate_json_bytes(&command.summary, 128 * 1024, "sales handoff summary")?;
+        if let Some(intent_id) = command.intent_id {
+            let owner: Option<Uuid> = sqlx::query_scalar(
+                "SELECT participant_id FROM marketplace_intents
+                  WHERE tenant_id = $1 AND domain_id = $2 AND id = $3",
+            )
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.domain_id.into_uuid())
+            .bind(intent_id.into_uuid())
+            .fetch_optional(self.pool())
+            .await?;
+            if owner != Some(command.participant_id.into_uuid()) {
+                return Err(StorageError::Forbidden(
+                    "sales handoff intent is not owned by this participant".to_owned(),
+                ));
+            }
+        }
+        if let Some(row) = sqlx::query(HANDOFF_SELECT_BY_KEY)
+            .bind(command.tenant_id.into_uuid())
+            .bind(command.participant_id.into_uuid())
+            .bind(&command.idempotency_key)
+            .fetch_optional(self.pool())
+            .await?
+        {
+            let handoff = handoff_from_row(&row)?;
+            if handoff.domain_id != command.domain_id
+                || handoff.intent_id != command.intent_id
+                || handoff.summary != command.summary
+            {
+                return Err(StorageError::IdempotencyConflict);
+            }
+            return Ok(handoff);
+        }
+        let row = sqlx::query(
+            "INSERT INTO marketplace_sales_handoffs
+                (id, tenant_id, domain_id, participant_id, intent_id, summary, idempotency_key)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id, tenant_id, domain_id, participant_id, intent_id, summary, status,
+                       idempotency_key, created_at, updated_at",
+        )
+        .bind(command.handoff_id.into_uuid())
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.participant_id.into_uuid())
+        .bind(command.intent_id.map(MarketplaceIntentId::into_uuid))
+        .bind(&command.summary)
+        .bind(&command.idempotency_key)
+        .fetch_one(self.pool())
+        .await?;
+        handoff_from_row(&row)
+    }
 }
 
 fn validate_intent(command: &CreateMarketplaceIntent) -> Result<(), StorageError> {
@@ -1341,6 +1775,41 @@ fn validate_object(value: &Value, field: &str) -> Result<(), StorageError> {
             "{field} must be a JSON object"
         )))
     }
+}
+
+fn validate_json_bytes(value: &Value, maximum: usize, field: &str) -> Result<(), StorageError> {
+    let bytes = serde_json::to_vec(value)?;
+    if bytes.len() > maximum {
+        return Err(StorageError::InvalidData(format!(
+            "{field} must be at most {maximum} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_behavior_event(command: &RecordMarketplaceBehaviorEvent) -> Result<(), StorageError> {
+    validate_text(&command.event_type, 64, "behavior event type")?;
+    if !command.event_type.bytes().enumerate().all(|(index, byte)| {
+        byte.is_ascii_lowercase()
+            || byte.is_ascii_digit()
+            || matches!(byte, b'.' | b'_' | b':' | b'-') && index > 0
+    }) || !command.event_type.as_bytes()[0].is_ascii_lowercase()
+    {
+        return Err(StorageError::InvalidData(
+            "behavior event type must use the lowercase event taxonomy".to_owned(),
+        ));
+    }
+    validate_object(&command.metadata, "behavior event metadata")?;
+    validate_json_bytes(&command.metadata, 32 * 1024, "behavior event metadata")?;
+    validate_text(
+        &command.idempotency_key,
+        MAX_IDEMPOTENCY_KEY_BYTES,
+        "behavior event idempotency key",
+    )?;
+    if let Some(reason) = &command.reason {
+        validate_text(reason, 500, "behavior event reason")?;
+    }
+    Ok(())
 }
 
 fn ensure_same_intent(
@@ -1532,6 +2001,11 @@ const INTRODUCTION_SELECT_FOR_PARTY: &str = "SELECT id, tenant_id, demand_intent
     WHERE tenant_id = $1 AND (demand_party_id = $2 OR supply_party_id = $2)
     ORDER BY created_at DESC LIMIT 100";
 
+const HANDOFF_SELECT_BY_KEY: &str = "SELECT id, tenant_id, domain_id, participant_id, intent_id,
+    summary, status, idempotency_key, created_at, updated_at
+    FROM marketplace_sales_handoffs WHERE tenant_id = $1 AND participant_id = $2
+      AND idempotency_key = $3";
+
 fn intent_from_row(row: &PgRow) -> Result<MarketplaceIntent, StorageError> {
     Ok(MarketplaceIntent {
         intent_id: MarketplaceIntentId::from_uuid(row.try_get("id")?),
@@ -1591,6 +2065,49 @@ fn introduction_from_row(row: &PgRow) -> Result<MarketplaceIntroduction, Storage
         idempotency_key: row.try_get("idempotency_key")?,
         expires_at: row.try_get("expires_at")?,
         version: row.try_get("version")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+fn profile_from_row(row: &PgRow) -> Result<MarketplaceIntentProfile, StorageError> {
+    Ok(MarketplaceIntentProfile {
+        tenant_id: TenantId::from_uuid(row.try_get("tenant_id")?),
+        domain_id: DomainId::from_uuid(row.try_get("domain_id")?),
+        participant_id: MarketplacePartyId::from_uuid(row.try_get("participant_id")?),
+        profile: row.try_get("profile")?,
+        version: row.try_get("version")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+fn preference_from_row(row: &PgRow) -> Result<MarketplaceOfferPreference, StorageError> {
+    Ok(MarketplaceOfferPreference {
+        tenant_id: TenantId::from_uuid(row.try_get("tenant_id")?),
+        domain_id: DomainId::from_uuid(row.try_get("domain_id")?),
+        participant_id: MarketplacePartyId::from_uuid(row.try_get("participant_id")?),
+        offer_id: MarketplaceOfferId::from_uuid(row.try_get("offer_id")?),
+        state: row.try_get("state")?,
+        reason: row.try_get("reason")?,
+        version: row.try_get("version")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+fn handoff_from_row(row: &PgRow) -> Result<MarketplaceSalesHandoff, StorageError> {
+    Ok(MarketplaceSalesHandoff {
+        handoff_id: MarketplaceSalesHandoffId::from_uuid(row.try_get("id")?),
+        tenant_id: TenantId::from_uuid(row.try_get("tenant_id")?),
+        domain_id: DomainId::from_uuid(row.try_get("domain_id")?),
+        participant_id: MarketplacePartyId::from_uuid(row.try_get("participant_id")?),
+        intent_id: row
+            .try_get::<Option<Uuid>, _>("intent_id")?
+            .map(MarketplaceIntentId::from_uuid),
+        summary: row.try_get("summary")?,
+        status: row.try_get("status")?,
+        idempotency_key: row.try_get("idempotency_key")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     })

@@ -10,10 +10,13 @@ import {
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
   querySubplatformRetrieval,
+  updateMarketplaceIntent,
+  upsertMarketplaceProfile,
   type RecommendedBackendListing,
   routePlatformIntent,
   type PlatformRouteHop,
   type PartySession,
+  updateMarketplaceDemandDiscovery,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { authClient, authFetchOptions } from "../lib/auth-client";
@@ -238,11 +241,13 @@ interface MatchChatProps {
   locale?: InterfaceLocale;
   role?: "buyer" | "seller";
   onRecommendations?: (recommendations: RecommendedBackendListing[]) => void;
+  /** Pass the seller's conversational draft into the schema-driven editor. */
+  onSellerDraft?: (draft: { narrative: string; intentId?: string; attributes: Record<string, unknown>; terms: Record<string, unknown> }) => void;
   /** Move a seller into the selected terminal platform before showing its supply form. */
   onSellerPlatformSelected?: (hop: PlatformRouteHop) => void | Promise<void>;
 }
 
-export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer", onRecommendations, onSellerPlatformSelected }: MatchChatProps) {
+export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer", onRecommendations, onSellerDraft, onSellerPlatformSelected }: MatchChatProps) {
   const copy = resolveChatCopy(subplatform, locale);
   const runtime = runtimeChatCopy(locale);
   const [message, setMessage] = useState("");
@@ -253,6 +258,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const conversationIdRef = useRef<string | null>(null);
+  const intentByTargetRef = useRef(new Map<string, { intentId: string; version: number }>());
   const focusInputAfterErrorRef = useRef(false);
   const [sellerRouteChoices, setSellerRouteChoices] = useState<PlatformRouteHop[]>([]);
   const isRoot = subplatform.slug === "root";
@@ -300,6 +306,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     setSellerRouteChoices([]);
     setSupplyDiscoveryEnabled(copy.buyerDiscoveryDefault);
     conversationIdRef.current = null;
+    intentByTargetRef.current.clear();
   }, [copy.buyerDiscoveryDefault, role, subplatform.path]);
 
   const chooseSellerRoute = useCallback(async (target: PlatformRouteHop) => {
@@ -427,7 +434,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             const targetUsesLegacy = target.marketplaceContract === "legacy-v1";
             const targetKey = target.path.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 96) || "root";
             if (isSeller) {
-              await createMarketplaceIntent({
+              const supplyIntent = await createMarketplaceIntent({
                 session: targetSession,
                 domainId: targetDomainId,
                 side: "supply",
@@ -446,6 +453,27 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                   ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
                 },
                 idempotencyKey: `chat-${requestId}-${targetKey}`,
+              });
+              // Keep the same opaque, scoped profile contract for supply as for demand. The
+              // vertical Agent may later replace this conversation projection with typed fields;
+              // the root never assumes that a supply is a vehicle, service, or another domain.
+              void upsertMarketplaceProfile({
+                session: targetSession,
+                domainId: targetDomainId,
+                profile: {
+                  kind: "supply_conversation",
+                  conversation_id: conversationId,
+                  narrative,
+                  latest_turn: text,
+                  turn_count: messages.filter((item) => item.role === "user").length + 1,
+                  source: "chat",
+                },
+              }).catch(() => undefined);
+              onSellerDraft?.({
+                narrative,
+                intentId: typeof supplyIntent.intent_id === "string" ? supplyIntent.intent_id : undefined,
+                attributes: { source: "conversation", conversation_id: conversationId, narrative },
+                terms: { pricing_mode: targetPricing.mode },
               });
             } else if (targetUsesLegacy) {
               if (!targetPricing.currency) throw new Error(`${target.label || target.slug} 尚未配置结算币种，暂时不能生成真实推荐`);
@@ -476,23 +504,68 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                 subplatform: target.slug,
               })));
             } else {
-              const intent = await createMarketplaceIntent({
+              const intentState = intentByTargetRef.current.get(targetKey);
+              const intent = intentState
+                ? await updateMarketplaceIntent({
+                    session: targetSession,
+                    domainId: targetDomainId,
+                    intentId: intentState.intentId,
+                    narrative,
+                    attributes: {
+                      source: "conversation",
+                      conversation_id: conversationId,
+                      latest_turn: text,
+                    },
+                    terms: {
+                      pricing_mode: targetPricing.mode,
+                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
+                    },
+                    expectedVersion: intentState.version,
+                  })
+                : await createMarketplaceIntent({
+                    session: targetSession,
+                    domainId: targetDomainId,
+                    side: "demand",
+                    narrative,
+                    attributes: {
+                      source: "conversation",
+                      conversation_id: conversationId,
+                    },
+                    terms: {
+                      pricing_mode: targetPricing.mode,
+                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
+                    },
+                    supplyDiscoveryEnabled,
+                    idempotencyKey: `chat-${requestId}-${targetKey}`,
+                  });
+              if (typeof intent.intent_id === "string" && typeof intent.version === "number") {
+                intentByTargetRef.current.set(targetKey, { intentId: intent.intent_id, version: intent.version });
+              }
+              if (intentState && typeof intent.intent_id === "string") {
+                void updateMarketplaceDemandDiscovery({
+                  session: targetSession,
+                  domainId: targetDomainId,
+                  intentId: intent.intent_id,
+                  enabled: supplyDiscoveryEnabled,
+                }).catch(() => undefined);
+              }
+              // The root stores only a scoped, versioned understanding. Domain-specific fields
+              // (for example vehicle attributes) are extracted by the active child Agent and
+              // may replace this opaque conversation projection later.
+              void upsertMarketplaceProfile({
                 session: targetSession,
                 domainId: targetDomainId,
-                side: "demand",
-                narrative,
-                attributes: {
-                  source: "conversation",
+                profile: {
+                  kind: "conversation",
                   conversation_id: conversationId,
+                  narrative,
+                  latest_turn: text,
+                  turn_count: messages.filter((item) => item.role === "user").length + 1,
+                  source: "chat",
                 },
-                terms: {
-                  pricing_mode: targetPricing.mode,
-                  ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
-                  ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
-                },
-                supplyDiscoveryEnabled,
-                idempotencyKey: `chat-${requestId}-${targetKey}`,
-              });
+              }).catch(() => undefined);
               let retrievalCandidates: RecommendedBackendListing[] = [];
               let canonicalCandidates: Awaited<ReturnType<typeof getMarketplaceOfferMatches>> | null = null;
               if (target.agentMcpTools?.includes("retrieval.query")) {
@@ -523,6 +596,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                     const remote = remoteByOffer.get(candidate.offer_id);
                     if (!remote) return [];
                     const reasons = [...new Set([...candidate.reasons, ...remote.reasons])].slice(0, 32);
+                    const risks = [...new Set([...(candidate.risks ?? []), ...(remote.risks ?? [])])].slice(0, 32);
                     return [{
                       ...candidate,
                       field_labels: fieldLabelsFor(target, candidate.attributes),
@@ -532,6 +606,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                       subplatform: target.slug,
                       match_score: candidate.score,
                       match_reasons: reasons,
+                      match_risks: risks,
                       intent_id: intent.intent_id,
                     } satisfies RecommendedBackendListing];
                   });
@@ -560,6 +635,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                   offer_id: candidate.offer_id,
                   match_score: candidate.score,
                   match_reasons: candidate.reasons,
+                  match_risks: candidate.risks,
                   intent_id: intent.intent_id,
                 })));
               }
@@ -575,7 +651,9 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           // A successful request with no candidates is still a new result. Clear
           // the previous cards instead of leaving stale offers on screen and
           // making them look like matches for the latest message.
-          onRecommendations?.(routedRecommendations);
+          // A first answer should be scannable. Keep the default result set to three canonical
+          // offers; later comparison can be expanded by the child-owned catalogue UI.
+          onRecommendations?.(routedRecommendations.slice(0, 3));
         }
         const visibleRouteNames = route?.routePlan
           .slice(0, MAX_CHAT_TARGETS)
@@ -613,7 +691,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerDraft, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {

@@ -146,4 +146,17 @@ describe("HTTP MCP argument contract", () => {
       expires_at: new Date(Date.now() + 60_000).toISOString(),
     })).toContain("offer_id");
   });
+
+  it("validates the V1 profile, evidence, preference, and handoff tools", () => {
+    const common = { tenant_id: tenantId, domain_id: domainId, platform_path: "/used-car", participant_id: partyId };
+    expect(validateMcpToolArguments("marketplace.intent.update", {
+      ...common, intent_id: intentId, narrative: "补充一个不能妥协的条件", expected_version: 2,
+    })).toBeNull();
+    expect(validateMcpToolArguments("marketplace.profile.upsert", { ...common, profile: { goals: ["fit"] } })).toBeNull();
+    expect(validateMcpToolArguments("marketplace.behavior.record", {
+      ...common, offer_id: intentId, event_type: "offer.dismiss", reason: "not_a_fit", metadata: {}, idempotency_key: "event-1",
+    })).toBeNull();
+    expect(validateMcpToolArguments("marketplace.preference.set", { ...common, offer_id: intentId, state: "saved" })).toBeNull();
+    expect(validateMcpToolArguments("marketplace.sales.handoff", { ...common, summary: { selected: intentId }, idempotency_key: "handoff-1" })).toBeNull();
+  });
 });

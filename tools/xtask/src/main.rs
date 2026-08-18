@@ -1,4 +1,4 @@
-use std::{env, process::Command as ProcessCommand, time::Duration};
+use std::{env, path::Path, process::Command as ProcessCommand, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -672,7 +672,7 @@ async fn status() -> Result<()> {
 
 fn serve(service: Service, args: &[String]) -> Result<()> {
     let mut command = if matches!(service, Service::Web) {
-        ProcessCommand::new(env_or("MATCHPLANE_WEB_NODE", "node"))
+        ProcessCommand::new(resolve_web_node())
     } else {
         let (program, default_args) = service_command(service);
         let mut command = ProcessCommand::new(program);
@@ -867,6 +867,41 @@ fn env_or(name: &str, fallback: &str) -> String {
     env::var(name).unwrap_or_else(|_| fallback.to_owned())
 }
 
+/// Resolve the Node executable for the standalone web workload.
+///
+/// Linux packages normally install Node at `/usr/bin/node`, while operators who install a
+/// pinned upstream runtime often use `/usr/local/bin/node`. A missing explicit path should not
+/// make an otherwise valid release fail before the child process can emit a useful error.
+fn resolve_web_node() -> String {
+    resolve_web_node_with(
+        env::var("MATCHPLANE_WEB_NODE").ok().as_deref(),
+        node_candidate_exists,
+    )
+}
+
+fn resolve_web_node_with<F>(configured: Option<&str>, mut candidate_exists: F) -> String
+where
+    F: FnMut(&str) -> bool,
+{
+    let configured = configured.unwrap_or("node");
+    if candidate_exists(configured) {
+        return configured.to_owned();
+    }
+
+    for candidate in ["/usr/local/bin/node", "/usr/bin/node", "node"] {
+        if candidate_exists(candidate) {
+            return candidate.to_owned();
+        }
+    }
+
+    // Keep the operator's explicit value for the eventual OS error when no candidate exists.
+    configured.to_owned()
+}
+
+fn node_candidate_exists(candidate: &str) -> bool {
+    candidate == "node" || Path::new(candidate).is_file()
+}
+
 fn environment_name(environment: Environment) -> &'static str {
     match environment {
         Environment::Development => "development",
@@ -968,7 +1003,8 @@ impl JsonRpcResponse {
 mod tests {
     use super::{
         AdminInviteRole, Service, admin_invite_role_value, normalize_admin_base_url,
-        service_command, sha256, validate_operator_email, validate_operator_uuid,
+        resolve_web_node_with, service_command, sha256, validate_operator_email,
+        validate_operator_uuid,
     };
     use uuid::Uuid;
 
@@ -980,6 +1016,22 @@ mod tests {
     #[test]
     fn service_command_maps_web_to_node() {
         assert_eq!(service_command(Service::Web).0, "node");
+    }
+
+    #[test]
+    fn web_node_resolution_keeps_an_available_configured_path() {
+        let resolved = resolve_web_node_with(Some("/opt/node/bin/node"), |candidate| {
+            candidate == "/opt/node/bin/node"
+        });
+        assert_eq!(resolved, "/opt/node/bin/node");
+    }
+
+    #[test]
+    fn web_node_resolution_falls_back_to_a_host_runtime_path() {
+        let resolved = resolve_web_node_with(Some("/usr/bin/node"), |candidate| {
+            candidate == "/usr/local/bin/node"
+        });
+        assert_eq!(resolved, "/usr/local/bin/node");
     }
 
     #[test]

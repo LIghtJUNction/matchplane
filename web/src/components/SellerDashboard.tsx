@@ -31,6 +31,12 @@ interface SellerDashboardProps {
   locale: InterfaceLocale;
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
+  agentDraft?: {
+    narrative: string;
+    intentId?: string;
+    attributes: Record<string, unknown>;
+    terms: Record<string, unknown>;
+  } | null;
 }
 
 type SellerRecord = ListingSubmission | MarketplaceOffer;
@@ -85,7 +91,7 @@ const sellerEnglishFallbacks: Record<string, string> = {
 };
 
 /** Generic seller surface. The active subplatform owns the meaning of `attributes`. */
-export function SellerDashboard({ locale, onNotice, subplatform }: SellerDashboardProps) {
+export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = null }: SellerDashboardProps) {
   const [externalKey, setExternalKey] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [askingAmount, setAskingAmount] = useState("");
@@ -105,6 +111,7 @@ export function SellerDashboard({ locale, onNotice, subplatform }: SellerDashboa
   const [customFields, setCustomFields] = useState<Array<{ id: string; key: string; value: string }>>([]);
   const [advancedAttributes, setAdvancedAttributes] = useState("{}");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [draftImported, setDraftImported] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submissions, setSubmissions] = useState<SellerRecord[]>([]);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
@@ -262,6 +269,26 @@ export function SellerDashboard({ locale, onNotice, subplatform }: SellerDashboa
   useEffect(() => {
     setCurrency(pricingCurrency ?? "");
   }, [pricingCurrency]);
+
+  useEffect(() => {
+    setDraftImported(false);
+  }, [agentDraft?.intentId, agentDraft?.narrative]);
+
+  const importAgentDraft = () => {
+    if (!agentDraft) return;
+    const draft = {
+      conversation: {
+        narrative: agentDraft.narrative,
+        intent_id: agentDraft.intentId ?? null,
+      },
+      ...agentDraft.attributes,
+      _terms: agentDraft.terms,
+    };
+    setAdvancedAttributes(JSON.stringify(draft, null, 2));
+    setAdvancedOpen(true);
+    setDraftImported(true);
+    onNotice(copy("agentDraftImportedNotice", "已把对话草稿放入高级资料，请检查并补齐字段后提交", "The conversation draft is in advanced attributes; review it before submitting"));
+  };
 
   const publishedOffers = useMemo(
     () => submissions.filter(isMarketplaceOffer).filter((offer) => offer.status === "active"),
@@ -427,6 +454,17 @@ export function SellerDashboard({ locale, onNotice, subplatform }: SellerDashboa
         <p className="seller-upload-intro">
           {copy("uploadDescription", "字段由当前子平台的 schema 定义。根平台只保存结构化 JSON，不会替供给方猜测或填充领域信息。")}
         </p>
+        {agentDraft ? (
+          <div className="seller-agent-draft" role="status">
+            <div>
+              <strong>{copy("agentDraftTitle", "对话草稿已准备好", "Conversation draft ready")}</strong>
+              <p>{agentDraft.narrative}</p>
+            </div>
+            <button className="text-action" type="button" onClick={importAgentDraft} disabled={draftImported}>
+              {draftImported ? copy("agentDraftImportedLabel", "已放入编辑器", "Added to editor") : copy("agentDraftImportLabel", "放入编辑器", "Add to editor")}
+            </button>
+          </div>
+        ) : null}
         <form className="seller-upload-form" onSubmit={submit}>
           <label htmlFor="seller-display-name">
             <span>{copy("offerNameLabel", "供给名称")}</span>
@@ -572,8 +610,8 @@ export function SellerDashboard({ locale, onNotice, subplatform }: SellerDashboa
                                 <div>
                                   <strong>{demand.narrative}</strong>
                                   <small>
-                                    {Math.round(Math.max(0, Math.min(1, demand.score)) * 100)}% {copy("relevanceLabel", "相关", "relevant")}
-                                    {demand.reasons.length ? ` · ${demand.reasons.slice(0, 2).join("、")}` : ""}
+                                    {demandMatchLevel(demand.score, locale)} · {copy("relevanceLabel", "相关", "relevant")}
+                                    {demand.reasons.length ? ` · ${demand.reasons.slice(0, 2).join(locale === "en" ? ", " : "、")}` : ""}
                                   </small>
                                 </div>
                                 <span className="submission-status">{copy("waitingDemandContactLabel", "等待需求方联系", "Waiting for the buyer to make contact")}</span>
@@ -640,6 +678,14 @@ function amountPlaceholder(scale: number, locale: InterfaceLocale = "zh"): strin
   return locale === "en"
     ? (scale > 0 ? `e.g. 1000.${"0".repeat(Math.min(scale, 2))}` : "e.g. 1000")
     : (scale > 0 ? `例如 1000.${"0".repeat(Math.min(scale, 2))}` : "例如 1000");
+}
+
+function demandMatchLevel(score: number, locale: InterfaceLocale): string {
+  const bounded = Math.max(0, Math.min(1, score));
+  if (locale === "en") {
+    return bounded >= 0.8 ? "Strong fit" : bounded >= 0.6 ? "Good fit" : bounded >= 0.4 ? "Possible fit" : "Weak fit";
+  }
+  return bounded >= 0.8 ? "非常适合" : bounded >= 0.6 ? "比较适合" : bounded >= 0.4 ? "一般" : "不太适合";
 }
 
 function sellerRecordId(record: SellerRecord): string {

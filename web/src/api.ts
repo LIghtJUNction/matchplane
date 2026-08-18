@@ -167,6 +167,32 @@ export interface PlatformSetupStatus {
   firstRun: { needsRootAccount: boolean; readyForAdmin: boolean };
 }
 
+export interface PlatformAiStatus {
+  router: {
+    configured: boolean;
+    protocol: "openai-compatible";
+    model: string | null;
+    endpointOrigin: string | null;
+    toolMode: "auto" | "required" | "disabled";
+    maxInputCharacters: number;
+    maxOutputTokens: number;
+    totalTimeoutMs: number;
+    maxSteps: number;
+    maxFanout: number;
+    requestsPerHour: number;
+    globalRequestsPerHour: number;
+  };
+  auth: {
+    primary: string[];
+    fallback: string[];
+    password: boolean;
+    emailOtp: boolean;
+    phoneOtp: boolean;
+    magicLink: boolean;
+    passkey: boolean;
+  };
+}
+
 export interface PlatformSiteSettings {
   organization_id: string;
   tenant_id: string;
@@ -728,6 +754,19 @@ export interface MarketplaceOffer {
 export interface MarketplaceOfferCandidate extends MarketplaceOffer {
   score: number;
   reasons: string[];
+  risks?: string[];
+}
+
+export interface MarketplaceOfferPreference {
+  tenant_id: string;
+  domain_id: string;
+  participant_id: string;
+  offer_id: string;
+  state: "saved" | "dismissed" | "neutral" | string;
+  reason?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Contact-free demand projection returned only after the demand participant opts in. */
@@ -795,6 +834,7 @@ export interface RecommendedBackendListing {
   status?: string;
   match_score?: number;
   match_reasons?: string[];
+  match_risks?: string[];
   [key: string]: unknown;
 }
 
@@ -972,6 +1012,19 @@ export async function getPlatformSetupStatus(): Promise<PlatformSetupStatus> {
     throw new MarketplaceApiError(response.status, "平台初始化状态暂时不可用");
   }
   return body as PlatformSetupStatus;
+}
+
+export async function getPlatformAiStatus(): Promise<PlatformAiStatus> {
+  const response = await fetch("/api/platform/ai/status", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null) as PlatformAiStatus & { error?: string } | null;
+  if (!response.ok || !body?.router || !body.auth) {
+    throw new MarketplaceApiError(response.status, body?.error || "AI 与登录配置读取失败");
+  }
+  return body;
 }
 
 export async function getPublicPlatformSiteSettings(platformPath = "/"): Promise<PlatformSiteSettings> {
@@ -1260,6 +1313,7 @@ export async function querySubplatformRetrieval(input: {
       ...(candidate.terms === undefined ? {} : { terms: candidate.terms }),
       score: candidate.score,
       reasons: candidate.reasons,
+      ...(candidate.risks === undefined ? {} : { risks: candidate.risks }),
       ...(candidate.metadata === undefined ? {} : { metadata: candidate.metadata }),
     })),
     degraded: result.degraded,
@@ -1279,6 +1333,7 @@ interface RetrievalWireResult {
     terms?: Record<string, unknown>;
     score: number;
     reasons: string[];
+    risks?: string[];
     metadata?: Record<string, unknown>;
   }>;
   degraded: boolean;
@@ -1657,6 +1712,189 @@ export function createMarketplaceIntent(input: {
         supply_discovery_enabled: input.supplyDiscoveryEnabled ?? false,
         supply_discovery_expires_at: input.supplyDiscoveryExpiresAt ?? null,
         idempotency_key: input.idempotencyKey,
+      }),
+    },
+    input.session,
+  );
+}
+
+export interface MarketplaceIntentState {
+  intent_id: string;
+  tenant_id: string;
+  domain_id: string;
+  participant_id: string;
+  side: "demand" | "supply" | string;
+  narrative: string;
+  attributes: Record<string, unknown>;
+  terms: Record<string, unknown>;
+  status: string;
+  version: number;
+  [key: string]: unknown;
+}
+
+/** Continue an existing conversation without creating a new demand on every turn. */
+export function updateMarketplaceIntent(input: {
+  session: PartySession;
+  domainId: string;
+  intentId: string;
+  narrative: string;
+  attributes?: Record<string, unknown>;
+  terms?: Record<string, unknown>;
+  expectedVersion: number;
+}): Promise<MarketplaceIntentState> {
+  return request<MarketplaceIntentState>(
+    `/v1/marketplace/intents/${encodeURIComponent(input.intentId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        narrative: input.narrative,
+        attributes: input.attributes ?? {},
+        terms: input.terms ?? {},
+        expected_version: input.expectedVersion,
+      }),
+    },
+    input.session,
+  );
+}
+
+export interface MarketplaceIntentProfileState {
+  tenant_id: string;
+  domain_id: string;
+  participant_id: string;
+  profile: Record<string, unknown>;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getMarketplaceProfile(input: {
+  session: PartySession;
+  domainId: string;
+}): Promise<MarketplaceIntentProfileState | null> {
+  const params = new URLSearchParams({
+    tenant_id: input.session.tenantId,
+    domain_id: input.domainId,
+    participant_id: input.session.partyId,
+  });
+  return request<MarketplaceIntentProfileState | null>(
+    `/v1/marketplace/profile?${params.toString()}`,
+    { cache: "no-store" },
+    input.session,
+  );
+}
+
+/** Persist an opaque, subplatform-owned understanding; the kernel only versions and scopes it. */
+export function upsertMarketplaceProfile(input: {
+  session: PartySession;
+  domainId: string;
+  profile: Record<string, unknown>;
+}): Promise<MarketplaceIntentProfileState> {
+  return request<MarketplaceIntentProfileState>(
+    "/v1/marketplace/profile",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        profile: input.profile,
+      }),
+    },
+    input.session,
+  );
+}
+
+export function recordMarketplaceBehaviorEvent(input: {
+  session: PartySession;
+  domainId: string;
+  eventType: string;
+  offerId?: string;
+  intentId?: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+  idempotencyKey?: string;
+}): Promise<{ event_id: string; duplicate: boolean }> {
+  return request<{ event_id: string; duplicate: boolean }>(
+    "/v1/marketplace/events",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        ...(input.intentId ? { intent_id: input.intentId } : {}),
+        ...(input.offerId ? { offer_id: input.offerId } : {}),
+        event_type: input.eventType,
+        ...(input.reason ? { reason: input.reason } : {}),
+        metadata: input.metadata ?? {},
+        idempotency_key: input.idempotencyKey ?? `web-${input.eventType}-${crypto.randomUUID()}`,
+      }),
+    },
+    input.session,
+  );
+}
+
+export function getMarketplaceOfferPreferences(input: {
+  session: PartySession;
+  domainId: string;
+}): Promise<MarketplaceOfferPreference[]> {
+  const params = new URLSearchParams({
+    tenant_id: input.session.tenantId,
+    domain_id: input.domainId,
+    participant_id: input.session.partyId,
+  });
+  return request<{ preferences: MarketplaceOfferPreference[] }>(
+    `/v1/marketplace/preferences?${params.toString()}`,
+    { cache: "no-store" },
+    input.session,
+  ).then((response) => response.preferences);
+}
+
+export function setMarketplaceOfferPreference(input: {
+  session: PartySession;
+  domainId: string;
+  offerId: string;
+  state: "saved" | "dismissed" | "neutral";
+  reason?: string;
+}): Promise<MarketplaceOfferPreference> {
+  return request<MarketplaceOfferPreference>(
+    "/v1/marketplace/preferences",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        offer_id: input.offerId,
+        state: input.state,
+        ...(input.reason ? { reason: input.reason } : {}),
+      }),
+    },
+    input.session,
+  );
+}
+
+export function createMarketplaceSalesHandoff(input: {
+  session: PartySession;
+  domainId: string;
+  intentId?: string;
+  summary: Record<string, unknown>;
+  idempotencyKey?: string;
+}): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>(
+    "/v1/marketplace/sales-handoffs",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        participant_id: input.session.partyId,
+        ...(input.intentId ? { intent_id: input.intentId } : {}),
+        summary: input.summary,
+        idempotency_key: input.idempotencyKey ?? `web-sales-handoff-${crypto.randomUUID()}`,
       }),
     },
     input.session,
