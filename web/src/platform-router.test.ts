@@ -28,6 +28,7 @@ const candidates: PlatformRouteCandidate[] = [
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   delete process.env.MATCHPLANE_ROUTER_AI_URL;
   delete process.env.MATCHPLANE_ROUTER_AI_KEY;
   delete process.env.MATCHPLANE_ROUTER_AI_MODEL;
@@ -228,6 +229,26 @@ describe("platform Agent router", () => {
     expect(decision.source).toBe("policy_fallback");
     expect(decision.rationale).toContain("总时限");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("caps each provider hop even when the recursive deadline has more time", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ selectedSlugs: ["used-car"] }) } }],
+    }), { status: 200 })));
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "找一台车",
+      candidates,
+      deadlineAt: Date.now() + 20_000,
+    });
+
+    expect(decision.source).toBe("ai");
+    expect(timeoutSpy).toHaveBeenCalledWith(4_000);
   });
 
   it("does not call an insecure provider endpoint in production", async () => {

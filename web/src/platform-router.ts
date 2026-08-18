@@ -154,6 +154,10 @@ export async function decidePlatformRoutes(input: {
         };
       }
     }
+    // The recursive orchestrator owns the larger request deadline, but one
+    // provider hop must stay bounded so a slow model cannot consume the whole
+    // budget and starve every descendant node.
+    const providerTimeoutMs = Math.min(remaining ?? DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -162,7 +166,7 @@ export async function decidePlatformRoutes(input: {
         "content-type": "application/json",
       },
       body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(remaining ?? DEFAULT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(providerTimeoutMs),
     });
     if (!response.ok) throw new Error(`router provider returned ${response.status}`);
     const payload = await readJsonResponseBody<unknown>(response, MAX_ROUTER_RESPONSE_BYTES);
