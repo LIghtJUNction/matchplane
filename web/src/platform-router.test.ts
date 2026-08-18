@@ -37,6 +37,7 @@ afterEach(() => {
   delete process.env.MATCHPLANE_ROUTER_AI_URL;
   delete process.env.MATCHPLANE_ROUTER_AI_KEY;
   delete process.env.MATCHPLANE_ROUTER_AI_MODEL;
+  delete process.env.MATCHPLANE_ROUTER_AI_PROTOCOL;
   delete process.env.MATCHPLANE_ROUTER_AI_MAX_TOKENS;
   delete process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE;
   delete process.env.MATCHPLANE_ENVIRONMENT;
@@ -63,8 +64,94 @@ describe("platform Agent router", () => {
     ]);
   });
 
+  it("uses the Anthropic Messages protocol without exposing a bearer credential", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "https://api.anthropic.com/v1/messages";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "claude-test";
+    process.env.MATCHPLANE_ROUTER_AI_PROTOCOL = "anthropic-messages";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(init?.headers).toEqual(expect.objectContaining({
+        "x-api-key": "server-only-key",
+        "anthropic-version": "2023-06-01",
+      }));
+      expect(init?.headers).not.toEqual(expect.objectContaining({ authorization: expect.anything() }));
+      expect(body.model).toBe("claude-test");
+      expect(body.system).toEqual(expect.any(String));
+      expect(body.messages).toEqual([expect.objectContaining({ role: "user" })]);
+      expect(body.tools).toEqual([expect.objectContaining({ name: "matchplane_platform_select_children" })]);
+      return new Response(JSON.stringify({
+        content: [{
+          type: "tool_use",
+          name: "matchplane_platform_select_children",
+          input: { selectedSlugs: ["electronics"], rationale: "消费电子", confidence: 0.9 },
+        }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "我想买一台轻薄笔记本",
+      candidates,
+    });
+
+    expect(decision.selectedSlugs).toEqual(["electronics"]);
+    expect(decision.routeMechanism).toBe("mcp_tool");
+    expect(decision.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
+  });
+
+  it("uses the Gemini GenerateContent protocol and model-scoped endpoint", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "https://generativelanguage.googleapis.com/v1beta";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "gemini-2.0-flash";
+    process.env.MATCHPLANE_ROUTER_AI_PROTOCOL = "gemini-generate-content";
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent");
+      expect(init?.headers).toEqual(expect.objectContaining({ "x-goog-api-key": "server-only-key" }));
+      expect(init?.headers).not.toEqual(expect.objectContaining({ authorization: expect.anything() }));
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.contents).toEqual([expect.objectContaining({ role: "user" })]);
+      expect(body.tools).toEqual([expect.objectContaining({ functionDeclarations: expect.any(Array) })]);
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{
+          functionCall: {
+            name: "matchplane_platform_select_children",
+            args: { selectedSlugs: ["used-car"], rationale: "车辆", confidence: 0.86 },
+          },
+        }] } }],
+        usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 6, totalTokenCount: 17 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "我想找一台二手车",
+      candidates,
+    });
+
+    expect(decision.selectedSlugs).toEqual(["used-car"]);
+    expect(decision.routeMechanism).toBe("mcp_tool");
+    expect(decision.usage).toEqual({ promptTokens: 11, completionTokens: 6, totalTokens: 17 });
+  });
+
   it("reports an unconfigured provider without making a network request", async () => {
     const fetchMock = vi.fn();
+    const result = await probePlatformRouter({ fetcher: fetchMock as unknown as typeof fetch });
+
+    expect(result.status).toBe("unconfigured");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for an unsupported provider protocol", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    process.env.MATCHPLANE_ROUTER_AI_PROTOCOL = "made-up-protocol";
+    const fetchMock = vi.fn();
+
     const result = await probePlatformRouter({ fetcher: fetchMock as unknown as typeof fetch });
 
     expect(result.status).toBe("unconfigured");

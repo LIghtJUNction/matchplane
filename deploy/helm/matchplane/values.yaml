@@ -43,6 +43,7 @@ web:
   # The router provider is optional. Keep its API key in existingWebSecret under router-ai-key.
   routerAiUrl: ''
   routerAiModel: ''
+  routerAiProtocol: openai-compatible
   routerAiMaxTokens: 512
   routerAiToolMode: auto
   routerAiMaxSteps: 8

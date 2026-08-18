@@ -8,7 +8,10 @@ import {
 import { isRootEmailAuthConfigured } from "../../../../../src/lib/mail";
 import { isPhoneOtpConfigured } from "../../../../../src/lib/sms";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
-import { isPlatformRouterConfigured } from "../../../../../src/platform-router";
+import {
+  configuredPlatformRouterProtocol,
+  isPlatformRouterConfigured,
+} from "../../../../../src/platform-router";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +41,7 @@ export async function GET(request: Request): Promise<Response> {
     {
       router: {
         configured: isPlatformRouterConfigured(),
-        protocol: "openai-compatible",
+        protocol: configuredPlatformRouterProtocol(),
         model,
         endpointOrigin: endpoint,
         toolMode,

@@ -71,8 +71,18 @@ const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
 const MAX_ROUTER_RESPONSE_BYTES = 256 * 1024;
 const DEFAULT_FALLBACK_CHILDREN = 4;
 const ROUTER_TOOL_NAME = "matchplane.platform.select_children";
+// Gemini function declarations reject dots in names. Native providers use this
+// wire-safe alias while the audit/event contract keeps the canonical tool name.
+const NATIVE_ROUTER_TOOL_NAME = "matchplane_platform_select_children";
+const DEFAULT_ROUTER_PROTOCOL = "openai-compatible";
 
 type RouterToolMode = "auto" | "required" | "disabled";
+
+/** Native wire protocols accepted at the server-side provider boundary. */
+export type PlatformRouterProtocol =
+  | "openai-compatible"
+  | "anthropic-messages"
+  | "gemini-generate-content";
 
 export async function decidePlatformRoutes(input: {
   platformPath: string;
@@ -107,7 +117,8 @@ export async function decidePlatformRoutes(input: {
   const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
   const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
-  if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) {
+  const protocol = configuredPlatformRouterProtocol();
+  if (!isPlatformRouterConfigured() || !endpoint || !apiKey || !model) {
     return policyFallback(candidates, input.narrative, "AI 路由服务未配置，使用受控相关性降级。", null);
   }
 
@@ -122,55 +133,31 @@ export async function decidePlatformRoutes(input: {
       return policyFallback(candidates, input.narrative, "平台路由达到本次请求的总时限，使用受控相关性降级。", model);
     }
     const toolMode = configuredToolMode();
-    const requestBody: Record<string, unknown> = {
+    const providerRequest = buildProviderRequest({
+      endpoint,
+      apiKey,
       model,
-      temperature: 0,
-      max_tokens: configuredMaxTokens(),
-      messages: [
-        {
-          role: "system",
-          content:
-            toolMode === "disabled"
-              ? "你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。返回 JSON：selectedSlugs(string[]), rationale(string), confidence(number 0..1)。如果没有合适候选，selectedSlugs 返回空数组。"
-              : `你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。优先调用 ${ROUTER_TOOL_NAME} 完成选择；不要调用未声明的工具。`,
-        },
-        {
-          role: "user",
-          // Candidate metadata is public routing context, but it is still
-          // bounded before it reaches the provider so a tenant cannot make
-          // the platform pay for an unbounded prompt.
-          content: boundedProviderIntent(input, candidates),
-        },
-      ],
-    };
-    if (toolMode === "disabled") {
-      requestBody.response_format = { type: "json_object" };
-    } else {
-      requestBody.tools = [routerSelectionTool(candidates)];
-      if (toolMode === "required") {
-        requestBody.tool_choice = {
-          type: "function",
-          function: { name: ROUTER_TOOL_NAME },
-        };
-      }
-    }
+      protocol,
+      toolMode,
+      candidates,
+      systemPrompt: toolMode === "disabled"
+        ? "你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。返回 JSON：selectedSlugs(string[]), rationale(string), confidence(number 0..1)。如果没有合适候选，selectedSlugs 返回空数组。"
+        : `你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。优先调用 ${ROUTER_TOOL_NAME} 完成选择；不要调用未声明的工具。`,
+      userContent: boundedProviderIntent(input, candidates),
+    });
     // The recursive orchestrator owns the larger request deadline, but one
     // provider hop must stay bounded so a slow model cannot consume the whole
     // budget and starve every descendant node.
     const providerTimeoutMs = Math.min(remaining ?? DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
-    const response = await fetch(endpoint, {
+    const response = await fetch(providerRequest.url, {
       method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
+      headers: providerRequest.headers,
+      body: JSON.stringify(providerRequest.body),
       signal: AbortSignal.timeout(providerTimeoutMs),
     });
     if (!response.ok) throw new Error(`router provider returned ${response.status}`);
     const payload = await readJsonResponseBody<unknown>(response, MAX_ROUTER_RESPONSE_BYTES);
-    const providerDecision = readProviderDecision(payload, candidates);
+    const providerDecision = readProviderDecision(payload, candidates, protocol);
     return {
       ...providerDecision.decision,
       source: "ai",
@@ -179,7 +166,7 @@ export async function decidePlatformRoutes(input: {
       degraded: false,
       costBearer: "platform",
       budget: currentBudget(),
-      usage: readUsage(payload),
+      usage: readUsage(payload, protocol),
     };
   } catch (error) {
     if (error instanceof PlatformRouterQuotaExceededError) throw error;
@@ -231,7 +218,19 @@ export function isPlatformRouterConfigured(): boolean {
   const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
   const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim();
-  return Boolean(endpoint && apiKey && model && isAllowedEndpoint(endpoint));
+  const rawProtocol = process.env.MATCHPLANE_ROUTER_AI_PROTOCOL?.trim().toLowerCase();
+  const supportedProtocol = !rawProtocol
+    || rawProtocol === "openai-compatible"
+    || rawProtocol === "anthropic-messages"
+    || rawProtocol === "gemini-generate-content";
+  return Boolean(endpoint && apiKey && model && supportedProtocol && isAllowedEndpoint(endpoint));
+}
+
+export function configuredPlatformRouterProtocol(): PlatformRouterProtocol {
+  const value = process.env.MATCHPLANE_ROUTER_AI_PROTOCOL?.trim().toLowerCase();
+  return value === "anthropic-messages" || value === "gemini-generate-content"
+    ? value
+    : DEFAULT_ROUTER_PROTOCOL;
 }
 
 export interface PlatformRouterProbeResult {
@@ -256,8 +255,9 @@ export async function probePlatformRouter(options: {
   const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
   const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
+  const protocol = configuredPlatformRouterProtocol();
   const startedAt = Date.now();
-  if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) {
+  if (!isPlatformRouterConfigured() || !endpoint || !apiKey || !model) {
     return {
       status: "unconfigured",
       model,
@@ -272,31 +272,28 @@ export async function probePlatformRouter(options: {
     : 4_000;
   const fetcher = options.fetcher ?? fetch;
   try {
-    const response = await fetcher(endpoint, {
+    const providerRequest = buildProviderRequest({
+      endpoint,
+      apiKey,
+      model,
+      protocol,
+      toolMode: "disabled",
+      candidates: [],
+      systemPrompt: "Respond with one short token.",
+      userContent: "healthcheck",
+      maxOutputTokens: 1,
+    });
+    const response = await fetcher(providerRequest.url, {
       method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        max_tokens: 1,
-        messages: [
-          { role: "system", content: "Respond with one short token." },
-          { role: "user", content: "healthcheck" },
-        ],
-      }),
+      headers: providerRequest.headers,
+      body: JSON.stringify(providerRequest.body),
       signal: AbortSignal.timeout(timeoutMs),
       cache: "no-store",
     });
     const payload = await readJsonResponseBody<unknown>(response, 64 * 1024);
-    const hasChoices = isRecord(payload)
-      && Array.isArray(payload.choices)
-      && payload.choices.length > 0;
+    const hasOutput = hasProviderOutput(payload, protocol);
     const latencyMs = Math.max(0, Date.now() - startedAt);
-    if (!response.ok || !hasChoices) {
+    if (!response.ok || !hasOutput) {
       return {
         status: "failed",
         model,
@@ -304,7 +301,7 @@ export async function probePlatformRouter(options: {
         latencyMs,
         message: !response.ok
           ? `模型网关返回 HTTP ${response.status}。`
-          : "模型网关响应缺少 choices。",
+          : "模型网关响应缺少可读内容。",
       };
     }
     return {
@@ -441,14 +438,17 @@ function boundedProviderIntent(
   });
 }
 
-function readUsage(value: unknown): PlatformRouteUsage | null {
+function readUsage(value: unknown, protocol: PlatformRouterProtocol): PlatformRouteUsage | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const usage = (value as { usage?: unknown }).usage;
+  const usage = protocol === "gemini-generate-content"
+    ? (value as { usageMetadata?: unknown }).usageMetadata
+    : (value as { usage?: unknown }).usage;
   if (!usage || typeof usage !== "object" || Array.isArray(usage)) return null;
   const record = usage as Record<string, unknown>;
-  const promptTokens = finiteNonNegativeInteger(record.prompt_tokens);
-  const completionTokens = finiteNonNegativeInteger(record.completion_tokens);
-  const totalTokens = finiteNonNegativeInteger(record.total_tokens);
+  const promptTokens = finiteNonNegativeInteger(protocol === "gemini-generate-content" ? record.promptTokenCount : protocol === "anthropic-messages" ? record.input_tokens : record.prompt_tokens);
+  const completionTokens = finiteNonNegativeInteger(protocol === "gemini-generate-content" ? record.candidatesTokenCount : protocol === "anthropic-messages" ? record.output_tokens : record.completion_tokens);
+  const reportedTotal = finiteNonNegativeInteger(protocol === "gemini-generate-content" ? record.totalTokenCount : record.total_tokens);
+  const totalTokens = reportedTotal ?? (promptTokens !== null && completionTokens !== null ? promptTokens + completionTokens : null);
   if (promptTokens === null || completionTokens === null || totalTokens === null) return null;
   return { promptTokens, completionTokens, totalTokens };
 }
@@ -477,27 +477,130 @@ function configuredToolMode(): RouterToolMode {
 function routerSelectionTool(candidates: PlatformRouteCandidate[]): Record<string, unknown> {
   return {
     type: "function",
-    function: {
-      name: ROUTER_TOOL_NAME,
-      description: "从当前节点已授权的候选子平台中选择下一跳；不得创造候选之外的 slug。",
-      strict: true,
-      parameters: {
-        type: "object",
-        additionalProperties: false,
-        required: ["selectedSlugs", "rationale", "confidence"],
-        properties: {
-          selectedSlugs: {
-            type: "array",
-            maxItems: candidates.length,
-            uniqueItems: true,
-            items: { type: "string", enum: candidates.map((candidate) => candidate.slug) },
-          },
-          rationale: { type: "string", maxLength: MAX_RATIONALE_LENGTH },
-          confidence: { type: "number", minimum: 0, maximum: 1 },
-        },
+    function: routerSelectionFunction(candidates),
+  };
+}
+
+function routerSelectionFunction(candidates: PlatformRouteCandidate[]): Record<string, unknown> {
+  return {
+    name: ROUTER_TOOL_NAME,
+    description: "从当前节点已授权的候选子平台中选择下一跳；不得创造候选之外的 slug。",
+    strict: true,
+    parameters: routerSelectionParameters(candidates),
+  };
+}
+
+function routerSelectionParameters(candidates: PlatformRouteCandidate[]): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["selectedSlugs", "rationale", "confidence"],
+    properties: {
+      selectedSlugs: {
+        type: "array",
+        maxItems: candidates.length,
+        uniqueItems: true,
+        items: { type: "string", enum: candidates.map((candidate) => candidate.slug) },
       },
+      rationale: { type: "string", maxLength: MAX_RATIONALE_LENGTH },
+      confidence: { type: "number", minimum: 0, maximum: 1 },
     },
   };
+}
+
+interface ProviderRequest {
+  url: string;
+  headers: Record<string, string>;
+  body: Record<string, unknown>;
+}
+
+function buildProviderRequest(input: {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  protocol: PlatformRouterProtocol;
+  toolMode: RouterToolMode;
+  candidates: PlatformRouteCandidate[];
+  systemPrompt: string;
+  userContent: string;
+  maxOutputTokens?: number;
+}): ProviderRequest {
+  const maxOutputTokens = input.maxOutputTokens ?? configuredMaxTokens();
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    "content-type": "application/json",
+  };
+  if (input.protocol === "anthropic-messages") {
+    headers["x-api-key"] = input.apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+    const body: Record<string, unknown> = {
+      model: input.model,
+      max_tokens: maxOutputTokens,
+      temperature: 0,
+      system: input.systemPrompt,
+      messages: [{ role: "user", content: input.userContent }],
+    };
+    if (input.toolMode !== "disabled") {
+      body.tools = [{
+        name: NATIVE_ROUTER_TOOL_NAME,
+        description: "从当前节点已授权的候选子平台中选择下一跳；不得创造候选之外的 slug。",
+        input_schema: routerSelectionParameters(input.candidates),
+      }];
+      if (input.toolMode === "required") body.tool_choice = { type: "tool", name: NATIVE_ROUTER_TOOL_NAME };
+    }
+    return { url: input.endpoint, headers, body };
+  }
+  if (input.protocol === "gemini-generate-content") {
+    headers["x-goog-api-key"] = input.apiKey;
+    const body: Record<string, unknown> = {
+      systemInstruction: { parts: [{ text: input.systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: input.userContent }] }],
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens,
+        ...(input.toolMode === "disabled" ? { responseMimeType: "application/json" } : {}),
+      },
+    };
+    if (input.toolMode !== "disabled") {
+      body.tools = [{ functionDeclarations: [geminiRouterFunction(input.candidates)] }];
+      if (input.toolMode === "required") {
+        body.toolConfig = { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [NATIVE_ROUTER_TOOL_NAME] } };
+      }
+    }
+    return { url: geminiEndpoint(input.endpoint, input.model), headers, body };
+  }
+
+  headers.authorization = `Bearer ${input.apiKey}`;
+  const body: Record<string, unknown> = {
+    model: input.model,
+    temperature: 0,
+    max_tokens: maxOutputTokens,
+    messages: [
+      { role: "system", content: input.systemPrompt },
+      { role: "user", content: input.userContent },
+    ],
+  };
+  if (input.toolMode === "disabled") {
+    body.response_format = { type: "json_object" };
+  } else {
+    body.tools = [routerSelectionTool(input.candidates)];
+    if (input.toolMode === "required") body.tool_choice = { type: "function", function: { name: ROUTER_TOOL_NAME } };
+  }
+  return { url: input.endpoint, headers, body };
+}
+
+function geminiRouterFunction(candidates: PlatformRouteCandidate[]): Record<string, unknown> {
+  const fn = routerSelectionFunction(candidates);
+  return {
+    name: NATIVE_ROUTER_TOOL_NAME,
+    description: fn.description,
+    parameters: fn.parameters,
+  };
+}
+
+function geminiEndpoint(endpoint: string, model: string): string {
+  if (endpoint.includes(":generateContent")) return endpoint;
+  return `${endpoint.replace(/\/$/, "")}/models/${encodeURIComponent(model)}:generateContent`;
 }
 
 function normalizeDecision(
@@ -545,12 +648,12 @@ function readProviderContent(value: unknown): string {
 function readProviderDecision(
   value: unknown,
   candidates: PlatformRouteCandidate[],
+  protocol: PlatformRouterProtocol,
 ): {
   decision: Omit<PlatformRouteDecision, "source" | "model" | "degraded" | "costBearer" | "budget" | "usage">;
   routeMechanism: "mcp_tool" | "structured_json";
 } {
-  const message = readProviderMessage(value);
-  const toolCall = readRouterToolCall(message);
+  const toolCall = readProviderToolCall(value, protocol);
   if (toolCall) {
     return {
       decision: normalizeDecision(JSON.parse(toolCall), candidates),
@@ -558,9 +661,71 @@ function readProviderDecision(
     };
   }
   return {
-    decision: normalizeDecision(JSON.parse(readProviderContent(value)), candidates),
+    decision: normalizeDecision(JSON.parse(readProviderText(value, protocol)), candidates),
     routeMechanism: "structured_json",
   };
+}
+
+function readProviderText(value: unknown, protocol: PlatformRouterProtocol): string {
+  if (protocol === "anthropic-messages") {
+    if (!isRecord(value) || !Array.isArray(value.content)) throw new Error("AI 路由响应缺少 content");
+    const text = value.content
+      .filter((part): part is { type?: unknown; text: string } => isRecord(part) && part.type === "text" && typeof part.text === "string")
+      .map((part) => part.text)
+      .join("");
+    if (!text) throw new Error("AI 路由响应 content 无效");
+    return text;
+  }
+  if (protocol === "gemini-generate-content") {
+    const parts = geminiParts(value);
+    const text = parts
+      .filter((part): part is { text: string } => typeof part.text === "string")
+      .map((part) => part.text)
+      .join("");
+    if (!text) throw new Error("AI 路由响应 content 无效");
+    return text;
+  }
+  return readProviderContent(value);
+}
+
+function readProviderToolCall(value: unknown, protocol: PlatformRouterProtocol): string | null {
+  if (protocol === "anthropic-messages") {
+    if (!isRecord(value) || !Array.isArray(value.content)) return null;
+    const call = value.content.find((part) => isRecord(part) && part.type === "tool_use" && isRouterToolName(part.name));
+    if (!call || !isRecord(call)) return null;
+    return isRecord(call.input) ? JSON.stringify(call.input) : null;
+  }
+  if (protocol === "gemini-generate-content") {
+    const call = geminiParts(value).find((part) => {
+      const functionCall = isRecord(part.functionCall) ? part.functionCall : null;
+      return isRouterToolName(functionCall?.name);
+    });
+    if (!call) return null;
+    const functionCall = isRecord(call.functionCall) ? call.functionCall : null;
+    return functionCall && isRecord(functionCall.args) ? JSON.stringify(functionCall.args) : null;
+  }
+  return readRouterToolCall(readProviderMessage(value));
+}
+
+function geminiParts(value: unknown): Array<Record<string, unknown>> {
+  if (!isRecord(value) || !Array.isArray(value.candidates) || !isRecord(value.candidates[0])) {
+    throw new Error("AI 路由响应缺少 candidates");
+  }
+  const content = value.candidates[0].content;
+  if (!isRecord(content) || !Array.isArray(content.parts)) throw new Error("AI 路由响应缺少 parts");
+  return content.parts.filter(isRecord);
+}
+
+function hasProviderOutput(value: unknown, protocol: PlatformRouterProtocol): boolean {
+  try {
+    if (protocol === "anthropic-messages") {
+      return isRecord(value) && Array.isArray(value.content) && value.content.some((part) => isRecord(part) && (part.type === "text" || part.type === "tool_use"));
+    }
+    if (protocol === "gemini-generate-content") return geminiParts(value).length > 0;
+    return isRecord(value) && Array.isArray(value.choices) && value.choices.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function readProviderMessage(value: unknown): Record<string, unknown> {
@@ -581,7 +746,7 @@ function readRouterToolCall(message: Record<string, unknown>): string | null {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
     const fn = (candidate as { function?: unknown }).function;
     return Boolean(fn && typeof fn === "object" && !Array.isArray(fn)
-      && (fn as { name?: unknown }).name === ROUTER_TOOL_NAME);
+      && isRouterToolName((fn as { name?: unknown }).name));
   });
   if (!call || typeof call !== "object" || Array.isArray(call)) throw new Error("AI 路由工具调用无效");
   const args = (call as { function?: unknown }).function;
@@ -595,7 +760,9 @@ function readRouterToolCall(message: Record<string, unknown>): string | null {
 function isAllowedEndpoint(value: string): boolean {
   try {
     const url = new URL(value);
-    if (url.username || url.password || url.hash) return false;
+    // Provider credentials must stay in headers; rejecting query strings also
+    // prevents accidental leakage through logs, traces, and reverse proxies.
+    if (url.username || url.password || url.hash || url.search) return false;
     if (isProductionEnvironment()) {
       return url.protocol === "https:";
     }
@@ -603,6 +770,10 @@ function isAllowedEndpoint(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isRouterToolName(value: unknown): boolean {
+  return value === ROUTER_TOOL_NAME || value === NATIVE_ROUTER_TOOL_NAME;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

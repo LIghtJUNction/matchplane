@@ -239,6 +239,8 @@ spec:
               value: {{ $root.Values.web.routerAiUrl | quote }}
             - name: MATCHPLANE_ROUTER_AI_MODEL
               value: {{ $root.Values.web.routerAiModel | quote }}
+            - name: MATCHPLANE_ROUTER_AI_PROTOCOL
+              value: {{ $root.Values.web.routerAiProtocol | quote }}
             - name: MATCHPLANE_ROUTER_AI_MAX_TOKENS
               value: {{ $root.Values.web.routerAiMaxTokens | quote }}
             - name: MATCHPLANE_ROUTER_AI_TOOL_MODE

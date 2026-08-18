@@ -1,6 +1,6 @@
 # AI 模型接入边界
 
-MatchPlane 的根平台只需要一个受限的“平台路由器”模型调用，不把供应商 SDK 或 API key 放进 Rust 核心，也不把模型调用下放给子平台。当前 `web/src/platform-router.ts` 使用 OpenAI-compatible Chat Completions 线协议：服务端读取 `MATCHPLANE_ROUTER_AI_URL`、`MATCHPLANE_ROUTER_AI_KEY` 和 `MATCHPLANE_ROUTER_AI_MODEL`，只发送已激活候选节点的公开路由描述，严格限制工具参数为候选 slug，并把模型不可用时的策略降级记录为 `degraded`。
+MatchPlane 的根平台只需要一个受限的“平台路由器”模型调用，不把供应商 SDK 或 API key 放进 Rust 核心，也不把模型调用下放给子平台。`web/src/platform-router.ts` 支持三种服务端线协议：OpenAI-compatible Chat Completions、Anthropic Messages、Gemini GenerateContent。服务端读取 `MATCHPLANE_ROUTER_AI_URL`、`MATCHPLANE_ROUTER_AI_KEY`、`MATCHPLANE_ROUTER_AI_MODEL` 和 `MATCHPLANE_ROUTER_AI_PROTOCOL`，只发送已激活候选节点的公开路由描述，严格限制工具参数为候选 slug，并把模型不可用时的策略降级记录为 `degraded`。
 
 因此接入模型的最短路径不是修改 Agent 或子平台，而是在平台边界接一个模型网关：
 
@@ -19,7 +19,10 @@ LiteLLM / Vercel AI Gateway / vLLM / Ollama / 自建兼容网关
 - 需要统一接入很多原生协议、做模型路由、fallback、预算和用量统计时，优先使用自托管 LiteLLM；把 MatchPlane 的 URL 指向 LiteLLM 的 OpenAI-compatible 入口，`MODEL` 使用网关支持的 `provider/model` 名称。
 - 已经运行 Vercel/Next.js，并希望在 TypeScript 中使用原生 provider、结构化输出和工具调用时，可在网关层增加 Vercel AI SDK（`ai` 加对应的 `@ai-sdk/*` provider）。不要把这些 provider 包塞进 Rust 核心。
 - MCP 是 Agent 的工具/数据边界，不是模型协议。子平台的向量检索、商品索引和领域 Skill 通过 MCP 暴露；根路由器只决定是否把请求转发给已授权节点。
-- 只有一个 OpenAI-compatible 服务时，直接使用现有 `platform-router.ts` 即可；不需要为每个厂商写一份 MatchPlane 适配器。
+- 只有一个 OpenAI-compatible 服务时，使用默认协议即可。
+- 直接接 Anthropic Messages 时，将协议设为 `anthropic-messages`，endpoint 通常为 `/v1/messages`；认证使用服务端 `x-api-key` 头。
+- 直接接 Gemini 时，将协议设为 `gemini-generate-content`，endpoint 可以是 `https://generativelanguage.googleapis.com/v1beta`，模型名使用 Gemini 的模型名；认证使用服务端 `x-goog-api-key` 头。
+- 如果网关已经统一了多家模型，继续用 `openai-compatible`，把 provider/model 的选择留给网关做 fallback、预算和审计。
 
 ## 生产约束
 
@@ -37,6 +40,7 @@ LiteLLM / Vercel AI Gateway / vLLM / Ollama / 自建兼容网关
 MATCHPLANE_ROUTER_AI_URL=https://llm-gateway.example.com/v1/chat/completions
 MATCHPLANE_ROUTER_AI_KEY=server-side-secret
 MATCHPLANE_ROUTER_AI_MODEL=openai/gpt-4o-mini
+MATCHPLANE_ROUTER_AI_PROTOCOL=openai-compatible
 MATCHPLANE_ROUTER_AI_TOOL_MODE=required
 MATCHPLANE_ROUTER_AI_MAX_TOKENS=512
 MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS=20000
@@ -47,7 +51,9 @@ MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS=20000
 模型响应内容传给前端；返回 `ready` 后再打开买方/卖方对话验证实际路由。未配置或上游不可用时，页面会
 明确显示 `unconfigured`/`failed`，生产路由继续使用可审计的受控降级，不会伪装成 AI 成功。
 
-`MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS` controls the total wall-clock budget for one recursive
+`MATCHPLANE_ROUTER_AI_PROTOCOL` 只接受 `openai-compatible`、`anthropic-messages` 或
+`gemini-generate-content`；用户请求不能选择协议、endpoint 或模型。Gemini 的 endpoint 不要带 API key
+查询参数，密钥只放在服务端 secret manager。`MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS` controls the total wall-clock budget for one recursive
 platform route (default 20 seconds, hard maximum 60 seconds). Each provider request remains
 bounded to four seconds, and once the shared deadline is reached the router records an explicit
 policy fallback instead of waiting through every remaining platform hop.

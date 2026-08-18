@@ -763,7 +763,7 @@ export function PlatformDashboard({
             <div className={aiStatus?.router.configured ? "readiness-item" : "readiness-item readiness-attention"}>
               <span aria-hidden="true" />
               <strong>{aiStatus?.router.configured ? `托管 Agent 已连接${aiStatus.router.model ? ` · ${aiStatus.router.model}` : ""}` : "托管 Agent 尚未连接"}</strong>
-              <small>{aiStatus?.router.configured ? `OpenAI-compatible · ${aiStatus.router.endpointOrigin || "服务端端点"}` : "把模型网关配置在 web 服务端，浏览器不会接触密钥"}</small>
+              <small>{aiStatus?.router.configured ? `${routerProtocolLabel(aiStatus.router.protocol)} · ${aiStatus.router.endpointOrigin || "服务端端点"}` : "把模型网关配置在 web 服务端，浏览器不会接触密钥"}</small>
             </div>
             <div className="readiness-item">
               <span aria-hidden="true" />
@@ -1082,6 +1082,17 @@ export function PlatformDashboard({
       />
     </div>
   );
+}
+
+function routerProtocolLabel(protocol: PlatformAiStatus["router"]["protocol"]): string {
+  switch (protocol) {
+    case "anthropic-messages":
+      return "Anthropic Messages";
+    case "gemini-generate-content":
+      return "Gemini GenerateContent";
+    default:
+      return "OpenAI-compatible";
+  }
 }
 
 function authCapabilitySummary(status: PlatformAiStatus | null): string {

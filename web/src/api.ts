@@ -171,7 +171,7 @@ export interface PlatformSetupStatus {
 export interface PlatformAiStatus {
   router: {
     configured: boolean;
-    protocol: "openai-compatible";
+    protocol: "openai-compatible" | "anthropic-messages" | "gemini-generate-content";
     model: string | null;
     endpointOrigin: string | null;
     toolMode: "auto" | "required" | "disabled";
