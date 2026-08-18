@@ -14,17 +14,23 @@ RUN --mount=type=cache,id=matchplane-web-cargo-registry,target=/usr/local/cargo/
     cargo build --release --locked -p xtask --bin matchplane \
     && install -Dm755 target/release/matchplane /build/out/matchplane
 
-# Keep the repository's pinned Bun release, but use the glibc-based image for the build stage.
-# The Alpine/musl image intermittently crashes with SIGILL while Next/Turbopack builds on the
-# GitHub-hosted x86 runner; this stage still runs both dependency installation and the build with
-# Bun, while the final runtime remains the pinned Node image below.
-FROM oven/bun:1.3.14-debian@sha256:431b37ce1acfed987e4f5b6c86a9f210ff63285a912fc5f21e18aeac0cb067ef AS builder
+# Keep Bun as the package-manager contract, but run the Next build with Node. Bun 1.3.14 can
+# crash with SIGILL/segmentation faults while Next/Turbopack builds inside Docker on some
+# GitHub-hosted x86 runners. Dependencies are still resolved from the pinned bun.lock; using the
+# same pinned Node image as the runtime makes the build path deterministic and avoids that Bun
+# runtime crash.
+FROM oven/bun:1.3.14-debian@sha256:431b37ce1acfed987e4f5b6c86a9f210ff63285a912fc5f21e18aeac0cb067ef AS web-deps
 
 WORKDIR /app
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY web/ ./
-RUN bun run build
+
+FROM node:22-trixie-slim@sha256:f4c1b09232a0ae8f765093968ec82107a1be65cb0bfb36fc831195794f139568 AS builder
+
+WORKDIR /app
+COPY --from=web-deps /app ./
+RUN node node_modules/next/dist/bin/next build
 # Next 16 preserves the path relative to outputFileTracingRoot in the
 # standalone bundle. Normalize both the monorepo (`standalone/web`) and the
 # package-local (`standalone`) layouts before copying into the runtime image.
