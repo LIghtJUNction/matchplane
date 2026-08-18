@@ -30,7 +30,14 @@ jobs:
       - name: Normalize version
         run: echo "VERSION=${VERSION#v}" >> "$GITHUB_ENV"
       - name: Install native build dependencies
-        run: sudo apt-get update && sudo apt-get install --yes cmake libcurl4-openssl-dev libprotobuf-dev protobuf-compiler zstd
+        run: |
+          set -euo pipefail
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            [ -f "$source" ] || continue
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$source"
+          done
+          sudo apt-get -o Acquire::Retries=1 -o Acquire::ConnectTimeout=10 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=1 -o Acquire::ConnectTimeout=10 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install --yes cmake libcurl4-openssl-dev libprotobuf-dev protobuf-compiler zstd
       - name: Install current pinned Rust toolchain
         run: rustup toolchain install 1.97.0 --profile minimal
       - name: Install pinned Bun

@@ -40,7 +40,7 @@ jobs:
 
   rust:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,8 +48,13 @@ jobs:
           submodules: recursive
       - name: Install native build dependencies
         run: |
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --yes cmake libcurl4-openssl-dev libprotobuf-dev protobuf-compiler
+          set -euo pipefail
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            [ -f "$source" ] || continue
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' "$source"
+          done
+          sudo apt-get -o Acquire::Retries=1 -o Acquire::ConnectTimeout=10 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=1 -o Acquire::ConnectTimeout=10 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install --yes cmake libcurl4-openssl-dev libprotobuf-dev protobuf-compiler
       - name: Install current pinned Rust toolchain
         run: rustup toolchain install 1.97.0 --profile minimal --component clippy,rustfmt
       - name: Check formatting
