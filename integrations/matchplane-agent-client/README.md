@@ -23,6 +23,8 @@ import { MatchPlaneAgentClient, terminalRoutePlanPaths } from "@matchplane/agent
 const client = new MatchPlaneAgentClient({
   baseUrl: process.env.MATCHPLANE_URL!,
   apiKey: process.env.MATCHPLANE_AGENT_API_KEY!,
+  // Optional; defaults to 60 seconds and is capped at 120 seconds.
+  requestTimeoutMs: 60_000,
 });
 
 // The same client can first ask the platform-tree router to choose a mounted
@@ -71,6 +73,10 @@ await client.requestContact(capability, {
 The client copies the capability's `platform_path` into every marketplace tool call. This is
 intentional: a capability for one mounted path cannot be replayed against a sibling or parent
 node, even when the tenant and domain are the same.
+
+Every MCP and retrieval request carries the configured deadline. Responses are streamed through a
+256 KiB client-side limit and malformed or oversized bodies fail closed as `MatchPlaneMcpError`;
+the SDK never parses an unbounded provider response.
 
 Child-owned tools use the same authenticated client and are still constrained by the active
 child manifest. `queryRetrieval()` is a typed convenience wrapper for the stable

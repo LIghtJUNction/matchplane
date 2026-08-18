@@ -245,6 +245,30 @@ describe("MatchPlane external Agent client", () => {
     await expect(client.listTools()).rejects.toBeInstanceOf(MatchPlaneMcpError);
   });
 
+  it("bounds transport deadlines and rejects oversized gateway responses", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      requestTimeoutMs: 5_000,
+      fetchImpl: async (_url, init) => {
+        requestSignal = init?.signal;
+        return new Response("x".repeat(256 * 1024 + 1), { status: 200 });
+      },
+    });
+
+    await expect(client.listTools()).rejects.toBeInstanceOf(MatchPlaneMcpError);
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("rejects an unbounded external Agent request timeout", () => {
+    expect(() => new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      requestTimeoutMs: 120_001,
+    })).toThrow("requestTimeoutMs");
+  });
+
   it("runs a caller-funded multi-step Skill only through its advertised MCP tools", async () => {
     const request: AgentSkillRequest = {
       protocol: "matchplane.agent/v1",
