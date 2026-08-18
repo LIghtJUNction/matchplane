@@ -10,11 +10,11 @@
     },
     "integrations/matchplane-agent-client": {
       "name": "@matchplane/agent-client",
-      "version": "0.1.9",
+      "version": "0.1.10",
     },
     "web": {
       "name": "@matchplane/web",
-      "version": "0.1.9",
+      "version": "0.1.10",
       "dependencies": {
         "@better-auth/api-key": "1.7.0-rc.6",
         "@better-auth/oauth-provider": "1.7.0-rc.6",

@@ -230,7 +230,11 @@ jobs:
       VERSION: ${{ github.ref_name }}
     steps:
       - name: Install current Arch build toolchain
-        run: pacman -Syu --noconfirm base-devel bun cargo cmake curl git openssh protobuf rust zstd
+        # Install every runtime/build dependency declared by both PKGBUILDs before dropping
+        # privileges for makepkg.  `makepkg --syncdeps` runs pacman through sudo when a package
+        # is missing; the container intentionally has no password-capable sudo, so a missing
+        # dependency would otherwise fail before either AUR package is built.
+        run: pacman -Syu --noconfirm base-devel bubblewrap bun cargo cmake curl git nodejs openssh protobuf rust zstd
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -245,6 +249,7 @@ jobs:
         run: |
           version=${VERSION#v}
           archive="dist/matchplane-${version}-linux-x86_64.tar.zst"
+          test -f "$archive"
           digest=$(sha256sum "$archive" | cut -d' ' -f1)
           sed -e "s/__VERSION__/${version}/g" -e "s/__SHA256__/${digest}/g" \
             packaging/aur/matchplane-bin/PKGBUILD.in > packaging/aur/matchplane-bin/PKGBUILD
