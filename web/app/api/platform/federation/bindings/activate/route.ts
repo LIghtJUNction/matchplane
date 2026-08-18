@@ -9,7 +9,11 @@ import {
   validateFederationParent,
 } from "../../../../../../src/federation-admin";
 import { validateFederationTokenEnv } from "../../../../../../src/federation-contract";
-import { validateSubplatformMcpEndpointUrl } from "../../../../../../src/platform-agent-tool";
+import {
+  prepareSubplatformMcpEndpoint,
+  probeSubplatformMcpEndpoint,
+  validateSubplatformMcpEndpointUrl,
+} from "../../../../../../src/platform-agent-tool";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../../../src/lib/body-limit";
 import { isProductionEnvironment } from "../../../../../../src/lib/runtime";
 
@@ -65,6 +69,22 @@ export async function POST(request: Request): Promise<Response> {
   if (binding.status === "revoked") return jsonError("已撤销的联邦绑定不能重新激活，请重新发邀请", 409);
   if (!(await validateSubplatformMcpEndpointUrl(binding.endpoint))) {
     return jsonError("联邦 MCP endpoint 未通过生产 DNS/公网地址校验", 409);
+  }
+  if (isProductionEnvironment() && !binding.registrationId) {
+    // Do not create an active organization/registration until the remote MCP server has
+    // completed the same initialize handshake used by the explicit health action. A URL and
+    // tokenEnv only prove configuration, not that the remote node is reachable or speaks the
+    // advertised protocol.
+    const endpoint = await prepareSubplatformMcpEndpoint({
+      serverKey: binding.mcpServerKey,
+      url: binding.endpoint,
+      tokenEnv,
+    });
+    if (!endpoint) return jsonError("联邦 MCP endpoint 或凭据尚未准备好", 409);
+    const probe = await probeSubplatformMcpEndpoint({ endpoint });
+    if (!probe.ok) {
+      return jsonError(`联邦 MCP initialize 未成功（${probe.error ?? `HTTP ${probe.status}`}）`, 409);
+    }
   }
   if (binding.organizationId) {
     const organization = await authDatabase.query<OrganizationOwnership>(

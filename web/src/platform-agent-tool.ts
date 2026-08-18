@@ -143,6 +143,26 @@ export async function validateSubplatformMcpEndpointUrl(
   return normalized ? hasSafeResolvedAddresses(normalized, environment) : false;
 }
 
+/**
+ * Build and validate an endpoint from a pending federation binding before its token_env has
+ * been persisted. Activation uses this short-lived candidate to run the production MCP
+ * initialize gate without first making an unprobed binding routable.
+ */
+export async function prepareSubplatformMcpEndpoint(input: {
+  serverKey: string;
+  url: string;
+  tokenEnv?: string | null;
+  environment?: NodeJS.ProcessEnv;
+}): Promise<SubplatformMcpEndpoint | null> {
+  const environment = input.environment ?? process.env;
+  const endpoint = readEndpointEntry(input.serverKey, {
+    url: input.url,
+    ...(input.tokenEnv ? { tokenEnv: input.tokenEnv } : {}),
+  }, environment);
+  if (!endpoint || !(await hasSafeResolvedAddresses(endpoint.url, environment))) return null;
+  return endpoint;
+}
+
 function readEndpointEntry(
   serverKey: string,
   entry: unknown,
@@ -244,7 +264,8 @@ export async function probeSubplatformMcpEndpoint(input: {
       cache: "no-store",
     });
     const body = await readJsonResponse(response);
-    if (!response.ok || !body.ok || "error" in body.payload) {
+    const result = body.payload.result;
+    if (!response.ok || !body.ok || "error" in body.payload || !isRecord(result) || result.isError === true) {
       return { ok: false, status: response.status, error: "远端 MCP initialize 未成功" };
     }
     return { ok: true, status: response.status };

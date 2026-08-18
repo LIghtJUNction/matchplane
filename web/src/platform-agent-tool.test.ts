@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   invokeSubplatformMcpTool,
+  prepareSubplatformMcpEndpoint,
   probeSubplatformMcpEndpoint,
   readSubplatformMcpEndpoint,
   validateSubplatformMcpEndpointUrl,
@@ -132,5 +133,37 @@ describe("subplatform MCP endpoint boundary", () => {
       endpoint: { serverKey: "used-car", url: "https://agent.example/mcp", bearerToken: "child-secret", timeoutMs: 1_000 },
       fetcher,
     })).resolves.toMatchObject({ ok: true, status: 200 });
+  });
+
+  it("rejects an HTTP 200 response that is not an MCP initialize result", async () => {
+    await expect(probeSubplatformMcpEndpoint({
+      endpoint: { serverKey: "used-car", url: "https://agent.example/mcp", bearerToken: null, timeoutMs: 1_000 },
+      fetcher: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: "matchplane-health" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })),
+    })).resolves.toMatchObject({ ok: false, status: 200 });
+  });
+
+  it("prepares a pending binding endpoint using the candidate token environment", async () => {
+    const environment: NodeJS.ProcessEnv = {
+      NODE_ENV: "production",
+      MATCHPLANE_REMOTE_MCP_TOKEN: "pending-secret",
+    };
+    await expect(prepareSubplatformMcpEndpoint({
+      serverKey: "remote-market",
+      url: "https://1.1.1.1/mcp",
+      tokenEnv: "MATCHPLANE_REMOTE_MCP_TOKEN",
+      environment,
+    })).resolves.toMatchObject({ serverKey: "remote-market", bearerToken: "pending-secret" });
+  });
+
+  it("does not prepare a production binding without its injected token", async () => {
+    await expect(prepareSubplatformMcpEndpoint({
+      serverKey: "remote-market",
+      url: "https://1.1.1.1/mcp",
+      tokenEnv: "MATCHPLANE_REMOTE_MCP_TOKEN",
+      environment: { NODE_ENV: "production" },
+    })).resolves.toBeNull();
   });
 });
