@@ -54,6 +54,7 @@ describe("subplatform MCP endpoint boundary", () => {
   it("bounds the response and does not forward caller credentials", async () => {
     const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
       const headers = new Headers(init?.headers);
+      expect(init?.redirect).toBe("error");
       expect(headers.get("authorization")).toBe("Bearer child-secret");
       expect(headers.get("x-matchplane-platform-path")).toBe("/used-car");
       expect(headers.get("x-matchplane-agent-subject")).toBe("agent-subject");
@@ -118,6 +119,7 @@ describe("subplatform MCP endpoint boundary", () => {
   it("probes MCP initialize without sending an agent subject", async () => {
     const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
       const headers = new Headers(init?.headers);
+      expect(init?.redirect).toBe("error");
       expect(headers.get("authorization")).toBe("Bearer child-secret");
       const request = JSON.parse(String(init?.body)) as { method?: string };
       expect(request.method).toBe("initialize");

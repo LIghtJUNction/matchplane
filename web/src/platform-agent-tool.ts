@@ -196,6 +196,9 @@ export async function invokeSubplatformMcpTool(input: {
         params: { name: input.toolName, arguments: input.arguments },
       }),
       signal: AbortSignal.timeout(input.endpoint.timeoutMs),
+      // The endpoint was validated before routing. Do not let a reachable public
+      // endpoint redirect this server-side client into an unvalidated private host.
+      redirect: "error",
       cache: "no-store",
     });
   } catch (error) {
@@ -237,6 +240,7 @@ export async function probeSubplatformMcpEndpoint(input: {
         params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "matchplane", version: "1" } },
       }),
       signal: AbortSignal.timeout(input.endpoint.timeoutMs),
+      redirect: "error",
       cache: "no-store",
     });
     const body = await readJsonResponse(response);
