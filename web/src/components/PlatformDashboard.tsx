@@ -660,6 +660,13 @@ export function PlatformDashboard({
     : setup?.hostedAgent.configured
       ? "平台 Agent 已连接"
       : "平台 Agent 使用受控降级";
+  const builderStatus = setupError
+    ? "构建器状态不可用"
+    : setup?.builder?.status === "ready"
+      ? "子平台构建器已就绪"
+      : setup?.builder?.status === "degraded"
+        ? "子平台构建器待补运行时"
+        : "子平台构建器未配置";
   const subplatformStateLabel: Record<string, string> = {
     active: "已激活",
     ready: "构建完成",
@@ -715,6 +722,11 @@ export function PlatformDashboard({
               <span aria-hidden="true" />
               <strong>{hostedAgentStatus}</strong>
               <small>{setup?.hostedAgent.configured ? "托管模型负责没有自有 Agent 的买家和卖家" : "配置 MATCHPLANE_ROUTER_AI_URL、KEY、MODEL 后启用"}</small>
+            </div>
+            <div className={setup?.builder?.status === "ready" ? "readiness-item" : "readiness-item readiness-attention"}>
+              <span aria-hidden="true" />
+              <strong>{builderStatus}</strong>
+              <small>{setup?.builder?.status === "ready" ? "Git/归档包会在隔离构建器中生成 immutable artifact" : "配置 builder token、工作目录与 bubblewrap 后再激活新包"}</small>
             </div>
           </div>
           {setup?.firstRun.needsRootAccount ? (

@@ -2,6 +2,10 @@
 Description=MatchPlane isolated static subplatform builder
 After=network-online.target matchplane-web.service
 Wants=network-online.target
+# The builder is optional until an operator supplies its isolated token and environment.  Do not
+# let systemd turn an intentionally unconfigured capability into a restart storm.
+ConditionPathExists=/etc/matchplane/services/subplatform-builder.env
+ConditionPathExists=/etc/matchplane/secrets/builder/builder.token
 
 [Service]
 Type=simple

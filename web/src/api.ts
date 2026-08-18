@@ -164,6 +164,7 @@ export interface PlatformSetupStatus {
   registrations: Record<string, number>;
   routing: { activeChildren: number; ready: boolean };
   hostedAgent: { configured: boolean; status: "ready" | "fallback" };
+  builder: { configured: boolean; status: "ready" | "degraded" | "unconfigured" };
   firstRun: { needsRootAccount: boolean; readyForAdmin: boolean };
 }
 

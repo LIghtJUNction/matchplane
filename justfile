@@ -10,7 +10,7 @@ web-install:
 web-check: web-install
     bun run --cwd web check
 
-check: web-check agent-check subplatform-check migration-check skills-check
+check: web-check agent-check subplatform-check subplatform-build-check migration-check skills-check
     cargo fmt --check
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo test --workspace --locked
@@ -49,6 +49,11 @@ subplatform-check:
     python3 -c 'import json, re; m=json.load(open("subplatforms/auto/matchplane.subplatform.json")); a=m["agent"]; assert m["apiVersion"] == "matchplane.subplatform/v1"; assert m["rootApiVersion"] == "v1"; assert m.get("marketplaceContract", "generic-v1") in {"generic-v1", "legacy-v1"}; assert isinstance(m["slug"], str) and m["slug"] and m["slug"] != "root"; assert a["protocol"] == "matchplane.agent/v1"; assert a["stages"] and all(re.fullmatch(r"[a-z0-9][a-z0-9._:-]{1,127}", stage) for stage in a["stages"]); assert a["skills"] and isinstance(a["mcpTools"], list)'
     python3 -c 'import json; json.load(open("docs/agent-mcp-skill-protocol-v1.json")); json.load(open("docs/agent-handoff-protocol-v1.json")); json.load(open("docs/federation-enrollment-protocol-v1.json")); json.load(open("docs/generic-marketplace-contract-v1.json")); json.load(open("docs/platform-routing-protocol-v1.json")); json.load(open("docs/retrieval-protocol-v1.json")); json.load(open("docs/schemas-matchplane-subplatform.json"))'
     test -n "$$(git -C subplatforms/auto rev-parse HEAD)"
+
+subplatform-build-check:
+    bun install --frozen-lockfile --cwd subplatforms/auto
+    bun run --cwd subplatforms/auto build
+    test -s subplatforms/auto/dist/index.html
 
 migration-check:
     python3 -c 'from pathlib import Path; versions = [p.name.split("_", 1)[0] for p in Path("migrations").glob("[0-9]*_*.sql")]; assert len(versions) == len(set(versions)), f"duplicate migration versions: {[v for v in sorted(set(versions)) if versions.count(v) > 1]}"'

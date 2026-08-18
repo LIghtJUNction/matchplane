@@ -50,6 +50,18 @@ if ! rg -q '^Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchpla
   echo 'builder service must use its isolated builder-token copy' >&2
   exit 1
 fi
+if ! rg -q '^ConditionPathExists=/etc/matchplane/services/subplatform-builder\.env$' \
+  packaging/systemd/matchplane-subplatform-builder.service \
+  || ! rg -q '^ConditionPathExists=/etc/matchplane/secrets/builder/builder\.token$' \
+  packaging/systemd/matchplane-subplatform-builder.service; then
+  echo 'optional builder service must fail closed when its environment or token is absent' >&2
+  exit 1
+fi
+if ! rg -q '^d /var/lib/matchplane/subplatform-artifacts 0750 matchplane-builder matchplane-web -$' \
+  packaging/tmpfiles/matchplane.conf; then
+  echo 'immutable builder artifacts must be writable by the isolated builder and readable by web' >&2
+  exit 1
+fi
 
 if rg -n --glob '*.Dockerfile' --glob 'Dockerfile*' \
   '^FROM [^$@[:space:]]+:[^@[:space:]]+( |$)' deploy packaging; then
