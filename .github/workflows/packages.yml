@@ -275,11 +275,20 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Download portable release asset
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: portable-and-deb
-          path: dist
+      - name: Download immutable portable release asset
+        run: |
+          set -euo pipefail
+          version=${VERSION#v}
+          filename="matchplane-${version}-linux-x86_64.tar.zst"
+          release_base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}"
+          mkdir -p dist
+          curl --fail --location --retry 3 --retry-all-errors --proto '=https' --tlsv1.2 \
+            "${release_base}/${filename}" --output "dist/${filename}"
+          curl --fail --location --retry 3 --retry-all-errors --proto '=https' --tlsv1.2 \
+            "${release_base}/SHA256SUMS" --output dist/SHA256SUMS
+          expected=$(awk -v name="$filename" '$2 == name { print $1; exit }' dist/SHA256SUMS)
+          test -n "$expected"
+          printf '%s  %s\n' "$expected" "dist/${filename}" | sha256sum -c -
       - name: Render and build both AUR packages
         run: |
           version=${VERSION#v}
