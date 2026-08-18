@@ -42,6 +42,11 @@ MATCHPLANE_ROUTER_AI_MAX_TOKENS=512
 MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS=20000
 ```
 
+配置 web 服务并重启后，根管理员可在“平台管理 → AI 与登录”点击“测试连接”。该按钮调用
+`POST /api/platform/ai/test`，只发送固定的健康检查文本和 `max_tokens=1`，不会把浏览器输入、密钥或
+模型响应内容传给前端；返回 `ready` 后再打开买方/卖方对话验证实际路由。未配置或上游不可用时，页面会
+明确显示 `unconfigured`/`failed`，生产路由继续使用可审计的受控降级，不会伪装成 AI 成功。
+
 `MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS` controls the total wall-clock budget for one recursive
 platform route (default 20 seconds, hard maximum 60 seconds). Each provider request remains
 bounded to four seconds, and once the shared deadline is reached the router records an explicit

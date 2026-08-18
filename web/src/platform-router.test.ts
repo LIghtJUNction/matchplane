@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { decidePlatformRoutes, PlatformRouterQuotaExceededError, type PlatformRouteCandidate } from "./platform-router";
+import {
+  decidePlatformRoutes,
+  PlatformRouterQuotaExceededError,
+  probePlatformRouter,
+  type PlatformRouteCandidate,
+} from "./platform-router";
 
 const candidates: PlatformRouteCandidate[] = [
   {
@@ -34,9 +39,38 @@ afterEach(() => {
   delete process.env.MATCHPLANE_ROUTER_AI_MODEL;
   delete process.env.MATCHPLANE_ROUTER_AI_MAX_TOKENS;
   delete process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE;
+  delete process.env.MATCHPLANE_ENVIRONMENT;
 });
 
 describe("platform Agent router", () => {
+  it("probes the configured provider with a fixed one-token request", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify({
+      choices: [{ message: { content: "ok" } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const result = await probePlatformRouter({ fetcher: fetchMock as unknown as typeof fetch });
+
+    expect(result).toMatchObject({ status: "ready", model: "router-test", responseStatus: 200 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.max_tokens).toBe(1);
+    expect(body.messages).toEqual([
+      { role: "system", content: "Respond with one short token." },
+      { role: "user", content: "healthcheck" },
+    ]);
+  });
+
+  it("reports an unconfigured provider without making a network request", async () => {
+    const fetchMock = vi.fn();
+    const result = await probePlatformRouter({ fetcher: fetchMock as unknown as typeof fetch });
+
+    expect(result.status).toBe("unconfigured");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("limits AI choices to the authorized child candidate set and records usage", async () => {
     process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
     process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";

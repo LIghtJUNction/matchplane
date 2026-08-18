@@ -234,6 +234,103 @@ export function isPlatformRouterConfigured(): boolean {
   return Boolean(endpoint && apiKey && model && isAllowedEndpoint(endpoint));
 }
 
+export interface PlatformRouterProbeResult {
+  status: "ready" | "unconfigured" | "failed";
+  model: string | null;
+  responseStatus: number | null;
+  latencyMs: number;
+  message: string;
+}
+
+/**
+ * Perform a bounded, credential-safe connectivity check for the configured router.
+ *
+ * This is intentionally separate from `decidePlatformRoutes`: an administrator may verify a
+ * provider without spending a normal routing admission or sending user data. The request has a
+ * fixed prompt and one output token, and the result never includes provider response content.
+ */
+export async function probePlatformRouter(options: {
+  fetcher?: typeof fetch;
+  timeoutMs?: number;
+} = {}): Promise<PlatformRouterProbeResult> {
+  const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
+  const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
+  const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
+  const startedAt = Date.now();
+  if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) {
+    return {
+      status: "unconfigured",
+      model,
+      responseStatus: null,
+      latencyMs: 0,
+      message: "模型网关尚未配置完整，或生产环境端点不是 HTTPS。",
+    };
+  }
+
+  const timeoutMs = Number.isSafeInteger(options.timeoutMs)
+    ? Math.max(1_000, Math.min(8_000, options.timeoutMs as number))
+    : 4_000;
+  const fetcher = options.fetcher ?? fetch;
+  try {
+    const response = await fetcher(endpoint, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: 1,
+        messages: [
+          { role: "system", content: "Respond with one short token." },
+          { role: "user", content: "healthcheck" },
+        ],
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+      cache: "no-store",
+    });
+    const payload = await readJsonResponseBody<unknown>(response, 64 * 1024);
+    const hasChoices = isRecord(payload)
+      && Array.isArray(payload.choices)
+      && payload.choices.length > 0;
+    const latencyMs = Math.max(0, Date.now() - startedAt);
+    if (!response.ok || !hasChoices) {
+      return {
+        status: "failed",
+        model,
+        responseStatus: response.status,
+        latencyMs,
+        message: !response.ok
+          ? `模型网关返回 HTTP ${response.status}。`
+          : "模型网关响应缺少 choices。",
+      };
+    }
+    return {
+      status: "ready",
+      model,
+      responseStatus: response.status,
+      latencyMs,
+      message: "模型网关连接正常。",
+    };
+  } catch (error) {
+    return {
+      status: "failed",
+      model,
+      responseStatus: null,
+      latencyMs: Math.max(0, Date.now() - startedAt),
+      message: `模型网关连接失败：${safeProbeError(error)}`,
+    };
+  }
+}
+
+function safeProbeError(error: unknown): string {
+  if (error instanceof Error && error.name === "TimeoutError") return "请求超时";
+  if (error instanceof Error && error.message) return error.message.slice(0, 160);
+  return "网络或上游服务不可用";
+}
+
 /** Total wall-clock budget for one recursive platform routing request. */
 export function configuredPlatformRouterTotalTimeoutMs(): number {
   const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS ?? String(DEFAULT_TOTAL_TIMEOUT_MS), 10);
@@ -506,4 +603,8 @@ function isAllowedEndpoint(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

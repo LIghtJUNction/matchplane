@@ -26,6 +26,7 @@ import {
   getPaymentRoutes,
   getPlatformSetupStatus,
   getPlatformAiStatus,
+  testPlatformAi,
   getSubplatformOrganizations,
   getRefundAdminRecords,
   createAdminRefund,
@@ -97,6 +98,7 @@ export function PlatformDashboard({
   const [invoiceModeDialogOpen, setInvoiceModeDialogOpen] = useState(false);
   const [domainEditorOpen, setDomainEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [aiTesting, setAiTesting] = useState(false);
   const [gatewayName, setGatewayName] = useState("");
   const [gatewayKind, setGatewayKind] = useState<PaymentGatewayRecord["kind"]>("test");
   const [gatewayMode, setGatewayMode] = useState<"test" | "production">("test");
@@ -226,6 +228,19 @@ export function PlatformDashboard({
     setPayments(nextPayments);
     setRefunds(nextRefunds);
     setInvoices(nextInvoices);
+  };
+
+  const testAiConnection = async () => {
+    setAiTesting(true);
+    try {
+      const result = await testPlatformAi();
+      setAiStatus(await getPlatformAiStatus());
+      onNotice(`${result.message}${result.latencyMs ? `（${result.latencyMs} ms）` : ""}`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "AI 连接测试失败");
+    } finally {
+      setAiTesting(false);
+    }
   };
 
   const submitRefund = async () => {
@@ -764,6 +779,9 @@ export function PlatformDashboard({
               <code>MATCHPLANE_ROUTER_AI_MODEL=provider/model</code>
             </div>
             <div className="platform-agent-config-actions">
+              <button className="button button-light" type="button" disabled={aiTesting || !aiStatus?.router.configured} onClick={() => void testAiConnection()}>
+                {aiTesting ? "测试中…" : "测试连接"}
+              </button>
               <a className="button button-light" href="/?role=buyer">打开买方对话测试</a>
               <span>{aiStatus?.router.configured ? `每小时上限 ${aiStatus.router.globalRequestsPerHour} 次 · 单次最长 ${Math.round(aiStatus.router.totalTimeoutMs / 1000)} 秒` : "配置后刷新此页，再用买方对话发送一句真实需求"}</span>
             </div>

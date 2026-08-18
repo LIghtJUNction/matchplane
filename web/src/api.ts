@@ -194,6 +194,14 @@ export interface PlatformAiStatus {
   };
 }
 
+export interface PlatformAiProbeResult {
+  status: "ready" | "unconfigured" | "failed";
+  model: string | null;
+  responseStatus: number | null;
+  latencyMs: number;
+  message: string;
+}
+
 export interface PlatformSiteSettings {
   organization_id: string;
   tenant_id: string;
@@ -1024,6 +1032,20 @@ export async function getPlatformAiStatus(): Promise<PlatformAiStatus> {
   const body = await response.json().catch(() => null) as PlatformAiStatus & { error?: string } | null;
   if (!response.ok || !body?.router || !body.auth) {
     throw new MarketplaceApiError(response.status, body?.error || "AI 与登录配置读取失败");
+  }
+  return body;
+}
+
+/** Test the server-side hosted Agent without sending browser or user content. */
+export async function testPlatformAi(): Promise<PlatformAiProbeResult> {
+  const response = await fetch("/api/platform/ai/test", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as (PlatformAiProbeResult & { error?: string }) | null;
+  if (!response.ok || !body?.status) {
+    throw new MarketplaceApiError(response.status, body?.message || body?.error || "AI 连接测试失败");
   }
   return body;
 }
