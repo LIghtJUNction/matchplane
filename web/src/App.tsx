@@ -19,6 +19,7 @@ import { PluginHost } from "./components/PluginHost";
 import { MatchChat } from "./components/MatchChat";
 import { PlatformFooter } from "./components/PlatformFooter";
 import { loadSubplatform, resolveSubplatform, subplatformCopy, subplatformFieldLabel, type SubplatformConfig } from "./subplatform";
+import { localizedSubplatformCopy } from "./lib/localized-copy";
 import {
   createMarketplaceIntroduction,
   createMarketplaceSalesHandoff,
@@ -305,7 +306,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   role={role}
                   locale={locale}
                   onNotice={setNotice}
-                  onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform))}
+                  onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform, locale))}
                   onSellerDraft={role === "seller" ? setSellerDraft : undefined}
                   onSellerPlatformSelected={selectSellerPlatform}
                   subplatform={subplatform}
@@ -332,6 +333,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         <ListingSheet
           listing={listing}
           subplatform={subplatform}
+          locale={locale}
           onClose={closeListing}
           contactDisabled={!isLiveMarketplaceEnabled()}
           onContact={async (selected) => {
@@ -549,7 +551,7 @@ function readSavedOfferIds(platformPath: string): string[] {
   }
 }
 
-function mapRecommendations(items: RecommendedBackendListing[], subplatform: SubplatformConfig): AssetListing[] {
+function mapRecommendations(items: RecommendedBackendListing[], subplatform: SubplatformConfig, locale: "zh" | "en"): AssetListing[] {
   return items.flatMap((item, index) => {
     const id = item.listing_id ?? item.offer_id;
     if (!id) return [];
@@ -592,9 +594,9 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
         : termPriceRange
           ? termPriceRange
           : pricingMode === "negotiable"
-            ? pricingNote ?? "可议价"
+            ? pricingNote ?? localizedSubplatformCopy(subplatform, locale, "negotiablePriceLabel", "可议价", "Negotiable")
             : pricingMode === "none"
-              ? pricingNote ?? "面议"
+              ? pricingNote ?? localizedSubplatformCopy(subplatform, locale, "noPriceLabel", "面议", "Price on request")
               : stringAttribute(terms, ["display_price", "price_label", "price"]) ?? "—";
     return [{
       id,

@@ -777,6 +777,8 @@ export function PlatformDashboard({
               <code>MATCHPLANE_ROUTER_AI_URL=https://your-gateway.example/v1/chat/completions</code>
               <code>MATCHPLANE_ROUTER_AI_KEY=server-secret</code>
               <code>MATCHPLANE_ROUTER_AI_MODEL=provider/model</code>
+              <code>MATCHPLANE_ROUTER_AI_PROTOCOL=openai-compatible</code>
+              <small>可选协议：openai-compatible、anthropic-messages、gemini-generate-content</small>
             </div>
             <div className="platform-agent-config-actions">
               <button className="button button-light" type="button" disabled={aiTesting || !aiStatus?.router.configured} onClick={() => void testAiConnection()}>
