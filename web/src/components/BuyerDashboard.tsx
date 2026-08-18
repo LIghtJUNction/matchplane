@@ -349,14 +349,16 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
         ) : (
           <div className="empty-state">
             <Search size={28} aria-hidden="true" />
-            <h3>{query ? copy("searchEmptyTitle", "没有命中这次搜索") : copy("noOffersTitle", "等待供给方上传资料")}</h3>
+            <h3>{query
+              ? copy("searchEmptyTitle", "没有命中这次搜索", "No offers match this search")
+              : copy("noOffersTitle", "等待供给方上传资料", "Waiting for supply partners to publish")}</h3>
             <p>
               {query
-                ? copy("searchEmptyDescription", "换一个名称、属性或地点试试。")
-                : copy("noOffersDescription", "平台不预置样例内容；供给方提交并通过审核后，这里会出现真实供给。")}
+                ? copy("searchEmptyDescription", "换一个名称、属性或地点试试。", "Try another name, attribute, or location.")
+                : copy("noOffersDescription", "平台不预置样例内容；供给方提交并通过审核后，这里会出现真实供给。", "There are no seeded examples. Approved offers will appear here after supply partners publish them.")}
             </p>
-            {query ? <button type="button" onClick={() => setQuery("")}>{copy("clearSearchLabel", "清除搜索")}</button> : null}
-            {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice(copy("describeDemandNotice", "先描述你的目标，平台会从已激活的子平台开始路由")); }}>{copy("describeDemandLabel", "描述需求")}</button> : null}
+            {query ? <button type="button" onClick={() => setQuery("")}>{copy("clearSearchLabel", "清除搜索", "Clear search")}</button> : null}
+            {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice(copy("describeDemandNotice", "先描述你的目标，平台会从已激活的子平台开始路由", "Describe your goal and the platform will route it through active matching nodes.")); }}>{copy("describeDemandLabel", "描述需求", "Describe a need")}</button> : null}
           </div>
         )}
       </section>
