@@ -76,7 +76,8 @@ node, even when the tenant and domain are the same.
 
 Every MCP and retrieval request carries the configured deadline. Responses are streamed through a
 256 KiB client-side limit and malformed or oversized bodies fail closed as `MatchPlaneMcpError`;
-the SDK never parses an unbounded provider response.
+the SDK never parses an unbounded provider response. A deadline breach is also reported as
+`MatchPlaneMcpError` with code `504`, so callers can use one transport-error path.
 
 Child-owned tools use the same authenticated client and are still constrained by the active
 child manifest. `queryRetrieval()` is a typed convenience wrapper for the stable

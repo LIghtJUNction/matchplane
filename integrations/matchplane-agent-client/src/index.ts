@@ -540,7 +540,7 @@ export class MatchPlaneAgentClient {
       limit: input.limit ?? 20,
       ...(input.trace_id === undefined ? {} : { trace_id: input.trace_id }),
     };
-    const response = await this.fetchImpl(`${this.baseUrl}/api/platform/retrieval/query`, {
+    const response = await this.fetchWithDeadline(`${this.baseUrl}/api/platform/retrieval/query`, {
       method: "POST",
       headers: new Headers({
         accept: "application/json",
@@ -548,7 +548,6 @@ export class MatchPlaneAgentClient {
         "x-matchplane-api-key": this.apiKey,
       }),
       body: JSON.stringify(envelope),
-      signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
     const raw = await readBoundedJson(response);
     if (!response.ok || !isRecord(raw)) {
@@ -650,6 +649,18 @@ export class MatchPlaneAgentClient {
     return this.callRpc("tools/call", { name, arguments: args }, partyToken);
   }
 
+  private async fetchWithDeadline(input: string, init: RequestInit): Promise<Response> {
+    const signal = AbortSignal.timeout(this.requestTimeoutMs);
+    try {
+      return await this.fetchImpl(input, { ...init, signal });
+    } catch (error) {
+      if (signal.aborted) {
+        throw new MatchPlaneMcpError(504, "MatchPlane request timed out", { timeout_ms: this.requestTimeoutMs });
+      }
+      throw error;
+    }
+  }
+
   private async callRpc(method: string, params: unknown, partyToken?: string): Promise<unknown> {
     const id = crypto.randomUUID();
     const headers = new Headers({
@@ -658,11 +669,10 @@ export class MatchPlaneAgentClient {
       "x-matchplane-api-key": this.apiKey,
     });
     if (partyToken) headers.set("authorization", `Bearer ${partyToken}`);
-    const response = await this.fetchImpl(`${this.baseUrl}/api/mcp`, {
+    const response = await this.fetchWithDeadline(`${this.baseUrl}/api/mcp`, {
       method: "POST",
       headers,
       body: JSON.stringify({ jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) }),
-      signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
     const payload = await readBoundedJson(response) as JsonRpcResponse | null;
     if (!response.ok || !payload) {
@@ -1109,7 +1119,10 @@ async function readBoundedJson(response: Response): Promise<unknown | null> {
   const declaredLength = response.headers.get("content-length");
   if (declaredLength !== null) {
     const length = Number(declaredLength);
-    if (Number.isFinite(length) && length > MAX_AGENT_RESPONSE_BYTES) return null;
+    if (Number.isFinite(length) && length > MAX_AGENT_RESPONSE_BYTES) {
+      await response.body?.cancel().catch(() => undefined);
+      return null;
+    }
   }
 
   const body = response.body;

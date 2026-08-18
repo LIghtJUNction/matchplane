@@ -269,6 +269,28 @@ describe("MatchPlane external Agent client", () => {
     })).toThrow("requestTimeoutMs");
   });
 
+  it("normalizes a transport timeout to a typed MCP error", async () => {
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      requestTimeoutMs: 5,
+      fetchImpl: async (_url, init) => new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) {
+          reject(new Error("missing request signal"));
+          return;
+        }
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    });
+
+    await expect(client.listTools()).rejects.toMatchObject({ name: "MatchPlaneMcpError", code: 504 });
+  });
+
   it("runs a caller-funded multi-step Skill only through its advertised MCP tools", async () => {
     const request: AgentSkillRequest = {
       protocol: "matchplane.agent/v1",
