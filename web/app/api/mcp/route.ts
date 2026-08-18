@@ -11,6 +11,9 @@ import { executeAuthenticatedChildTool } from "../../../src/platform-child-tool"
 export const runtime = "nodejs";
 
 const MAX_UPSTREAM_RESPONSE_BYTES = 256 * 1024;
+// Marketplace actions cross the Next/Rust boundary. Keep a hard server-side deadline so a
+// stalled gateway cannot retain an MCP request forever or exhaust the web worker pool.
+const MARKETPLACE_GATEWAY_TIMEOUT_MS = 20_000;
 
 /**
  * HTTP MCP facade for buyer/seller Agents. Authentication and platform-tree authorization remain
@@ -252,7 +255,13 @@ async function callMarketplaceTool(
         body,
       }));
     } else {
-      result = await fetch(`${gateway}${path}`, { method, headers, body, cache: "no-store" });
+      result = await fetch(`${gateway}${path}`, {
+        method,
+        headers,
+        body,
+        cache: "no-store",
+        signal: AbortSignal.timeout(MARKETPLACE_GATEWAY_TIMEOUT_MS),
+      });
     }
   } catch {
     return rpcError(id, -32003, "marketplace gateway is unavailable");
