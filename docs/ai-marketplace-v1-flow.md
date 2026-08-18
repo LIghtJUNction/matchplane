@@ -19,9 +19,10 @@ There are three separate model responsibilities:
    `@matchplane/agent-client` SDK. Its model, tool loop and token bill are caller-owned. It gets a
    short-lived party capability rather than a browser session or a platform model key.
 
-The root router is currently OpenAI-compatible. A deployment can point it at LiteLLM, Vercel AI
-Gateway, vLLM, Ollama, or another compatible gateway; provider-specific SDKs stay outside the Rust
-kernel. See [`ai-provider-contract.md`](ai-provider-contract.md).
+The root router accepts OpenAI-compatible Chat Completions by default and can also speak native
+Anthropic Messages or Gemini GenerateContent at the server boundary. A deployment can point it at
+LiteLLM, Vercel AI Gateway, vLLM, Ollama, or another compatible gateway; provider-specific SDKs
+stay outside the Rust kernel. See [`ai-provider-contract.md`](ai-provider-contract.md).
 
 ## Buyer flow
 
