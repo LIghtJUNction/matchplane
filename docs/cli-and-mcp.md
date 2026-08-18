@@ -32,7 +32,7 @@ matchplane mcp serve
 
 `serve` 仅启动一个指定的打包工作负载，并透传其环境变量与标准输入输出。若默认值（`node` 和 `/usr/share/matchplane/web/server.js`）不合适，web 工作负载可使用 `MATCHPLANE_WEB_NODE` 与 `MATCHPLANE_WEB_SERVER`。当显式 Node 路径不存在时，CLI 会依次探测 `/usr/local/bin/node`、`/usr/bin/node` 和 PATH 中的 `node`，兼容发行版包与运营方安装的固定 Node 运行时；若都不可用，仍保留原配置路径以便 systemd 记录清晰错误。进程托管仍由监督器负责，例如用户权限、资源限制、重启策略及信号/终止策略。
 
-`matchplane serve subplatform-builder` 只启动隔离构建器二进制；它不读取 `MATCHPLANE_DATABASE_URL`，也不提供 shell/MCP 工具。生产环境应通过独立容器或 systemd sandbox 给予它 `MATCHPLANE_SUBPLATFORM_BUILDER_WEB_URL`、callback token、上传只读目录、artifact 写目录和独立工作根，并显式配置 `bubblewrap`、来源 host allowlist 与构建时间上限。
+`matchplane serve subplatform-builder` 只启动隔离构建器二进制；它不读取 `MATCHPLANE_DATABASE_URL`，也不提供 shell/MCP 工具。生产环境应通过独立容器或 systemd sandbox 给予它 `MATCHPLANE_SUBPLATFORM_BUILDER_WEB_URL`、callback token、上传只读目录、artifact 写目录和独立工作根，并显式配置 `bubblewrap`、来源 host allowlist 与构建时间上限。Bun 包可通过 `MATCHPLANE_SUBPLATFORM_BUILDER_BUN` 指定绝对路径（例如官方安装脚本生成的 `/opt/bun/bin/bun`）；未设置时使用服务 PATH 中的 `bun`，运行时版本由运营方选择，不写入子平台 manifest。
 
 该 worker 会先 claim `/api/platform/subplatforms/discover/claim`，从 Git/`upload://` 来源读取唯一 `matchplane.subplatform.json`，再回写 `/discover/complete` 或 `/discover/fail`；只有 discovery `ready` 后，Web 管理员才需要登记并等待后续静态构建。源码解析与构建共用独立工作根，不使用共享 `/tmp`。
 

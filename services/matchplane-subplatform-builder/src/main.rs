@@ -16,6 +16,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use matchplane_observability::init;
@@ -1108,6 +1111,46 @@ impl BuildTemplate {
     }
 }
 
+fn resolve_build_program(program: &str) -> Result<String> {
+    let configured_bun = env::var("MATCHPLANE_SUBPLATFORM_BUILDER_BUN").ok();
+    resolve_build_program_with_config(program, configured_bun.as_deref())
+}
+
+fn resolve_build_program_with_config(
+    program: &str,
+    configured_bun: Option<&str>,
+) -> Result<String> {
+    if program != "bun" {
+        return Ok(program.to_owned());
+    }
+    let Some(configured_bun) = configured_bun
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(program.to_owned());
+    };
+    let path = PathBuf::from(configured_bun);
+    if !path.is_absolute() {
+        bail!("MATCHPLANE_SUBPLATFORM_BUILDER_BUN must be an absolute executable path");
+    }
+    let metadata = fs::metadata(&path)
+        .with_context(|| format!("reading configured Bun runtime {}", path.display()))?;
+    if !metadata.is_file() {
+        bail!(
+            "configured Bun runtime {} is not a regular file",
+            path.display()
+        );
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o111 == 0 {
+        bail!(
+            "configured Bun runtime {} is not executable",
+            path.display()
+        );
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 async fn run_build(manifest: &Manifest, build_timeout: Duration, build_dir: &Path) -> Result<()> {
     let source_root = &manifest.package_root;
     let static_dir = source_root.join(&manifest.static_directory);
@@ -1116,6 +1159,7 @@ async fn run_build(manifest: &Manifest, build_timeout: Duration, build_dir: &Pat
     }
     fs::create_dir_all(build_dir).context("creating build scratch directory")?;
     let (program, args) = manifest.build_template.command();
+    let program = resolve_build_program(program)?;
     let mut command_args = vec![
         "--die-with-parent".to_owned(),
         "--unshare-net".to_owned(),
@@ -1150,7 +1194,7 @@ async fn run_build(manifest: &Manifest, build_timeout: Duration, build_dir: &Pat
         "HOME".to_owned(),
         "/tmp".to_owned(),
         "--".to_owned(),
-        program.to_owned(),
+        program.clone(),
     ];
     command_args.extend(args.iter().map(|arg| (*arg).to_owned()));
     let bwrap =
@@ -1272,9 +1316,10 @@ async fn prepare_dependencies(manifest: &Manifest, build_dir: &Path) -> Result<(
     {
         bail!("{} build requires a committed lockfile", manifest.slug);
     }
+    let program = resolve_build_program(program)?;
     let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
     run_sandboxed(
-        program,
+        &program,
         &args,
         &manifest.package_root,
         build_dir,
@@ -1707,6 +1752,30 @@ mod tests {
         ));
         assert!(BuildTemplate::parse("bun run build && curl https://evil.example").is_err());
         assert!(BuildTemplate::parse("sh -c echo pwned").is_err());
+    }
+
+    #[test]
+    fn configured_bun_runtime_must_be_an_absolute_executable_file() {
+        assert_eq!(
+            resolve_build_program_with_config("bun", None).expect("default runtime"),
+            "bun"
+        );
+        assert_eq!(
+            resolve_build_program_with_config("bun", Some("/bin/sh"))
+                .expect("absolute executable runtime"),
+            "/bin/sh"
+        );
+        assert!(resolve_build_program_with_config("bun", Some("bun")).is_err());
+        assert!(resolve_build_program_with_config("bun", Some("/tmp")).is_err());
+    }
+
+    #[test]
+    fn configured_bun_runtime_does_not_affect_other_build_templates() {
+        assert_eq!(
+            resolve_build_program_with_config("npm", Some("relative/bun"))
+                .expect("non-Bun runtime"),
+            "npm"
+        );
     }
 
     #[test]
