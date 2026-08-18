@@ -21,6 +21,13 @@ interface PluginHostProps {
   listings?: AssetListing[];
   /** Open a result in the host-owned detail sheet and contact flow. */
   onOpenListing?: (listing: AssetListing) => void;
+  /** Opaque conversational seller draft; the plugin may import it into its editable form. */
+  sellerDraft?: {
+    narrative: string;
+    intentId?: string;
+    attributes: Record<string, unknown>;
+    terms: Record<string, unknown>;
+  } | null;
 }
 
 /**
@@ -29,7 +36,7 @@ interface PluginHostProps {
  * but it never receives a session token or payment authority. Contact updates are validated by
  * the host and forwarded through the same Better Auth session bridge as the generic workspace.
  */
-export function PluginHost({ subplatform, role, theme, locale, onNotice, fallback, listings = [], onOpenListing }: PluginHostProps) {
+export function PluginHost({ subplatform, role, theme, locale, onNotice, fallback, listings = [], onOpenListing, sellerDraft = null }: PluginHostProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const contextTokenRef = useRef<string | null>(null);
   const pluginReadyRef = useRef(false);
@@ -73,6 +80,7 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
         assetSchema: subplatform.assetSchema,
         ui: subplatform.ui,
         capabilities: ["chat.open", "match.results", "listing.open", "listing.select", "listing.submit", "contact.update", "navigation"],
+        ...(role === "seller" && sellerDraft ? { agentDraft: sellerDraft } : {}),
       },
     }, "*");
     // onLoad can precede plugin.ready. Messages are ordered, so the plugin can
@@ -144,6 +152,12 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
   useEffect(() => {
     postResults();
   }, [listings]);
+
+  useEffect(() => {
+    // A routed seller draft may arrive after the iframe has already loaded. Re-send the
+    // versioned context so the plugin can offer an import action without a page reload.
+    if (pluginReadyRef.current) postContext();
+  }, [sellerDraft]);
 
   if (!artifact) return null;
 

@@ -367,6 +367,19 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             })
           : null;
         if (isSeller && route?.routePlan.length) {
+          // Keep the conversational material when routing a seller to a child. The target
+          // platform owns the schema, so this is deliberately an opaque editable draft rather
+          // than guessed vehicle/service fields. The form or plugin can import it and the seller
+          // still explicitly reviews and submits it.
+          onSellerDraft?.({
+            narrative,
+            attributes: {
+              source: "conversation",
+              conversation_id: conversationId,
+              routed_from: platformPath(subplatform),
+            },
+            terms: { pricing_mode: pricingFor(subplatform).mode },
+          });
           // A seller must publish into the node selected by the platform Agent. The old flow
           // wrote supply intents into every hop and left the form mounted at the root path,
           // which made a successful route look like a dead end. Pick the deepest terminal hop

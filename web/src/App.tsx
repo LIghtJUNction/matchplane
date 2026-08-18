@@ -320,6 +320,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   subplatform={subplatform}
                   listings={role === "buyer" ? listings : []}
                   onOpenListing={setListing}
+                  sellerDraft={sellerDraft}
                   fallback={genericWorkspace}
                 />
               ) : genericWorkspace}
