@@ -186,6 +186,7 @@ Discovery 进入 `queued → discovering → ready/rejected` 状态；只有 `re
 - 插件是静态前端适配层，不会携带独立数据库、不能签发 token、不能绕过联系人同意、不能直接调用支付方。支付凭据仍由根/payment service 保存。隔离构建器附加 artifact locator 后，激活清单会衍生 `assets.hosted` URL 为 `/api/platform/plugin-assets/<mount>/...`；浏览器在 `sandbox="allow-scripts"` 的 iframe 中承载该发布。由于该沙箱采用不透明 `null` origin，host 通过通配 `postMessage` 目标，但只接收来自精确 iframe 窗口和其主机生成的每实例 `contextToken` 的消息。host 每次发送 versioned `matchplane.plugin/v1` context 与受限 `match.results` 快照；当 host 侧推荐集变化时，快照会更新。插件可请求 `chat.open`、`listing.open`、`listing.select`、`listing.submit` 与 `navigation`；`listing.open` 仅携带结果 id，host 使用最新快照解析后再打开 host-owned 详情/联系人流程。列表提交携带 `requestId`，并返回对应的 `listing.submit.result`。host 在调用 marketplace API 前会校验 seller 角色、Better Auth 会话、激活租户/domain/schema 与受限 JSON。artifact endpoint 在 `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT` 下解析主机本地文件，核验 active build digest，禁止路径穿透与软链接逃逸，并施加严格 CSP。它不会抓取插件提供的 URL 或运行插件服务端代码。
 - 结果桥是“单向数据 + 双向选中”：
   - host 发送 `{ protocol: "matchplane.plugin/v1", type: "match.results", version: 1, contextToken, payload: { listings: [...] } }`，最多包含 100 条由 host 拥有且公开的结果卡片。
+  - 供给方会话的 `platform.context` 可附带 `agentDraft`（`narrative`、可选 `intentId`、不透明 `attributes` 与 `terms`）。它只是聊天材料的可编辑草稿，不是已发布供给，也不携带 token、联系人或支付权限；插件必须让供给方检查并通过 `listing.submit` 明确提交，宿主仍会做 schema、租户和权限校验。草稿在路由到子平台后会通过新的 context 消息补发，避免聊天与表单脱节。
   - 插件发送 `{ type: "listing.open", contextToken, payload: { listingId } }`；host 会忽略当前快照之外的 id。
   这种约束在保留垂直化渲染能力的同时，将作用域、联系人同意与支付行为留在根服务侧。
 - 路径仅在清单校验、API 兼容、CSP/资源检查、包扫描和运营审计通过后才激活。禁用或吊销会移除路径，但根账号与历史会保留。
