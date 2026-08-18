@@ -157,7 +157,7 @@ export function ListingSheet({ listing, subplatform, onClose, onContact, contact
                 {contactSubmitting
                   ? subplatformCopy(subplatform, "contactSubmittingLabel", "正在提交…")
                   : contactDisabled
-                    ? subplatformCopy(subplatform, "contactUnavailableLabel", "演示环境不可用")
+                    ? subplatformCopy(subplatform, "contactUnavailableLabel", "当前暂不可用")
                     : subplatformCopy(subplatform, "requestContactLabel", "申请联系")}
               </motion.button>
             </div>
