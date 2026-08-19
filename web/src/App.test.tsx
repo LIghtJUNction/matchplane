@@ -44,13 +44,16 @@ beforeEach(() => {
 });
 
 describe("MatchPlane workspaces", () => {
-  it("keeps the root entry chat-first while showing root platform context", async () => {
+  it("keeps the root entry focused on one chat with secondary routes collapsed", async () => {
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "先说说你想解决什么。" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "从一句话开始。" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "从一句话开始。" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "卖方供给" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" })).toBeInTheDocument();
+
+    const disclosure = screen.getByText("其他入口").closest("details");
+    expect(disclosure).not.toHaveAttribute("open");
   });
 
   it("requires a seller session before accepting supply uploads", async () => {
@@ -212,7 +215,12 @@ describe("MatchPlane workspaces", () => {
 
     await user.click(screen.getByRole("button", { name: "EN" }));
 
-    expect(await screen.findByRole("heading", { name: "Start with one sentence.", level: 2 })).toBeInTheDocument();
+    expect(screen.getByText("More entry points")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Start with one sentence.", level: 2 })).not.toBeInTheDocument();
+
+    const disclosure = screen.getByText("More entry points").closest("details");
+    expect(disclosure).not.toHaveAttribute("open");
+    await user.click(screen.getByText("More entry points"));
     expect(screen.getByRole("link", { name: "I can provide" })).toBeInTheDocument();
   });
 });

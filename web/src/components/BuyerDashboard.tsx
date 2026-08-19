@@ -4,6 +4,7 @@ import {
   BadgeCheck,
   CalendarDays,
   Check,
+  ChevronDown,
   Heart,
   MapPin,
   Search,
@@ -317,6 +318,7 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
   const scrollToListings = () => {
     document.getElementById("recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+  const showRecommendations = !isRoot || listings.length > 0 || query.trim().length > 0;
 
   return (
     <div className="dashboard buyer-dashboard">
@@ -439,55 +441,57 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
         </section>
       ) : null}
 
-      <section id="recommendations" className={`content-section${isRoot ? " root-content" : ""}`}>
-        <SectionHeading
-          eyebrow={subplatform.ui?.chat?.listingEyebrow}
-          title={`${visible.length} ${locale === "zh" && subplatform.ui?.chat?.listingLabel
-            ? subplatform.ui.chat.listingLabel
-            : copy("listingCountLabel", "个可用供给", "available offers")}`}
-        />
-        {visible.length ? (
-          <div className="listing-grid">
-            {visible.map((listing, index) => (
-              <AssetCard
-                key={listing.id}
-                listing={listing}
-                index={index}
-                saved={saved.has(listing.id)}
-                compared={compareIds.has(listing.id)}
-                onSave={() => toggleSaved(listing)}
-                onDismiss={() => dismissListing(listing)}
-                onCompare={() => toggleCompare(listing)}
-                onOpen={() => {
-                  void recordBehavior(listing, "offer.open");
-                  onOpenListing(listing);
-                }}
-                locale={locale}
-                matchLabel={copy("matchLabel", "匹配", "match")}
-                viewLabel={copy("viewOfferLabel", "查看", "View")}
-                saveLabel={copy("saveOfferLabel", "收藏", "Save")}
-                unsaveLabel={copy("unsaveOfferLabel", "取消收藏", "Remove from saved")}
-                dismissLabel={copy("dismissOfferLabel", "不太合适", "Not a fit")}
-                compareLabel={compareIds.has(listing.id) ? copy("removeCompareLabel", "取消比较", "Remove") : copy("compareLabel", "比较", "Compare")}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <Search size={28} aria-hidden="true" />
-            <h3>{query
-              ? copy("searchEmptyTitle", "没有命中这次搜索", "No offers match this search")
-              : copy("noOffersTitle", "等待供给方上传资料", "Waiting for supply partners to publish")}</h3>
-            <p>
-              {query
-                ? copy("searchEmptyDescription", "换一个名称、属性或地点试试。", "Try another name, attribute, or location.")
-                : copy("noOffersDescription", "平台不预置样例内容；供给方提交并通过审核后，这里会出现真实供给。", "There are no seeded examples. Approved offers will appear here after supply partners publish them.")}
-            </p>
-            {query ? <button type="button" onClick={() => setQuery("")}>{copy("clearSearchLabel", "清除搜索", "Clear search")}</button> : null}
-            {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice(copy("describeDemandNotice", "先描述你的目标，平台会从已激活的子平台开始路由", "Describe your goal and the platform will route it through active matching nodes.")); }}>{copy("describeDemandLabel", "描述需求", "Describe a need")}</button> : null}
-          </div>
-        )}
-      </section>
+      {showRecommendations ? (
+        <section id="recommendations" className={`content-section${isRoot ? " root-content" : ""}`}>
+          <SectionHeading
+            eyebrow={subplatform.ui?.chat?.listingEyebrow}
+            title={`${visible.length} ${locale === "zh" && subplatform.ui?.chat?.listingLabel
+              ? subplatform.ui.chat.listingLabel
+              : copy("listingCountLabel", "个可用供给", "available offers")}`}
+          />
+          {visible.length ? (
+            <div className="listing-grid">
+              {visible.map((listing, index) => (
+                <AssetCard
+                  key={listing.id}
+                  listing={listing}
+                  index={index}
+                  saved={saved.has(listing.id)}
+                  compared={compareIds.has(listing.id)}
+                  onSave={() => toggleSaved(listing)}
+                  onDismiss={() => dismissListing(listing)}
+                  onCompare={() => toggleCompare(listing)}
+                  onOpen={() => {
+                    void recordBehavior(listing, "offer.open");
+                    onOpenListing(listing);
+                  }}
+                  locale={locale}
+                  matchLabel={copy("matchLabel", "匹配", "match")}
+                  viewLabel={copy("viewOfferLabel", "查看", "View")}
+                  saveLabel={copy("saveOfferLabel", "收藏", "Save")}
+                  unsaveLabel={copy("unsaveOfferLabel", "取消收藏", "Remove from saved")}
+                  dismissLabel={copy("dismissOfferLabel", "不太合适", "Not a fit")}
+                  compareLabel={compareIds.has(listing.id) ? copy("removeCompareLabel", "取消比较", "Remove") : copy("compareLabel", "比较", "Compare")}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <Search size={28} aria-hidden="true" />
+              <h3>{query
+                ? copy("searchEmptyTitle", "没有命中这次搜索", "No offers match this search")
+                : copy("noOffersTitle", "等待供给方上传资料", "Waiting for supply partners to publish")}</h3>
+              <p>
+                {query
+                  ? copy("searchEmptyDescription", "换一个名称、属性或地点试试。", "Try another name, attribute, or location.")
+                  : copy("noOffersDescription", "平台不预置样例内容；供给方提交并通过审核后，这里会出现真实供给。", "There are no seeded examples. Approved offers will appear here after supply partners publish them.")}
+              </p>
+              {query ? <button type="button" onClick={() => setQuery("")}>{copy("clearSearchLabel", "清除搜索", "Clear search")}</button> : null}
+              {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice(copy("describeDemandNotice", "先描述你的目标，平台会从已激活的子平台开始路由", "Describe your goal and the platform will route it through active matching nodes.")); }}>{copy("describeDemandLabel", "描述需求", "Describe a need")}</button> : null}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       {compareIds.size ? (
         <section className="surface compare-panel" aria-label={copy("compareLabel", "比较", "Compare")}>
@@ -597,29 +601,30 @@ function RootFlow({
   locale: InterfaceLocale;
 }) {
   const copy = (key: string, fallbackZh: string, fallbackEn = fallbackZh) => localizedSubplatformCopy(subplatform, locale, key, fallbackZh, fallbackEn);
-  const description = locale === "zh" && subplatform.description ? subplatform.description : copy("rootRoutingDescription", "描述目标，平台会把请求交给已激活的匹配节点。", "Describe your goal and the platform will route it through active matching nodes.");
   return (
-    <section className="root-routing-strip" aria-labelledby="root-routing-title">
-      <div className="root-routing-copy">
-        <h2 id="root-routing-title">{copy("rootRoutingTitle", "从一句话开始。", "Start with one sentence.")}</h2>
-        <p>{description}</p>
+    <details className="root-routing-disclosure">
+      <summary>
+        <span>{copy("moreEntryPointsLabel", "其他入口", "More entry points")}</span>
+        <ChevronDown size={16} aria-hidden="true" />
+      </summary>
+      <div className="root-routing-disclosure-content">
+        <a className="root-routing-seller-link" href={`${subplatform.path}?role=seller`}>
+          {copy("supplyActionLabel", "我来提供", "I can provide")}
+          <ArrowRight size={17} aria-hidden="true" />
+        </a>
+        {childPlatforms.length ? (
+          <div className="root-platform-links" aria-label={copy("activePlatformsLabel", "已激活的平台", "Active platforms")}>
+            {childPlatforms.map((child) => (
+              <a className="root-platform-link-card" key={child.path} href={child.path}>
+                <strong>{child.displayName}</strong>
+                {child.description ? <small>{child.description}</small> : null}
+                <ArrowRight size={16} aria-hidden="true" />
+              </a>
+            ))}
+          </div>
+        ) : null}
       </div>
-      <a className="button button-quiet root-routing-seller-link" href={`${subplatform.path}?role=seller`}>
-        {copy("supplyActionLabel", "我来提供", "I can provide")}
-        <ArrowRight size={17} aria-hidden="true" />
-      </a>
-      {childPlatforms.length ? (
-        <div className="root-platform-links" aria-label={copy("activePlatformsLabel", "已激活的平台", "Active platforms")}>
-          {childPlatforms.map((child) => (
-            <a className="root-platform-link-card" key={child.path} href={child.path}>
-              <strong>{child.displayName}</strong>
-              {child.description ? <small>{child.description}</small> : null}
-              <ArrowRight size={16} aria-hidden="true" />
-            </a>
-          ))}
-        </div>
-      ) : null}
-    </section>
+    </details>
   );
 }
 
