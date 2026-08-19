@@ -96,6 +96,11 @@ followed by `bun run --cwd web dev`; the Next.js development server listens on
 `/usr/share/matchplane/web` in every Linux package; the packaged `matchplane-web.service` serves
 the UI and Better Auth routes.
 
+For a shared development or test host, use the [development/test runbook](docs/development-test-runbook.md).
+It keeps the MatchPlane profile separate from Next.js' optimized `NODE_ENV`, documents the CLI
+startup order, and keeps hosted AI and payment providers in sandbox mode. The test host is not a
+production deployment.
+
 The generic marketplace kernel supports neutral demand/supply participants, explainable
 recommendations, consent-controlled introductions, and bounded source references for the separate
 payment service without assuming what is being matched. Register a participant through
