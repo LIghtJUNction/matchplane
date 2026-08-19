@@ -100,29 +100,55 @@ export async function POST(request: Request): Promise<Response> {
   const sourceDigest = input.sourceDigest!;
   const registrationId = randomUUID();
   let organization: { id: string; name: string; slug: string };
-  try {
-    organization = (await auth.api.createOrganization({
-      body: {
-        name: manifest.value.displayName,
-        slug: manifest.value.slug,
-        userId: session.user.id,
-        metadata: {
-          tenantId: input.tenantId,
-          domainId: input.domainId,
-          packageId: manifest.value.id,
-          parentOrganizationId: parentId,
+  let organizationCreated = false;
+  const existingOrganization = await authDatabase.query<{ id: string; name: string; slug: string }>(
+    `SELECT id::text, name, slug
+       FROM "organization"
+      WHERE slug = $1
+        AND "tenantId" = $2
+        AND "parentOrganizationId" = $3::uuid
+        AND "rootPlatform" = false
+      LIMIT 1`,
+    [manifest.value.slug, input.tenantId, parentId],
+  );
+  if (existingOrganization.rows[0]) {
+    // A subplatform slug identifies a stable organization node. Reuse that node for an
+    // immutable registration upgrade instead of creating a second Better Auth organization.
+    organization = existingOrganization.rows[0];
+  } else {
+    try {
+      organization = (await auth.api.createOrganization({
+        body: {
+          name: manifest.value.displayName,
+          slug: manifest.value.slug,
+          userId: session.user.id,
+          metadata: {
+            tenantId: input.tenantId,
+            domainId: input.domainId,
+            packageId: manifest.value.id,
+            parentOrganizationId: parentId,
+          },
         },
-      },
-    })) as { id: string; name: string; slug: string };
-  } catch (error) {
-    console.error("subplatform organization creation failed", error);
-    return NextResponse.json({ error: "子平台组织创建失败；slug 可能已被占用" }, { status: 409 });
+      })) as { id: string; name: string; slug: string };
+      organizationCreated = true;
+    } catch (error) {
+      console.error("subplatform organization creation failed", error);
+      return NextResponse.json({ error: "子平台组织创建失败；slug 可能已被占用" }, { status: 409 });
+    }
   }
 
   let client: PoolClient | undefined;
+  let version = "1";
   try {
     client = await authDatabase.connect();
     await client.query("BEGIN");
+    const nextVersion = await client.query<{ version: string }>(
+      `SELECT (COALESCE(MAX(version), 0) + 1)::text AS version
+         FROM subplatform_registrations
+        WHERE tenant_id = $1::uuid AND slug = $2`,
+      [input.tenantId, manifest.value.slug],
+    );
+    version = nextVersion.rows[0]?.version ?? "1";
     const projected = await client.query(
       `UPDATE "organization"
           SET "tenantId" = $2,
@@ -147,9 +173,10 @@ export async function POST(request: Request): Promise<Response> {
       `INSERT INTO subplatform_registrations
         (id, tenant_id, domain_id, package_id, slug, source_kind, source_locator,
          pinned_revision, source_digest, manifest_digest, build_digest, manifest,
-         requested_scopes, membership_policy, state, registered_by)
+         requested_scopes, membership_policy, version, state, registered_by)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8,
-               decode($9, 'hex'), decode($10, 'hex'), $11, $12::jsonb, $13, $14, 'validated', $15)`,
+               decode($9, 'hex'), decode($10, 'hex'), $11, $12::jsonb, $13, $14,
+               $15::bigint, 'validated', $16)`,
       [
         registrationId,
         input.tenantId,
@@ -165,13 +192,16 @@ export async function POST(request: Request): Promise<Response> {
         JSON.stringify(manifest.value),
         requestedScopes,
         membershipPolicy,
+        version,
         session.user.id,
       ],
     );
     await client.query("COMMIT");
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
-    await authDatabase.query('DELETE FROM "organization" WHERE id = $1::uuid', [organization.id]).catch(() => undefined);
+    if (organizationCreated) {
+      await authDatabase.query('DELETE FROM "organization" WHERE id = $1::uuid', [organization.id]).catch(() => undefined);
+    }
     console.error("subplatform registration persistence failed", error);
     return NextResponse.json({ error: "子平台注册记录保存失败" }, { status: 500 });
   } finally {
@@ -183,6 +213,7 @@ export async function POST(request: Request): Promise<Response> {
     organizationId: organization.id,
     slug: organization.slug,
     state: "validated",
+    version,
     manifestDigest,
     sourceDigest,
     next: "isolated_builder_must_attach_build_digest_before_activation",

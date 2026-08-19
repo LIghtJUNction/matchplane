@@ -93,31 +93,55 @@ export async function POST(request: Request): Promise<Response> {
   const toolHealthError = await validateDeclaredMcpTools(row);
   if (toolHealthError) return NextResponse.json({ error: toolHealthError }, { status: 409 });
 
-  const activated = await authDatabase.query(
-    `UPDATE subplatform_registrations
-        SET state = 'active',
-            activated_at = COALESCE(activated_at, clock_timestamp()),
-            version = version + 1
-      WHERE id = $1::uuid
-        AND state IN ('validated', 'building', 'ready')
-        AND build_digest = decode($2, 'hex')
-      RETURNING id,
-                slug,
-                state,
-                encode(build_digest, 'hex') AS "buildDigest",
-                encode(manifest_digest, 'hex') AS "manifestDigest",
-                tenant_id AS "tenantId",
-                domain_id AS "domainId",
-                activated_at AS "activatedAt"`,
-    [input.registrationId, input.buildDigest.toLowerCase()],
-  );
-  if (activated.rowCount !== 1) {
-    return NextResponse.json({ error: "注册版本已被其他操作修改，请重新读取后再试" }, { status: 409 });
+  const client = await authDatabase.connect();
+  try {
+    await client.query("BEGIN");
+    const activated = await client.query(
+      `UPDATE subplatform_registrations
+          SET state = 'active',
+              activated_at = COALESCE(activated_at, clock_timestamp()),
+              version = version + 1
+        WHERE id = $1::uuid
+          AND state IN ('validated', 'building', 'ready')
+          AND build_digest = decode($2, 'hex')
+        RETURNING id,
+                  slug,
+                  state,
+                  encode(build_digest, 'hex') AS "buildDigest",
+                  encode(manifest_digest, 'hex') AS "manifestDigest",
+                  tenant_id AS "tenantId",
+                  domain_id AS "domainId",
+                  activated_at AS "activatedAt"`,
+      [input.registrationId, input.buildDigest.toLowerCase()],
+    );
+    if (activated.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: "注册版本已被其他操作修改，请重新读取后再试" }, { status: 409 });
+    }
+    const active = activated.rows[0] as { tenantId: string; slug: string };
+    // A slug is one mounted organization path. Once a newer immutable release is active,
+    // retire older active rows so routing and child-tool discovery cannot fan out duplicates.
+    await client.query(
+      `UPDATE subplatform_registrations
+          SET state = 'disabled', updated_at = clock_timestamp()
+        WHERE tenant_id = $1::uuid
+          AND slug = $2
+          AND id <> $3::uuid
+          AND state = 'active'`,
+      [active.tenantId, active.slug, input.registrationId],
+    );
+    await client.query("COMMIT");
+    return NextResponse.json({
+      ...activated.rows[0],
+      routing: "enabled",
+    }, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    console.error("subplatform activation transaction failed", error);
+    return NextResponse.json({ error: "子平台激活失败，请稍后重试" }, { status: 500 });
+  } finally {
+    client.release();
   }
-  return NextResponse.json({
-    ...activated.rows[0],
-    routing: "enabled",
-  }, { headers: { "cache-control": "no-store" } });
 }
 
 interface ActivationRequest {
