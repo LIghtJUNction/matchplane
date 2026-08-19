@@ -638,6 +638,7 @@ fn doctor_report() -> DoctorReport {
             service_role: env::var("MATCHPLANE_SERVICE_ROLE").ok(),
             error: Some(safe_error(&error.to_string())),
             errors: vec![safe_error(&error.to_string())],
+            hosted_agent: hosted_agent_report(),
         },
     }
 }
@@ -654,6 +655,7 @@ fn doctor_report_from_diagnostics(diagnostics: ConfigurationDiagnostics) -> Doct
         service_role: Some(diagnostics.service_role),
         error: errors.first().cloned(),
         errors,
+        hosted_agent: hosted_agent_report(),
     }
 }
 
@@ -758,6 +760,9 @@ async fn handle_mcp_request(request: JsonRpcRequest) -> Result<Option<JsonRpcRes
                 JsonRpcResponse::success(id, tool_result(probe_status().await))
             }
             Some("platform.doctor") => JsonRpcResponse::success(id, tool_result(doctor_report())),
+            Some("platform.ai.status") => {
+                JsonRpcResponse::success(id, tool_result(hosted_agent_report()))
+            }
             Some("platform.health") => {
                 JsonRpcResponse::success(id, tool_result(probe_status().await))
             }
@@ -776,6 +781,7 @@ fn tool_list() -> Value {
         "tools": [
             { "name": "platform.status", "description": "Probe MatchPlane readiness endpoints without exposing secrets.", "inputSchema": { "type": "object", "additionalProperties": false } },
             { "name": "platform.doctor", "description": "Validate loaded configuration and production safety gates.", "inputSchema": { "type": "object", "additionalProperties": false } },
+            { "name": "platform.ai.status", "description": "Report the server-side hosted Agent configuration without exposing its key or URL path.", "inputSchema": { "type": "object", "additionalProperties": false } },
             { "name": "platform.health", "description": "Return the same bounded read-only health report as platform.status.", "inputSchema": { "type": "object", "additionalProperties": false } }
         ]
     })
@@ -803,6 +809,7 @@ async fn probe_status() -> StatusReport {
                     status: None,
                     error: Some(safe_error(&error.to_string())),
                 }],
+                hosted_agent: hosted_agent_report(),
             };
         }
     };
@@ -838,6 +845,7 @@ async fn probe_status() -> StatusReport {
     StatusReport {
         ok: checks.iter().all(|check| check.ok),
         checks,
+        hosted_agent: hosted_agent_report(),
     }
 }
 
@@ -936,12 +944,104 @@ struct DoctorReport {
     service_role: Option<String>,
     error: Option<String>,
     errors: Vec<String>,
+    hosted_agent: HostedAgentReport,
 }
 
 #[derive(Debug, Serialize)]
 struct StatusReport {
     ok: bool,
     checks: Vec<Probe>,
+    hosted_agent: HostedAgentReport,
+}
+
+/// A secret-free summary of the optional platform-owned model router.
+///
+/// The hosted Agent is deliberately advisory: the platform can still serve a deterministic
+/// policy fallback when no provider is configured. `issues` gives an operator or operations
+/// Agent enough information to repair the deployment without printing credentials or a URL path.
+#[derive(Debug, Clone, Serialize)]
+struct HostedAgentReport {
+    configured: bool,
+    protocol: String,
+    model: Option<String>,
+    endpoint_origin: Option<String>,
+    key_configured: bool,
+    issues: Vec<String>,
+}
+
+fn hosted_agent_report() -> HostedAgentReport {
+    hosted_agent_report_from_values(
+        env::var("MATCHPLANE_ENVIRONMENT")
+            .ok()
+            .as_deref()
+            .unwrap_or("development"),
+        env::var("MATCHPLANE_ROUTER_AI_URL").ok().as_deref(),
+        env::var("MATCHPLANE_ROUTER_AI_KEY").ok().as_deref(),
+        env::var("MATCHPLANE_ROUTER_AI_MODEL").ok().as_deref(),
+        env::var("MATCHPLANE_ROUTER_AI_PROTOCOL").ok().as_deref(),
+    )
+}
+
+fn hosted_agent_report_from_values(
+    environment: &str,
+    endpoint: Option<&str>,
+    key: Option<&str>,
+    model: Option<&str>,
+    protocol: Option<&str>,
+) -> HostedAgentReport {
+    let protocol = protocol
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("openai-compatible")
+        .to_owned();
+    let endpoint_origin = endpoint.and_then(|value| safe_endpoint_origin(value.trim()));
+    let key_configured = key.is_some_and(|value| !value.trim().is_empty());
+    let model = model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let mut issues = Vec::new();
+    if endpoint_origin.is_none() {
+        issues.push("MATCHPLANE_ROUTER_AI_URL is missing or invalid".to_owned());
+    }
+    if !key_configured {
+        issues.push("MATCHPLANE_ROUTER_AI_KEY is not configured".to_owned());
+    }
+    if model.is_none() {
+        issues.push("MATCHPLANE_ROUTER_AI_MODEL is not configured".to_owned());
+    }
+    if !matches!(
+        protocol.as_str(),
+        "openai-compatible" | "anthropic-messages" | "gemini-generate-content"
+    ) {
+        issues.push("MATCHPLANE_ROUTER_AI_PROTOCOL is unsupported".to_owned());
+    }
+    if environment.trim().eq_ignore_ascii_case("production")
+        && endpoint
+            .and_then(|value| Url::parse(value.trim()).ok())
+            .is_some_and(|url| url.scheme() != "https")
+    {
+        issues.push("production hosted Agent endpoint must use HTTPS".to_owned());
+    }
+    HostedAgentReport {
+        configured: issues.is_empty(),
+        protocol,
+        model,
+        endpoint_origin,
+        key_configured,
+        issues,
+    }
+}
+
+fn safe_endpoint_origin(value: &str) -> Option<String> {
+    let parsed = Url::parse(value).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return None;
+    }
+    match parsed.origin() {
+        url::Origin::Tuple(_, _, _) => Some(parsed.origin().ascii_serialization()),
+        url::Origin::Opaque(_) => None,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1002,9 +1102,9 @@ impl JsonRpcResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdminInviteRole, Service, admin_invite_role_value, normalize_admin_base_url,
-        resolve_web_node_with, service_command, sha256, validate_operator_email,
-        validate_operator_uuid,
+        AdminInviteRole, Service, admin_invite_role_value, hosted_agent_report_from_values,
+        normalize_admin_base_url, resolve_web_node_with, safe_endpoint_origin, service_command,
+        sha256, validate_operator_email, validate_operator_uuid,
     };
     use uuid::Uuid;
 
@@ -1085,6 +1185,56 @@ mod tests {
         assert_eq!(
             admin_invite_role_value(AdminInviteRole::SubplatformAdmin),
             "subplatform_admin"
+        );
+    }
+
+    #[test]
+    fn hosted_agent_report_requires_all_server_side_provider_values() {
+        let report = hosted_agent_report_from_values(
+            "production",
+            Some("https://llm.example/v1/chat/completions"),
+            None,
+            Some("provider/model"),
+            Some("openai-compatible"),
+        );
+        assert!(!report.configured);
+        assert!(!report.key_configured);
+    }
+
+    #[test]
+    fn hosted_agent_report_accepts_a_secure_supported_provider() {
+        let report = hosted_agent_report_from_values(
+            "production",
+            Some("https://llm.example/v1/chat/completions"),
+            Some("server-only-key"),
+            Some("provider/model"),
+            Some("openai-compatible"),
+        );
+        assert!(report.configured);
+        assert_eq!(
+            report.endpoint_origin.as_deref(),
+            Some("https://llm.example")
+        );
+    }
+
+    #[test]
+    fn hosted_agent_report_rejects_http_provider_in_production() {
+        let report = hosted_agent_report_from_values(
+            "production",
+            Some("http://llm.example/v1/chat/completions"),
+            Some("server-only-key"),
+            Some("provider/model"),
+            Some("openai-compatible"),
+        );
+        assert!(!report.configured);
+        assert!(report.issues.iter().any(|issue| issue.contains("HTTPS")));
+    }
+
+    #[test]
+    fn safe_endpoint_origin_drops_path_and_credentials() {
+        assert_eq!(
+            safe_endpoint_origin("https://user:secret@llm.example/v1/chat"),
+            Some("https://llm.example".to_owned())
         );
     }
 

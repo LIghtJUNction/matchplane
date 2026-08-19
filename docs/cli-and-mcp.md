@@ -38,14 +38,15 @@ matchplane mcp serve
 
 ## MCP stdio 合约
 
-`matchplane mcp serve` 为 MCP 客户端实现换行分隔的 JSON-RPC。它为三个只读工具提供 `initialize`、`tools/list` 与 `tools/call`：
+`matchplane mcp serve` 为 MCP 客户端实现换行分隔的 JSON-RPC。它为四个只读工具提供 `initialize`、`tools/list` 与 `tools/call`：
 
 - `platform.status` — 探测网关、支付与 web 的就绪 URL；
 - `platform.health` — 给简化客户端返回同一套受限健康报告；
 - `platform.doctor` — 校验已加载的 `MATCHPLANE_*` 配置和生产门禁。
+- `platform.ai.status` — 只读检查平台托管 Agent 的服务端 URL origin、协议、模型和密钥是否齐全。
   结果保留用于兼容性的首个 `error` 字段，同时额外包含 `errors` 数组，列出所有检测到的阻塞项，便于运营者或 Agent 一次性准备变更集，而不是每次只处理一个失败检查项。敏感值会被脱敏，配置加载器在工作负载启动时依然会快速失败。
 
-URL 使用运营配置项（`MATCHPLANE_GATEWAY_HEALTH_URL`、`MATCHPLANE_PAYMENT_HEALTH_URL` 和 `MATCHPLANE_WEB_HEALTH_URL`），默认指向 loopback。输出包含状态码和脱敏错误，不包含凭据与连接字符串。该服务不会提供 shell 执行、任意 HTTP 转发、数据库写入、支付动作或联系人数据。平台撮合与子平台检索仍在各自的已认证 HTTP/MCP 合约之下，本运维服务器不具备放行权限。web 服务在 `/api/mcp` 提供已认证的 HTTP MCP 门面；其 `platform.match` 工具转发与 chat API 相同的受限路由请求，并接受 Better Auth 会话或有作用域的组织 API key。它支持可选的 `idempotency_key`（最多 240 个可打印字符）；同一调用方、同一规范化平台路径与同一 key 的重试会返回原始路由结果而不再触发托管模型调用，而不同意图内容会被判定为冲突并拒绝。并发重复请求会返回 `409` 并带 `Retry-After: 2`，可在首请求完成后重试。`platform.agent.handoff` 工具会接收调用方自费的 `matchplane.agent/v1` 报文，持久化幂等 handoff，并仅返回活跃的直系子节点能力。它不会调用根模型：外部需求方/供给方 Agent 自行承担 provider 凭据与 token 账单。机器调用请使用带显式 `agent:handoff` 权限的组织 API key。
+URL 使用运营配置项（`MATCHPLANE_GATEWAY_HEALTH_URL`、`MATCHPLANE_PAYMENT_HEALTH_URL` 和 `MATCHPLANE_WEB_HEALTH_URL`），默认指向 loopback。输出包含状态码和脱敏错误，不包含凭据与连接字符串。`platform.status`、`platform.doctor` 和 `platform.ai.status` 还会返回 `hosted_agent` 摘要：它只包含 origin、协议、模型名、`key_configured` 和不含 secret 的修复提示，不会把完整 endpoint、API key 或 prompt 打出来。该服务不会提供 shell 执行、任意 HTTP 转发、数据库写入、支付动作或联系人数据。平台撮合与子平台检索仍在各自的已认证 HTTP/MCP 合约之下，本运维服务器不具备放行权限。web 服务在 `/api/mcp` 提供已认证的 HTTP MCP 门面；其 `platform.match` 工具转发与 chat API 相同的受限路由请求，并接受 Better Auth 会话或有作用域的组织 API key。它支持可选的 `idempotency_key`（最多 240 个可打印字符）；同一调用方、同一规范化平台路径与同一 key 的重试会返回原始路由结果而不再触发托管模型调用，而不同意图内容会被判定为冲突并拒绝。并发重复请求会返回 `409` 并带 `Retry-After: 2`，可在首请求完成后重试。`platform.agent.handoff` 工具会接收调用方自费的 `matchplane.agent/v1` 报文，持久化幂等 handoff，并仅返回活跃的直系子节点能力。它不会调用根模型：外部需求方/供给方 Agent 自行承担 provider 凭据与 token 账单。机器调用请使用带显式 `agent:handoff` 权限的组织 API key。
 
 HTTP 门面在转发前会先校验声明的作用域与预算合约：平台路径必须标准化，tenant/domain/party 标识符必须是 UUID，marketplace 调用必须显式带 `platform_path`，且 Agent handoff 始终调用方自费。Rust 网关依然是最终授权与领域 schema 的仲裁者；这层早期校验仅是确定性的 MCP 边界，不授予实际访问。
 
