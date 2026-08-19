@@ -55,7 +55,11 @@
     "candidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["asset_id", "score", "reasons"],
+      "required": ["score", "reasons"],
+      "anyOf": [
+        { "required": ["asset_id"] },
+        { "required": ["offer_id"] }
+      ],
       "properties": {
         "asset_id": { "$ref": "#/$defs/uuid" },
         "offer_id": {

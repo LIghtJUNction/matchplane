@@ -161,7 +161,7 @@ Rust 网关暴露一套小型、与垂直无关的持久化合同。它是平台
 POST /api/platform/retrieval/query
 ```
 
-请求/响应形状定义见 [`docs/retrieval-protocol-v1.json`](retrieval-protocol-v1.json)。调用该门面时必须携带规范化的 `scope.platform_path`、tenant/domain 作用域、领域中立的 narrative/requirements 与受限结果上限。根服务会将它转成目标 active 节点 manifest 明确允许的 `retrieval.query` MCP tool；只有部署管理员配置了 endpoint 且调用方拥有 `retrieval:query` 时才会转发。子平台返回标准 root `asset_id`、可选 `offer_id`、分数、provider/model 版本与可解释原因。根当前只负责路径、租户、权限和 ABI 校验；它不会把远端 display_name 或 attributes 当作可信成交授权，也不会凭检索响应直接释放联系人、支付或结算。创建 introduction 时，Rust 网关仍会重新校验 offer 的状态、作用域和双方权限。未配置检索终端、上游超时或返回不符合 ABI 时，根返回可观测的错误，不会默默使用根平台凭据。
+请求/响应形状定义见 [`docs/retrieval-protocol-v1.json`](retrieval-protocol-v1.json)。调用该门面时必须携带规范化的 `scope.platform_path`、tenant/domain 作用域、领域中立的 narrative/requirements 与受限结果上限。根服务会将它转成目标 active 节点 manifest 明确允许的 `retrieval.query` MCP tool；只有部署管理员配置了 endpoint 且调用方拥有 `retrieval:query` 时才会转发。每个候选必须返回标准 root `asset_id` 或 canonical `offer_id` 至少一个（服务等没有目录资产的垂直只需返回 `offer_id`），并携带分数、provider/model 版本与可解释原因/风险。根当前只负责路径、租户、权限和 ABI 校验；它不会把远端 display_name 或 attributes 当作可信成交授权，也不会凭检索响应直接释放联系人、支付或结算。创建 introduction 时，Rust 网关仍会重新校验 offer 的状态、作用域和双方权限。未配置检索终端、上游超时或返回不符合 ABI 时，根返回可观测的错误，不会默默使用根平台凭据。
 
 请求按 `request_id` 由 provider 自行幂等；provider 应对重试返回同样结果缓存/复用。provider 可返回空候选列表或 `degraded: true`；根必须在审计中保留该状态，而不是静默切换到其他模型。向量数据库和索引 worker 不随根平台默认提供；若部署方启用兼容 provider，也必须通过同一 retrieval ABI 接入，不会成为新子平台的强制要求。
 

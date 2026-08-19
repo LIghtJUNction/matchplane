@@ -21,7 +21,8 @@ export interface RetrievalQuery {
 }
 
 export interface RetrievalCandidate {
-  assetId: string;
+  /** Optional canonical catalogue asset. Generic offers may not have an asset row. */
+  assetId?: string;
   /** Optional canonical offer reference used by the introduction API. */
   offerId?: string;
   /** Public projection fields are optional so a provider may keep its catalogue private. */
@@ -179,7 +180,10 @@ function parseCandidate(value: unknown, index: number): ParseResult<RetrievalCan
   if (!isRecord(value)) return failure(`retrieval candidate ${index} must be an object`);
   const unsupported = Object.keys(value).find((key) => !new Set(["asset_id", "offer_id", "display_name", "attributes", "terms", "score", "reasons", "risks", "metadata"]).has(key));
   if (unsupported) return failure(`retrieval candidate contains an unsupported field: ${unsupported}`);
-  if (!isUuid(value.asset_id)) return failure(`retrieval candidate ${index} asset_id must be a UUID`);
+  if (value.asset_id === undefined && value.offer_id === undefined) {
+    return failure(`retrieval candidate ${index} must include asset_id or offer_id`);
+  }
+  if (value.asset_id !== undefined && !isUuid(value.asset_id)) return failure(`retrieval candidate ${index} asset_id must be a UUID`);
   if (value.offer_id !== undefined && !isUuid(value.offer_id)) return failure(`retrieval candidate ${index} offer_id must be a UUID`);
   if (value.display_name !== undefined && !isBoundedString(value.display_name, 500)) return failure(`retrieval candidate ${index} display_name is invalid`);
   if (typeof value.score !== "number" || !Number.isFinite(value.score) || value.score < -1 || value.score > 1) return failure(`retrieval candidate ${index} score is invalid`);
@@ -194,7 +198,7 @@ function parseCandidate(value: unknown, index: number): ParseResult<RetrievalCan
   return {
     ok: true,
     value: {
-      assetId: value.asset_id,
+      ...(value.asset_id === undefined ? {} : { assetId: value.asset_id }),
       ...(value.offer_id === undefined ? {} : { offerId: value.offer_id }),
       ...(value.display_name === undefined ? {} : { displayName: value.display_name }),
       ...(value.attributes === undefined ? {} : { attributes: value.attributes }),

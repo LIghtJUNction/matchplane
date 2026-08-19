@@ -416,13 +416,15 @@ export interface RetrievalQueryInput {
 }
 
 export interface RetrievalCandidate {
-  asset_id: string;
+  /** Optional canonical catalogue asset; generic offers may only have offer_id. */
+  asset_id?: string;
   offer_id?: string;
   display_name?: string;
   attributes?: Record<string, unknown>;
   terms?: Record<string, unknown>;
   score: number;
   reasons: string[];
+  risks?: string[];
   metadata?: Record<string, unknown>;
 }
 
@@ -971,12 +973,19 @@ function parseRetrievalResult(raw: unknown, requestId: string, limit: number): R
 }
 
 function parseRetrievalCandidate(value: unknown, index: number): RetrievalCandidate {
-  if (!isRecord(value) || !isUuid(value.asset_id)) throw new Error(`retrieval candidate ${index} asset_id is invalid`);
+  if (!isRecord(value) || (value.asset_id === undefined && value.offer_id === undefined)) {
+    throw new Error(`retrieval candidate ${index} must include asset_id or offer_id`);
+  }
+  if (value.asset_id !== undefined && !isUuid(value.asset_id)) throw new Error(`retrieval candidate ${index} asset_id is invalid`);
   if (value.offer_id !== undefined && !isUuid(value.offer_id)) throw new Error(`retrieval candidate ${index} offer_id is invalid`);
   if (value.display_name !== undefined && !isBoundedString(value.display_name, 500)) throw new Error(`retrieval candidate ${index} display_name is invalid`);
   if (typeof value.score !== "number" || !Number.isFinite(value.score) || value.score < -1 || value.score > 1) throw new Error(`retrieval candidate ${index} score is invalid`);
   if (!Array.isArray(value.reasons) || value.reasons.length > 32
     || value.reasons.some((reason) => !isBoundedString(reason, 500) || !reason.trim())) throw new Error(`retrieval candidate ${index} reasons are invalid`);
+  if (value.risks !== undefined && (!Array.isArray(value.risks) || value.risks.length > 32
+    || value.risks.some((risk) => !isBoundedString(risk, 500) || !risk.trim()))) {
+    throw new Error(`retrieval candidate ${index} risks are invalid`);
+  }
   for (const field of ["attributes", "terms", "metadata"] as const) {
     if (value[field] !== undefined && (!isRecord(value[field]) || serializedBytes(value[field]) > 32 * 1024)) {
       throw new Error(`retrieval candidate ${index} ${field} is invalid`);
@@ -986,13 +995,14 @@ function parseRetrievalCandidate(value: unknown, index: number): RetrievalCandid
   const terms = value.terms === undefined ? undefined : value.terms as Record<string, unknown>;
   const metadata = value.metadata === undefined ? undefined : value.metadata as Record<string, unknown>;
   return {
-    asset_id: value.asset_id,
+    ...(value.asset_id === undefined ? {} : { asset_id: value.asset_id }),
     ...(value.offer_id === undefined ? {} : { offer_id: value.offer_id }),
     ...(value.display_name === undefined ? {} : { display_name: value.display_name }),
     ...(attributes === undefined ? {} : { attributes }),
     ...(terms === undefined ? {} : { terms }),
     score: value.score,
     reasons: [...value.reasons] as string[],
+    ...(value.risks === undefined ? {} : { risks: [...value.risks] as string[] }),
     ...(metadata === undefined ? {} : { metadata }),
   };
 }

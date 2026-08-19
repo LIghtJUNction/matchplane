@@ -110,6 +110,29 @@ describe("MatchPlane external Agent client", () => {
     expect(new Headers(calls[0]?.init?.headers).get("x-matchplane-api-key")).toBe("mpk_test");
   });
 
+  it("accepts generic offer-only retrieval candidates and preserves risks", async () => {
+    const requestId = "123e4567-e89b-12d3-a456-426614174004";
+    const fetchImpl = async (): Promise<Response> => new Response(JSON.stringify({
+      protocol: "matchplane.retrieval/v1",
+      request_id: requestId,
+      provider: { id: "service.search", version: "2026.08" },
+      candidates: [{ offer_id: "123e4567-e89b-12d3-a456-426614174003", score: 0.74, reasons: ["范围匹配"], risks: ["需确认档期"] }],
+      degraded: false,
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl });
+    const result = await client.queryRetrieval({
+      tenant_id: "123e4567-e89b-12d3-a456-426614174000",
+      domain_id: "123e4567-e89b-12d3-a456-426614174001",
+      platform_path: "/services",
+      narrative: "找一个咨询服务",
+      request_id: requestId,
+      limit: 2,
+    });
+    expect(result.candidates[0]?.asset_id).toBeUndefined();
+    expect(result.candidates[0]?.offer_id).toBe("123e4567-e89b-12d3-a456-426614174003");
+    expect(result.candidates[0]?.risks).toEqual(["需确认档期"]);
+  });
+
   it("rejects invalid child retrieval scope before contacting the gateway", async () => {
     const fake = fakeFetch();
     const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });

@@ -81,4 +81,30 @@ describe("retrieval protocol v1", () => {
     expect(parseRetrievalResult({ ...base, request_id: tenantId }, requestId, 10)).toMatchObject({ ok: false });
     expect(parseRetrievalResult({ ...base, candidates: Array.from({ length: 11 }, () => ({ asset_id: assetId, score: 0, reasons: [] })) }, requestId, 10)).toMatchObject({ ok: false });
   });
+
+  it("accepts an offer-only candidate for a generic service without a catalogue asset", () => {
+    const parsed = parseRetrievalResult({
+      protocol: "matchplane.retrieval/v1",
+      request_id: requestId,
+      provider: { id: "service.search", version: "2026.08" },
+      candidates: [{ offer_id: offerId, score: 0.74, reasons: ["交付范围匹配"], risks: ["需确认档期"] }],
+      degraded: false,
+    }, requestId, 10);
+    expect(parsed).toMatchObject({ ok: true });
+    if (parsed.ok) {
+      expect(parsed.value.candidates[0]?.assetId).toBeUndefined();
+      expect(parsed.value.candidates[0]?.offerId).toBe(offerId);
+      expect(parsed.value.candidates[0]?.risks).toEqual(["需确认档期"]);
+    }
+  });
+
+  it("rejects a candidate without a canonical asset or offer", () => {
+    expect(parseRetrievalResult({
+      protocol: "matchplane.retrieval/v1",
+      request_id: requestId,
+      provider: { id: "service.search", version: "2026.08" },
+      candidates: [{ score: 0.74, reasons: ["无 canonical ref"] }],
+      degraded: false,
+    }, requestId, 10)).toMatchObject({ ok: false });
+  });
 });
