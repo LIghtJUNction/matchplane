@@ -11,6 +11,7 @@ import { executeAuthenticatedChildTool } from "../../../src/platform-child-tool"
 export const runtime = "nodejs";
 
 const MAX_UPSTREAM_RESPONSE_BYTES = 256 * 1024;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // Marketplace actions cross the Next/Rust boundary. Keep a hard server-side deadline so a
 // stalled gateway cannot retain an MCP request forever or exhaust the web worker pool.
 const MARKETPLACE_GATEWAY_TIMEOUT_MS = 20_000;
@@ -102,12 +103,15 @@ async function callChildTool(
   const platformPath = typeof args.platform_path === "string" ? args.platform_path : "";
   const toolName = typeof args.tool_name === "string" ? args.tool_name : "";
   const toolArguments = isRecord(args.arguments) ? args.arguments : {};
+  const scopedEnvelope = readScopedChildEnvelope(toolName, platformPath, toolArguments);
+  if (scopedEnvelope.error) return rpcError(id, -32602, scopedEnvelope.error);
   const result = await executeAuthenticatedChildTool({
     request,
     platformPath,
     toolName,
     arguments: toolArguments,
     requestId: typeof args.request_id === "string" ? args.request_id : undefined,
+    ...(scopedEnvelope.scope ? { tenantId: scopedEnvelope.scope.tenantId, domainId: scopedEnvelope.scope.domainId } : {}),
     allowSession: false,
   });
   if (result.status === 401) {
@@ -117,6 +121,28 @@ async function callChildTool(
     return rpcError(id, -32002, message);
   }
   return rpcToolResponse(id, result.payload, !result.ok, result.status);
+}
+
+/**
+ * Stable child protocols carry their own tenant/domain scope. Bind that envelope to the active
+ * registration before forwarding it, while leaving package-specific tools free to define their
+ * own argument shape. This prevents a generic MCP caller from using a valid child path with a
+ * different tenant/domain inside catalog, retrieval, or media payloads.
+ */
+function readScopedChildEnvelope(
+  toolName: string,
+  platformPath: string,
+  argumentsValue: Record<string, unknown>,
+): { scope?: { tenantId: string; domainId: string }; error?: string } {
+  const requiresScope = toolName === "catalog.upsert" || toolName === "retrieval.query" || toolName === "media.upload";
+  if (!requiresScope) return {};
+  const scope = isRecord(argumentsValue.scope) ? argumentsValue.scope : null;
+  if (!scope || typeof scope.tenant_id !== "string" || !UUID_PATTERN.test(scope.tenant_id)
+    || typeof scope.domain_id !== "string" || !UUID_PATTERN.test(scope.domain_id)
+    || scope.platform_path !== platformPath) {
+    return { error: `${toolName} requires a tenant/domain scope bound to platform_path` };
+  }
+  return { scope: { tenantId: scope.tenant_id, domainId: scope.domain_id } };
 }
 
 /**
