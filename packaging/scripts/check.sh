@@ -120,7 +120,7 @@ if [[ ${MATCHPLANE_BUILD_PACKAGES:-0} == 1 ]]; then
   tar --extract --zstd --file "$archive_path" --directory "$archive_root"
   packaged_web="$archive_root/usr/share/matchplane/web"
   node -e "const p=process.argv[1]; require.resolve('next/package.json',{paths:[p]})" "$packaged_web"
-  staged_swc_helpers=$(find "$archive_root/usr/share/matchplane/node_modules" \
+  staged_swc_helpers=$(find "$archive_root/usr/share/matchplane/web/node_modules" \
     -type f -path '*/node_modules/@swc/helpers/esm/_interop_require_default.js' \
     -print -quit 2>/dev/null || true)
   if [[ -z $staged_swc_helpers ]]; then

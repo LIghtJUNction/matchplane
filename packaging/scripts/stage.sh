@@ -51,22 +51,33 @@ install -Dm0644 "$repository_root/docs/cli-and-mcp.md" \
   "$root/usr/share/doc/matchplane/cli-and-mcp.md"
 cp -a "$repository_root/.agents/skills/." "$root/usr/share/matchplane/skills/"
 # Next 16 can emit either a package-local standalone root or a monorepo-shaped
-# `standalone/web` tree.  In the latter layout the app's node_modules links point
-# two levels up to `standalone/node_modules`; preserve that sibling when flattening
-# the app into the packaged `/usr/share/matchplane/web` directory.  Dropping it
-# leaves `node_modules/next` as a dangling link and makes the packaged server fail
-# before it can bind its port.
+# `standalone/web` tree. In the latter layout the app's node_modules links point
+# two levels up to `standalone/node_modules`. Keep the Bun store beside the
+# flattened app and rewrite the one top-level `next` link to stay within that
+# package-local tree. Leaving the link pointed at the build workspace makes
+# Node's `createRequire` reject `next` during standalone bootstrap.
 cp -a "$standalone_root/." "$root/usr/share/matchplane/web/"
 standalone_parent=$(dirname "$standalone_root")
-if [[ "$standalone_root" != "$repository_root/web/.next/standalone" && -d "$standalone_parent/node_modules" ]]; then
-  cp -a "$standalone_parent/node_modules" "$root/usr/share/matchplane/node_modules"
+if [[ "$standalone_root" != "$repository_root/web/.next/standalone" && -d "$standalone_parent/node_modules/.bun" ]]; then
+  install -d "$root/usr/share/matchplane/web/node_modules"
+  cp -a "$standalone_parent/node_modules/.bun" \
+    "$root/usr/share/matchplane/web/node_modules/.bun"
+  staged_next="$root/usr/share/matchplane/web/node_modules/next"
+  if [[ -L $staged_next ]]; then
+    next_link=$(readlink "$staged_next")
+    if [[ $next_link == ../../node_modules/.bun/* ]]; then
+      next_fragment=${next_link#../../node_modules/.bun/}
+      unlink "$staged_next"
+      ln -s ".bun/$next_fragment" "$staged_next"
+    fi
+  fi
 fi
 # Bun's isolated linker can make Next's file tracer retain only the CJS half of
 # `@swc/helpers`, while Next's standalone bootstrap still imports one ESM helper.
 # Complete that one traced package from the locked install so the packaged Node
 # process does not fail during module resolution.  The versioned `.bun` path is
 # discovered rather than hard-coded, keeping this valid across dependency bumps.
-staged_swc_helpers=$(find "$root/usr/share/matchplane/node_modules" \
+staged_swc_helpers=$(find "$root/usr/share/matchplane/web/node_modules" \
   -type f -path '*/node_modules/@swc/helpers/package.json' -print -quit 2>/dev/null || true)
 source_swc_helpers=$(find "$repository_root/node_modules" \
   -type f -path '*/node_modules/@swc/helpers/package.json' -print -quit 2>/dev/null || true)

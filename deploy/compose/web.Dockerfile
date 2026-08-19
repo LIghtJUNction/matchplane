@@ -35,13 +35,25 @@ RUN node node_modules/next/dist/bin/next build
 # standalone bundle. Normalize both the monorepo (`standalone/web`) and the
 # package-local (`standalone`) layouts before copying into the runtime image.
 RUN set -eux; \
-    mkdir -p /app/standalone /app/standalone-node_modules; \
+    mkdir -p /app/standalone; \
     if [ -f /app/.next/standalone/server.js ]; then \
       cp -a /app/.next/standalone/. /app/standalone/; \
     elif [ -f /app/.next/standalone/web/server.js ]; then \
       cp -a /app/.next/standalone/web/. /app/standalone/; \
-      if [ -d /app/.next/standalone/node_modules ]; then \
-        cp -a /app/.next/standalone/node_modules /app/standalone-node_modules; \
+      if [ -d /app/.next/standalone/node_modules/.bun ]; then \
+        mkdir -p /app/standalone/node_modules; \
+        cp -a /app/.next/standalone/node_modules/.bun /app/standalone/node_modules/.bun; \
+        next_link=/app/standalone/node_modules/next; \
+        if [ -L "$next_link" ]; then \
+          target=$(readlink "$next_link"); \
+          case "$target" in \
+            ../../node_modules/.bun/*) \
+              fragment=${target#../../node_modules/.bun/}; \
+              unlink "$next_link"; \
+              ln -s ".bun/$fragment" "$next_link"; \
+              ;; \
+          esac; \
+        fi; \
       fi; \
     else \
       echo 'Next standalone server.js was not produced' >&2; \
@@ -56,7 +68,6 @@ ENV PORT=4173
 
 WORKDIR /app
 COPY --from=builder --chown=node:node /app/standalone ./
-COPY --from=builder --chown=node:node /app/standalone-node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=cli-builder /build/out/matchplane /usr/local/bin/matchplane
