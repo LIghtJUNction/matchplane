@@ -21,6 +21,7 @@ import {
   getInvoiceAdminRecords,
   getInvoiceSetting,
   getInvoiceProviders,
+  getMarketplaceOfferAdminRecords,
   getPaymentAdminRecords,
   getPaymentGateways,
   getPaymentRoutes,
@@ -31,6 +32,7 @@ import {
   getRefundAdminRecords,
   createAdminRefund,
   isLiveMarketplaceEnabled,
+  activateMarketplaceOffer,
   activateSubplatform,
   createPlatformDomain,
   createRootPlatformOrganization,
@@ -47,6 +49,7 @@ import {
   type InvoiceProviderRecord,
   type InvoiceAdminRecord,
   type InvoiceSetting,
+  type MarketplaceOfferAdminRecord,
   type PaymentAdminRecord,
   type PaymentGatewayRecord,
   type PaymentRouteRecord,
@@ -87,6 +90,7 @@ export function PlatformDashboard({
   const [payments, setPayments] = useState<PaymentAdminRecord[]>([]);
   const [refunds, setRefunds] = useState<RefundAdminRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceAdminRecord[]>([]);
+  const [offerQueue, setOfferQueue] = useState<MarketplaceOfferAdminRecord[]>([]);
   const [financeView, setFinanceView] = useState<"invoices" | "refunds">("invoices");
   const [refundPaymentId, setRefundPaymentId] = useState("");
   const [refundAmount, setRefundAmount] = useState("");
@@ -187,9 +191,10 @@ export function PlatformDashboard({
       getPaymentAdminRecords(),
       getRefundAdminRecords(),
       getInvoiceAdminRecords(),
+      getMarketplaceOfferAdminRecords({ status: "draft", limit: 50 }),
       getSubplatformOrganizations(),
     ])
-      .then(([gatewayResult, routeResult, invoiceResult, invoiceSettingResult, paymentResult, refundResult, invoiceRecordResult, subplatformResult]) => {
+      .then(([gatewayResult, routeResult, invoiceResult, invoiceSettingResult, paymentResult, refundResult, invoiceRecordResult, offerResult, subplatformResult]) => {
         if (!mounted) return;
         // Payment administration is intentionally allowed to be unavailable while the first
         // Better Auth session is still settling; the setup card remains useful in that state.
@@ -200,6 +205,7 @@ export function PlatformDashboard({
         if (paymentResult.status === "fulfilled") setPayments(paymentResult.value);
         if (refundResult.status === "fulfilled") setRefunds(refundResult.value);
         if (invoiceRecordResult.status === "fulfilled") setInvoices(invoiceRecordResult.value);
+        if (offerResult.status === "fulfilled") setOfferQueue(offerResult.value);
         if (subplatformResult.status === "fulfilled") setSubplatforms(subplatformResult.value);
       });
     return () => {
@@ -270,6 +276,28 @@ export function PlatformDashboard({
 
   const refreshSubplatforms = async () => {
     setSubplatforms(await getSubplatformOrganizations());
+  };
+
+  const refreshOfferQueue = async () => {
+    setOfferQueue(await getMarketplaceOfferAdminRecords({ status: "draft", limit: 50 }));
+  };
+
+  const activateOffer = async (offer: MarketplaceOfferAdminRecord) => {
+    const tenantId = setup?.root.tenantId;
+    if (!tenantId || tenantId !== offer.tenant_id) {
+      onNotice("供给不属于当前根平台 tenant，未执行激活");
+      return;
+    }
+    setSaving(true);
+    try {
+      await activateMarketplaceOffer({ offerId: offer.offer_id, tenantId });
+      await refreshOfferQueue();
+      onNotice(`“${offer.display_name}”已激活，进入当前子平台的匹配范围`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "供给激活失败");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const refreshDomains = async () => {
@@ -790,6 +818,37 @@ export function PlatformDashboard({
           </div>
         </section>
 
+        <section className="surface offer-review-panel" aria-labelledby="offer-review-title">
+          <SectionHeading
+            eyebrow="供给审核"
+            title="确认真实资料，再进入买方匹配"
+            action="刷新"
+            onAction={() => void refreshOfferQueue()}
+          />
+          <p className="subplatform-intro">根平台只负责审核状态和审计，不解释子平台的 attributes/terms；字段含义由对应子平台自己定义。</p>
+          {offerQueue.length ? (
+            <div className="offer-review-list" aria-label="待审核供给列表">
+              {offerQueue.map((offer) => (
+                <article className="offer-review-row" key={offer.offer_id}>
+                  <div className="offer-review-copy">
+                    <strong>{offer.display_name}</strong>
+                    <small>{offer.external_key} · domain {offer.domain_id.slice(0, 8)}… · {formatAdminDate(offer.updated_at)}</small>
+                    <details>
+                      <summary>查看子平台资料</summary>
+                      <pre>{formatOfferJson({ attributes: offer.attributes, terms: offer.terms })}</pre>
+                    </details>
+                  </div>
+                  <button className="button button-dark" type="button" disabled={saving} onClick={() => void activateOffer(offer)}>
+                    激活并匹配
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="offer-review-empty">当前没有待审核供给。卖家提交后会先出现在这里。</div>
+          )}
+        </section>
+
         <section className="surface domain-panel" aria-labelledby="domain-title">
           <SectionHeading
             eyebrow="平台范围"
@@ -1107,4 +1166,17 @@ function authCapabilitySummary(status: PlatformAiStatus | null): string {
   if (status.auth.passkey) labels.push("Passkey");
   labels.push(...status.auth.primary, ...status.auth.fallback);
   return labels.length ? `${labels.join("、")} 可用` : "尚未配置额外登录方式";
+}
+
+function formatAdminDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? "时间未知" : date.toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatOfferJson(value: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "资料无法展开";
+  }
 }

@@ -803,6 +803,12 @@ export interface MarketplaceDemandCandidate {
 
 export type MarketplaceOfferOutcome = MarketplaceOffer & { duplicate: boolean };
 
+/** Root-admin projection of one generic supply offer awaiting moderation. */
+export interface MarketplaceOfferAdminRecord extends MarketplaceOffer {
+  tenant_id: string;
+  supply_party_id: string;
+}
+
 export interface MarketplaceIntroduction {
   introduction_id: string;
   tenant_id: string;
@@ -2163,6 +2169,43 @@ export function createMarketplaceOffer(input: {
     },
     input.session,
   );
+}
+
+/** Read the root-scoped generic offer queue for the administrator workspace. */
+export async function getMarketplaceOfferAdminRecords(input?: {
+  domainId?: string;
+  status?: "draft" | "active" | "reserved" | "sold" | "withdrawn" | "expired";
+  limit?: number;
+}): Promise<MarketplaceOfferAdminRecord[]> {
+  const query = new URLSearchParams();
+  if (input?.domainId) query.set("domain_id", input.domainId);
+  if (input?.status) query.set("status", input.status);
+  if (input?.limit) query.set("limit", String(input.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await fetch(`/api/admin/marketplace/offers${suffix}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null) as { offers?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "供给审核队列读取失败");
+  return Array.isArray(body?.offers) ? body.offers as MarketplaceOfferAdminRecord[] : [];
+}
+
+/** Activate one draft through the Rust gateway's operator state transition. */
+export async function activateMarketplaceOffer(input: {
+  offerId: string;
+  tenantId: string;
+}): Promise<MarketplaceOfferAdminRecord> {
+  const response = await fetch(`/api/admin/marketplace/offers/${encodeURIComponent(input.offerId)}/activate`, {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ tenant_id: input.tenantId }),
+  });
+  const body = await response.json().catch(() => null) as (MarketplaceOfferAdminRecord & { error?: string }) | null;
+  if (!response.ok || !body?.offer_id) throw new MarketplaceApiError(response.status, body?.error || "供给激活失败");
+  return body;
 }
 
 /** Upload bytes transiently to the active child-owned media adapter. */

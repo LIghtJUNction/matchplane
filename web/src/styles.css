@@ -1338,6 +1338,18 @@ main {
   line-height: 1.4;
 }
 
+.offer-review-panel { grid-column: 1 / -1; }
+.offer-review-list { margin-top: 1rem; display: grid; gap: 0.5rem; }
+.offer-review-row { min-width: 0; padding: 0.75rem; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.8rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--paper); }
+.offer-review-copy { min-width: 0; display: grid; gap: 0.22rem; }
+.offer-review-copy strong { overflow: hidden; font-size: 0.76rem; text-overflow: ellipsis; white-space: nowrap; }
+.offer-review-copy small { overflow: hidden; color: var(--muted); font-size: 0.63rem; text-overflow: ellipsis; white-space: nowrap; }
+.offer-review-copy details { margin-top: 0.35rem; }
+.offer-review-copy summary { width: fit-content; color: var(--ink-soft); cursor: pointer; font-size: 0.64rem; }
+.offer-review-copy pre { max-height: 12rem; margin: 0.5rem 0 0; overflow: auto; padding: 0.65rem; border-radius: 0.65rem; background: var(--ivory); color: var(--ink-soft); font: 0.62rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.offer-review-row > .button { min-height: 2.4rem; white-space: nowrap; }
+.offer-review-empty { margin-top: 1rem; padding: 1rem; border: 1px dashed var(--line-strong); border-radius: 1rem; color: var(--muted); font-size: 0.7rem; text-align: center; }
+
 .site-settings-panel {
   grid-column: 1 / -1;
   background: color-mix(in srgb, var(--ivory) 78%, transparent);
@@ -2256,6 +2268,8 @@ main {
   .mode-summary { width: 100%; }
   .platform-agent-config-actions { align-items: stretch; flex-direction: column; }
   .platform-agent-config-actions .button { width: 100%; justify-content: center; }
+  .offer-review-row { grid-template-columns: 1fr; }
+  .offer-review-row > .button { width: 100%; }
   .subplatform-header { align-items: stretch; flex-direction: column; }
   .subplatform-header > .button { width: 100%; }
   .subplatform-row { grid-template-columns: 2.5rem minmax(0, 1fr) auto; }
