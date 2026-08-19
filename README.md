@@ -1,5 +1,11 @@
 # MatchPlane
 
+[![CI](https://github.com/LIghtJUNction/matchplane/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LIghtJUNction/matchplane/actions/workflows/ci.yml)
+[![Packages](https://github.com/LIghtJUNction/matchplane/actions/workflows/packages.yml/badge.svg)](https://github.com/LIghtJUNction/matchplane/actions/workflows/packages.yml)
+[![License: MIT](https://img.shields.io/github/license/LIghtJUNction/matchplane)](LICENSE)
+
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 MatchPlane is federated AI matching infrastructure. PostgreSQL owns orders, reservations,
 trades, ledger entries, events, and audit history; Kafka transports durable facts; Valkey holds
 only rebuildable low-latency projections. AI retrieval proposes candidates and never commits a
@@ -19,9 +25,10 @@ publishable client shape for both kernel sides and a bounded local Skill runner 
 calls; Agent owners can install it in their own server-side runtime without taking a platform token
 dependency.
 
-远程平台可使用 `matchplane federation-invite --domain-id <uuid>` 或根管理员面板生成一次性
-签名入驻 token。远端提交的节点会先保持 `pending`，只有根管理员激活后才进入递归平台树；
-激活节点与内嵌子平台共用组织、manifest、MCP allowlist 和路径路由模型。
+Remote platforms can use `matchplane federation-invite --domain-id <uuid>` or the root administrator
+panel to generate a one-time signed enrollment token. A submitted remote node remains `pending`
+until a root administrator activates it; active nodes and embedded subplatforms share the same
+organization, manifest, MCP allowlist, and path-routing model.
 
 The repository is a Rust 2024 modular monorepo with independently deployable services. The root
 engine is domain-neutral; every vertical is a mounted adapter that supplies its own manifest, UI,
