@@ -56,6 +56,8 @@ HTTP 门面在转发前会先校验声明的作用域与预算合约：平台路
 
 检索协议已经有可运行的根代理：`POST /api/platform/retrieval/query` 接收 `matchplane.retrieval/v1` 报文，要求 `scope.platform_path`、`tenant_id`、`domain_id` 与 `retrieval:query` 权限，并只转发到目标 active manifest 声明的 `retrieval.query`。子平台返回的 provider、候选、分数和 `degraded` 会按 [`docs/retrieval-protocol-v1.json`](retrieval-protocol-v1.json) 严格校验；根不会把候选结果当作联系人、支付或成交授权。
 
+同一报文也可通过已认证的 HTTP MCP 门面调用：向 `POST /api/mcp` 发送 JSON-RPC `tools/call`，工具名为 `platform.retrieval.query`，`arguments` 直接使用上述 `matchplane.retrieval/v1` envelope。它复用专用检索门面的 `retrieval:query`、租户/域/递归路径校验和 active manifest allowlist，不会退化为可指定 endpoint 的通用 HTTP 转发；`tools/list` 会公布完整的输入 schema。
+
 机器 Agent 要继续使用通用 marketplace 工具时，请创建组织 API key，并设置 `platform:read`（仅在先调用 `platform.match` 选择平台时需要）、`marketplace:write` 与中性 `agentSide` 元数据，取值为 `demand`、`supply` 或 `both`。如果 Agent 还要调用 typed `queryRetrieval()`，再加入 `retrieval:query`；不要为只发布供给的 key 额外授予检索权限。旧字段 `agentRole` 仅作为兼容迁移别名保留。通过 `/api/mcp` 调用 `marketplace.agent.session`（或 `POST /api/marketplace/agent-session`），并携带生效的 `tenant_id`、`domain_id`、`platform_path` 与内核 `side`（`demand` 或 `supply`）。响应会返回租户/side 作用域的 15 分钟 party bearer 及 `access_token_expires_at` 截止时间。将该 bearer 作为 `Authorization: Bearer ...` 传给 `marketplace.intent.*`、`marketplace.offer.*`、`marketplace.demand.match`、`marketplace.intent.discovery.update` 与 `marketplace.introduction.*` 工具。需求 Agent 只有在创建 intent 时显式设置 `supply_discovery_enabled: true`，供给 Agent 才能看到不含参与者 ID 和联系方式的需求摘要；需求方可随时调用 discovery update 撤回后续发现。这不等同于引介或联系人同意。该交换不会创建浏览器会话，不允许调用方指定 `participant_id`，也不会返回联系人信息。
 
 当 doctor 校验或任一就绪探测失败时，退出码为非零。这使得 CLI 适用于 CI、systemd 预检，以及 Agent 的受限工具循环。生产环境应将 `errors` 中每一项都视为必检门禁；不要仅因为测试 Compose 环境的 web 健康接口返回 200 就上线。

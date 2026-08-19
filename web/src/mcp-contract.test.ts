@@ -133,6 +133,29 @@ describe("HTTP MCP argument contract", () => {
     })).toBeNull();
   });
 
+  it("validates the first-class retrieval MCP envelope and keeps it child-scoped", () => {
+    const query = {
+      protocol: "matchplane.retrieval/v1",
+      request_id: intentId,
+      scope: { tenant_id: tenantId, domain_id: domainId, platform_path: "/used-car" },
+      input: { narrative: "预算内、适合通勤的方案", requirements: { energy: "hybrid" } },
+      limit: 10,
+    };
+    expect(validateMcpToolArguments("platform.retrieval.query", query)).toBeNull();
+    expect(validateMcpToolArguments("platform.retrieval.query", {
+      ...query,
+      scope: { ...query.scope, platform_path: "/" },
+    })).toContain("active child");
+    expect(validateMcpToolArguments("platform.retrieval.query", {
+      ...query,
+      endpoint: "https://attacker.example/mcp",
+    })).toContain("unsupported field");
+    expect(validateMcpToolArguments("platform.retrieval.query", {
+      ...query,
+      protocol: "matchplane.retrieval/v2",
+    })).toContain("matchplane.retrieval/v1");
+  });
+
   it("rejects invalid generic introduction payloads", () => {
     expect(validateMcpToolArguments("marketplace.introduction.create", {
       tenant_id: tenantId,

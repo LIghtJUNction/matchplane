@@ -7,6 +7,8 @@
  * being copied into paths or capability headers.
  */
 
+import { parseRetrievalQuery } from "./retrieval-protocol";
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PLATFORM_PATH_PATTERN = /^\/(?:[a-z0-9-]+(?:\/[a-z0-9-]+)*)?$/;
 const MAX_OBJECT_BYTES = 128 * 1024;
@@ -20,6 +22,8 @@ export function validateMcpToolArguments(
       return validatePlatformMatch(args);
     case "platform.agent.handoff":
       return validateAgentHandoff(args);
+    case "platform.retrieval.query":
+      return validateRetrievalQuery(args);
     case "platform.child.tool":
       return validateChildTool(args);
     case "marketplace.agent.session":
@@ -59,6 +63,14 @@ export function validateMcpToolArguments(
     default:
       return "unsupported MatchPlane tool";
   }
+}
+
+function validateRetrievalQuery(args: Record<string, unknown>): string | null {
+  const parsed = parseRetrievalQuery(args);
+  if (!parsed.ok) return parsed.error;
+  return parsed.value.platformPath === "/"
+    ? "scope.platform_path must identify an active child node"
+    : null;
 }
 
 function validateChildTool(args: Record<string, unknown>): string | null {
