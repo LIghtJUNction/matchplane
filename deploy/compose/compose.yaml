@@ -265,6 +265,10 @@ services:
     environment:
       MATCHPLANE_ENVIRONMENT: ${MATCHPLANE_ENVIRONMENT:-development}
       MATCHPLANE_AUTO_MCP_TOKEN: ${MATCHPLANE_AUTO_MCP_TOKEN:-matchplane_auto_dev_only}
+      # Production child Agents must be pinned to the active root scope. Development may leave
+      # these empty while the package is used as a local reference adapter.
+      MATCHPLANE_AUTO_TENANT_ID: ${MATCHPLANE_AUTO_TENANT_ID:-}
+      MATCHPLANE_AUTO_DOMAIN_ID: ${MATCHPLANE_AUTO_DOMAIN_ID:-}
       MATCHPLANE_AUTO_PLATFORM_PATH: /used-car
       MATCHPLANE_AUTO_MCP_HOST: 0.0.0.0
       MATCHPLANE_AUTO_MCP_PORT: 8787
