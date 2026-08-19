@@ -114,7 +114,20 @@ if [[ ${MATCHPLANE_BUILD_PACKAGES:-0} == 1 ]]; then
   output_directory=$(mktemp -d)
   trap 'rm -rf "$output_directory"' EXIT
   packaging/scripts/archive.sh "$package_version" target/release "$output_directory"
-  tar --list --zstd --file "$output_directory/matchplane-$package_version-linux-x86_64.tar.zst" >/dev/null
+  archive_path="$output_directory/matchplane-$package_version-linux-x86_64.tar.zst"
+  tar --list --zstd --file "$archive_path" >/dev/null
+  archive_root=$(mktemp -d)
+  tar --extract --zstd --file "$archive_path" --directory "$archive_root"
+  packaged_web="$archive_root/usr/share/matchplane/web"
+  node -e "const p=process.argv[1]; require.resolve('next/package.json',{paths:[p]})" "$packaged_web"
+  staged_swc_helpers=$(find "$archive_root/usr/share/matchplane/node_modules" \
+    -type f -path '*/node_modules/@swc/helpers/esm/_interop_require_default.js' \
+    -print -quit 2>/dev/null || true)
+  if [[ -z $staged_swc_helpers ]]; then
+    echo 'portable archive is missing the Next standalone @swc/helpers ESM runtime' >&2
+    exit 1
+  fi
+  find "$archive_root" -depth -delete
   if command -v dpkg-deb >/dev/null 2>&1; then
     packaging/ubuntu/build-deb.sh "$package_version" target/release "$output_directory"
     dpkg-deb --info "$output_directory/matchplane_${package_version}_amd64.deb" >/dev/null
