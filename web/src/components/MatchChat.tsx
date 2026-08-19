@@ -737,7 +737,8 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const session = subplatform.domainId
+      const scopedMarketplace = subplatform.slug !== "root" && Boolean(subplatform.domainId);
+      const session = scopedMarketplace
         ? await getMarketplaceSession({
             subplatform: subplatform.slug,
             platformPath: subplatform.path,
@@ -746,7 +747,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             role,
           })
         : null;
-      const authState = subplatform.domainId
+      const authState = scopedMarketplace
         ? null
         : await authClient.getSession({ fetchOptions: authFetchOptions(subplatform.slug) });
       if (cancelled) return;
@@ -776,7 +777,8 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     if (!text || sending) return;
 
     void (async () => {
-      const session = subplatform.domainId
+      const scopedMarketplace = subplatform.slug !== "root" && Boolean(subplatform.domainId);
+      const session = scopedMarketplace
         ? await getMarketplaceSession({
             subplatform: subplatform.slug,
             platformPath: subplatform.path,
@@ -785,7 +787,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             role,
           })
         : null;
-      const authState = subplatform.domainId
+      const authState = scopedMarketplace
         ? null
         : await authClient.getSession({ fetchOptions: authFetchOptions(subplatform.slug) });
       if (!session && !authState?.data) {

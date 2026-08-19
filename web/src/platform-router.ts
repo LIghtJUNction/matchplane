@@ -65,6 +65,7 @@ export class PlatformRouterQuotaExceededError extends Error {
 const MAX_CANDIDATES = 32;
 const MAX_RATIONALE_LENGTH = 1_000;
 const DEFAULT_TIMEOUT_MS = 4_000;
+const MAX_PROVIDER_TIMEOUT_MS = 20_000;
 const DEFAULT_TOTAL_TIMEOUT_MS = 20_000;
 const MAX_TOTAL_TIMEOUT_MS = 60_000;
 const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
@@ -148,7 +149,7 @@ export async function decidePlatformRoutes(input: {
     // The recursive orchestrator owns the larger request deadline, but one
     // provider hop must stay bounded so a slow model cannot consume the whole
     // budget and starve every descendant node.
-    const providerTimeoutMs = Math.min(remaining ?? DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+    const providerTimeoutMs = Math.min(remaining ?? configuredProviderTimeoutMs(), configuredProviderTimeoutMs());
     const response = await fetch(providerRequest.url, {
       method: "POST",
       headers: providerRequest.headers,
@@ -472,6 +473,13 @@ function remainingDeadlineMs(deadlineAt: number | undefined): number | null {
 function configuredToolMode(): RouterToolMode {
   const value = process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE?.trim().toLowerCase();
   return value === "required" || value === "disabled" ? value : "auto";
+}
+
+function configuredProviderTimeoutMs(): number {
+  const parsed = Number.parseInt(process.env.MATCHPLANE_ROUTER_AI_TIMEOUT_MS ?? String(DEFAULT_TIMEOUT_MS), 10);
+  return Number.isSafeInteger(parsed)
+    ? Math.max(DEFAULT_TIMEOUT_MS, Math.min(MAX_PROVIDER_TIMEOUT_MS, parsed))
+    : DEFAULT_TIMEOUT_MS;
 }
 
 function routerSelectionTool(candidates: PlatformRouteCandidate[]): Record<string, unknown> {

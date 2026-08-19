@@ -629,10 +629,10 @@ async function activeSubplatformScope(
        JOIN domains ON domains.id = subplatform_registrations.domain_id
                     AND domains.tenant_id = subplatform_registrations.tenant_id
                     AND domains.status = 'active'
-      WHERE tenant_id = $1::uuid
-        AND slug = $2
-        AND ($3::uuid IS NULL OR domain_id = $3::uuid)
-        AND state = 'active'
+      WHERE subplatform_registrations.tenant_id = $1::uuid
+        AND subplatform_registrations.slug = $2
+        AND ($3::uuid IS NULL OR subplatform_registrations.domain_id = $3::uuid)
+        AND subplatform_registrations.state = 'active'
       LIMIT 1`,
     [tenantId, slug, domainId ?? null],
   );
@@ -650,11 +650,11 @@ async function subplatformAllowsPublicClaim(
        JOIN domains ON domains.id = subplatform_registrations.domain_id
                     AND domains.tenant_id = subplatform_registrations.tenant_id
                     AND domains.status = 'active'
-      WHERE tenant_id = $1::uuid
-        AND slug = $2
-        AND ($3::uuid IS NULL OR domain_id = $3::uuid)
-        AND state = 'active'
-        AND membership_policy = 'public'
+      WHERE subplatform_registrations.tenant_id = $1::uuid
+        AND subplatform_registrations.slug = $2
+        AND ($3::uuid IS NULL OR subplatform_registrations.domain_id = $3::uuid)
+        AND subplatform_registrations.state = 'active'
+        AND subplatform_registrations.membership_policy = 'public'
       LIMIT 1`,
     [tenantId, slug, domainId ?? null],
   );

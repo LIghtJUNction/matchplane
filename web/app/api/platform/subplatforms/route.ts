@@ -199,9 +199,26 @@ export async function GET(request: Request): Promise<Response> {
   if (!isUuid(configuredTenantId)) {
     return NextResponse.json({ error: "root tenant 尚未配置" }, { status: 503 });
   }
-  const parentId = new URL(request.url).searchParams.get("parentOrganizationId");
-  if (parentId && !isUuid(parentId)) return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
+  const requestedParentId = new URL(request.url).searchParams.get("parentOrganizationId");
+  if (requestedParentId && !isUuid(requestedParentId)) {
+    return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
+  }
   const configuredRootOrganizationId = process.env.MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID?.trim() ?? null;
+  const rootOrganizationId = configuredRootOrganizationId && isUuid(configuredRootOrganizationId)
+    ? configuredRootOrganizationId
+    : ((await authDatabase.query<{ id: string }>(
+        `SELECT id::text
+           FROM "organization"
+          WHERE "tenantId" = $1
+            AND "parentOrganizationId" IS NULL
+            AND "rootPlatform" = true
+          LIMIT 1`,
+        [configuredTenantId],
+      )).rows[0]?.id ?? null);
+  // The dashboard asks for the root's children without a query parameter. Scope that default
+  // to the configured root organization; otherwise registrations projected under the root are
+  // invisible because the recursive anchor only looks for top-level organizations.
+  const parentId = requestedParentId || rootOrganizationId;
   const userRole = (session.user as { role?: string }).role;
   if (!(await canManageParent(session.user.id, userRole, parentId || null))) {
     return NextResponse.json({ error: "平台管理员权限不足" }, { status: 403 });
@@ -212,9 +229,8 @@ export async function GET(request: Request): Promise<Response> {
          FROM "organization"
         WHERE "tenantId" = $2
           AND "rootPlatform" = false
-          AND ($3::uuid IS NULL OR id <> $3::uuid)
           AND (($1::uuid IS NULL AND "parentOrganizationId" IS NULL)
-           OR id = $1::uuid)
+           OR "parentOrganizationId" = $1::uuid)
        UNION ALL
        SELECT child.id, child.name, child.slug, child."parentOrganizationId", child."tenantId",
               child."domainId", child."sourceRepository", child."createdAt"
@@ -237,7 +253,8 @@ export async function GET(request: Request): Promise<Response> {
             registration.build_error AS "buildError"
        FROM nodes
        LEFT JOIN LATERAL (
-         SELECT r.id, r.state, r.build_digest, r.manifest_digest
+         SELECT r.id, r.state, r.build_digest, r.manifest_digest,
+                r.build_attempts, r.build_error
            FROM subplatform_registrations r
           WHERE r.slug = nodes.slug
             AND r.tenant_id::text = nodes."tenantId"
@@ -246,9 +263,8 @@ export async function GET(request: Request): Promise<Response> {
        ) registration ON true
       ORDER BY "createdAt" ASC`,
     [
-      parentId || null,
+      parentId,
       configuredTenantId,
-      configuredRootOrganizationId && isUuid(configuredRootOrganizationId) ? configuredRootOrganizationId : null,
     ],
   );
   return NextResponse.json({ organizations: rows.rows }, { headers: { "cache-control": "no-store" } });
