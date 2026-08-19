@@ -29,6 +29,7 @@ import {
   clearPartySessionCache,
   getPaymentSetting,
   type RecommendedBackendListing,
+  type MarketplaceAttachment,
   type PlatformRouteHop,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
@@ -57,6 +58,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     intentId?: string;
     attributes: Record<string, unknown>;
     terms: Record<string, unknown>;
+    attachments?: MarketplaceAttachment[];
   } | null>(null);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);

@@ -228,6 +228,7 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
           permissions: {
             platform: ["read"],
             retrieval: ["query"],
+            media: ["upload"],
             marketplace: ["read", "write"],
             agent: ["handoff", "tool"],
           },

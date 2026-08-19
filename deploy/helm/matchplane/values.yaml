@@ -33,6 +33,7 @@ web:
   # Leave empty when artifacts are supplied by the host-mounted systemd/Compose path.
   artifactPvc: ''
   uploadRoot: /var/lib/matchplane/subplatform-uploads
+  mediaMaxBytes: 104857600
   # Optional ReadWriteMany PVC for opaque archive uploads. The isolated builder should mount
   # the same PVC read-only or consume the upload object through an external worker.
   uploadPvc: ''

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 
-import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing, type ContactExchange } from "../api";
+import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing, type ContactExchange, type MarketplaceAttachment } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
 import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
@@ -27,6 +27,7 @@ interface PluginHostProps {
     intentId?: string;
     attributes: Record<string, unknown>;
     terms: Record<string, unknown>;
+    attachments?: MarketplaceAttachment[];
   } | null;
 }
 

@@ -112,7 +112,7 @@ systemctl enable --now \
   matchplane-subplatform-builder.service
 ```
 
-web/Better Auth 监听 `127.0.0.1:4173`，网关监听 `127.0.0.1:8080`，支付服务监听 `127.0.0.1:8081`，联邦 gRPC 使用配置地址。Kafka、PostgreSQL、Valkey 与支付 API 均不要暴露到公网。Nginx 仅转发 [deploy/nginx/matchplane.conf](../deploy/nginx/matchplane.conf) 中声明路由。
+web/Better Auth 监听 `127.0.0.1:4173`，网关监听 `127.0.0.1:8080`，支付服务监听 `127.0.0.1:8081`，联邦 gRPC 使用配置地址。Kafka、PostgreSQL、Valkey 与支付 API 均不要暴露到公网。Nginx 仅转发 [deploy/nginx/matchplane.conf](../deploy/nginx/matchplane.conf) 中声明路由。媒体上传的精确路径已解除 Nginx 默认的 1 MiB body 拦截，由 web 的 `MATCHPLANE_MEDIA_MAX_BYTES` 负责 100 MiB 默认、256 MiB 硬上限；如果部署调整该变量，必须同步超时、内存和监控。不要把应用层上限改成无界，超大视频应由子平台对象存储直传。
 
 ## 5. 上线前验收
 

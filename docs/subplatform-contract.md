@@ -26,7 +26,7 @@ await auth.api.verifyApiKey({
   body: {
     configId: "platform",
     key: request.headers.get("x-matchplane-api-key") ?? "",
-    permissions: { platform: ["read"], retrieval: ["query"] }
+    permissions: { platform: ["read"], retrieval: ["query"], media: ["upload"] }
   }
 });
 ```
@@ -56,7 +56,7 @@ Key 不会创建被冒充的用户会话。轮换方式是创建替代 key、更
     "protocol": "matchplane.agent/v1",
     "stages": ["merchant", "inventory"],
     "skills": ["matchplane.matching.v1"],
-    "mcpTools": ["catalog.search", "merchant.search"],
+    "mcpTools": ["catalog.search", "merchant.search", "media.upload"],
     "mcpServerKey": "example-auto"
   },
   "assets": { "staticDirectory": "dist", "buildCommand": "bun run build" }
@@ -66,6 +66,12 @@ Key 不会创建被冒充的用户会话。轮换方式是创建替代 key、更
 根服务在注册前会按 schema 验证清单。`id` 在全局稳定；`slug` 在根租户内唯一，并作为 URL 路径。`rootApiVersion` 与能力在启用前协商。可选 `agent` 块仅声明协议、工作流阶段与 MCP 工具名，不包含 endpoint、凭据或向量库配置。`agent.stages` 是子平台自有的 taxonomy key，根只校验长度/字符边界；`merchant`、`inventory` 只是二手车示例，不是全局枚举。`mcpServerKey` 仅是稳定的查找键。部署管理员可通过 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 将该 key 绑定到 HTTPS MCP endpoint；软件包本身不能指定 URL 或提供 bearer token。带有 `agent:tool` 权限的已认证 Agent 可调用通用 HTTP MCP 工具 `platform.child.tool`，传入当前 `platform_path`、白名单内 `tool_name` 和受限 JSON `arguments`。根服务会在转发前再次检查路径可见性与活跃注册，剥离调用方 API key，仅添加受限路由头、请求超时和响应体限制，并将子平台 MCP 结果作为可审计工具响应返回。终端未配置时返回明确的 degraded 错误，不会回退到根凭据或任意 URL。
 
 领域文案、定价能力、筛选器与商家字段属于软件包，不属于根实现。软件包可在清单中声明 `pricing`、`ui.chat`、`ui.copy`、`ui.filters`、`ui.supplyFields` 与 `ui.contactFields`；根服务会校验并传递给通用 shell/plugin。默认走领域中立 marketplace 合约。仍需使用旧垂直适配器的软件包必须显式声明 `marketplaceContract: "legacy-v1"`；仅定价或存在 schema 并不隐式选择该适配器。网关的 legacy HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明或默认业务货币。卖家提交由激活包 schema 定义的值，根服务仅保存并转发其结构化属性。
+
+### Agent 资料上传
+
+需要让买方或卖方在聊天里交图片、PDF 或其他材料的包，必须同时提供真实的 `media.upload` MCP 工具并把它写进 `agent.mcpTools`。根 web 的 `POST /api/platform/media/upload` 只做 Better Auth/API-key、tenant/domain/path、MIME、文件名、base64 长度和请求幂等校验，然后把有限时的请求转发给这个子平台工具；根不保存原始二进制、不扫描、不解析车辆或其他领域字段。子平台负责恶意内容扫描、图片尺寸/文本提取、内容寻址存储与保留策略，并返回 [`docs/media-attachment-protocol-v1.json`](media-attachment-protocol-v1.json) 约定的 `media://` 引用。聊天草稿会把引用交给子平台 Agent，人工编辑器必须允许供给方查看、修改和删除后再创建 offer。
+
+默认 relay 上限为 100 MiB，部署可用 `MATCHPLANE_MEDIA_MAX_BYTES` 调低或提高到协议硬上限 256 MiB，并同步 Nginx/Ingress/Next body 限制。不要把它设成无界：JSON/base64 中转会按请求大小占用 web 内存。视频或更大文件应由子平台提供对象存储直传/MCP URL 协议；没有真实 `media.upload` 适配器的包不会显示上传按钮，也不会假装文件已经进入检索索引。
 
 `ui.copy` 和 `ui.chat` 的键默认是中文或平台的主语言；需要英文界面时，包可以为同一个键提供 `<key>En` 覆盖，例如 `contactProfileTitleEn` 或 `buyerTitleEn`。没有覆盖时，根通用 shell 使用自己的英文 fallback；它不会翻译或重写 `supplyFields`、`contactFields`、资产属性和商家内容。这样语言切换不会把领域术语硬编码进根平台，同时保留商家对文案的控制权。
 

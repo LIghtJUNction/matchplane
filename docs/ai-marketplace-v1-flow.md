@@ -50,7 +50,8 @@ reviewable draft. The seller then completes the package schema manually and subm
 moderation must activate it before it is matchable.
 
 For a package that supports media, the package manifest advertises a media MCP tool (for example
-`media.upload`). The seller Agent, not the root, performs this sequence:
+`media.upload`). The chat UI uses the root's scoped `POST /api/platform/media/upload` facade, but
+the seller/package Agent and the child adapter still own the interpretation and persistence:
 
 1. Send the selected file/photo to the package media adapter.
 2. The adapter validates MIME/size, scans it, stores it under a content-addressed key, and returns
@@ -60,6 +61,11 @@ For a package that supports media, the package manifest advertises a media MCP t
 4. The UI places the proposal in the manual editor. The seller reviews, edits and confirms it.
 5. `marketplace.offer.create` stores the package-owned attributes/terms and the attachment refs as
    JSON. The root does not store raw binary or infer fields.
+
+The default root relay budget is 100 MiB (`MATCHPLANE_MEDIA_MAX_BYTES` can lower or raise it up to
+the 256 MiB protocol ceiling). Reverse proxies must be configured with the same JSON/base64 body
+budget. This is a bounded compatibility path, not a promise of unlimited uploads; large video
+files should use a child-owned direct-to-object-storage adapter.
 
 If the package has no real media adapter, the UI must not claim that a local file was uploaded or
 indexed. Sellers can still paste an approved URL or use the JSON editor. This fail-closed rule
@@ -76,6 +82,8 @@ The authenticated HTTP MCP facade is `/api/mcp`. The stable tools are:
   `marketplace.preference.set`, `marketplace.sales.handoff`;
 - supply and consent: `marketplace.offer.create/match`, `marketplace.demand.match`,
   `marketplace.introduction.*`.
+- package-owned material: `media.upload` is optional and is only callable when the active
+  manifest declares it and the deployment has configured its MCP endpoint.
 
 `retrieval.query` is a package-declared capability, not a default root implementation. The root
 retrieval facade validates the `matchplane.retrieval/v1` envelope, forwards only to an active

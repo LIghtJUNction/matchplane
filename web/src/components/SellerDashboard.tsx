@@ -12,6 +12,7 @@ import {
   getMarketplaceOffers,
   getSellerListingSubmissions,
   isLiveMarketplaceEnabled,
+  uploadMarketplaceAttachment,
   retrieveMarketplaceContact,
   type MarketplaceIntroduction,
   type MarketplaceDemandCandidate,
@@ -19,6 +20,7 @@ import {
   type MarketplaceOffer,
   submitSellerListing,
   type ListingSubmission,
+  type MarketplaceAttachment,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import type { InterfaceLocale } from "../lib/preferences";
@@ -36,6 +38,7 @@ interface SellerDashboardProps {
     intentId?: string;
     attributes: Record<string, unknown>;
     terms: Record<string, unknown>;
+    attachments?: MarketplaceAttachment[];
   } | null;
 }
 
@@ -103,6 +106,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
   const isFixedPrice = pricing.mode === "fixed";
   const isRangePrice = pricing.mode === "range";
   const isNegotiablePrice = pricing.mode === "negotiable";
+  const mediaUploadEnabled = subplatform.agentMcpTools?.includes("media.upload") === true;
   const usesLegacyMarketplace = subplatform.marketplaceContract === "legacy-v1";
   const pricingCurrency = pricing.currency ?? subplatform.currency;
   const pricingScale = pricing.currencyScale ?? subplatform.currencyScale;
@@ -112,6 +116,8 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
   const [advancedAttributes, setAdvancedAttributes] = useState("{}");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draftImported, setDraftImported] = useState(false);
+  const [attachments, setAttachments] = useState<MarketplaceAttachment[]>([]);
+  const [mediaUploading, setMediaUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submissions, setSubmissions] = useState<SellerRecord[]>([]);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
@@ -285,9 +291,45 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       _terms: agentDraft.terms,
     };
     setAdvancedAttributes(JSON.stringify(draft, null, 2));
+    if (agentDraft.attachments?.length) setAttachments(agentDraft.attachments.slice(0, 8));
     setAdvancedOpen(true);
     setDraftImported(true);
     onNotice(copy("agentDraftImportedNotice", "已把对话草稿放入高级资料，请检查并补齐字段后提交", "The conversation draft is in advanced attributes; review it before submitting"));
+  };
+
+  const uploadFiles = async (files: FileList | null) => {
+    if (!files || !files.length || mediaUploading) return;
+    if (!mediaUploadEnabled) {
+      onNotice(copy("mediaUnavailableNotice", "当前子平台没有启用资料上传适配器", "This platform has not enabled its media adapter"));
+      return;
+    }
+    if (!subplatform.tenantId || !subplatform.domainId) {
+      onNotice(copy("platformIdentityIncompleteNotice", "当前子平台尚未完成身份配置", "This platform's identity configuration is incomplete"));
+      return;
+    }
+    const remaining = Math.max(0, 8 - attachments.length);
+    if (!remaining) {
+      onNotice(copy("mediaLimitNotice", "最多添加 8 个附件", "You can add up to 8 attachments"));
+      return;
+    }
+    setMediaUploading(true);
+    try {
+      const uploaded: MarketplaceAttachment[] = [];
+      for (const file of Array.from(files).slice(0, remaining)) {
+        uploaded.push(await uploadMarketplaceAttachment({
+          platformPath: subplatform.path,
+          tenantId: subplatform.tenantId,
+          domainId: subplatform.domainId,
+          file,
+        }));
+      }
+      setAttachments((current) => [...current, ...uploaded].slice(0, 8));
+      if (files.length > remaining) onNotice(copy("mediaLimitNotice", "最多添加 8 个附件", "You can add up to 8 attachments"));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : copy("mediaUploadError", "附件上传失败，请稍后重试", "Could not upload the attachment; try again"));
+    } finally {
+      setMediaUploading(false);
+    }
   };
 
   const publishedOffers = useMemo(
@@ -361,6 +403,9 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       onNotice(copy("advancedJsonError", "高级资料必须是有效的 JSON 对象", "Advanced attributes must be a valid JSON object"));
       return;
     }
+    const attributesWithAttachments = attachments.length
+      ? { ...parsedAttributes, attachments: attachments.map(publicAttachment) }
+      : parsedAttributes;
 
     let session: Awaited<ReturnType<typeof getMarketplaceSession>> = null;
     try {
@@ -389,7 +434,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
             assetSchemaId: subplatform.assetSchemaId as string,
             externalKey: normalizedKey,
             displayName: normalizedName,
-            attributes: parsedAttributes,
+            attributes: attributesWithAttachments,
             askingAmount: normalizedAmount as string,
             currency: normalizedCurrency,
             currencyScale: pricingScale as number,
@@ -399,7 +444,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
             domainId: subplatform.domainId,
             externalKey: normalizedKey,
             displayName: normalizedName,
-            attributes: parsedAttributes,
+            attributes: attributesWithAttachments,
             terms: {
               pricing_mode: pricing.mode,
               ...(normalizedAmount ? { amount_minor: normalizedAmount } : {}),
@@ -423,6 +468,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       setCustomFields([]);
       setAdvancedAttributes("{}");
       setAdvancedOpen(false);
+      setAttachments([]);
       onNotice(copy("offerSubmittedNotice", "供给已提交，等待平台审核后展示", "Offer submitted; it will appear after platform review"));
     } catch (error) {
       onNotice(error instanceof Error ? error.message : copy("offerSubmitError", "供给提交失败，请稍后重试", "Could not submit the offer; try again"));
@@ -463,6 +509,49 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
             <button className="text-action" type="button" onClick={importAgentDraft} disabled={draftImported}>
               {draftImported ? copy("agentDraftImportedLabel", "已放入编辑器", "Added to editor") : copy("agentDraftImportLabel", "放入编辑器", "Add to editor")}
             </button>
+          </div>
+        ) : null}
+        {mediaUploadEnabled ? (
+          <div className="seller-media-uploader seller-upload-wide">
+            <div className="seller-media-uploader-heading">
+              <div>
+                <strong>{copy("mediaUploadTitle", "把图片或资料交给平台")}</strong>
+                <small>{copy("mediaUploadDescription", "由当前子平台的 Agent 读取和保存；你仍可以在下面手动修改资料。")}</small>
+              </div>
+              <label className="text-action seller-media-picker" htmlFor="seller-media-input">
+                <FileUp size={16} aria-hidden="true" />
+                {mediaUploading ? copy("mediaUploadingLabel", "处理中…") : copy("mediaChooseLabel", "添加附件")}
+                <input
+                  id="seller-media-input"
+                  type="file"
+                  accept="image/*,application/pdf,text/plain,application/json"
+                  multiple
+                  onChange={(event) => {
+                    void uploadFiles(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                  disabled={mediaUploading || submitting}
+                />
+              </label>
+            </div>
+            {attachments.length ? (
+              <ul className="seller-media-list" aria-label={copy("mediaListLabel", "已添加的附件")}>
+                {attachments.map((attachment) => (
+                  <li key={attachment.attachment_ref}>
+                    <span title={attachment.file_name}>{attachment.file_name}</span>
+                    <small>{formatAttachmentSize(attachment.size_bytes)}</small>
+                    <button
+                      type="button"
+                      aria-label={`${copy("removeMediaLabel", "移除附件")} ${attachment.file_name}`}
+                      onClick={() => setAttachments((current) => current.filter((item) => item.attachment_ref !== attachment.attachment_ref))}
+                      disabled={mediaUploading || submitting}
+                    >
+                      <Trash2 size={15} aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         ) : null}
         <form className="seller-upload-form" onSubmit={submit}>
@@ -678,6 +767,27 @@ function amountPlaceholder(scale: number, locale: InterfaceLocale = "zh"): strin
   return locale === "en"
     ? (scale > 0 ? `e.g. 1000.${"0".repeat(Math.min(scale, 2))}` : "e.g. 1000")
     : (scale > 0 ? `例如 1000.${"0".repeat(Math.min(scale, 2))}` : "例如 1000");
+}
+
+function publicAttachment(attachment: MarketplaceAttachment): Record<string, unknown> {
+  return {
+    attachment_ref: attachment.attachment_ref,
+    kind: attachment.kind,
+    file_name: attachment.file_name,
+    media_type: attachment.media_type,
+    size_bytes: attachment.size_bytes,
+    sha256: attachment.sha256,
+    ...(attachment.width === undefined ? {} : { width: attachment.width }),
+    ...(attachment.height === undefined ? {} : { height: attachment.height }),
+    ...(attachment.duration_ms === undefined ? {} : { duration_ms: attachment.duration_ms }),
+    ...(attachment.metadata === undefined ? {} : { metadata: attachment.metadata }),
+  };
+}
+
+function formatAttachmentSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 1024)} KB`;
+  return `${(sizeBytes / (1024 * 1024)).toFixed(sizeBytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
 }
 
 function demandMatchLevel(score: number, locale: InterfaceLocale): string {
