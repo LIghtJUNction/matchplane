@@ -54,6 +54,22 @@ RUN set -eux; \
               ;; \
           esac; \
         fi; \
+        external_aliases=$(grep -RhoE '"[A-Za-z0-9@._/-]+-[0-9a-f]{14,}"' /app/.next/server 2>/dev/null | sed -E 's/^"|"$//g' | sort -u || true); \
+        for external_alias in $external_aliases; do \
+          package_name=$(printf '%s\\n' "$external_alias" | sed -E 's/-[0-9a-f]{14,}$//'); \
+          source_link=/app/node_modules/$package_name; \
+          if [ -L "$source_link" ]; then \
+            package_link=$(readlink "$source_link"); \
+            case "$package_link" in \
+              ../../node_modules/.bun/*) \
+                package_fragment=${package_link#../../node_modules/.bun/}; \
+                alias_path=/app/standalone/node_modules/$external_alias; \
+                mkdir -p "$(dirname "$alias_path")"; \
+                [ -e "$alias_path" ] || ln -s ".bun/$package_fragment" "$alias_path"; \
+                ;; \
+            esac; \
+          fi; \
+        done; \
       fi; \
     else \
       echo 'Next standalone server.js was not produced' >&2; \
