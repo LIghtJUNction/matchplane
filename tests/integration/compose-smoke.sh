@@ -6,6 +6,17 @@ env_file="$repository_root/.env.example"
 if [[ -f "$repository_root/.env" ]]; then env_file="$repository_root/.env"; fi
 compose=(docker compose --env-file "$env_file" -f "$repository_root/deploy/compose/compose.yaml")
 
+# The smoke stack is disposable. Always remove its containers, network, and volumes when the
+# test exits, including assertion failures, so a local or CI interruption cannot leave Kafka and
+# the other workload containers consuming CPU and disk indefinitely.
+cleanup() {
+  local status=$?
+  trap - EXIT
+  "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+  exit "$status"
+}
+trap cleanup EXIT
+
 "${compose[@]}" up --build --detach --wait
 "${compose[@]}" exec -T postgres psql \
   --username "${MATCHPLANE_POSTGRES_USER:-matchplane}" \
