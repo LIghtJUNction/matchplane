@@ -257,7 +257,7 @@ describe("platform Agent router", () => {
         tools?: Array<{ function?: { name?: string; parameters?: { properties?: Record<string, unknown> } } }>;
         response_format?: unknown;
       };
-      expect(body.tools?.[0]?.function?.name).toBe("matchplane.platform.select_children");
+      expect(body.tools?.[0]?.function?.name).toBe("matchplane_platform_select_children");
       expect(body.tools?.[0]?.function?.parameters?.properties?.selectedSlugs).toBeDefined();
       expect(body.response_format).toBeUndefined();
       return new Response(JSON.stringify({
@@ -267,7 +267,7 @@ describe("platform Agent router", () => {
               id: "call_1",
               type: "function",
               function: {
-                name: "matchplane.platform.select_children",
+                name: "matchplane_platform_select_children",
                 arguments: JSON.stringify({
                   selectedSlugs: ["electronics", "not-registered"],
                   rationale: "需求更接近消费电子",

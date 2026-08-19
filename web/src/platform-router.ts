@@ -72,8 +72,9 @@ const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
 const MAX_ROUTER_RESPONSE_BYTES = 256 * 1024;
 const DEFAULT_FALLBACK_CHILDREN = 4;
 const ROUTER_TOOL_NAME = "matchplane.platform.select_children";
-// Gemini function declarations reject dots in names. Native providers use this
-// wire-safe alias while the audit/event contract keeps the canonical tool name.
+// Provider function names use a wire-safe alias. The dotted name remains the canonical
+// MatchPlane audit/tool contract, but New API/OpenAI-compatible gateways reject dots in the
+// provider-facing function name.
 const NATIVE_ROUTER_TOOL_NAME = "matchplane_platform_select_children";
 const DEFAULT_ROUTER_PROTOCOL = "openai-compatible";
 
@@ -143,7 +144,7 @@ export async function decidePlatformRoutes(input: {
       candidates,
       systemPrompt: toolMode === "disabled"
         ? "你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。返回 JSON：selectedSlugs(string[]), rationale(string), confidence(number 0..1)。如果没有合适候选，selectedSlugs 返回空数组。"
-        : `你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。优先调用 ${ROUTER_TOOL_NAME} 完成选择；不要调用未声明的工具。`,
+        : `你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。优先调用 ${NATIVE_ROUTER_TOOL_NAME} 完成选择；不要调用未声明的工具。`,
       userContent: boundedProviderIntent(input, candidates),
     });
     // The recursive orchestrator owns the larger request deadline, but one
@@ -485,13 +486,16 @@ function configuredProviderTimeoutMs(): number {
 function routerSelectionTool(candidates: PlatformRouteCandidate[]): Record<string, unknown> {
   return {
     type: "function",
-    function: routerSelectionFunction(candidates),
+    function: routerSelectionFunction(candidates, NATIVE_ROUTER_TOOL_NAME),
   };
 }
 
-function routerSelectionFunction(candidates: PlatformRouteCandidate[]): Record<string, unknown> {
+function routerSelectionFunction(
+  candidates: PlatformRouteCandidate[],
+  name = ROUTER_TOOL_NAME,
+): Record<string, unknown> {
   return {
-    name: ROUTER_TOOL_NAME,
+    name,
     description: "从当前节点已授权的候选子平台中选择下一跳；不得创造候选之外的 slug。",
     strict: true,
     parameters: routerSelectionParameters(candidates),
@@ -592,7 +596,7 @@ function buildProviderRequest(input: {
     body.response_format = { type: "json_object" };
   } else {
     body.tools = [routerSelectionTool(input.candidates)];
-    if (input.toolMode === "required") body.tool_choice = { type: "function", function: { name: ROUTER_TOOL_NAME } };
+    if (input.toolMode === "required") body.tool_choice = { type: "function", function: { name: NATIVE_ROUTER_TOOL_NAME } };
   }
   return { url: input.endpoint, headers, body };
 }
