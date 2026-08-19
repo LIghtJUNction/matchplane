@@ -71,6 +71,8 @@ Key 不会创建被冒充的用户会话。轮换方式是创建替代 key、更
 
 需要让买方或卖方在聊天里交图片、PDF 或其他材料的包，必须同时提供真实的 `media.upload` MCP 工具并把它写进 `agent.mcpTools`。根 web 的 `POST /api/platform/media/upload` 只做 Better Auth/API-key、tenant/domain/path、MIME、文件名、base64 长度和请求幂等校验，然后把有限时的请求转发给这个子平台工具；根不保存原始二进制、不扫描、不解析车辆或其他领域字段。子平台负责恶意内容扫描、图片尺寸/文本提取、内容寻址存储与保留策略，并返回 [`docs/media-attachment-protocol-v1.json`](media-attachment-protocol-v1.json) 约定的 `media://` 引用。聊天草稿会把引用交给子平台 Agent，人工编辑器必须允许供给方查看、修改和删除后再创建 offer。
 
+供给创建后，根通过 [`docs/catalog-protocol-v1.json`](catalog-protocol-v1.json) 将数据库中的 canonical opaque offer projection 同步给子平台的 `catalog.upsert`。浏览器只能提交 offer UUID，根会重新读取供给所有字段并检查 Better Auth 所属关系；客户端不能伪造价格、属性、卖家或 `active` 状态。审核激活由 Rust 网关完成，成功后再同步 `active` 状态；同步失败会显示为可观测的 degraded 状态，买方仍以根的 active offer 重读结果为准。
+
 默认 relay 上限为 100 MiB，部署可用 `MATCHPLANE_MEDIA_MAX_BYTES` 调低或提高到协议硬上限 256 MiB，并同步 Nginx/Ingress/Next body 限制。不要把它设成无界：JSON/base64 中转会按请求大小占用 web 内存。视频或更大文件应由子平台提供对象存储直传/MCP URL 协议；没有真实 `media.upload` 适配器的包不会显示上传按钮，也不会假装文件已经进入检索索引。
 
 `ui.copy` 和 `ui.chat` 的键默认是中文或平台的主语言；需要英文界面时，包可以为同一个键提供 `<key>En` 覆盖，例如 `contactProfileTitleEn` 或 `buyerTitleEn`。没有覆盖时，根通用 shell 使用自己的英文 fallback；它不会翻译或重写 `supplyFields`、`contactFields`、资产属性和商家内容。这样语言切换不会把领域术语硬编码进根平台，同时保留商家对文案的控制权。

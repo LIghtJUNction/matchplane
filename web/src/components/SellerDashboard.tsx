@@ -7,6 +7,7 @@ import { motion } from "motion/react";
 import {
   consentMarketplaceContact,
   createMarketplaceOffer,
+  syncMarketplaceOfferToChild,
   getMarketplaceIntroductions,
   getMarketplaceDemandMatches,
   getMarketplaceOffers,
@@ -427,35 +428,48 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
     }
     setSubmitting(true);
     try {
-      const record: SellerRecord = usesLegacyMarketplace
-        ? await submitSellerListing({
-            session,
-            domainId: subplatform.domainId,
-            assetSchemaId: subplatform.assetSchemaId as string,
-            externalKey: normalizedKey,
-            displayName: normalizedName,
-            attributes: attributesWithAttachments,
-            askingAmount: normalizedAmount as string,
-            currency: normalizedCurrency,
-            currencyScale: pricingScale as number,
-          })
-        : await createMarketplaceOffer({
-            session,
-            domainId: subplatform.domainId,
-            externalKey: normalizedKey,
-            displayName: normalizedName,
-            attributes: attributesWithAttachments,
-            terms: {
-              pricing_mode: pricing.mode,
-              ...(normalizedAmount ? { amount_minor: normalizedAmount } : {}),
-              ...(normalizedMin ? { amount_min_minor: normalizedMin } : {}),
-              ...(normalizedMax ? { amount_max_minor: normalizedMax } : {}),
-              ...(normalizedCurrency ? { currency: normalizedCurrency } : {}),
-              ...(pricingScale !== undefined ? { currency_scale: pricingScale } : {}),
-              ...(pricing.label ? { pricing_label: pricing.label } : {}),
-              ...(pricingNote.trim() ? { pricing_note: pricingNote.trim() } : {}),
-            },
-          });
+      let record: SellerRecord;
+      if (usesLegacyMarketplace) {
+        record = await submitSellerListing({
+          session,
+          domainId: subplatform.domainId,
+          assetSchemaId: subplatform.assetSchemaId as string,
+          externalKey: normalizedKey,
+          displayName: normalizedName,
+          attributes: attributesWithAttachments,
+          askingAmount: normalizedAmount as string,
+          currency: normalizedCurrency,
+          currencyScale: pricingScale as number,
+        });
+      } else {
+        const offer = await createMarketplaceOffer({
+          session,
+          domainId: subplatform.domainId,
+          externalKey: normalizedKey,
+          displayName: normalizedName,
+          attributes: attributesWithAttachments,
+          terms: {
+            pricing_mode: pricing.mode,
+            ...(normalizedAmount ? { amount_minor: normalizedAmount } : {}),
+            ...(normalizedMin ? { amount_min_minor: normalizedMin } : {}),
+            ...(normalizedMax ? { amount_max_minor: normalizedMax } : {}),
+            ...(normalizedCurrency ? { currency: normalizedCurrency } : {}),
+            ...(pricingScale !== undefined ? { currency_scale: pricingScale } : {}),
+            ...(pricing.label ? { pricing_label: pricing.label } : {}),
+            ...(pricingNote.trim() ? { pricing_note: pricingNote.trim() } : {}),
+          },
+        });
+        record = offer;
+        if (offer.status === "draft") {
+          const synced = await syncMarketplaceOfferToChild({
+            offerId: offer.offer_id,
+            tenantId: offer.tenant_id,
+            domainId: offer.domain_id,
+            platformPath: subplatform.path,
+          }).catch(() => ({ synced: false }));
+          if (!synced.synced) onNotice(copy("offerIndexPending", "供给已保存，子平台目录将在审核后同步", "Offer saved; the child catalog will sync after review"));
+        }
+      }
       setSubmissions((current) => [record, ...current]);
       setExternalKey("");
       setDisplayName("");

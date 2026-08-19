@@ -47,12 +47,13 @@ subplatform-check:
     test -f subplatforms/auto/matchplane.subplatform.json
     python3 -c 'import json; p=json.load(open("subplatforms/auto/package.json")); assert p["scripts"].get("build"), "subplatform package must expose the manifest build command"'
     python3 -c 'import json, re; m=json.load(open("subplatforms/auto/matchplane.subplatform.json")); a=m["agent"]; assert m["apiVersion"] == "matchplane.subplatform/v1"; assert m["rootApiVersion"] == "v1"; assert m.get("marketplaceContract", "generic-v1") in {"generic-v1", "legacy-v1"}; assert isinstance(m["slug"], str) and m["slug"] and m["slug"] != "root"; assert a["protocol"] == "matchplane.agent/v1"; assert a["stages"] and all(re.fullmatch(r"[a-z0-9][a-z0-9._:-]{1,127}", stage) for stage in a["stages"]); assert a["skills"] and isinstance(a["mcpTools"], list)'
-    python3 -c 'import json; json.load(open("docs/agent-mcp-skill-protocol-v1.json")); json.load(open("docs/agent-handoff-protocol-v1.json")); json.load(open("docs/federation-enrollment-protocol-v1.json")); json.load(open("docs/generic-marketplace-contract-v1.json")); json.load(open("docs/media-attachment-protocol-v1.json")); json.load(open("docs/platform-routing-protocol-v1.json")); json.load(open("docs/retrieval-protocol-v1.json")); json.load(open("docs/schemas-matchplane-subplatform.json"))'
+    python3 -c 'import json; json.load(open("docs/agent-mcp-skill-protocol-v1.json")); json.load(open("docs/agent-handoff-protocol-v1.json")); json.load(open("docs/catalog-protocol-v1.json")); json.load(open("docs/federation-enrollment-protocol-v1.json")); json.load(open("docs/generic-marketplace-contract-v1.json")); json.load(open("docs/media-attachment-protocol-v1.json")); json.load(open("docs/platform-routing-protocol-v1.json")); json.load(open("docs/retrieval-protocol-v1.json")); json.load(open("docs/schemas-matchplane-subplatform.json"))'
     test -n "$$(git -C subplatforms/auto rev-parse HEAD)"
 
 subplatform-build-check:
     bun install --no-save --cwd subplatforms/auto
     bun run --cwd subplatforms/auto build
+    bun run --cwd subplatforms/auto agent:test
     test -s subplatforms/auto/dist/index.html
 
 migration-check:

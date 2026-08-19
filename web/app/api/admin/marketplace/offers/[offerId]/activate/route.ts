@@ -4,6 +4,7 @@ import { auth } from "../../../../../../../src/lib/auth";
 import { readJsonBody, readResponseTextBody } from "../../../../../../../src/lib/body-limit";
 import { loadInternalBearer } from "../../../../../../../src/lib/internal-auth";
 import { hasTrustedBrowserOrigin } from "../../../../../../../src/lib/request-origin";
+import { syncCanonicalMarketplaceOffer } from "../../../../../../../src/catalog-sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,17 +70,43 @@ export async function POST(
     return jsonError("网关审核服务暂时不可用", 503);
   }
 
-  try {
-    return new Response(await readResponseTextBody(upstream, 256 * 1024), {
+  const responseText = await readResponseTextBody(upstream, 256 * 1024).catch(() => null);
+  if (responseText === null) return jsonError("网关审核服务返回内容过大或无效", 502);
+  if (!upstream.ok) {
+    return new Response(responseText, {
       status: upstream.status,
       headers: {
         "content-type": upstream.headers.get("content-type") ?? "application/json",
         "cache-control": "no-store",
       },
     });
-  } catch {
-    return jsonError("网关审核服务返回内容过大或无效", 502);
   }
+
+  // Activation is authoritative in Rust.  The optional child index is synchronized only after
+  // the state transition; a missing/degraded adapter is reported explicitly and never turns a
+  // draft into an unverified buyer result.
+  let activated: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(responseText) as unknown;
+    activated = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return new Response(responseText, {
+      status: upstream.status,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  }
+  const sync = await syncCanonicalMarketplaceOffer({ request, offerId, tenantId });
+  activated.catalog_sync = {
+    synced: sync.synced,
+    platform_path: sync.platformPath,
+    ...(sync.synced ? {} : { error: readError(sync.payload) ?? "子平台目录尚未同步" }),
+  };
+  return NextResponse.json(activated, {
+    status: upstream.status,
+    headers: { "cache-control": "no-store" },
+  });
 }
 
 function isUuid(value: string): boolean {
@@ -91,4 +118,8 @@ function jsonError(error: string, status: number): Response {
     status,
     headers: { "cache-control": "no-store" },
   });
+}
+
+function readError(payload: Record<string, unknown>): string | null {
+  return typeof payload.error === "string" && payload.error.length <= 500 ? payload.error : null;
 }

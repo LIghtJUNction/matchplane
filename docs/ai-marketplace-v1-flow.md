@@ -61,6 +61,9 @@ the seller/package Agent and the child adapter still own the interpretation and 
 4. The UI places the proposal in the manual editor. The seller reviews, edits and confirms it.
 5. `marketplace.offer.create` stores the package-owned attributes/terms and the attachment refs as
    JSON. The root does not store raw binary or infer fields.
+6. The root sends the canonical offer projection through `catalog.upsert`; the child indexes it
+   only after the root moderation transition reaches `active`. See
+   [`catalog-protocol-v1.json`](catalog-protocol-v1.json).
 
 The default root relay budget is 100 MiB (`MATCHPLANE_MEDIA_MAX_BYTES` can lower or raise it up to
 the 256 MiB protocol ceiling). Reverse proxies must be configured with the same JSON/base64 body

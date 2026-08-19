@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 
-import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing, type ContactExchange, type MarketplaceAttachment } from "../api";
+import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing, syncMarketplaceOfferToChild, type ContactExchange, type MarketplaceAttachment } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
 import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
@@ -336,7 +336,7 @@ async function submitPluginListing(
         currencyScale: pricing.currencyScale ?? input.subplatform.currencyScale ?? 0,
       });
     } else {
-      await createMarketplaceOffer({
+      const created = await createMarketplaceOffer({
         session,
         domainId: input.subplatform.domainId,
         externalKey,
@@ -350,6 +350,12 @@ async function submitPluginListing(
           ...(pricing.label ? { pricing_label: pricing.label } : {}),
         },
       });
+      await syncMarketplaceOfferToChild({
+        offerId: created.offer_id,
+        tenantId: created.tenant_id,
+        domainId: created.domain_id,
+        platformPath: input.subplatform.path,
+      }).catch(() => undefined);
     }
     input.onNotice(subplatformCopy(input.subplatform, "pluginSubmissionSuccess", "供给已真实提交，等待子平台审核后进入 AI 撮合"));
     respond(true);

@@ -290,9 +290,11 @@ export function PlatformDashboard({
     }
     setSaving(true);
     try {
-      await activateMarketplaceOffer({ offerId: offer.offer_id, tenantId });
+      const activated = await activateMarketplaceOffer({ offerId: offer.offer_id, tenantId });
       await refreshOfferQueue();
-      onNotice(`“${offer.display_name}”已激活，进入当前子平台的匹配范围`);
+      onNotice(activated.catalog_sync?.synced === false
+        ? `“${offer.display_name}”已激活，但子平台目录尚未同步；请检查 MCP 服务后重试。`
+        : `“${offer.display_name}”已激活，进入当前子平台的匹配范围`);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "供给激活失败");
     } finally {

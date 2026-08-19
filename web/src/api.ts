@@ -2196,7 +2196,7 @@ export async function getMarketplaceOfferAdminRecords(input?: {
 export async function activateMarketplaceOffer(input: {
   offerId: string;
   tenantId: string;
-}): Promise<MarketplaceOfferAdminRecord> {
+}): Promise<MarketplaceOfferAdminRecord & { catalog_sync?: { synced?: boolean; error?: string; platform_path?: string | null } }> {
   const response = await fetch(`/api/admin/marketplace/offers/${encodeURIComponent(input.offerId)}/activate`, {
     method: "POST",
     credentials: "include",
@@ -2206,6 +2206,34 @@ export async function activateMarketplaceOffer(input: {
   const body = await response.json().catch(() => null) as (MarketplaceOfferAdminRecord & { error?: string }) | null;
   if (!response.ok || !body?.offer_id) throw new MarketplaceApiError(response.status, body?.error || "供给激活失败");
   return body;
+}
+
+/** Push the canonical offer projection to the selected child-owned catalog adapter. */
+export async function syncMarketplaceOfferToChild(input: {
+  offerId: string;
+  tenantId: string;
+  domainId: string;
+  platformPath: string;
+}): Promise<{ offerId: string; synced: boolean; platformPath: string | null }> {
+  const response = await fetch("/api/platform/catalog/sync", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({
+      protocol: "matchplane.catalog/v1",
+      request_id: crypto.randomUUID(),
+      scope: {
+        tenant_id: input.tenantId,
+        domain_id: input.domainId,
+        platform_path: input.platformPath,
+      },
+      offer_id: input.offerId,
+    }),
+  });
+  const body = await response.json().catch(() => null) as { offer_id?: string; synced?: boolean; platform_path?: string | null; error?: string } | null;
+  if (!response.ok && response.status !== 202) throw new MarketplaceApiError(response.status, body?.error || "子平台目录同步失败");
+  if (!body?.offer_id) throw new MarketplaceApiError(502, "子平台目录同步返回了无效响应");
+  return { offerId: body.offer_id, synced: body.synced === true, platformPath: body.platform_path ?? null };
 }
 
 /** Upload bytes transiently to the active child-owned media adapter. */

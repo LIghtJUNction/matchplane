@@ -205,6 +205,8 @@ services:
       MATCHPLANE_ROOT_TENANT_ID: ${MATCHPLANE_ROOT_TENANT_ID:-}
       MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT: ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-/var/lib/matchplane/subplatform-artifacts}
       MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT: ${MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT:-/var/lib/matchplane/subplatform-uploads}
+      MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON: '${MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON:-{"used-car":{"url":"http://auto-agent:8787/mcp","tokenEnv":"MATCHPLANE_AUTO_MCP_TOKEN"}}}'
+      MATCHPLANE_AUTO_MCP_TOKEN: ${MATCHPLANE_AUTO_MCP_TOKEN:-matchplane_auto_dev_only}
       MATCHPLANE_MEDIA_MAX_BYTES: ${MATCHPLANE_MEDIA_MAX_BYTES:-104857600}
       MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN: ${MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN:-}
       MATCHPLANE_SUBPLATFORM_SECRET_ROOT: ${MATCHPLANE_SUBPLATFORM_SECRET_ROOT:-/run/secrets/subplatform-email}
@@ -235,6 +237,8 @@ services:
         condition: service_started
       payment-service:
         condition: service_started
+      auto-agent:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${MATCHPLANE_WEB_HOST_PORT:-4173}:4173"
     volumes:
@@ -251,6 +255,43 @@ services:
       - matchplane
     security_opt:
       - no-new-privileges:true
+
+  auto-agent:
+    image: matchplane/auto-agent:dev
+    build:
+      context: ../..
+      dockerfile: deploy/compose/auto-agent.Dockerfile
+    restart: unless-stopped
+    environment:
+      MATCHPLANE_ENVIRONMENT: ${MATCHPLANE_ENVIRONMENT:-development}
+      MATCHPLANE_AUTO_MCP_TOKEN: ${MATCHPLANE_AUTO_MCP_TOKEN:-matchplane_auto_dev_only}
+      MATCHPLANE_AUTO_PLATFORM_PATH: /used-car
+      MATCHPLANE_AUTO_MCP_HOST: 0.0.0.0
+      MATCHPLANE_AUTO_MCP_PORT: 8787
+      MATCHPLANE_AUTO_MAX_MEDIA_BYTES: ${MATCHPLANE_MEDIA_MAX_BYTES:-104857600}
+      MATCHPLANE_AUTO_DATA_DIR: /var/lib/matchplane-auto
+    volumes:
+      - auto-agent-data:/var/lib/matchplane-auto
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8787/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: "2.0"
+    networks:
+      - matchplane
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   subplatform-builder:
     image: matchplane/subplatform-builder:dev
@@ -325,6 +366,7 @@ volumes:
   valkey-data:
   kafka-data:
   subplatform-builder-work:
+  auto-agent-data:
 
 networks:
   matchplane:
