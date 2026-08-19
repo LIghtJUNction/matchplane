@@ -74,7 +74,7 @@ Key 不会创建被冒充的用户会话。轮换方式是创建替代 key、更
 
 针对内置归档路径，根或父节点管理员先向 `POST /api/platform/subplatforms/upload` 发送 multipart 并带 `archive` 字段（可选 `x-matchplane-parent-organization-id` 请求头）。web 进程限制 64 MiB，仅接受 tar/gzip 或 tar/zstd 后缀，在 `MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT` 下使用随机定位符与 0600 权限存储原始字节，并返回 `upload://<id>` 与 SHA-256 digest；不会解包归档。隔离构建器消费该 locator 时会拒绝路径遍历、符号链接、设备文件、超大条目和缺失清单，然后通过构建回调附加已验证的 build digest 后方可激活。运营方必须提供可持久写入目录（或 Helm 下 RWX 的上传 PVC）；未配置时以 503 关闭。
 
-静态构建模板只接受 `bun run build`、`npm run build`、`pnpm run build` 或 `yarn build`，不会把 manifest 字符串交给 shell。要在生产构建器中安装依赖，包必须提交对应锁文件并由固定 builder image 使用 frozen 安装；依赖安装阶段运行在清理过环境的隔离目录中，后续真正执行 `build` 命令的阶段断网。没有锁文件的包会在构建前失败，不能依赖每次构建时漂移的 semver 依赖。构建器不接受任意服务端代码、Docker socket 或运行时密钥。
+静态构建模板只接受 `bun run build`、`npm run build`、`pnpm run build` 或 `yarn build`，不会把 manifest 字符串交给 shell。默认情况下，包必须提交对应锁文件并由固定 builder image 使用 frozen 安装；依赖安装阶段运行在清理过环境的隔离目录中，后续真正执行 `build` 命令的阶段断网。若确实需要跟随最新依赖，清单可以显式设置 `assets.dependencyPolicy: "latest"`；当前只允许 `bun run build`，构建器会执行无锁的 `bun install --no-save`，并在注册信息中保留源码、清单和产物摘要。该策略牺牲可复现性，不能用于需要稳定回滚的生产包。构建器不接受任意服务端代码、Docker socket 或运行时密钥。
 
 ## 检索边界
 

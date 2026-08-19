@@ -384,6 +384,10 @@ function validateManifest(value: unknown, slug: string | undefined, packageId: s
   if (!Array.isArray(manifest.capabilities) || manifest.capabilities.some((item) => !stringMatches(item, /^[a-z0-9_:-]+$/))) return { ok: false, error: "manifest.capabilities 无效" };
   if (!Array.isArray(manifest.requiredScopes) || manifest.requiredScopes.some((item) => !allowedScopes.has(item))) return { ok: false, error: "manifest.requiredScopes 无效" };
   if (!manifest.assets || typeof manifest.assets !== "object" || !stringMatches(manifest.assets.staticDirectory, /^(?!\/)(?!.*\.\.).+$/) || !stringMatches(manifest.assets.buildCommand, /^.{1,500}$/u)) return { ok: false, error: "manifest.assets 无效" };
+  if (manifest.assets.dependencyPolicy !== undefined
+    && manifest.assets.dependencyPolicy !== "locked"
+    && manifest.assets.dependencyPolicy !== "latest") return { ok: false, error: "manifest.assets.dependencyPolicy 无效" };
+  if (manifest.assets.dependencyPolicy === "latest" && manifest.assets.buildCommand.trim() !== "bun run build") return { ok: false, error: "latest 依赖策略目前只支持 bun run build" };
   if (manifest.agent && !validateAgentManifest(manifest.agent)) return { ok: false, error: "manifest.agent 无效" };
   if (manifest.retrieval && (manifest.retrieval.protocol !== "matchplane.retrieval/v1" || manifest.retrieval.owner !== "subplatform")) return { ok: false, error: "manifest.retrieval 必须声明 subplatform-owned v1" };
   return { ok: true, value: manifest as Manifest };
@@ -528,7 +532,7 @@ interface Manifest {
   routes: string[];
   capabilities: string[];
   requiredScopes: string[];
-  assets: { staticDirectory: string; buildCommand: string };
+  assets: { staticDirectory: string; buildCommand: string; dependencyPolicy?: "locked" | "latest" };
   agent?: {
     protocol: "matchplane.agent/v1";
     stages: string[];

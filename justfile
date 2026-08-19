@@ -51,7 +51,7 @@ subplatform-check:
     test -n "$$(git -C subplatforms/auto rev-parse HEAD)"
 
 subplatform-build-check:
-    bun install --frozen-lockfile --cwd subplatforms/auto
+    bun install --no-save --cwd subplatforms/auto
     bun run --cwd subplatforms/auto build
     test -s subplatforms/auto/dist/index.html
 
