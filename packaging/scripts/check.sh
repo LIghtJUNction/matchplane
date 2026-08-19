@@ -41,6 +41,10 @@ if ! rg -q '^Environment=MATCHPLANE_WEB_NODE=/usr/bin/node$' \
   echo 'packaged web service must use the host nodejs path /usr/bin/node' >&2
   exit 1
 fi
+if rg -q '^Environment=MATCHPLANE_ENVIRONMENT=' packaging/systemd/matchplane-web.service; then
+  echo 'web service must not hard-code a deployment environment; use matchplane.env' >&2
+  exit 1
+fi
 if ! rg -q '^Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchplane/secrets/web/builder\.token$' \
   packaging/systemd/matchplane-web.service; then
   echo 'web service must use its own builder-token copy' >&2

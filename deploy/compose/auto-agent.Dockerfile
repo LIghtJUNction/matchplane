@@ -1,4 +1,7 @@
-FROM oven/bun:latest
+# Keep the Agent runtime aligned with the other Bun images while making the
+# container input reproducible. The subplatform package itself still chooses
+# its own supported Bun range; this only pins the image bytes used by Compose.
+FROM oven/bun:1.3.14-debian@sha256:431b37ce1acfed987e4f5b6c86a9f210ff63285a912fc5f21e18aeac0cb067ef
 
 WORKDIR /app
 
