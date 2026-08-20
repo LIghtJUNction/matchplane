@@ -47,7 +47,7 @@ export async function PATCH(request: Request): Promise<Response> {
       smtpPort: input.smtpPort as number,
       tlsMode: input.tlsMode as RootEmailConfigInput["tlsMode"],
       username: stringField(input.username),
-      credentialSlot: stringField(input.credentialSlot),
+      smtpPassword: optionalPassword(input.smtpPassword),
       fromAddress: stringField(input.fromAddress),
       replyTo: optionalString(input.replyTo),
       mode: input.mode as RootEmailConfigInput["mode"],
@@ -82,4 +82,8 @@ function optionalString(value: unknown): string | undefined {
 
 function optionalVersion(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function optionalPassword(value: unknown): string | undefined {
+  return typeof value === "string" && value.length ? value : undefined;
 }

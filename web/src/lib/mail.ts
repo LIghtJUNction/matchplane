@@ -180,7 +180,7 @@ async function managedRootEmailRoute(): Promise<EmailRoute | null> {
     smtpPort: managed.smtpPort,
     tlsMode: managed.tlsMode,
     username: managed.username,
-    credentialSecretRef: `secret://root-email/${managed.credentialSlot}`,
+    credentialSecretRef: "secret://root-email/smtp-password",
     fromAddress: managed.fromAddress,
     replyTo: managed.replyTo,
     mode: managed.mode,

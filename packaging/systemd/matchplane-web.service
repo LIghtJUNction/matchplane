@@ -38,7 +38,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 # Root-admin archive uploads are opaque staging bytes. Keep the rest of the host read-only.
-ReadWritePaths=/var/lib/matchplane/subplatform-uploads
+ReadWritePaths=/var/lib/matchplane/subplatform-uploads /etc/matchplane/secrets/root-email
 ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
