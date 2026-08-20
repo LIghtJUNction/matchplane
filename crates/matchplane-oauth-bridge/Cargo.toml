@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
-oauth-axum.workspace = true
+oauth2.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true
 time.workspace = true
