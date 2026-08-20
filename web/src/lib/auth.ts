@@ -55,8 +55,9 @@ const trustedOrigins = parseTrustedOrigins(baseURL, process.env.BETTER_AUTH_TRUS
 const isProductionRuntime = isProductionEnvironment();
 // Local Compose and test installations need a way to inspect the administrator workspace
 // before an SMTP route exists. This switch is deliberately explicit and environment-gated:
-// production always keeps Better Auth email verification enabled, even if an operator
-// accidentally carries the development variable into a production deployment.
+// production never enables the demo-account bootstrap or suppresses the registration
+// verification step, even if an operator accidentally carries the development variable into a
+// production deployment.
 const allowDevAuthBootstrap =
   (process.env.MATCHPLANE_ENVIRONMENT === "development" || process.env.MATCHPLANE_ENVIRONMENT === "test")
   && process.env.MATCHPLANE_ALLOW_DEMO_BOOTSTRAP === "true";
@@ -115,7 +116,10 @@ export const auth = betterAuth({
   trustedOrigins,
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: !allowDevAuthBootstrap,
+    // Verification is a registration trust step, not a second factor for an existing
+    // account. Operators must be able to sign in with the password they already set even
+    // when the deployment has no mail route configured.
+    requireEmailVerification: false,
     autoSignIn: false,
     minPasswordLength: 8,
     maxPasswordLength: 128,
@@ -129,7 +133,7 @@ export const auth = betterAuth({
   },
   emailVerification: {
     sendOnSignUp: !allowDevAuthBootstrap,
-    sendOnSignIn: !allowDevAuthBootstrap,
+    sendOnSignIn: false,
     autoSignInAfterVerification: true,
     sendVerificationEmail: (data) =>
       sendConfiguredAuthEmail({
@@ -201,6 +205,8 @@ export const auth = betterAuth({
       expiresIn: 5 * 60,
       allowedAttempts: 3,
       storeOTP: "hashed",
+      sendVerificationOnSignUp: !allowDevAuthBootstrap,
+      overrideDefaultEmailVerification: true,
       rateLimit: { window: 60, max: 3 },
       sendVerificationOTP: (data) =>
         sendConfiguredAuthEmail({
@@ -214,7 +220,9 @@ export const auth = betterAuth({
       otpLength: 6,
       expiresIn: 5 * 60,
       allowedAttempts: 3,
-      requireVerification: true,
+      // Phone OTP is an explicit sign-in/sign-up method. Do not turn it into a
+      // second factor for ordinary password sessions.
+      requireVerification: false,
       phoneNumberValidator: (value) => /^\+[1-9]\d{7,14}$/.test(value),
       sendOTP: sendConfiguredPhoneOtp,
       signUpOnVerification: {
@@ -570,8 +578,8 @@ function firstProfileBoolean(profile: Record<string, unknown>, keys: string[]): 
 /**
  * Local Compose can be inspected before SMTP is configured.  In that explicitly enabled
  * development mode only, the first account becomes the root administrator so the operator can
- * open the workspace and finish tenant setup.  Production never enables this branch: it requires
- * MATCHPLANE_ROOT_ADMIN_EMAIL plus normal Better Auth verification.
+ * open the workspace and finish tenant setup. Production never enables this branch: it requires
+ * MATCHPLANE_ROOT_ADMIN_EMAIL and keeps verification on newly registered accounts.
  */
 async function shouldBootstrapDevelopmentAccount(): Promise<boolean> {
   if (!allowDevAuthBootstrap || configuredRootAdminEmail) return false;

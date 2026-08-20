@@ -127,6 +127,14 @@ id_type!(
     MarketplaceOfferId
 );
 id_type!(
+    #[doc = "Identifies a durable marketplace behavior event."]
+    MarketplaceBehaviorEventId
+);
+id_type!(
+    #[doc = "Identifies a sales handoff request."]
+    MarketplaceSalesHandoffId
+);
+id_type!(
     #[doc = "Identifies a seller-funded promotion campaign."]
     PromotionCampaignId
 );

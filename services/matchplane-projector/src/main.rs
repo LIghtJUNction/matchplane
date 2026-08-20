@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::Context;
 use matchplane_cache::{CachedBook, CachedLevel, ProjectionOutcome, ValkeyCache};
 use matchplane_config::AppConfig;
@@ -21,7 +23,9 @@ async fn main() -> anyhow::Result<()> {
         &config.otlp_endpoint,
     )
     .context("projector observability initialization failed")?;
-    let mut cache = ValkeyCache::connect(&config.valkey_url)
+    let valkey_ca_file =
+        (!config.valkey_ca_file.is_empty()).then(|| Path::new(config.valkey_ca_file.as_str()));
+    let mut cache = ValkeyCache::connect_with_ca(&config.valkey_url, valkey_ca_file)
         .await
         .context("projector could not connect to Valkey")?;
     cache.ping().await.context("projector readiness failed")?;

@@ -1,6 +1,8 @@
 //! Rebuildable Valkey market-data projections.
 
-use redis::{AsyncCommands, Script, aio::ConnectionManager};
+use std::{fs, path::Path};
+
+use redis::{AsyncCommands, Script, TlsCertificates, aio::ConnectionManager};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -59,6 +61,9 @@ pub enum CacheError {
     /// Redis protocol client failure.
     #[error("Valkey operation failed: {0}")]
     Redis(#[from] redis::RedisError),
+    /// The configured Valkey TLS CA bundle could not be read.
+    #[error("Valkey TLS CA bundle could not be read: {0}")]
+    TlsCertificate(#[from] std::io::Error),
     /// Projection script returned an unknown code.
     #[error("Valkey projection returned unexpected code {0}")]
     UnexpectedProjectionCode(i64),
@@ -83,7 +88,31 @@ impl ValkeyCache {
     ///
     /// Returns [`CacheError`] when the URL or connection is invalid.
     pub async fn connect(url: &str) -> Result<Self, CacheError> {
-        let client = redis::Client::open(url)?;
+        Self::connect_with_ca(url, None).await
+    }
+
+    /// Opens an asynchronous Valkey connection manager with an optional private CA bundle.
+    ///
+    /// `rediss://` URLs use the redis-rs Rustls transport. When `ca_file` is provided, the
+    /// certificate is used as the exclusive trust anchor for that connection; otherwise the
+    /// operating-system trust store is used. Plain `redis://` URLs remain supported for the
+    /// development and test profiles, while production configuration rejects them before this
+    /// method is called.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CacheError`] when the URL, CA bundle, or connection is invalid.
+    pub async fn connect_with_ca(url: &str, ca_file: Option<&Path>) -> Result<Self, CacheError> {
+        let client = match ca_file.filter(|path| !path.as_os_str().is_empty()) {
+            Some(path) => redis::Client::build_with_tls(
+                url,
+                TlsCertificates {
+                    client_tls: None,
+                    root_cert: Some(fs::read(path)?),
+                },
+            )?,
+            None => redis::Client::open(url)?,
+        };
         let connection = client.get_connection_manager().await?;
         Ok(Self { connection })
     }

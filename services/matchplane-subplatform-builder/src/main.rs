@@ -16,6 +16,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use matchplane_observability::init;
@@ -158,6 +161,7 @@ struct Manifest {
     package_root: PathBuf,
     static_directory: PathBuf,
     build_template: BuildTemplate,
+    dependency_policy: DependencyPolicy,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -166,6 +170,12 @@ enum BuildTemplate {
     Npm,
     Pnpm,
     Yarn,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DependencyPolicy {
+    Locked,
+    Latest,
 }
 
 #[tokio::main]
@@ -436,11 +446,15 @@ async fn discover_one_inner(
         .and_then(Value::as_str)
         .context("manifest.assets.staticDirectory is required")?;
     safe_relative_path(Path::new(static_directory))?;
-    BuildTemplate::parse(
+    let build_template = BuildTemplate::parse(
         assets
             .get("buildCommand")
             .and_then(Value::as_str)
             .context("manifest.assets.buildCommand is required")?,
+    )?;
+    DependencyPolicy::parse(
+        assets.get("dependencyPolicy").and_then(Value::as_str),
+        build_template,
     )?;
     let manifest_digest = hex::encode(Sha256::digest(canonical_json(&manifest).as_bytes()));
     let payload = DiscoverySuccess {
@@ -1051,6 +1065,10 @@ fn read_manifest(source_root: &Path, job: &BuildJob, expected_digest: &str) -> R
         .context("manifest has no parent directory")?
         .to_path_buf();
     let build_template = BuildTemplate::parse(build_command)?;
+    let dependency_policy = DependencyPolicy::parse(
+        assets.get("dependencyPolicy").and_then(Value::as_str),
+        build_template,
+    )?;
     let digest = hex::encode(Sha256::digest(canonical_json(&value).as_bytes()));
     if !constant_time_hex_eq(&digest, expected_digest) {
         bail!("manifest digest mismatch");
@@ -1061,6 +1079,7 @@ fn read_manifest(source_root: &Path, job: &BuildJob, expected_digest: &str) -> R
         package_root,
         static_directory,
         build_template,
+        dependency_policy,
     })
 }
 
@@ -1108,6 +1127,64 @@ impl BuildTemplate {
     }
 }
 
+impl DependencyPolicy {
+    fn parse(value: Option<&str>, build_template: BuildTemplate) -> Result<Self> {
+        let policy = match value.unwrap_or("locked") {
+            "locked" => Self::Locked,
+            "latest" => Self::Latest,
+            other => {
+                bail!("manifest.assets.dependencyPolicy must be locked or latest, got {other}")
+            }
+        };
+        if matches!(policy, Self::Latest) && !matches!(build_template, BuildTemplate::Bun) {
+            bail!(
+                "manifest.assets.dependencyPolicy latest currently requires the Bun build template"
+            );
+        }
+        Ok(policy)
+    }
+}
+
+fn resolve_build_program(program: &str) -> Result<String> {
+    let configured_bun = env::var("MATCHPLANE_SUBPLATFORM_BUILDER_BUN").ok();
+    resolve_build_program_with_config(program, configured_bun.as_deref())
+}
+
+fn resolve_build_program_with_config(
+    program: &str,
+    configured_bun: Option<&str>,
+) -> Result<String> {
+    if program != "bun" {
+        return Ok(program.to_owned());
+    }
+    let Some(configured_bun) = configured_bun
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(program.to_owned());
+    };
+    let path = PathBuf::from(configured_bun);
+    if !path.is_absolute() {
+        bail!("MATCHPLANE_SUBPLATFORM_BUILDER_BUN must be an absolute executable path");
+    }
+    let metadata = fs::metadata(&path)
+        .with_context(|| format!("reading configured Bun runtime {}", path.display()))?;
+    if !metadata.is_file() {
+        bail!(
+            "configured Bun runtime {} is not a regular file",
+            path.display()
+        );
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o111 == 0 {
+        bail!(
+            "configured Bun runtime {} is not executable",
+            path.display()
+        );
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 async fn run_build(manifest: &Manifest, build_timeout: Duration, build_dir: &Path) -> Result<()> {
     let source_root = &manifest.package_root;
     let static_dir = source_root.join(&manifest.static_directory);
@@ -1116,6 +1193,7 @@ async fn run_build(manifest: &Manifest, build_timeout: Duration, build_dir: &Pat
     }
     fs::create_dir_all(build_dir).context("creating build scratch directory")?;
     let (program, args) = manifest.build_template.command();
+    let program = resolve_build_program(program)?;
     let mut command_args = vec![
         "--die-with-parent".to_owned(),
         "--unshare-net".to_owned(),
@@ -1150,7 +1228,7 @@ async fn run_build(manifest: &Manifest, build_timeout: Duration, build_dir: &Pat
         "HOME".to_owned(),
         "/tmp".to_owned(),
         "--".to_owned(),
-        program.to_owned(),
+        program.clone(),
     ];
     command_args.extend(args.iter().map(|arg| (*arg).to_owned()));
     let bwrap =
@@ -1228,53 +1306,67 @@ async fn prepare_dependencies(manifest: &Manifest, build_dir: &Path) -> Result<(
     if !package_json.is_file() {
         return Ok(());
     }
-    let (program, args, lockfile) = match manifest.build_template {
-        BuildTemplate::Bun => (
-            "bun",
-            vec![
-                "install",
-                "--frozen-lockfile",
-                "--ignore-scripts",
-                "--no-progress",
-            ],
-            ["bun.lock", "bun.lockb"].as_slice(),
-        ),
-        BuildTemplate::Npm => (
-            "npm",
-            vec!["ci", "--ignore-scripts", "--no-audit", "--no-fund"],
-            ["package-lock.json", "npm-shrinkwrap.json"].as_slice(),
-        ),
-        BuildTemplate::Pnpm => (
-            "pnpm",
-            vec![
-                "install",
-                "--frozen-lockfile",
-                "--ignore-scripts",
-                "--reporter",
-                "append-only",
-            ],
-            ["pnpm-lock.yaml"].as_slice(),
-        ),
-        BuildTemplate::Yarn => (
-            "yarn",
-            vec![
-                "install",
-                "--frozen-lockfile",
-                "--ignore-scripts",
-                "--non-interactive",
-            ],
-            ["yarn.lock"].as_slice(),
-        ),
-    };
-    if !lockfile
-        .iter()
-        .any(|name| manifest.package_root.join(name).is_file())
+    let (program, args, lockfiles): (&str, Vec<&str>, &[&str]) =
+        if matches!(manifest.dependency_policy, DependencyPolicy::Latest) {
+            // The latest policy is deliberately explicit and currently limited to Bun. It lets a
+            // subplatform follow current package versions without making the root platform
+            // resolve or execute arbitrary package-manager commands.
+            (
+                "bun",
+                vec!["install", "--no-save", "--ignore-scripts", "--no-progress"],
+                &[],
+            )
+        } else {
+            match manifest.build_template {
+                BuildTemplate::Bun => (
+                    "bun",
+                    vec![
+                        "install",
+                        "--frozen-lockfile",
+                        "--ignore-scripts",
+                        "--no-progress",
+                    ],
+                    &["bun.lock", "bun.lockb"],
+                ),
+                BuildTemplate::Npm => (
+                    "npm",
+                    vec!["ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+                    &["package-lock.json", "npm-shrinkwrap.json"],
+                ),
+                BuildTemplate::Pnpm => (
+                    "pnpm",
+                    vec![
+                        "install",
+                        "--frozen-lockfile",
+                        "--ignore-scripts",
+                        "--reporter",
+                        "append-only",
+                    ],
+                    &["pnpm-lock.yaml"],
+                ),
+                BuildTemplate::Yarn => (
+                    "yarn",
+                    vec![
+                        "install",
+                        "--frozen-lockfile",
+                        "--ignore-scripts",
+                        "--non-interactive",
+                    ],
+                    &["yarn.lock"],
+                ),
+            }
+        };
+    if !lockfiles.is_empty()
+        && !lockfiles
+            .iter()
+            .any(|name| manifest.package_root.join(name).is_file())
     {
         bail!("{} build requires a committed lockfile", manifest.slug);
     }
+    let program = resolve_build_program(program)?;
     let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
     run_sandboxed(
-        program,
+        &program,
         &args,
         &manifest.package_root,
         build_dir,
@@ -1282,7 +1374,17 @@ async fn prepare_dependencies(manifest: &Manifest, build_dir: &Path) -> Result<(
         Duration::from_secs(600),
     )
     .await
-    .with_context(|| format!("installing frozen dependencies for {}", manifest.slug))
+    .with_context(|| {
+        format!(
+            "installing {} dependencies for {}",
+            if matches!(manifest.dependency_policy, DependencyPolicy::Latest) {
+                "latest"
+            } else {
+                "locked"
+            },
+            manifest.slug
+        )
+    })
 }
 
 async fn publish_artifact(
@@ -1707,6 +1809,44 @@ mod tests {
         ));
         assert!(BuildTemplate::parse("bun run build && curl https://evil.example").is_err());
         assert!(BuildTemplate::parse("sh -c echo pwned").is_err());
+    }
+
+    #[test]
+    fn dependency_policy_defaults_to_locked_and_latest_is_bun_only() {
+        assert_eq!(
+            DependencyPolicy::parse(None, BuildTemplate::Bun).expect("default policy"),
+            DependencyPolicy::Locked
+        );
+        assert_eq!(
+            DependencyPolicy::parse(Some("latest"), BuildTemplate::Bun).expect("latest Bun policy"),
+            DependencyPolicy::Latest
+        );
+        assert!(DependencyPolicy::parse(Some("latest"), BuildTemplate::Npm).is_err());
+        assert!(DependencyPolicy::parse(Some("floating"), BuildTemplate::Bun).is_err());
+    }
+
+    #[test]
+    fn configured_bun_runtime_must_be_an_absolute_executable_file() {
+        assert_eq!(
+            resolve_build_program_with_config("bun", None).expect("default runtime"),
+            "bun"
+        );
+        assert_eq!(
+            resolve_build_program_with_config("bun", Some("/bin/sh"))
+                .expect("absolute executable runtime"),
+            "/bin/sh"
+        );
+        assert!(resolve_build_program_with_config("bun", Some("bun")).is_err());
+        assert!(resolve_build_program_with_config("bun", Some("/tmp")).is_err());
+    }
+
+    #[test]
+    fn configured_bun_runtime_does_not_affect_other_build_templates() {
+        assert_eq!(
+            resolve_build_program_with_config("npm", Some("relative/bun"))
+                .expect("non-Bun runtime"),
+            "npm"
+        );
     }
 
     #[test]

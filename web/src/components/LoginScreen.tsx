@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Fingerprint, KeyRound, QrCode, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint, KeyRound } from "lucide-react";
 
 import {
   establishMarketplaceSession,
@@ -12,6 +12,7 @@ import {
 import { authClient, authFetchOptions } from "../lib/auth-client";
 import { useInterfacePreferences } from "../lib/preferences";
 import { loadSubplatform, resolveSubplatform, type SubplatformConfig } from "../subplatform";
+import { Brand } from "./Primitives";
 import { PreferenceControls } from "./PreferenceControls";
 
 type AuthMethod = "password" | "email-otp" | "magic-link";
@@ -37,6 +38,7 @@ export function LoginScreen() {
   const copy = loginCopy(locale);
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState("");
   const [method, setMethod] = useState<AuthMethod>("password");
   const [next, setNext] = useState("/");
@@ -55,10 +57,10 @@ export function LoginScreen() {
     passkey: true,
   });
   const [otpSent, setOtpSent] = useState(false);
+  const [registrationPending, setRegistrationPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [qrOpen, setQrOpen] = useState(false);
   const redeemingInviteRef = useRef(false);
 
   useEffect(() => {
@@ -197,6 +199,16 @@ export function LoginScreen() {
       setError(copy.phonePasswordUnavailable);
       return;
     }
+    if (registrationPending) {
+      if (resolvedIdentifier.kind !== "email") {
+        setError(copy.invalidIdentifier);
+        return;
+      }
+      if (!/^\d{6}$/.test(otp.trim())) {
+        setError(copy.invalidOtp);
+        return;
+      }
+    }
     if (method === "email-otp" && resolvedIdentifier.kind === "email" && !capabilities.emailOtp) {
       setError(copy.emailOtpUnavailable);
       return;
@@ -213,7 +225,7 @@ export function LoginScreen() {
       setError(copy.magicLinkUnavailable);
       return;
     }
-    if (method === "password" && password.length < 8) {
+    if (method === "password" && !registrationPending && password.length < 8) {
       setError(copy.passwordTooShort);
       return;
     }
@@ -226,6 +238,17 @@ export function LoginScreen() {
     setNotice(null);
     try {
       const options = authFetchOptions(subplatform.slug);
+      if (registrationPending) {
+        const result = await authClient.emailOtp.verifyEmail({
+          email: resolvedIdentifier.value,
+          otp: otp.trim(),
+          fetchOptions: options,
+        } as never);
+        if (result.error) throw new Error(result.error.message || copy.authFailed);
+        setRegistrationPending(false);
+        await finishSignIn();
+        return;
+      }
       if (method === "email-otp" && !otpSent) {
         const result = resolvedIdentifier.kind === "phone"
           ? await authClient.phoneNumber.sendOtp({
@@ -289,10 +312,10 @@ export function LoginScreen() {
       } as never);
       if (result.error) {
         if (oauthQuery) throw new Error(copy.authFailed);
-        // One neutral action handles both returning and first-time users. A
-        // failed sign-in is followed by an idempotent sign-up attempt: an
-        // existing account remains untouched, while a new account receives
-        // the normal Better Auth verification email.
+        // The password form also acts as the registration entry point, but only when the
+        // deployment has an email route that can deliver the verification code. Without it,
+        // never turn a failed login into a misleading "check your email" state.
+        if (!capabilities.emailOtp && !capabilities.magicLink) throw new Error(copy.authFailed);
         const created = await authClient.signUp.email({
           name: displayNameFromIdentifier(resolvedIdentifier.value),
           email: resolvedIdentifier.value,
@@ -301,7 +324,9 @@ export function LoginScreen() {
           fetchOptions: options,
         });
         if (!created.error) {
-          setNotice(copy.signUpSent);
+          setRegistrationPending(true);
+          setOtp("");
+          setNotice(copy.otpSent);
           setSubmitting(false);
           return;
         }
@@ -364,6 +389,8 @@ export function LoginScreen() {
   const switchMethod = (nextMethod: AuthMethod) => {
     setMethod(nextMethod);
     setOtpSent(false);
+    setRegistrationPending(false);
+    setShowPassword(false);
     setOtp("");
     setError(null);
     setNotice(null);
@@ -374,21 +401,45 @@ export function LoginScreen() {
     ...(capabilities.emailOtp || capabilities.phoneOtp ? ["email-otp" as const] : []),
     ...(capabilities.magicLink ? ["magic-link" as const] : []),
   ];
+  const context = loginContextCopy(locale, role);
+  const emailOnlyIdentifier = method === "password" || method === "magic-link" || registrationPending;
 
   return (
     <main className="login-page">
       <div className="login-topbar">
         <a className="login-back" href="/" aria-label={copy.back}>
-          <ArrowLeft size={16} aria-hidden="true" /><span>{copy.back}</span>
+          <ArrowLeft size={18} aria-hidden="true" /><span>{copy.back}</span>
         </a>
         <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
       </div>
-      <section className="login-card" aria-labelledby="login-title">
-        <h1 id="login-title" className="sr-only">{copy.account}</h1>
-        <button className="login-qr-corner" type="button" onClick={() => setQrOpen(true)} aria-label={copy.qrLogin}>
-          <span className="login-qr-corner-mark" aria-hidden="true"><QrCode size={22} strokeWidth={1.7} /></span>
-          <span>{copy.qrLogin}</span>
-        </button>
+      <div className="login-layout">
+        <section className="login-story" aria-labelledby="login-title">
+          <Brand label={subplatform.brandName} homeHref="/" />
+          <div className="login-story-copy">
+            <h1 id="login-title">{context.title}</h1>
+            <p>{context.description}</p>
+          </div>
+          <div className="login-route-map" aria-hidden="true">
+            <svg viewBox="0 0 520 210" focusable="false">
+              <path className="login-route-line login-route-line-main" d="M38 164 C132 164 122 48 252 48 C365 48 356 148 482 74" />
+              <path className="login-route-line login-route-line-branch" d="M252 48 C274 99 316 133 389 150" />
+              <circle className="login-route-node login-route-node-start" cx="38" cy="164" r="12" />
+              <circle className="login-route-node login-route-node-match" cx="252" cy="48" r="16" />
+              <circle className="login-route-node login-route-node-end" cx="482" cy="74" r="12" />
+              <circle className="login-route-node login-route-node-branch" cx="389" cy="150" r="9" />
+            </svg>
+            <span className="login-route-label login-route-label-start">{copy.routeGoal}</span>
+            <span className="login-route-label login-route-label-match">{copy.routeMatch}</span>
+            <span className="login-route-label login-route-label-end">{copy.routeConnect}</span>
+          </div>
+          <p className="login-continuity">{copy.identityContinuity}</p>
+        </section>
+
+        <section className="login-card" aria-labelledby="login-form-title">
+          <div className="login-card-header">
+            <h2 id="login-form-title">{copy.formTitle}</h2>
+            <p>{copy.formDescription}</p>
+          </div>
 
         {nationalIdentityEnabled ? (
           <div className="login-primary-provider">
@@ -399,34 +450,44 @@ export function LoginScreen() {
           </div>
         ) : null}
 
-        <div className={`login-methods login-methods-count-${availableMethods.length}`} role="tablist" aria-label={copy.authMethods}>
-          <button className={method === "password" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "password"} onClick={() => switchMethod("password")}>{copy.password}</button>
-          {availableMethods.includes("email-otp") ? <button className={method === "email-otp" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "email-otp"} onClick={() => switchMethod("email-otp")}>{copy.emailOtp}</button> : null}
-          {availableMethods.includes("magic-link") ? <button className={method === "magic-link" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "magic-link"} onClick={() => switchMethod("magic-link")}>{copy.magicLink}</button> : null}
-        </div>
+        {availableMethods.length > 1 ? (
+          <div className={`login-methods login-methods-count-${availableMethods.length}`} role="tablist" aria-label={copy.authMethods}>
+            <button className={method === "password" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "password"} onClick={() => switchMethod("password")}>{copy.password}</button>
+            {availableMethods.includes("email-otp") ? <button className={method === "email-otp" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "email-otp"} onClick={() => switchMethod("email-otp")}>{copy.emailOtp}</button> : null}
+            {availableMethods.includes("magic-link") ? <button className={method === "magic-link" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "magic-link"} onClick={() => switchMethod("magic-link")}>{copy.magicLink}</button> : null}
+          </div>
+        ) : null}
 
         <form className="login-form" onSubmit={submit}>
-          <label htmlFor="login-identifier"><span>{copy.identifier}</span><input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="username webauthn" inputMode="text" placeholder={copy.identifierPlaceholder} autoFocus /></label>
-          {method === "password" ? (
+          <label htmlFor="login-identifier">
+            <span>{emailOnlyIdentifier ? copy.email : copy.identifier}</span>
+            <input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} readOnly={registrationPending} autoComplete="username webauthn" inputMode="text" placeholder={emailOnlyIdentifier ? copy.emailPlaceholder : copy.identifierPlaceholder} autoFocus />
+          </label>
+          {method === "password" && !registrationPending ? (
             <div className="login-password-field">
               <label htmlFor="login-password"><span>{copy.password}</span></label>
               <span className="login-password-control">
-                <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password webauthn" placeholder={copy.passwordPlaceholder} />
-                {capabilities.passkey ? (
-                  <button className="login-passkey-button" type="button" onClick={() => void startPasskeyLogin()} disabled={submitting} aria-label={copy.passkeyLogin} title={copy.passkeyLogin}>
-                    <KeyRound size={17} aria-hidden="true" />
+                <input id="login-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password webauthn" placeholder={copy.passwordPlaceholder} />
+                <span className="login-password-actions">
+                  <button className="login-password-visibility" type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={submitting} aria-label={showPassword ? copy.hidePassword : copy.showPassword} title={showPassword ? copy.hidePassword : copy.showPassword}>
+                    {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
                   </button>
-                ) : null}
+                  {capabilities.passkey ? (
+                    <button className="login-passkey-button" type="button" onClick={() => void startPasskeyLogin()} disabled={submitting} aria-label={copy.passkeyLogin} title={copy.passkeyLogin}>
+                      <KeyRound size={17} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </span>
               </span>
             </div>
           ) : null}
-          {method === "email-otp" && otpSent ? (
+          {((method === "email-otp" && otpSent) || registrationPending) ? (
             <label htmlFor="login-otp"><span>{copy.otp}</span><input id="login-otp" inputMode="numeric" pattern="[0-9]{6}" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} autoComplete="one-time-code" placeholder={copy.otpPlaceholder} /></label>
           ) : null}
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           {notice ? <p className="login-notice" role="status">{notice}</p> : null}
           <button className="button button-dark login-submit" type="submit" disabled={submitting}>
-            {submitting ? copy.loading : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : copy.continue}
+            {submitting ? copy.loading : registrationPending ? copy.verifyAndContinue : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : copy.continue}
             {!submitting ? <ArrowRight size={17} aria-hidden="true" /> : null}
           </button>
         </form>
@@ -444,17 +505,8 @@ export function LoginScreen() {
             </div>
           </div>
         ) : null}
-      </section>
-      {qrOpen ? (
-        <div className="login-qr-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setQrOpen(false); }}>
-          <section className="login-qr-dialog" role="dialog" aria-modal="true" aria-labelledby="login-qr-title">
-            <button className="login-qr-close" type="button" onClick={() => setQrOpen(false)} aria-label={copy.close}><X size={17} aria-hidden="true" /></button>
-            <div className="login-qr-visual" aria-hidden="true"><QrCode size={108} strokeWidth={1.25} /></div>
-            <h2 id="login-qr-title">{copy.qrLoginTitle}</h2>
-            <p>{copy.qrLoginReserved}</p>
-          </section>
-        </div>
-      ) : null}
+        </section>
+      </div>
     </main>
   );
 }
@@ -491,7 +543,10 @@ function safeNext(value: string | null): string {
   if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\u0000-\u001f\u007f]/.test(value)) return "/";
   try {
     const resolved = new URL(value, window.location.origin);
-    return resolved.origin === window.location.origin ? `${resolved.pathname}${resolved.search}${resolved.hash}` : "/";
+    // Better Auth validates callback URLs as origins/paths and rejects fragments. The hash is
+    // browser-local state, so dropping it keeps login valid when a user arrives from a page
+    // anchor such as `/?role=buyer#top`.
+    return resolved.origin === window.location.origin ? `${resolved.pathname}${resolved.search}` : "/";
   } catch {
     return "/";
   }
@@ -512,17 +567,35 @@ function authErrorCallbackURL(role: BetterAuthMarketplaceRole, next: string, adm
   return `/login?${params.toString()}`;
 }
 
+function loginContextCopy(locale: "zh" | "en", role: BetterAuthMarketplaceRole) {
+  if (locale === "en") {
+    if (role === "seller") return { title: "Continue managing your offers.", description: "Sign in and we’ll return you to the platform you were using." };
+    if (role === "platform" || role === "subplatform_admin") return { title: "Continue to platform administration.", description: "Sign in and we’ll return you to the platform you were managing." };
+    return { title: "Continue your match.", description: "Sign in and we’ll return you to the request you were working on." };
+  }
+  if (role === "seller") return { title: "继续管理你的供给。", description: "登录后，我们会带你回到刚才使用的平台。" };
+  if (role === "platform" || role === "subplatform_admin") return { title: "继续管理你的平台。", description: "登录后，我们会带你回到刚才管理的平台。" };
+  return { title: "继续你的匹配。", description: "登录后，我们会带你回到刚才正在处理的需求。" };
+}
+
 function loginCopy(locale: "zh" | "en") {
   if (locale === "en") {
     return {
       back: "Back",
-      account: "MatchPlane",
+      formTitle: "Continue with your account",
+      formDescription: "Use email or another method enabled for this platform.",
+      identityContinuity: "One account across every platform node you’re authorized to use.",
+      routeGoal: "Goal",
+      routeMatch: "Match",
+      routeConnect: "Connect",
       authMethods: "Authentication methods",
       nationalIdentity: "National online identity",
       socialMethods: "Social sign-in",
       password: "Password",
       emailOtp: "Code",
       magicLink: "Magic link",
+      email: "Email",
+      emailPlaceholder: "name@example.com",
       identifier: "Email or phone",
       identifierPlaceholder: "name@example.com or +86 138…",
       passwordPlaceholder: "At least 8 characters",
@@ -539,7 +612,6 @@ function loginCopy(locale: "zh" | "en") {
       oauthMagicLinkBlocked: "Use a password or email code for platform authorization.",
       otpSent: "Code sent.",
       magicLinkSent: "Magic link sent.",
-      signUpSent: "Check your email to verify your account.",
       authFailed: "Sign-in did not complete. Try again.",
       invalidIdentifier: "Enter a valid email address or phone number.",
       phonePasswordUnavailable: "Use the code method to sign in with a phone number.",
@@ -549,12 +621,10 @@ function loginCopy(locale: "zh" | "en") {
       magicLinkUnavailable: "Magic links are not configured on this platform.",
       phoneOtpSent: "Code sent to your phone.",
       passkeyLogin: "Use a passkey",
+      showPassword: "Show password",
+      hidePassword: "Hide password",
       passkeyUnsupported: "This browser or device does not support passkeys.",
       passkeyFailed: "Passkey sign-in did not complete.",
-      qrLogin: "Scan",
-      qrLoginTitle: "Scan to sign in",
-      qrLoginReserved: "Mobile scan sign-in is reserved here and will appear after the QR authorization service is configured.",
-      close: "Close",
       socialFailedSuffix: " sign-in failed",
       socialRedirectMissing: "The sign-in provider did not return a redirect.",
       socialFailed: "Social sign-in is unavailable.",
@@ -562,13 +632,20 @@ function loginCopy(locale: "zh" | "en") {
   }
   return {
     back: "返回",
-    account: "MatchPlane",
+    formTitle: "继续使用你的账号",
+    formDescription: "使用邮箱，或选择当前平台已启用的其他方式。",
+    identityContinuity: "一个账号，通行于你已获授权的平台节点。",
+    routeGoal: "目标",
+    routeMatch: "匹配",
+    routeConnect: "连接",
     authMethods: "登录方式",
     nationalIdentity: "国家网络身份认证",
     socialMethods: "第三方登录",
     password: "密码",
     emailOtp: "验证码",
     magicLink: "免密链接",
+    email: "邮箱",
+    emailPlaceholder: "name@example.com",
     identifier: "邮箱或手机号",
     identifierPlaceholder: "name@example.com 或 138…",
     passwordPlaceholder: "至少 8 位",
@@ -585,7 +662,6 @@ function loginCopy(locale: "zh" | "en") {
     oauthMagicLinkBlocked: "平台授权请使用密码或邮箱验证码。",
     otpSent: "验证码已发送。",
     magicLinkSent: "免密链接已发送。",
-    signUpSent: "请查收邮件并完成验证。",
     authFailed: "登录没有完成，请再试一次。",
     invalidIdentifier: "请输入有效的邮箱或手机号。",
     phonePasswordUnavailable: "手机号请使用验证码登录。",
@@ -595,12 +671,10 @@ function loginCopy(locale: "zh" | "en") {
     magicLinkUnavailable: "当前平台尚未配置免密链接服务。",
     phoneOtpSent: "验证码已发送到手机。",
     passkeyLogin: "使用 Passkey",
+    showPassword: "显示密码",
+    hidePassword: "隐藏密码",
     passkeyUnsupported: "当前浏览器或设备暂不支持 Passkey。",
     passkeyFailed: "Passkey 登录没有完成。",
-    qrLogin: "扫码",
-    qrLoginTitle: "扫码登录",
-    qrLoginReserved: "手机扫码登录入口已预留，配置二维码授权服务后即可使用。",
-    close: "关闭",
     socialFailedSuffix: "登录失败",
     socialRedirectMissing: "登录服务没有返回跳转地址。",
     socialFailed: "第三方登录暂时不可用。",

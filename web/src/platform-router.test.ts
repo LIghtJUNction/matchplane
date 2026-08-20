@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { decidePlatformRoutes, PlatformRouterQuotaExceededError, type PlatformRouteCandidate } from "./platform-router";
+import {
+  decidePlatformRoutes,
+  PlatformRouterQuotaExceededError,
+  probePlatformRouter,
+  type PlatformRouteCandidate,
+} from "./platform-router";
 
 const candidates: PlatformRouteCandidate[] = [
   {
@@ -28,14 +33,131 @@ const candidates: PlatformRouteCandidate[] = [
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   delete process.env.MATCHPLANE_ROUTER_AI_URL;
   delete process.env.MATCHPLANE_ROUTER_AI_KEY;
   delete process.env.MATCHPLANE_ROUTER_AI_MODEL;
+  delete process.env.MATCHPLANE_ROUTER_AI_PROTOCOL;
   delete process.env.MATCHPLANE_ROUTER_AI_MAX_TOKENS;
   delete process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE;
+  delete process.env.MATCHPLANE_ENVIRONMENT;
 });
 
 describe("platform Agent router", () => {
+  it("probes the configured provider with a fixed one-token request", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify({
+      choices: [{ message: { content: "ok" } }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const result = await probePlatformRouter({ fetcher: fetchMock as unknown as typeof fetch });
+
+    expect(result).toMatchObject({ status: "ready", model: "router-test", responseStatus: 200 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.max_tokens).toBe(1);
+    expect(body.messages).toEqual([
+      { role: "system", content: "Respond with one short token." },
+      { role: "user", content: "healthcheck" },
+    ]);
+  });
+
+  it("uses the Anthropic Messages protocol without exposing a bearer credential", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "https://api.anthropic.com/v1/messages";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "claude-test";
+    process.env.MATCHPLANE_ROUTER_AI_PROTOCOL = "anthropic-messages";
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(init?.headers).toEqual(expect.objectContaining({
+        "x-api-key": "server-only-key",
+        "anthropic-version": "2023-06-01",
+      }));
+      expect(init?.headers).not.toEqual(expect.objectContaining({ authorization: expect.anything() }));
+      expect(body.model).toBe("claude-test");
+      expect(body.system).toEqual(expect.any(String));
+      expect(body.messages).toEqual([expect.objectContaining({ role: "user" })]);
+      expect(body.tools).toEqual([expect.objectContaining({ name: "matchplane_platform_select_children" })]);
+      return new Response(JSON.stringify({
+        content: [{
+          type: "tool_use",
+          name: "matchplane_platform_select_children",
+          input: { selectedSlugs: ["electronics"], rationale: "消费电子", confidence: 0.9 },
+        }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "我想买一台轻薄笔记本",
+      candidates,
+    });
+
+    expect(decision.selectedSlugs).toEqual(["electronics"]);
+    expect(decision.routeMechanism).toBe("mcp_tool");
+    expect(decision.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
+  });
+
+  it("uses the Gemini GenerateContent protocol and model-scoped endpoint", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "https://generativelanguage.googleapis.com/v1beta";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "gemini-2.0-flash";
+    process.env.MATCHPLANE_ROUTER_AI_PROTOCOL = "gemini-generate-content";
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent");
+      expect(init?.headers).toEqual(expect.objectContaining({ "x-goog-api-key": "server-only-key" }));
+      expect(init?.headers).not.toEqual(expect.objectContaining({ authorization: expect.anything() }));
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.contents).toEqual([expect.objectContaining({ role: "user" })]);
+      expect(body.tools).toEqual([expect.objectContaining({ functionDeclarations: expect.any(Array) })]);
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{
+          functionCall: {
+            name: "matchplane_platform_select_children",
+            args: { selectedSlugs: ["used-car"], rationale: "车辆", confidence: 0.86 },
+          },
+        }] } }],
+        usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 6, totalTokenCount: 17 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "我想找一台二手车",
+      candidates,
+    });
+
+    expect(decision.selectedSlugs).toEqual(["used-car"]);
+    expect(decision.routeMechanism).toBe("mcp_tool");
+    expect(decision.usage).toEqual({ promptTokens: 11, completionTokens: 6, totalTokens: 17 });
+  });
+
+  it("reports an unconfigured provider without making a network request", async () => {
+    const fetchMock = vi.fn();
+    const result = await probePlatformRouter({ fetcher: fetchMock as unknown as typeof fetch });
+
+    expect(result.status).toBe("unconfigured");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for an unsupported provider protocol", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    process.env.MATCHPLANE_ROUTER_AI_PROTOCOL = "made-up-protocol";
+    const fetchMock = vi.fn();
+
+    const result = await probePlatformRouter({ fetcher: fetchMock as unknown as typeof fetch });
+
+    expect(result.status).toBe("unconfigured");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("limits AI choices to the authorized child candidate set and records usage", async () => {
     process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
     process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
@@ -85,6 +207,26 @@ describe("platform Agent router", () => {
     expect(decision.costBearer).toBe("platform");
   });
 
+  it("fails closed when a provider response exceeds the bounded response budget", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ payload: "x".repeat(300 * 1024) }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "帮我找合适的供给",
+      candidates,
+    });
+
+    expect(decision.source).toBe("policy_fallback");
+    expect(decision.degraded).toBe(true);
+    expect(decision.rationale).toContain("AI 路由降级");
+  });
+
   it("reserves a provider call before paying for it", async () => {
     process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
     process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
@@ -115,7 +257,7 @@ describe("platform Agent router", () => {
         tools?: Array<{ function?: { name?: string; parameters?: { properties?: Record<string, unknown> } } }>;
         response_format?: unknown;
       };
-      expect(body.tools?.[0]?.function?.name).toBe("matchplane.platform.select_children");
+      expect(body.tools?.[0]?.function?.name).toBe("matchplane_platform_select_children");
       expect(body.tools?.[0]?.function?.parameters?.properties?.selectedSlugs).toBeDefined();
       expect(body.response_format).toBeUndefined();
       return new Response(JSON.stringify({
@@ -125,7 +267,7 @@ describe("platform Agent router", () => {
               id: "call_1",
               type: "function",
               function: {
-                name: "matchplane.platform.select_children",
+                name: "matchplane_platform_select_children",
                 arguments: JSON.stringify({
                   selectedSlugs: ["electronics", "not-registered"],
                   rationale: "需求更接近消费电子",
@@ -208,6 +350,26 @@ describe("platform Agent router", () => {
     expect(decision.source).toBe("policy_fallback");
     expect(decision.rationale).toContain("总时限");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("caps each provider hop even when the recursive deadline has more time", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ selectedSlugs: ["used-car"] }) } }],
+    }), { status: 200 })));
+
+    const decision = await decidePlatformRoutes({
+      platformPath: "/",
+      narrative: "找一台车",
+      candidates,
+      deadlineAt: Date.now() + 20_000,
+    });
+
+    expect(decision.source).toBe("ai");
+    expect(timeoutSpy).toHaveBeenCalledWith(4_000);
   });
 
   it("does not call an insecure provider endpoint in production", async () => {

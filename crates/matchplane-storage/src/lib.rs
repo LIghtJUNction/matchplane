@@ -16,11 +16,14 @@ use thiserror::Error;
 
 pub use generic_marketplace::{
     AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,
-    CreateMarketplaceOffer, MarketplaceContactEnvelope, MarketplaceDemandCandidate,
-    MarketplaceIntent, MarketplaceIntentOutcome, MarketplaceIntroduction,
+    CreateMarketplaceOffer, CreateMarketplaceSalesHandoff, MarketplaceBehaviorEventOutcome,
+    MarketplaceContactEnvelope, MarketplaceDemandCandidate, MarketplaceIntent,
+    MarketplaceIntentOutcome, MarketplaceIntentProfile, MarketplaceIntroduction,
     MarketplaceIntroductionOutcome, MarketplaceOffer, MarketplaceOfferCandidate,
-    MarketplaceOfferOutcome, MatchMarketplaceDemands, MatchMarketplaceOffers,
-    RequestMarketplaceContact, UpdateMarketplaceDemandDiscovery,
+    MarketplaceOfferOutcome, MarketplaceOfferPreference, MarketplaceSalesHandoff,
+    MatchMarketplaceDemands, MatchMarketplaceOffers, RecordMarketplaceBehaviorEvent,
+    RequestMarketplaceContact, SetMarketplaceOfferPreference, UpdateMarketplaceDemandDiscovery,
+    UpdateMarketplaceIntent, UpsertMarketplaceIntentProfile,
 };
 pub use marketplace::{
     AcceptContactExchange, ApproveMarketplaceListingSubmission, AuthenticatedParty,

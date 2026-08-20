@@ -10,7 +10,7 @@ web-install:
 web-check: web-install
     bun run --cwd web check
 
-check: web-check agent-check subplatform-check migration-check
+check: web-check agent-check subplatform-check subplatform-build-check migration-check skills-check
     cargo fmt --check
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo test --workspace --locked
@@ -50,5 +50,13 @@ subplatform-check:
     python3 -c 'import json; json.load(open("docs/agent-mcp-skill-protocol-v1.json")); json.load(open("docs/agent-handoff-protocol-v1.json")); json.load(open("docs/federation-enrollment-protocol-v1.json")); json.load(open("docs/generic-marketplace-contract-v1.json")); json.load(open("docs/platform-routing-protocol-v1.json")); json.load(open("docs/retrieval-protocol-v1.json")); json.load(open("docs/schemas-matchplane-subplatform.json"))'
     test -n "$$(git -C subplatforms/auto rev-parse HEAD)"
 
+subplatform-build-check:
+    bun install --no-save --cwd subplatforms/auto
+    bun run --cwd subplatforms/auto build
+    test -s subplatforms/auto/dist/index.html
+
 migration-check:
     python3 -c 'from pathlib import Path; versions = [p.name.split("_", 1)[0] for p in Path("migrations").glob("[0-9]*_*.sql")]; assert len(versions) == len(set(versions)), f"duplicate migration versions: {[v for v in sorted(set(versions)) if versions.count(v) > 1]}"'
+
+skills-check:
+    python3 tools/check-skills.py

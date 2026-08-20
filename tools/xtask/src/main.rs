@@ -1,6 +1,6 @@
-use std::{env, process::Command as ProcessCommand, time::Duration};
+use std::{env, io, path::Path, process::Command as ProcessCommand, time::Duration};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use matchplane_config::{AppConfig, ConfigurationDiagnostics, Environment};
 use matchplane_domain::{DomainId, TenantId};
@@ -8,12 +8,16 @@ use matchplane_storage::{
     PgStore, ProvisionRootDomain, ProvisionRootPlatform, ProvisionedRootPlatform,
 };
 use reqwest::Client;
+use rpassword::prompt_password;
+use scrypt::{Params as ScryptParams, scrypt as derive_scrypt};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use time::{Duration as TimeDuration, OffsetDateTime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use unicode_normalization::UnicodeNormalization;
 use url::Url;
 use uuid::{Uuid, Variant};
 
@@ -71,6 +75,11 @@ enum Command {
         /// Public web origin to place in the registration URL. Defaults to BETTER_AUTH_URL.
         #[arg(long, env = "BETTER_AUTH_URL")]
         base_url: Option<String>,
+    },
+    /// Manage Better Auth credentials through operator-only maintenance actions.
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommand,
     },
     /// Issue a one-time invite for a signed remote MatchPlane platform enrollment.
     #[command(name = "federation-invite")]
@@ -139,6 +148,20 @@ enum AdminInviteRole {
 }
 
 #[derive(Debug, Subcommand)]
+enum AuthCommand {
+    /// Reset a root administrator's password and revoke all of that account's sessions.
+    ResetPassword {
+        /// Existing root administrator email address.
+        #[arg(long)]
+        email: String,
+        /// Read one new password line from stdin instead of opening hidden TTY prompts.
+        /// This is intended for a secret manager pipe; the password is never a CLI argument.
+        #[arg(long)]
+        password_stdin: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum McpCommand {
     /// Serve `platform.status`, `platform.doctor`, and `platform.health` tools.
     Serve,
@@ -175,6 +198,13 @@ async fn main() -> Result<()> {
             expires_hours,
             base_url,
         } => create_admin_invite(role, organization_id, expires_hours, base_url).await,
+        Command::Auth {
+            command:
+                AuthCommand::ResetPassword {
+                    email,
+                    password_stdin,
+                },
+        } => reset_root_admin_password(email, password_stdin).await,
         Command::FederationInvite {
             domain_id,
             parent_organization_id,
@@ -387,6 +417,183 @@ async fn create_admin_invite(
         .context("administrator invite output failed")?
     );
     Ok(())
+}
+
+async fn reset_root_admin_password(email: String, password_stdin: bool) -> Result<()> {
+    let email = email.trim().to_lowercase();
+    validate_operator_email(&email)?;
+
+    let config = AppConfig::load().context("password reset configuration is invalid")?;
+    let store = PgStore::connect(&config.database_url, 2)
+        .await
+        .context("password reset could not connect to PostgreSQL")?;
+    let user = sqlx::query(
+        r#"SELECT id, role
+             FROM "user"
+            WHERE lower("email") = lower($1)
+            LIMIT 1"#,
+    )
+    .bind(&email)
+    .fetch_optional(store.pool())
+    .await
+    .context("password reset user lookup failed")?;
+    let Some(user) = user else {
+        bail!("no Better Auth account exists for the supplied email")
+    };
+    let user_id: Uuid = user
+        .try_get("id")
+        .context("password reset user id is invalid")?;
+    let role: String = user
+        .try_get::<Option<String>, _>("role")
+        .context("password reset user role is invalid")?
+        .unwrap_or_default();
+    if !role
+        .split(',')
+        .any(|value| matches!(value.trim(), "rootSuperAdmin" | "rootAdmin"))
+    {
+        bail!("password reset is limited to root administrator accounts")
+    }
+
+    let password = read_new_password(password_stdin)?;
+    let password_hash = better_auth_password_hash(password.expose_secret())?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .context("password reset transaction could not start")?;
+    let locked_user = sqlx::query(
+        r#"SELECT id, role
+             FROM "user"
+            WHERE id = $1::uuid
+            FOR UPDATE"#,
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .context("password reset could not lock the user")?;
+    let Some(locked_user) = locked_user else {
+        bail!("the target account disappeared during password reset")
+    };
+    let locked_role: String = locked_user
+        .try_get::<Option<String>, _>("role")
+        .context("password reset locked user role is invalid")?
+        .unwrap_or_default();
+    if !locked_role
+        .split(',')
+        .any(|value| matches!(value.trim(), "rootSuperAdmin" | "rootAdmin"))
+    {
+        bail!("the target account is no longer a root administrator")
+    }
+
+    let account_id = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+             FROM "account"
+            WHERE "userId" = $1::uuid AND "providerId" = 'credential'
+            ORDER BY "updatedAt" DESC
+            LIMIT 1"#,
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .context("password reset credential lookup failed")?;
+    if let Some(account_id) = account_id {
+        sqlx::query(
+            r#"UPDATE "account"
+                  SET "password" = $1,
+                      "issuer" = 'local:credential',
+                      "updatedAt" = CURRENT_TIMESTAMP
+                WHERE id = $2::uuid"#,
+        )
+        .bind(&password_hash)
+        .bind(account_id)
+        .execute(&mut *transaction)
+        .await
+        .context("password reset credential update failed")?;
+    } else {
+        sqlx::query(
+            r#"INSERT INTO "account"
+                 ("accountId", "providerId", "userId", "password", "issuer", "createdAt", "updatedAt")
+               VALUES ($1, 'credential', $2::uuid, $3, 'local:credential', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"#,
+        )
+        .bind(user_id.to_string())
+        .bind(user_id)
+        .bind(&password_hash)
+        .execute(&mut *transaction)
+        .await
+        .context("password reset credential creation failed")?;
+    }
+    let sessions_revoked = sqlx::query(r#"DELETE FROM "session" WHERE "userId" = $1::uuid"#)
+        .bind(user_id)
+        .execute(&mut *transaction)
+        .await
+        .context("password reset session revocation failed")?
+        .rows_affected();
+    transaction
+        .commit()
+        .await
+        .context("password reset transaction commit failed")?;
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "passwordReset": true,
+            "email": email,
+            "role": locked_role,
+            "sessionsRevoked": sessions_revoked,
+        }))
+        .context("password reset output failed")?
+    );
+    Ok(())
+}
+
+fn read_new_password(from_stdin: bool) -> Result<SecretString> {
+    let password = if from_stdin {
+        let mut value = String::new();
+        io::stdin()
+            .read_line(&mut value)
+            .context("could not read the password from stdin")?;
+        value.trim_end_matches(['\r', '\n']).to_owned()
+    } else {
+        let first = prompt_password("New password: ").context("could not read the new password")?;
+        let confirmation = prompt_password("Confirm new password: ")
+            .context("could not read the password confirmation")?;
+        if first != confirmation {
+            bail!("password confirmation does not match")
+        }
+        first
+    };
+    let password = SecretString::from(password);
+    let length = password.expose_secret().chars().count();
+    if !(8..=128).contains(&length) {
+        bail!("password must contain between 8 and 128 characters")
+    }
+    Ok(password)
+}
+
+fn better_auth_password_hash(password: &str) -> Result<String> {
+    let mut raw_salt = [0_u8; 16];
+    getrandom::fill(&mut raw_salt)
+        .map_err(|error| anyhow!("could not generate a password salt: {error}"))?;
+    let salt = hex::encode(raw_salt);
+    Ok(format!(
+        "{salt}:{}",
+        better_auth_derived_key(password, &salt)?
+    ))
+}
+
+fn better_auth_derived_key(password: &str, salt: &str) -> Result<String> {
+    let normalized: String = password.nfkc().collect();
+    let params =
+        ScryptParams::new(14, 16, 1, 64).context("Better Auth scrypt parameters are invalid")?;
+    let mut derived_key = [0_u8; 64];
+    derive_scrypt(
+        normalized.as_bytes(),
+        salt.as_bytes(),
+        &params,
+        &mut derived_key,
+    )
+    .context("could not derive the Better Auth password hash")?;
+    Ok(hex::encode(derived_key))
 }
 
 async fn create_federation_invite(
@@ -638,6 +845,7 @@ fn doctor_report() -> DoctorReport {
             service_role: env::var("MATCHPLANE_SERVICE_ROLE").ok(),
             error: Some(safe_error(&error.to_string())),
             errors: vec![safe_error(&error.to_string())],
+            hosted_agent: hosted_agent_report(),
         },
     }
 }
@@ -654,6 +862,7 @@ fn doctor_report_from_diagnostics(diagnostics: ConfigurationDiagnostics) -> Doct
         service_role: Some(diagnostics.service_role),
         error: errors.first().cloned(),
         errors,
+        hosted_agent: hosted_agent_report(),
     }
 }
 
@@ -672,7 +881,7 @@ async fn status() -> Result<()> {
 
 fn serve(service: Service, args: &[String]) -> Result<()> {
     let mut command = if matches!(service, Service::Web) {
-        ProcessCommand::new(env_or("MATCHPLANE_WEB_NODE", "node"))
+        ProcessCommand::new(resolve_web_node())
     } else {
         let (program, default_args) = service_command(service);
         let mut command = ProcessCommand::new(program);
@@ -758,6 +967,9 @@ async fn handle_mcp_request(request: JsonRpcRequest) -> Result<Option<JsonRpcRes
                 JsonRpcResponse::success(id, tool_result(probe_status().await))
             }
             Some("platform.doctor") => JsonRpcResponse::success(id, tool_result(doctor_report())),
+            Some("platform.ai.status") => {
+                JsonRpcResponse::success(id, tool_result(hosted_agent_report()))
+            }
             Some("platform.health") => {
                 JsonRpcResponse::success(id, tool_result(probe_status().await))
             }
@@ -776,6 +988,7 @@ fn tool_list() -> Value {
         "tools": [
             { "name": "platform.status", "description": "Probe MatchPlane readiness endpoints without exposing secrets.", "inputSchema": { "type": "object", "additionalProperties": false } },
             { "name": "platform.doctor", "description": "Validate loaded configuration and production safety gates.", "inputSchema": { "type": "object", "additionalProperties": false } },
+            { "name": "platform.ai.status", "description": "Report the server-side hosted Agent configuration without exposing its key or URL path.", "inputSchema": { "type": "object", "additionalProperties": false } },
             { "name": "platform.health", "description": "Return the same bounded read-only health report as platform.status.", "inputSchema": { "type": "object", "additionalProperties": false } }
         ]
     })
@@ -803,6 +1016,7 @@ async fn probe_status() -> StatusReport {
                     status: None,
                     error: Some(safe_error(&error.to_string())),
                 }],
+                hosted_agent: hosted_agent_report(),
             };
         }
     };
@@ -838,6 +1052,7 @@ async fn probe_status() -> StatusReport {
     StatusReport {
         ok: checks.iter().all(|check| check.ok),
         checks,
+        hosted_agent: hosted_agent_report(),
     }
 }
 
@@ -865,6 +1080,41 @@ async fn probe(client: &Client, service: &'static str, url: String) -> Probe {
 
 fn env_or(name: &str, fallback: &str) -> String {
     env::var(name).unwrap_or_else(|_| fallback.to_owned())
+}
+
+/// Resolve the Node executable for the standalone web workload.
+///
+/// Linux packages normally install Node at `/usr/bin/node`, while operators who install a
+/// pinned upstream runtime often use `/usr/local/bin/node`. A missing explicit path should not
+/// make an otherwise valid release fail before the child process can emit a useful error.
+fn resolve_web_node() -> String {
+    resolve_web_node_with(
+        env::var("MATCHPLANE_WEB_NODE").ok().as_deref(),
+        node_candidate_exists,
+    )
+}
+
+fn resolve_web_node_with<F>(configured: Option<&str>, mut candidate_exists: F) -> String
+where
+    F: FnMut(&str) -> bool,
+{
+    let configured = configured.unwrap_or("node");
+    if candidate_exists(configured) {
+        return configured.to_owned();
+    }
+
+    for candidate in ["/usr/local/bin/node", "/usr/bin/node", "node"] {
+        if candidate_exists(candidate) {
+            return candidate.to_owned();
+        }
+    }
+
+    // Keep the operator's explicit value for the eventual OS error when no candidate exists.
+    configured.to_owned()
+}
+
+fn node_candidate_exists(candidate: &str) -> bool {
+    candidate == "node" || Path::new(candidate).is_file()
 }
 
 fn environment_name(environment: Environment) -> &'static str {
@@ -901,12 +1151,104 @@ struct DoctorReport {
     service_role: Option<String>,
     error: Option<String>,
     errors: Vec<String>,
+    hosted_agent: HostedAgentReport,
 }
 
 #[derive(Debug, Serialize)]
 struct StatusReport {
     ok: bool,
     checks: Vec<Probe>,
+    hosted_agent: HostedAgentReport,
+}
+
+/// A secret-free summary of the optional platform-owned model router.
+///
+/// The hosted Agent is deliberately advisory: the platform can still serve a deterministic
+/// policy fallback when no provider is configured. `issues` gives an operator or operations
+/// Agent enough information to repair the deployment without printing credentials or a URL path.
+#[derive(Debug, Clone, Serialize)]
+struct HostedAgentReport {
+    configured: bool,
+    protocol: String,
+    model: Option<String>,
+    endpoint_origin: Option<String>,
+    key_configured: bool,
+    issues: Vec<String>,
+}
+
+fn hosted_agent_report() -> HostedAgentReport {
+    hosted_agent_report_from_values(
+        env::var("MATCHPLANE_ENVIRONMENT")
+            .ok()
+            .as_deref()
+            .unwrap_or("development"),
+        env::var("MATCHPLANE_ROUTER_AI_URL").ok().as_deref(),
+        env::var("MATCHPLANE_ROUTER_AI_KEY").ok().as_deref(),
+        env::var("MATCHPLANE_ROUTER_AI_MODEL").ok().as_deref(),
+        env::var("MATCHPLANE_ROUTER_AI_PROTOCOL").ok().as_deref(),
+    )
+}
+
+fn hosted_agent_report_from_values(
+    environment: &str,
+    endpoint: Option<&str>,
+    key: Option<&str>,
+    model: Option<&str>,
+    protocol: Option<&str>,
+) -> HostedAgentReport {
+    let protocol = protocol
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("openai-compatible")
+        .to_owned();
+    let endpoint_origin = endpoint.and_then(|value| safe_endpoint_origin(value.trim()));
+    let key_configured = key.is_some_and(|value| !value.trim().is_empty());
+    let model = model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let mut issues = Vec::new();
+    if endpoint_origin.is_none() {
+        issues.push("MATCHPLANE_ROUTER_AI_URL is missing or invalid".to_owned());
+    }
+    if !key_configured {
+        issues.push("MATCHPLANE_ROUTER_AI_KEY is not configured".to_owned());
+    }
+    if model.is_none() {
+        issues.push("MATCHPLANE_ROUTER_AI_MODEL is not configured".to_owned());
+    }
+    if !matches!(
+        protocol.as_str(),
+        "openai-compatible" | "anthropic-messages" | "gemini-generate-content"
+    ) {
+        issues.push("MATCHPLANE_ROUTER_AI_PROTOCOL is unsupported".to_owned());
+    }
+    if environment.trim().eq_ignore_ascii_case("production")
+        && endpoint
+            .and_then(|value| Url::parse(value.trim()).ok())
+            .is_some_and(|url| url.scheme() != "https")
+    {
+        issues.push("production hosted Agent endpoint must use HTTPS".to_owned());
+    }
+    HostedAgentReport {
+        configured: issues.is_empty(),
+        protocol,
+        model,
+        endpoint_origin,
+        key_configured,
+        issues,
+    }
+}
+
+fn safe_endpoint_origin(value: &str) -> Option<String> {
+    let parsed = Url::parse(value).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return None;
+    }
+    match parsed.origin() {
+        url::Origin::Tuple(_, _, _) => Some(parsed.origin().ascii_serialization()),
+        url::Origin::Opaque(_) => None,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -967,8 +1309,10 @@ impl JsonRpcResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdminInviteRole, Service, admin_invite_role_value, normalize_admin_base_url,
-        service_command, sha256, validate_operator_email, validate_operator_uuid,
+        AdminInviteRole, Service, admin_invite_role_value, better_auth_derived_key,
+        hosted_agent_report_from_values, normalize_admin_base_url, resolve_web_node_with,
+        safe_endpoint_origin, service_command, sha256, validate_operator_email,
+        validate_operator_uuid,
     };
     use uuid::Uuid;
 
@@ -980,6 +1324,22 @@ mod tests {
     #[test]
     fn service_command_maps_web_to_node() {
         assert_eq!(service_command(Service::Web).0, "node");
+    }
+
+    #[test]
+    fn web_node_resolution_keeps_an_available_configured_path() {
+        let resolved = resolve_web_node_with(Some("/opt/node/bin/node"), |candidate| {
+            candidate == "/opt/node/bin/node"
+        });
+        assert_eq!(resolved, "/opt/node/bin/node");
+    }
+
+    #[test]
+    fn web_node_resolution_falls_back_to_a_host_runtime_path() {
+        let resolved = resolve_web_node_with(Some("/usr/bin/node"), |candidate| {
+            candidate == "/usr/local/bin/node"
+        });
+        assert_eq!(resolved, "/usr/local/bin/node");
     }
 
     #[test]
@@ -1033,6 +1393,67 @@ mod tests {
         assert_eq!(
             admin_invite_role_value(AdminInviteRole::SubplatformAdmin),
             "subplatform_admin"
+        );
+    }
+
+    #[test]
+    fn better_auth_hash_matches_the_node_scrypt_fixture() {
+        let (salt, expected_key) = "2fed236420c93b71f823a22012f34f9a:9a4c013d8e168bda79db6de1e0ffc7607db2be2f0850c1f4daa0a8fc04afb12e7b67ce60cc8f5bd0a206ef4181ad0d5d70012e445c7b171becbd0fd9d814923f"
+            .split_once(':')
+            .expect("fixture must contain a salt separator");
+        assert_eq!(
+            better_auth_derived_key("MatchPlane-CLI-Test-2026!", salt).unwrap(),
+            expected_key
+        );
+    }
+
+    #[test]
+    fn hosted_agent_report_requires_all_server_side_provider_values() {
+        let report = hosted_agent_report_from_values(
+            "production",
+            Some("https://llm.example/v1/chat/completions"),
+            None,
+            Some("provider/model"),
+            Some("openai-compatible"),
+        );
+        assert!(!report.configured);
+        assert!(!report.key_configured);
+    }
+
+    #[test]
+    fn hosted_agent_report_accepts_a_secure_supported_provider() {
+        let report = hosted_agent_report_from_values(
+            "production",
+            Some("https://llm.example/v1/chat/completions"),
+            Some("server-only-key"),
+            Some("provider/model"),
+            Some("openai-compatible"),
+        );
+        assert!(report.configured);
+        assert_eq!(
+            report.endpoint_origin.as_deref(),
+            Some("https://llm.example")
+        );
+    }
+
+    #[test]
+    fn hosted_agent_report_rejects_http_provider_in_production() {
+        let report = hosted_agent_report_from_values(
+            "production",
+            Some("http://llm.example/v1/chat/completions"),
+            Some("server-only-key"),
+            Some("provider/model"),
+            Some("openai-compatible"),
+        );
+        assert!(!report.configured);
+        assert!(report.issues.iter().any(|issue| issue.contains("HTTPS")));
+    }
+
+    #[test]
+    fn safe_endpoint_origin_drops_path_and_credentials() {
+        assert_eq!(
+            safe_endpoint_origin("https://user:secret@llm.example/v1/chat"),
+            Some("https://llm.example".to_owned())
         );
     }
 

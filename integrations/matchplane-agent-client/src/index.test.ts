@@ -110,6 +110,29 @@ describe("MatchPlane external Agent client", () => {
     expect(new Headers(calls[0]?.init?.headers).get("x-matchplane-api-key")).toBe("mpk_test");
   });
 
+  it("accepts generic offer-only retrieval candidates and preserves risks", async () => {
+    const requestId = "123e4567-e89b-12d3-a456-426614174004";
+    const fetchImpl = async (): Promise<Response> => new Response(JSON.stringify({
+      protocol: "matchplane.retrieval/v1",
+      request_id: requestId,
+      provider: { id: "service.search", version: "2026.08" },
+      candidates: [{ offer_id: "123e4567-e89b-12d3-a456-426614174003", score: 0.74, reasons: ["范围匹配"], risks: ["需确认档期"] }],
+      degraded: false,
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl });
+    const result = await client.queryRetrieval({
+      tenant_id: "123e4567-e89b-12d3-a456-426614174000",
+      domain_id: "123e4567-e89b-12d3-a456-426614174001",
+      platform_path: "/services",
+      narrative: "找一个咨询服务",
+      request_id: requestId,
+      limit: 2,
+    });
+    expect(result.candidates[0]?.asset_id).toBeUndefined();
+    expect(result.candidates[0]?.offer_id).toBe("123e4567-e89b-12d3-a456-426614174003");
+    expect(result.candidates[0]?.risks).toEqual(["需确认档期"]);
+  });
+
   it("rejects invalid child retrieval scope before contacting the gateway", async () => {
     const fake = fakeFetch();
     const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
@@ -243,6 +266,52 @@ describe("MatchPlane external Agent client", () => {
       }), { status: 200 }),
     });
     await expect(client.listTools()).rejects.toBeInstanceOf(MatchPlaneMcpError);
+  });
+
+  it("bounds transport deadlines and rejects oversized gateway responses", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      requestTimeoutMs: 5_000,
+      fetchImpl: async (_url, init) => {
+        requestSignal = init?.signal;
+        return new Response("x".repeat(256 * 1024 + 1), { status: 200 });
+      },
+    });
+
+    await expect(client.listTools()).rejects.toBeInstanceOf(MatchPlaneMcpError);
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("rejects an unbounded external Agent request timeout", () => {
+    expect(() => new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      requestTimeoutMs: 120_001,
+    })).toThrow("requestTimeoutMs");
+  });
+
+  it("normalizes a transport timeout to a typed MCP error", async () => {
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      requestTimeoutMs: 5,
+      fetchImpl: async (_url, init) => new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) {
+          reject(new Error("missing request signal"));
+          return;
+        }
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    });
+
+    await expect(client.listTools()).rejects.toMatchObject({ name: "MatchPlaneMcpError", code: 504 });
   });
 
   it("runs a caller-funded multi-step Skill only through its advertised MCP tools", async () => {

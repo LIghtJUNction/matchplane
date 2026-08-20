@@ -10,10 +10,13 @@ import {
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
   querySubplatformRetrieval,
+  updateMarketplaceIntent,
+  upsertMarketplaceProfile,
   type RecommendedBackendListing,
   routePlatformIntent,
   type PlatformRouteHop,
   type PartySession,
+  updateMarketplaceDemandDiscovery,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { authClient, authFetchOptions } from "../lib/auth-client";
@@ -53,8 +56,6 @@ interface ChatCopy {
   sellerPlaceholder: string;
   buyerFootnote: string;
   sellerFootnote: string;
-  buyerPending: string;
-  sellerPending: string;
   buyerSuccess: string;
   sellerSuccess: string;
 }
@@ -74,8 +75,6 @@ const defaultChatCopy: ChatCopy = {
   sellerPlaceholder: "例如：我能提供什么，交付条件和限制是……",
   buyerFootnote: "Enter 发送 · Shift + Enter 换行",
   sellerFootnote: "Enter 发送 · Shift + Enter 换行",
-  buyerPending: "我先把你的目标、限制和优先级整理成一份匹配需求。",
-  sellerPending: "我先把你的供给、条件和限制整理成一份资料。",
   buyerSuccess: "需求已发送，撮合会围绕你的真实目标展开",
   sellerSuccess: "供给描述已整理；请在下方提交资料，提交后才会写入系统",
 };
@@ -95,8 +94,6 @@ const defaultChatCopyEn: ChatCopy = {
   sellerPlaceholder: "For example: I can offer this, under these terms and constraints…",
   buyerFootnote: "Enter to send · Shift + Enter for a new line",
   sellerFootnote: "Enter to send · Shift + Enter for a new line",
-  buyerPending: "I’m organizing your goal, constraints, and priorities into a matching request.",
-  sellerPending: "I’m organizing your offer, terms, and constraints into a listing.",
   buyerSuccess: "Your request was sent; matching will follow your actual goal.",
   sellerSuccess: "Your offer is organized; submit the details below to publish it.",
 };
@@ -112,15 +109,92 @@ const englishChatLabels: Record<string, string> = {
   sendDemandLabel: "Send request",
 };
 
+interface RuntimeChatCopy {
+  sellerLocated: (name: string) => string;
+  sellerSwitched: (name: string) => string;
+  routeOpenError: string;
+  unavailableSupply: string;
+  unavailableDemand: string;
+  multiplePlatforms: string;
+  choosePlatform: string;
+  targetPlatform: string;
+  authDisconnected: string;
+  routeNode: string;
+  routeOverflow: string;
+  routeDegraded: (names: string, overflow: string) => string;
+  routeSelected: (names: string, overflow: string) => string;
+  noMatch: string;
+  noChildren: string;
+  recorded: string;
+  retrievalDegraded: string;
+  retrievalDegradedNotice: string;
+  sendFailed: string;
+  authFailed: string;
+  routeChoicesAria: string;
+}
+
+function runtimeChatCopy(locale: InterfaceLocale): RuntimeChatCopy {
+  if (locale === "en") {
+    return {
+      sellerLocated: (name) => `Located ${name}. You can submit your offer details now.`,
+      sellerSwitched: (name) => `Switched to ${name}. Continue with your offer details.`,
+      routeOpenError: "The target platform could not be opened. Try again shortly.",
+      unavailableSupply: "This environment is not connected to the live supply API, so nothing was saved. Enable the platform API before sending.",
+      unavailableDemand: "This environment is not connected to the live matching API, so nothing was saved. Enable the platform API before sending.",
+      multiplePlatforms: "I found several suitable platforms for this offer. Choose one to continue.",
+      choosePlatform: "Choose a platform for this offer.",
+      targetPlatform: "target subplatform",
+      authDisconnected: "The Better Auth session is not connected to this platform node.",
+      routeNode: "the current platform node",
+      routeOverflow: " and other platforms",
+      routeDegraded: (names, overflow) => `Routing is temporarily degraded. Your request was sent to ${names}${overflow} under the bounded fallback; downstream platforms will continue looking for supply.`,
+      routeSelected: (names, overflow) => `The routing Agent selected ${names}${overflow}. Downstream platforms will now look for merchants and specific offers, with an explanation for each match.`,
+      noMatch: "Your request was recorded here, but the routing Agent did not find a suitable active platform. Add a goal, budget, or constraint and try again.",
+      noChildren: "Your request was recorded here. There are no active child platforms yet; an administrator can enable one to continue routing.",
+      recorded: "Your request was recorded on this platform node.",
+      retrievalDegraded: " A child retrieval service is temporarily unavailable, so basic condition matching is being used. It will recover when the administrator configures the service.",
+      retrievalDegradedNotice: "Child retrieval is temporarily unavailable; basic condition matching is being used.",
+      sendFailed: "Your request could not be sent. Try again shortly.",
+      authFailed: "The Better Auth session check did not complete.",
+      routeChoicesAria: "Choose a platform for publishing an offer",
+    };
+  }
+  return {
+    sellerLocated: (name) => `已定位到${name}，现在可以提交你的供给资料。`,
+    sellerSwitched: (name) => `已切换到${name}，请继续填写供给资料`,
+    routeOpenError: "目标平台暂时无法打开，请稍后重试",
+    unavailableSupply: "当前环境未连接真实供给 API，内容没有写入系统。请先启用平台 API 后再发送。",
+    unavailableDemand: "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。",
+    multiplePlatforms: "我找到了多个适合发布供给的平台，请先选择一个。",
+    choosePlatform: "请选择供给发布的平台",
+    targetPlatform: "目标子平台",
+    authDisconnected: "Better Auth 会话尚未连接到当前平台节点",
+    routeNode: "当前平台节点",
+    routeOverflow: " 等平台",
+    routeDegraded: (names, overflow) => `AI 路由暂时不可用，已按受控策略把需求交给 ${names}${overflow}；下级平台会继续筛选商家与具体供给。`,
+    routeSelected: (names, overflow) => `AI 已从当前节点的候选平台中选出 ${names}${overflow}，接下来由下级平台继续挑选商家与具体供给，并解释匹配理由。`,
+    noMatch: "需求已记录在当前平台节点；AI 判断当前候选平台暂时没有合适的匹配。你可以补充目标、预算或限制条件后重试。",
+    noChildren: "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。",
+    recorded: "需求已记录在当前平台节点。",
+    retrievalDegraded: " 子平台智能检索暂时不可用，已先使用基础条件匹配；管理员配置检索服务后会自动恢复。",
+    retrievalDegradedNotice: "子平台智能检索暂时不可用，已先使用基础条件匹配",
+    sendFailed: "需求暂时没有发送成功，请稍后再试。",
+    authFailed: "Better Auth 会话校验失败",
+    routeChoicesAria: "选择供给发布平台",
+  };
+}
+
 function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale): ChatCopy {
   const configured = subplatform.ui?.chat ?? {};
   const defaults = locale === "en" ? defaultChatCopyEn : defaultChatCopy;
   const text = (key: keyof ChatCopy, fallback: string): string => {
-    const value = configured[key];
+    const localizedKey = locale === "en" ? `${key}En` : key;
+    const value = configured[localizedKey];
     return typeof value === "string" && value.trim() ? value.trim() : fallback;
   };
   const headlines = (key: "buyerHeadlines" | "sellerHeadlines", fallback: string[]): string[] => {
-    const value = configured[key];
+    const localizedKey = locale === "en" ? `${key}En` : key;
+    const value = configured[localizedKey];
     if (!Array.isArray(value)) return fallback;
     const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 12);
     return items.length ? items : fallback;
@@ -148,8 +222,6 @@ function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale
     sellerPlaceholder: text("sellerPlaceholder", defaults.sellerPlaceholder),
     buyerFootnote: text("buyerFootnote", defaults.buyerFootnote),
     sellerFootnote: text("sellerFootnote", defaults.sellerFootnote),
-    buyerPending: text("buyerPending", defaults.buyerPending),
-    sellerPending: text("sellerPending", defaults.sellerPending),
     buyerSuccess: text("buyerSuccess", defaults.buyerSuccess),
     sellerSuccess: text("sellerSuccess", defaults.sellerSuccess),
   };
@@ -161,12 +233,15 @@ interface MatchChatProps {
   locale?: InterfaceLocale;
   role?: "buyer" | "seller";
   onRecommendations?: (recommendations: RecommendedBackendListing[]) => void;
+  /** Pass the seller's conversational draft into the schema-driven editor. */
+  onSellerDraft?: (draft: { narrative: string; intentId?: string; attributes: Record<string, unknown>; terms: Record<string, unknown> }) => void;
   /** Move a seller into the selected terminal platform before showing its supply form. */
   onSellerPlatformSelected?: (hop: PlatformRouteHop) => void | Promise<void>;
 }
 
-export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer", onRecommendations, onSellerPlatformSelected }: MatchChatProps) {
+export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer", onRecommendations, onSellerDraft, onSellerPlatformSelected }: MatchChatProps) {
   const copy = resolveChatCopy(subplatform, locale);
+  const runtime = runtimeChatCopy(locale);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
@@ -175,6 +250,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const conversationIdRef = useRef<string | null>(null);
+  const intentByTargetRef = useRef(new Map<string, { intentId: string; version: number }>());
   const focusInputAfterErrorRef = useRef(false);
   const [sellerRouteChoices, setSellerRouteChoices] = useState<PlatformRouteHop[]>([]);
   const isRoot = subplatform.slug === "root";
@@ -222,6 +298,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     setSellerRouteChoices([]);
     setSupplyDiscoveryEnabled(copy.buyerDiscoveryDefault);
     conversationIdRef.current = null;
+    intentByTargetRef.current.clear();
   }, [copy.buyerDiscoveryDefault, role, subplatform.path]);
 
   const chooseSellerRoute = useCallback(async (target: PlatformRouteHop) => {
@@ -232,15 +309,15 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       setSellerRouteChoices([]);
       setMessages((current) => [
         ...current,
-        { id: `route-${crypto.randomUUID()}`, role: "assistant", text: `已定位到${target.displayName}，现在可以提交你的供给资料。` },
+        { id: `route-${crypto.randomUUID()}`, role: "assistant", text: runtime.sellerLocated(target.displayName) },
       ]);
-      onNotice(`已切换到${target.displayName}，请继续填写供给资料`);
+      onNotice(runtime.sellerSwitched(target.displayName));
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "目标平台暂时无法打开，请稍后重试");
+      onNotice(error instanceof Error ? error.message : runtime.routeOpenError);
     } finally {
       setSending(false);
     }
-  }, [onNotice, onSellerPlatformSelected, sending]);
+  }, [locale, onNotice, onSellerPlatformSelected, sending]);
 
   const submitMessage = useCallback(
     async (rawText: string, session?: PartySession) => {
@@ -258,20 +335,13 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       setMessages((current) => [
         ...current,
         { id: `${requestId}-user`, role: "user", text },
-        {
-          id: `${requestId}-assistant`,
-          role: "assistant",
-          text: isSeller ? copy.sellerPending : copy.buyerPending,
-        },
       ]);
 
       try {
         const live = isLiveMarketplaceEnabled();
         if (!live) {
-          const message = isSeller
-            ? "当前环境未连接真实供给 API，内容没有写入系统。请先启用平台 API 后再发送。"
-            : "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。";
-          setMessages((current) => current.map((item) => item.id === `${requestId}-assistant` ? { ...item, text: message } : item));
+          const message = isSeller ? runtime.unavailableSupply : runtime.unavailableDemand;
+          setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: message }]);
           setMessage(text);
           onNotice(message);
           return;
@@ -284,6 +354,19 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             })
           : null;
         if (isSeller && route?.routePlan.length) {
+          // Keep the conversational material when routing a seller to a child. The target
+          // platform owns the schema, so this is deliberately an opaque editable draft rather
+          // than guessed vehicle/service fields. The form or plugin can import it and the seller
+          // still explicitly reviews and submits it.
+          onSellerDraft?.({
+            narrative,
+            attributes: {
+              source: "conversation",
+              conversation_id: conversationId,
+              routed_from: platformPath(subplatform),
+            },
+            terms: { pricing_mode: pricingFor(subplatform).mode },
+          });
           // A seller must publish into the node selected by the platform Agent. The old flow
           // wrote supply intents into every hop and left the form mounted at the root path,
           // which made a successful route look like a dead end. Pick the deepest terminal hop
@@ -291,21 +374,17 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           const terminals = terminalRouteHops(route.routePlan).slice(0, MAX_CHAT_TARGETS);
           if (terminals.length > 1) {
             setSellerRouteChoices(terminals);
-            setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-              ? { ...item, text: "我找到了多个适合发布供给的平台，请先选择一个。" }
-              : item));
-            onNotice("请选择供给发布的平台");
+            setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: runtime.multiplePlatforms }]);
+            onNotice(runtime.choosePlatform);
             return;
           }
           const target = terminals[0] ?? route.routePlan.at(-1) ?? null;
           if (target && onSellerPlatformSelected) {
             await onSellerPlatformSelected(target);
           }
-          const selectedName = target?.displayName || route.routePlan.at(-1)?.displayName || "目标子平台";
-          setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-            ? { ...item, text: `已定位到${selectedName}，现在可以提交你的供给资料。` }
-            : item));
-          onNotice(`已切换到${selectedName}，请继续填写供给资料`);
+          const selectedName = target?.displayName || route.routePlan.at(-1)?.displayName || runtime.targetPlatform;
+          setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: runtime.sellerLocated(selectedName) }]);
+          onNotice(runtime.sellerSwitched(selectedName));
           return;
         }
         const routedRecommendations: RecommendedBackendListing[] = [];
@@ -346,30 +425,78 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                   domainId: targetDomainId,
                   role,
                 });
-            if (!targetSession) throw new Error("Better Auth 会话尚未连接到当前平台节点");
+            if (!targetSession) throw new Error(runtime.authDisconnected);
             const targetPricing = pricingFor(target);
             const targetUsesLegacy = target.marketplaceContract === "legacy-v1";
             const targetKey = target.path.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 96) || "root";
             if (isSeller) {
-              await createMarketplaceIntent({
+              // Keep seller conversations durable in the same intent as the buyer flow. A
+              // seller may describe the same offer over several turns; creating a new supply
+              // intent on every turn would fragment the listing and make the later editable
+              // draft depend on whichever request happened to finish last.
+              const supplyIntentState = intentByTargetRef.current.get(targetKey);
+              const supplyIntent = supplyIntentState
+                ? await updateMarketplaceIntent({
+                    session: targetSession,
+                    domainId: targetDomainId,
+                    intentId: supplyIntentState.intentId,
+                    narrative,
+                    attributes: {
+                      source: "conversation",
+                      conversation_id: conversationId,
+                      latest_turn: text,
+                      platform_path: target.path,
+                    },
+                    terms: {
+                      pricing_mode: targetPricing.mode,
+                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
+                    },
+                    expectedVersion: supplyIntentState.version,
+                  })
+                : await createMarketplaceIntent({
+                    session: targetSession,
+                    domainId: targetDomainId,
+                    side: "supply",
+                    narrative,
+                    attributes: {
+                      source: "conversation",
+                      conversation_id: conversationId,
+                      platform_path: target.path,
+                      delegated_route_count: route?.routePlan.length ?? 0,
+                      routing_source: route?.routing.source ?? null,
+                      routing_degraded: route?.routing.degraded ?? false,
+                    },
+                    terms: {
+                      pricing_mode: targetPricing.mode,
+                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
+                    },
+                    idempotencyKey: `chat-${requestId}-${targetKey}`,
+                  });
+              if (typeof supplyIntent.intent_id === "string" && typeof supplyIntent.version === "number") {
+                intentByTargetRef.current.set(targetKey, { intentId: supplyIntent.intent_id, version: supplyIntent.version });
+              }
+              // Keep the same opaque, scoped profile contract for supply as for demand. The
+              // vertical Agent may later replace this conversation projection with typed fields;
+              // the root never assumes that a supply is a vehicle, service, or another domain.
+              void upsertMarketplaceProfile({
                 session: targetSession,
                 domainId: targetDomainId,
-                side: "supply",
-                narrative,
-                attributes: {
-                  source: "conversation",
+                profile: {
+                  kind: "supply_conversation",
                   conversation_id: conversationId,
-                  platform_path: target.path,
-                  delegated_route_count: route?.routePlan.length ?? 0,
-                  routing_source: route?.routing.source ?? null,
-                  routing_degraded: route?.routing.degraded ?? false,
+                  narrative,
+                  latest_turn: text,
+                  turn_count: messages.filter((item) => item.role === "user").length + 1,
+                  source: "chat",
                 },
-                terms: {
-                  pricing_mode: targetPricing.mode,
-                  ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
-                  ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
-                },
-                idempotencyKey: `chat-${requestId}-${targetKey}`,
+              }).catch(() => undefined);
+              onSellerDraft?.({
+                narrative,
+                intentId: typeof supplyIntent.intent_id === "string" ? supplyIntent.intent_id : undefined,
+                attributes: { source: "conversation", conversation_id: conversationId, narrative },
+                terms: { pricing_mode: targetPricing.mode },
               });
             } else if (targetUsesLegacy) {
               if (!targetPricing.currency) throw new Error(`${target.label || target.slug} 尚未配置结算币种，暂时不能生成真实推荐`);
@@ -400,23 +527,68 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                 subplatform: target.slug,
               })));
             } else {
-              const intent = await createMarketplaceIntent({
+              const intentState = intentByTargetRef.current.get(targetKey);
+              const intent = intentState
+                ? await updateMarketplaceIntent({
+                    session: targetSession,
+                    domainId: targetDomainId,
+                    intentId: intentState.intentId,
+                    narrative,
+                    attributes: {
+                      source: "conversation",
+                      conversation_id: conversationId,
+                      latest_turn: text,
+                    },
+                    terms: {
+                      pricing_mode: targetPricing.mode,
+                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
+                    },
+                    expectedVersion: intentState.version,
+                  })
+                : await createMarketplaceIntent({
+                    session: targetSession,
+                    domainId: targetDomainId,
+                    side: "demand",
+                    narrative,
+                    attributes: {
+                      source: "conversation",
+                      conversation_id: conversationId,
+                    },
+                    terms: {
+                      pricing_mode: targetPricing.mode,
+                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
+                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
+                    },
+                    supplyDiscoveryEnabled,
+                    idempotencyKey: `chat-${requestId}-${targetKey}`,
+                  });
+              if (typeof intent.intent_id === "string" && typeof intent.version === "number") {
+                intentByTargetRef.current.set(targetKey, { intentId: intent.intent_id, version: intent.version });
+              }
+              if (intentState && typeof intent.intent_id === "string") {
+                void updateMarketplaceDemandDiscovery({
+                  session: targetSession,
+                  domainId: targetDomainId,
+                  intentId: intent.intent_id,
+                  enabled: supplyDiscoveryEnabled,
+                }).catch(() => undefined);
+              }
+              // The root stores only a scoped, versioned understanding. Domain-specific fields
+              // (for example vehicle attributes) are extracted by the active child Agent and
+              // may replace this opaque conversation projection later.
+              void upsertMarketplaceProfile({
                 session: targetSession,
                 domainId: targetDomainId,
-                side: "demand",
-                narrative,
-                attributes: {
-                  source: "conversation",
+                profile: {
+                  kind: "conversation",
                   conversation_id: conversationId,
+                  narrative,
+                  latest_turn: text,
+                  turn_count: messages.filter((item) => item.role === "user").length + 1,
+                  source: "chat",
                 },
-                terms: {
-                  pricing_mode: targetPricing.mode,
-                  ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
-                  ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
-                },
-                supplyDiscoveryEnabled,
-                idempotencyKey: `chat-${requestId}-${targetKey}`,
-              });
+              }).catch(() => undefined);
               let retrievalCandidates: RecommendedBackendListing[] = [];
               let canonicalCandidates: Awaited<ReturnType<typeof getMarketplaceOfferMatches>> | null = null;
               if (target.agentMcpTools?.includes("retrieval.query")) {
@@ -447,6 +619,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                     const remote = remoteByOffer.get(candidate.offer_id);
                     if (!remote) return [];
                     const reasons = [...new Set([...candidate.reasons, ...remote.reasons])].slice(0, 32);
+                    const risks = [...new Set([...(candidate.risks ?? []), ...(remote.risks ?? [])])].slice(0, 32);
                     return [{
                       ...candidate,
                       field_labels: fieldLabelsFor(target, candidate.attributes),
@@ -456,6 +629,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                       subplatform: target.slug,
                       match_score: candidate.score,
                       match_reasons: reasons,
+                      match_risks: risks,
                       intent_id: intent.intent_id,
                     } satisfies RecommendedBackendListing];
                   });
@@ -484,6 +658,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                   offer_id: candidate.offer_id,
                   match_score: candidate.score,
                   match_reasons: candidate.reasons,
+                  match_risks: candidate.risks,
                   intent_id: intent.intent_id,
                 })));
               }
@@ -499,51 +674,58 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           // A successful request with no candidates is still a new result. Clear
           // the previous cards instead of leaving stale offers on screen and
           // making them look like matches for the latest message.
-          onRecommendations?.(routedRecommendations);
+          // A first answer should be scannable. Keep the default result set to three canonical
+          // offers; later comparison can be expanded by the child-owned catalogue UI.
+          onRecommendations?.(routedRecommendations.slice(0, 3));
         }
         const visibleRouteNames = route?.routePlan
           .slice(0, MAX_CHAT_TARGETS)
           .map((hop) => hop.displayName)
-          .join("、") || "当前平台节点";
-        const routeOverflowSuffix = route && route.routePlan.length > MAX_CHAT_TARGETS ? " 等平台" : "";
+          .join(locale === "en" ? ", " : "、") || runtime.routeNode;
+        const routeOverflowSuffix = route && route.routePlan.length > MAX_CHAT_TARGETS ? runtime.routeOverflow : "";
         const assistantText = isSeller
           ? copy.sellerSuccess
           : live
             ? route?.status === "degraded" && route.routePlan.length
-              ? `AI 路由暂时不可用，已按受控策略把需求交给 ${visibleRouteNames}${routeOverflowSuffix}；下级平台会继续筛选商家与具体供给。`
+              ? runtime.routeDegraded(visibleRouteNames, routeOverflowSuffix)
               : route?.routePlan.length
-                ? `AI 已从当前节点的候选平台中选出 ${visibleRouteNames}${routeOverflowSuffix}，接下来由下级平台继续挑选商家与具体供给，并解释匹配理由。`
+                ? runtime.routeSelected(visibleRouteNames, routeOverflowSuffix)
                 : route?.routing.source === "ai"
-                  ? "需求已记录在当前平台节点；AI 判断当前候选平台暂时没有合适的匹配。你可以补充目标、预算或限制条件后重试。"
-                  : "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。"
-            : "需求已记录在当前平台节点。";
+                  ? runtime.noMatch
+                  : runtime.noChildren
+            : runtime.recorded;
         const degradedSuffix = retrievalDegraded
-          ? " 子平台智能检索暂时不可用，已先使用基础条件匹配；管理员配置检索服务后会自动恢复。"
+          ? runtime.retrievalDegraded
           : "";
-        setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-          ? { ...item, text: `${assistantText}${isSeller ? "" : degradedSuffix}` }
-          : item));
+        setMessages((current) => [...current, {
+          id: `${requestId}-assistant`,
+          role: "assistant",
+          text: `${assistantText}${isSeller ? "" : degradedSuffix}`,
+        }]);
         onNotice(retrievalDegraded
-          ? "子平台智能检索暂时不可用，已先使用基础条件匹配"
+          ? runtime.retrievalDegradedNotice
           : isSeller ? copy.sellerSuccess : copy.buyerSuccess);
         if (isSeller) window.setTimeout(() => document.getElementById("seller-display-name")?.focus(), 0);
       } catch (error) {
-        setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-          ? { ...item, text: error instanceof Error ? error.message : "需求暂时没有发送成功，请稍后再试。" }
-          : item));
+        setMessages((current) => [...current, {
+          id: `${requestId}-assistant`,
+          role: "assistant",
+          text: error instanceof Error ? error.message : runtime.sendFailed,
+        }]);
         setMessage(text);
         focusInputAfterErrorRef.current = true;
       } finally {
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, messages, onNotice, onRecommendations, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [copy.buyerSuccess, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerDraft, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const session = subplatform.domainId
+      const scopedMarketplace = subplatform.slug !== "root" && Boolean(subplatform.domainId);
+      const session = scopedMarketplace
         ? await getMarketplaceSession({
             subplatform: subplatform.slug,
             platformPath: subplatform.path,
@@ -552,7 +734,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             role,
           })
         : null;
-      const authState = subplatform.domainId
+      const authState = scopedMarketplace
         ? null
         : await authClient.getSession({ fetchOptions: authFetchOptions(subplatform.slug) });
       if (cancelled) return;
@@ -582,7 +764,8 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     if (!text || sending) return;
 
     void (async () => {
-      const session = subplatform.domainId
+      const scopedMarketplace = subplatform.slug !== "root" && Boolean(subplatform.domainId);
+      const session = scopedMarketplace
         ? await getMarketplaceSession({
             subplatform: subplatform.slug,
             platformPath: subplatform.path,
@@ -591,7 +774,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             role,
           })
         : null;
-      const authState = subplatform.domainId
+      const authState = scopedMarketplace
         ? null
         : await authClient.getSession({ fetchOptions: authFetchOptions(subplatform.slug) });
       if (!session && !authState?.data) {
@@ -602,7 +785,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       }
       setSignedIn(true);
       void submitMessage(text, session ?? undefined);
-    })().catch((error) => onNotice(error instanceof Error ? error.message : "Better Auth 会话校验失败"));
+    })().catch((error) => onNotice(error instanceof Error ? error.message : runtime.authFailed));
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -632,7 +815,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             </button>
           ) : null}
           <span className="sr-only" aria-live="polite">
-            {sending ? label("sendingChatStatus", "正在发送…") : signedIn ? label("signedInChatStatus", "已登录") : ""}
+            {!sending && signedIn ? label("signedInChatStatus", "已登录") : ""}
           </span>
         </div>
       </div>
@@ -645,8 +828,20 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         </div>
       ) : null}
 
+      {sending ? (
+        <div
+          className="chat-typing-indicator"
+          role="status"
+          aria-label={locale === "en" ? "Matching…" : "正在匹配…"}
+        >
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+        </div>
+      ) : null}
+
       {sellerRouteChoices.length ? (
-        <div className="match-chat-route-choices" role="group" aria-label="选择供给发布平台">
+        <div className="match-chat-route-choices" role="group" aria-label={runtime.routeChoicesAria}>
           {sellerRouteChoices.map((target) => (
             <button
               key={target.path}

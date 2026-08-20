@@ -1,26 +1,35 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
-  Bell,
+  ChevronLeft,
+  LogIn,
+  LogOut,
+  Settings2,
   UserRound,
 } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 
 import { BuyerDashboard } from "./components/BuyerDashboard";
+import { ContactProfileCard } from "./components/ContactProfileCard";
 import { ListingSheet, ModeDialog } from "./components/Overlays";
 import { PlatformDashboard } from "./components/PlatformDashboard";
 import { PreferenceControls } from "./components/PreferenceControls";
-import { Brand, IconButton, spring } from "./components/Primitives";
+import { Brand, spring } from "./components/Primitives";
 import { SellerDashboard } from "./components/SellerDashboard";
 import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
 import { PluginHost } from "./components/PluginHost";
 import { MatchChat } from "./components/MatchChat";
 import { PlatformFooter } from "./components/PlatformFooter";
+import { PlatformMenu } from "./components/PlatformMenu";
+import { WorkspaceSettingsDialog } from "./components/WorkspaceSettingsDialog";
 import { loadSubplatform, resolveSubplatform, subplatformCopy, subplatformFieldLabel, type SubplatformConfig } from "./subplatform";
+import { localizedSubplatformCopy } from "./lib/localized-copy";
 import {
   createMarketplaceIntroduction,
+  createMarketplaceSalesHandoff,
+  getMarketplaceProfile,
   requestMarketplaceContact,
   createBuyerIntroduction,
   clearPartySessionCache,
@@ -49,6 +58,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform(initialPath));
   const [listings, setListings] = useState<AssetListing[]>([]);
+  const [sellerDraft, setSellerDraft] = useState<{
+    narrative: string;
+    intentId?: string;
+    attributes: Record<string, unknown>;
+    terms: Record<string, unknown>;
+  } | null>(null);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
@@ -56,8 +71,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const accountMenuRef = useRef<HTMLDivElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    if (role !== "seller") setSellerDraft(null);
+  }, [role, subplatform.path]);
 
   const closeListing = useCallback(() => setListing(null), []);
   const closeModeDialog = useCallback(() => setModeDialogOpen(false), []);
@@ -67,25 +85,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     const timeout = window.setTimeout(() => setNotice(null), 3600);
     return () => window.clearTimeout(timeout);
   }, [notice]);
-
-  useEffect(() => {
-    if (!accountMenuOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setAccountMenuOpen(false);
-    };
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node) || !accountMenuRef.current?.contains(target)) {
-        setAccountMenuOpen(false);
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () => {
-      window.removeEventListener("keydown", closeOnEscape);
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-    };
-  }, [accountMenuOpen]);
 
   useEffect(() => {
     const requestedPath = window.location.pathname;
@@ -125,11 +124,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       });
   }, [subplatform.slug]);
 
-  const openAccount = () => {
-    if (authUser) {
-      setAccountMenuOpen((open) => !open);
-      return;
-    }
+  const openSignIn = () => {
     const nextUrl = new URL(window.location.href);
     nextUrl.searchParams.set("role", role);
     const next = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
@@ -142,11 +137,19 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       if (result.error) throw new Error(result.error.message || "退出登录失败");
       clearPartySessionCache();
       setAuthUser(null);
-      setAccountMenuOpen(false);
+      setSettingsOpen(false);
       setNotice(ui.signedOut);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : ui.signOutFailed);
     }
+  };
+
+  const selectPublicWorkspace = (nextRole: "buyer" | "seller") => {
+    setRole(nextRole);
+    setSettingsOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.set("role", nextRole);
+    window.history.replaceState(null, "", url);
   };
 
   const selectSellerPlatform = useCallback(async (hop: PlatformRouteHop) => {
@@ -212,9 +215,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   };
 
   const genericWorkspace: ReactNode = role === "buyer" ? (
-    <BuyerDashboard listings={listings} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
+    <BuyerDashboard listings={listings} locale={locale} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
   ) : role === "seller" ? (
-    <SellerDashboard onNotice={setNotice} subplatform={subplatform} />
+    null
   ) : role === "subplatform_admin" ? (
     <SubplatformAdminDashboard onNotice={setNotice} subplatform={subplatform} />
   ) : (
@@ -225,99 +228,156 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       onNotice={setNotice}
     />
   );
+  const fullscreenPlugin = subplatform.slug !== "root"
+    && Boolean(subplatform.pluginArtifact)
+    && (role === "buyer" || role === "seller");
+  const pluginWorkspace = subplatform.pluginArtifact ? (
+    <PluginHost
+      fullscreen={fullscreenPlugin}
+      role={role}
+      theme={theme}
+      locale={locale}
+      onNotice={setNotice}
+      subplatform={subplatform}
+      listings={role === "buyer" ? listings : []}
+      onOpenListing={setListing}
+      sellerDraft={sellerDraft}
+      fallback={genericWorkspace}
+    />
+  ) : null;
 
   return (
     <MotionConfig reducedMotion="user" transition={spring}>
-      <div id="top" className="app-shell">
+      <div id="top" className={`app-shell${fullscreenPlugin ? " is-subplatform-fullscreen" : ""}`}>
         <a className="skip-link" href="#main-content">{ui.skipToContent}</a>
-        <header className="app-header">
-          <div className="header-inner">
-            <div className="brand-cluster">
-              <Brand
-                label={subplatform.brandName}
-                homeHref={subplatform.slug === "root" ? "#top" : `/${subplatform.slug}`}
-              />
-              {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">{ui.rootPlatform}</a> : null}
-            </div>
-            <div ref={accountMenuRef} className="header-actions">
-              <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
-              <IconButton label={ui.notifications} onClick={() => setNotice(ui.noNotifications) }><Bell size={19} aria-hidden="true" /></IconButton>
-              <button className="profile-button" type="button" aria-label={authUser ? ui.openAccount : ui.signIn} aria-expanded={authUser ? accountMenuOpen : undefined} onClick={openAccount}>
-                <span><UserRound size={18} aria-hidden="true" /></span>
-                <span className="profile-copy"><strong>{authUser?.name || subplatform.brandName}</strong><small>{authUser ? roleLabel(role, locale, subplatform) : ui.signIn}</small></span>
-              </button>
-              <AnimatePresence>
-                {authUser && accountMenuOpen ? (
-                  <motion.div
-                    className="account-menu"
-                    role="menu"
-                    aria-label={ui.accountMenu}
-                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                    transition={spring}
-                  >
-                    <div className="account-menu-identity">
-                      <strong>{authUser.name || ui.user}</strong>
-                      <small>{authUser.email || ui.unifiedIdentity}</small>
-                    </div>
-                    <div className="account-menu-links">
-                      <a role="menuitem" href={`${window.location.pathname}?role=buyer`}>{ui.buyerWorkspace}</a>
-                      <a role="menuitem" href={`${window.location.pathname}?role=seller`}>{ui.sellerWorkspace}</a>
-                      {subplatform.slug !== "root" ? (
-                        <a role="menuitem" href={`${window.location.pathname}?role=subplatform_admin`}>{ui.subplatformAdmin}</a>
-                      ) : null}
-                      {authUser.role === "rootSuperAdmin" || authUser.role === "rootAdmin" ? (
-                        <a role="menuitem" href="/?role=platform">{ui.platformAdmin}</a>
-                      ) : null}
-                    </div>
-                    <button className="account-menu-signout" type="button" role="menuitem" onClick={() => void signOut()}>{ui.signOut}</button>
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
-            </div>
-          </div>
-        </header>
-
-        <main id="main-content" tabIndex={-1}>
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={role}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={spring}
+        {fullscreenPlugin ? (
+          <header className="subplatform-fullscreen-header">
+            <a
+              className="subplatform-back-link"
+              href={parentPlatformHref(subplatform.path, role)}
+              aria-label={ui.backToParent}
+              title={ui.backToParent}
             >
-              {role === "buyer" || role === "seller" ? (
-                <MatchChat
-                  role={role}
-                  locale={locale}
-                  onNotice={setNotice}
-                  onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform))}
-                  onSellerPlatformSelected={selectSellerPlatform}
-                  subplatform={subplatform}
+              <ChevronLeft size={25} strokeWidth={1.75} aria-hidden="true" />
+            </a>
+          </header>
+        ) : (
+          <header className="app-header">
+            <div className="header-inner">
+              <div className="brand-cluster">
+                <Brand
+                  label={subplatform.brandName}
+                  homeHref={subplatform.slug === "root" ? "#top" : `/${subplatform.slug}`}
                 />
-              ) : null}
-              {subplatform.pluginArtifact ? (
-                <PluginHost
-                  role={role}
-                  theme={theme}
-                  locale={locale}
-                  onNotice={setNotice}
-                  subplatform={subplatform}
-                  listings={role === "buyer" ? listings : []}
-                  onOpenListing={setListing}
-                  fallback={genericWorkspace}
-                />
-              ) : genericWorkspace}
-            </motion.div>
-          </AnimatePresence>
+                {subplatform.slug === "root" ? <PlatformMenu locale={locale} platformPath={subplatform.path} /> : null}
+                {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">{ui.rootPlatform}</a> : null}
+              </div>
+              <div className="header-actions">
+                <motion.button
+                  className="workspace-settings-trigger"
+                  type="button"
+                  aria-expanded={settingsOpen}
+                  aria-haspopup="dialog"
+                  onClick={() => setSettingsOpen(true)}
+                  whileTap={{ scale: 0.95 }}
+                  transition={spring}
+                >
+                  <Settings2 size={18} aria-hidden="true" />
+                  <span>{ui.settings}</span>
+                </motion.button>
+              </div>
+            </div>
+          </header>
+        )}
+
+        <main id="main-content" className={fullscreenPlugin ? "subplatform-fullscreen-main" : undefined} tabIndex={-1}>
+          {fullscreenPlugin ? pluginWorkspace : (
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={role}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={spring}
+              >
+                {role === "buyer" || role === "seller" ? (
+                  <MatchChat
+                    role={role}
+                    locale={locale}
+                    onNotice={setNotice}
+                    onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform, locale))}
+                    onSellerDraft={role === "seller" ? setSellerDraft : undefined}
+                    onSellerPlatformSelected={selectSellerPlatform}
+                    subplatform={subplatform}
+                  />
+                ) : null}
+                {subplatform.pluginArtifact && (role === "platform" || role === "subplatform_admin" || (role === "buyer" && listings.length > 0))
+                  ? pluginWorkspace
+                  : genericWorkspace}
+              </motion.div>
+            </AnimatePresence>
+          )}
         </main>
-        <PlatformFooter subplatform={subplatform} />
+        {fullscreenPlugin ? null : <PlatformFooter subplatform={subplatform} />}
+
+        {fullscreenPlugin ? null : <WorkspaceSettingsDialog
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          title={role === "seller" ? ui.sellerSettingsTitle : ui.settingsTitle}
+          description={role === "seller" ? ui.sellerSettingsDescription : ui.settingsDescription}
+          className={role === "seller" ? "workspace-settings-dialog-wide" : undefined}
+          closeLabel={ui.closeSettings}
+          backdropLabel={ui.closeSettingsDialog}
+        >
+          <div className="workspace-settings-overview">
+            <section className="workspace-settings-section workspace-account-section" aria-labelledby="workspace-account-title">
+              <div className="workspace-settings-section-heading">
+                <h3 id="workspace-account-title">{ui.account}</h3>
+                <span>{roleLabel(role, locale, subplatform)}</span>
+              </div>
+              {authUser ? (
+                <div className="workspace-account-row">
+                  <span className="workspace-account-avatar"><UserRound size={19} aria-hidden="true" /></span>
+                  <span className="workspace-account-copy"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></span>
+                  <button className="workspace-account-action" type="button" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
+                </div>
+              ) : (
+                <button className="button button-dark workspace-signin-action" type="button" onClick={openSignIn}><LogIn size={17} aria-hidden="true" />{ui.signIn}</button>
+              )}
+            </section>
+
+            <section className="workspace-settings-section" aria-labelledby="workspace-preferences-title">
+              <div className="workspace-settings-section-heading">
+                <h3 id="workspace-preferences-title">{ui.appearance}</h3>
+              </div>
+              <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
+            </section>
+
+            <section className="workspace-settings-section" aria-labelledby="workspace-switch-title">
+              <div className="workspace-settings-section-heading">
+                <h3 id="workspace-switch-title">{ui.workspace}</h3>
+              </div>
+              <div className="workspace-role-switch" role="group" aria-label={ui.workspace}>
+                <button className={role === "buyer" ? "is-active" : ""} type="button" aria-pressed={role === "buyer"} onClick={() => selectPublicWorkspace("buyer")}>{ui.buyerWorkspace}</button>
+                <button className={role === "seller" ? "is-active" : ""} type="button" aria-pressed={role === "seller"} onClick={() => selectPublicWorkspace("seller")}>{ui.sellerWorkspace}</button>
+              </div>
+              {authUser ? (
+                <div className="workspace-admin-links">
+                  {subplatform.slug !== "root" ? <a href={`${window.location.pathname}?role=subplatform_admin`}>{ui.subplatformAdmin}</a> : null}
+                  {authUser.role === "rootSuperAdmin" || authUser.role === "rootAdmin" ? <a href="/?role=platform">{ui.platformAdmin}</a> : null}
+                </div>
+              ) : null}
+            </section>
+
+            {role === "buyer" ? <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} /> : null}
+            {role === "seller" ? <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} agentDraft={sellerDraft} /> : null}
+          </div>
+        </WorkspaceSettingsDialog>}
 
         <ListingSheet
           listing={listing}
           subplatform={subplatform}
+          locale={locale}
           onClose={closeListing}
           contactDisabled={!isLiveMarketplaceEnabled()}
           onContact={async (selected) => {
@@ -360,6 +420,34 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 return;
               }
               if (isGenericOffer && selected.offerId && selected.intentId) {
+                const profile = await getMarketplaceProfile({
+                  session,
+                  domainId: selectedDomainId,
+                }).catch(() => null);
+                try {
+                  await createMarketplaceSalesHandoff({
+                    session,
+                    domainId: selectedDomainId,
+                    intentId: selected.intentId,
+                    summary: {
+                      source: "buyer_contact_request",
+                      offer_id: selected.offerId,
+                      offer_title: selected.title,
+                      platform_path: selectedPath,
+                      profile: profile?.profile ?? null,
+                      match_level: selected.matchScore === undefined
+                        ? null
+                        : selected.matchScore >= 80 ? "very_suitable" : selected.matchScore >= 60 ? "suitable" : selected.matchScore >= 40 ? "possible" : "weak",
+                      reasons: selected.reasons ?? [],
+                      risks: selected.risks ?? [],
+                      recent_offer_ids: listings.filter((item) => item.platformPath === selectedPath).map((item) => item.offerId ?? item.id).slice(0, 32),
+                      saved_offer_ids: readSavedOfferIds(selectedPath),
+                    },
+                    idempotencyKey: `web-handoff-${selected.intentId}-${selected.offerId}`,
+                  });
+                } catch {
+                  // A missing optional handoff migration must not prevent a consent-gated contact request.
+                }
                 const introduction = await createMarketplaceIntroduction({
                   session,
                   domainId: selectedDomainId,
@@ -429,6 +517,12 @@ function roleFromLocation(): WorkspaceRole {
   return requested === "seller" || requested === "platform" || requested === "subplatform_admin" ? requested : "buyer";
 }
 
+function parentPlatformHref(path: string, role: WorkspaceRole): string {
+  const segments = path.split("/").filter(Boolean);
+  const parentPath = segments.length > 1 ? `/${segments.slice(0, -1).join("/")}` : "/";
+  return role === "buyer" ? parentPath : `${parentPath}?role=${encodeURIComponent(role)}`;
+}
+
 function roleLabel(role: WorkspaceRole, locale: "zh" | "en", subplatform: SubplatformConfig): string {
   if (locale === "en") {
     return role === "buyer"
@@ -452,12 +546,19 @@ function appCopy(locale: "zh" | "en") {
   if (locale === "en") {
     return {
       skipToContent: "Skip to content",
+      backToParent: "Back to parent platform",
       rootPlatform: "Root platform",
-      notifications: "Notifications",
-      noNotifications: "No new notifications",
-      openAccount: "Open account menu",
+      settings: "Settings",
+      settingsTitle: "Settings",
+      settingsDescription: "Account, display, and workspace preferences.",
+      closeSettings: "Close settings",
+      closeSettingsDialog: "Close settings dialog",
+      sellerSettingsTitle: "Offer settings",
+      sellerSettingsDescription: "Review your profile and publish real supply details.",
+      account: "Account",
+      appearance: "Display & language",
+      workspace: "Workspace",
       signIn: "Sign in",
-      accountMenu: "Account menu",
       user: "MatchPlane user",
       unifiedIdentity: "Unified identity",
       buyerWorkspace: "Buyer workspace",
@@ -471,12 +572,19 @@ function appCopy(locale: "zh" | "en") {
   }
   return {
     skipToContent: "跳到主要内容",
+    backToParent: "返回上一级平台",
     rootPlatform: "根平台",
-    notifications: "通知",
-    noNotifications: "目前没有新的平台通知",
-    openAccount: "打开个人账户菜单",
+    settings: "设置",
+    settingsTitle: "设置",
+    settingsDescription: "管理账号、显示与工作台偏好。",
+    closeSettings: "关闭设置",
+    closeSettingsDialog: "关闭设置对话框",
+    sellerSettingsTitle: "供给设置",
+    sellerSettingsDescription: "检查资料，并提交真实供给信息。",
+    account: "账号",
+    appearance: "显示与语言",
+    workspace: "工作台",
     signIn: "登录",
-    accountMenu: "个人账户菜单",
     user: "MatchPlane 用户",
     unifiedIdentity: "已登录的统一身份",
     buyerWorkspace: "买方工作台",
@@ -495,7 +603,19 @@ function listingFromLocation(): AssetListing | null {
   return null;
 }
 
-function mapRecommendations(items: RecommendedBackendListing[], subplatform: SubplatformConfig): AssetListing[] {
+function readSavedOfferIds(platformPath: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const value = JSON.parse(window.localStorage.getItem(`matchplane.saved.${platformPath}`) ?? "[]") as unknown;
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string").slice(0, 32)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function mapRecommendations(items: RecommendedBackendListing[], subplatform: SubplatformConfig, locale: "zh" | "en"): AssetListing[] {
   return items.flatMap((item, index) => {
     const id = item.listing_id ?? item.offer_id;
     if (!id) return [];
@@ -538,9 +658,9 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
         : termPriceRange
           ? termPriceRange
           : pricingMode === "negotiable"
-            ? pricingNote ?? "可议价"
+            ? pricingNote ?? localizedSubplatformCopy(subplatform, locale, "negotiablePriceLabel", "可议价", "Negotiable")
             : pricingMode === "none"
-              ? pricingNote ?? "面议"
+              ? pricingNote ?? localizedSubplatformCopy(subplatform, locale, "noPriceLabel", "面议", "Price on request")
               : stringAttribute(terms, ["display_price", "price_label", "price"]) ?? "—";
     return [{
       id,
@@ -556,6 +676,7 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
       accent: (["cactus", "clay", "heather", "oat"] as const)[index % 4],
       facts,
       reasons: item.match_reasons ?? (typeof item.reasons === "object" && Array.isArray(item.reasons) ? item.reasons.filter((reason): reason is string => typeof reason === "string") : undefined),
+      risks: item.match_risks ?? (typeof item.risks === "object" && Array.isArray(item.risks) ? item.risks.filter((risk): risk is string => typeof risk === "string") : undefined),
       trust: stringArrayAttribute(item, ["trust", "verification_labels", "verificationLabels"]),
       response: stringAttribute(item, ["response", "seller_response", "sellerResponse"]),
       offerId: item.offer_id,

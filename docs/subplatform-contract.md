@@ -2,7 +2,7 @@
 
 MatchPlane 采用单一平台模型。平台节点可以是部署根、挂载到其他平台下的子节点，或同时兼具两者。子垂直是可替换的软件包，挂载在某个路径下，例如 `https://matx.tech/auto`。该软件包只提供展示与领域适配，不会替代根平台的身份、鉴权、撮合、联系人同意、支付或审计能力。
 
-部署根是当前租户下标记为 `rootPlatform=true` 的单一 Better Auth 组织；仅仅缺少父节点并不足以成为根。若该节点被其他运营方挂载，它会成为该运营方的子节点，但不会改变其代码或数据模型。每个节点共享同一套 API、账户、清单、管理员、API-key 与审计机制；“root”和“subplatform”只是树上当前位置描述，不是不同产品类型。
+部署根是当前租户下标记为 `rootPlatform=true` 的单一 Better Auth 组织；仅仅缺少父节点并不足以成为根。若一个部署根被其他运营方挂载，接收方会通过签名联邦入驻创建 `source_kind=remote` 的子节点投影；原部署的本地 root 组织不会被直接改挂父节点，因此仍能管理自己的后代。对接收方用户而言，这个远端投影就是一个普通子平台，使用同一套 API、账户交换、清单、管理员、API-key 与审计边界；“root”和“subplatform”只是树上当前位置描述，不是不同产品类型。
 
 ## 身份与授权
 
@@ -67,12 +67,14 @@ Key 不会创建被冒充的用户会话。轮换方式是创建替代 key、更
 
 领域文案、定价能力、筛选器与商家字段属于软件包，不属于根实现。软件包可在清单中声明 `pricing`、`ui.chat`、`ui.copy`、`ui.filters`、`ui.supplyFields` 与 `ui.contactFields`；根服务会校验并传递给通用 shell/plugin。默认走领域中立 marketplace 合约。仍需使用旧垂直适配器的软件包必须显式声明 `marketplaceContract: "legacy-v1"`；仅定价或存在 schema 并不隐式选择该适配器。网关的 legacy HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明或默认业务货币。卖家提交由激活包 schema 定义的值，根服务仅保存并转发其结构化属性。
 
+`ui.copy` 和 `ui.chat` 的键默认是中文或平台的主语言；需要英文界面时，包可以为同一个键提供 `<key>En` 覆盖，例如 `contactProfileTitleEn` 或 `buyerTitleEn`。没有覆盖时，根通用 shell 使用自己的英文 fallback；它不会翻译或重写 `supplyFields`、`contactFields`、资产属性和商家内容。这样语言切换不会把领域术语硬编码进根平台，同时保留商家对文案的控制权。
+
 内置注册入口是 `POST /api/platform/subplatforms`。该接口要求 Better Auth 根/父管理员会话、已存在的 `tenantId`/`domainId`、锁定的 Git commit 或不可变 archive 定位符，以及 manifest JSON。它会创建 Better Auth 组织，记录递归父子关系和不可变 digest 到 `subplatform_registrations`，并返回 `state: validated`。在另一次激活前，隔离构建器必须先附加签名后的 `build_digest`；web 请求不会克隆或执行不受信任的包代码。注册请求不能自报 `buildDigest`。生产激活还会对 manifest 中声明的 MCP 工具执行 endpoint 配置与 `initialize` 健康门禁；开发环境可以先激活静态包再配置工具服务。构建回调为
 `POST /api/platform/subplatforms/build`，由部署端独占 token `MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN` 认证；对同一不可变 digest 幂等。根或父管理员仍负责最终激活；builder 不可独立发布软件包。浏览器包可额外提交 `artifactPath`（位于 `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT` 下的相对 digest 目录）和 `artifactEntry`（相对 HTML 文件，默认 `index.html`）。这些值与 build digest 一并不可变，不能从公开注册接口注入。
 
 针对内置归档路径，根或父节点管理员先向 `POST /api/platform/subplatforms/upload` 发送 multipart 并带 `archive` 字段（可选 `x-matchplane-parent-organization-id` 请求头）。web 进程限制 64 MiB，仅接受 tar/gzip 或 tar/zstd 后缀，在 `MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT` 下使用随机定位符与 0600 权限存储原始字节，并返回 `upload://<id>` 与 SHA-256 digest；不会解包归档。隔离构建器消费该 locator 时会拒绝路径遍历、符号链接、设备文件、超大条目和缺失清单，然后通过构建回调附加已验证的 build digest 后方可激活。运营方必须提供可持久写入目录（或 Helm 下 RWX 的上传 PVC）；未配置时以 503 关闭。
 
-静态构建模板只接受 `bun run build`、`npm run build`、`pnpm run build` 或 `yarn build`，不会把 manifest 字符串交给 shell。要在生产构建器中安装依赖，包必须提交对应锁文件并由固定 builder image 使用 frozen 安装；依赖安装阶段运行在清理过环境的隔离目录中，后续真正执行 `build` 命令的阶段断网。没有锁文件的包会在构建前失败，不能依赖每次构建时漂移的 semver 依赖。构建器不接受任意服务端代码、Docker socket 或运行时密钥。
+静态构建模板只接受 `bun run build`、`npm run build`、`pnpm run build` 或 `yarn build`，不会把 manifest 字符串交给 shell。默认情况下，包必须提交对应锁文件并由固定 builder image 使用 frozen 安装；依赖安装阶段运行在清理过环境的隔离目录中，后续真正执行 `build` 命令的阶段断网。若确实需要跟随最新依赖，清单可以显式设置 `assets.dependencyPolicy: "latest"`；当前只允许 `bun run build`，构建器会执行无锁的 `bun install --no-save`，并在注册信息中保留源码、清单和产物摘要。该策略牺牲可复现性，不能用于需要稳定回滚的生产包。构建器不接受任意服务端代码、Docker socket 或运行时密钥。
 
 ## 检索边界
 
@@ -159,7 +161,7 @@ Rust 网关暴露一套小型、与垂直无关的持久化合同。它是平台
 POST /api/platform/retrieval/query
 ```
 
-请求/响应形状定义见 [`docs/retrieval-protocol-v1.json`](retrieval-protocol-v1.json)。调用该门面时必须携带规范化的 `scope.platform_path`、tenant/domain 作用域、领域中立的 narrative/requirements 与受限结果上限。根服务会将它转成目标 active 节点 manifest 明确允许的 `retrieval.query` MCP tool；只有部署管理员配置了 endpoint 且调用方拥有 `retrieval:query` 时才会转发。子平台返回标准 root `asset_id`、可选 `offer_id`、分数、provider/model 版本与可解释原因。根当前只负责路径、租户、权限和 ABI 校验；它不会把远端 display_name 或 attributes 当作可信成交授权，也不会凭检索响应直接释放联系人、支付或结算。创建 introduction 时，Rust 网关仍会重新校验 offer 的状态、作用域和双方权限。未配置检索终端、上游超时或返回不符合 ABI 时，根返回可观测的错误，不会默默使用根平台凭据。
+请求/响应形状定义见 [`docs/retrieval-protocol-v1.json`](retrieval-protocol-v1.json)。调用该门面时必须携带规范化的 `scope.platform_path`、tenant/domain 作用域、领域中立的 narrative/requirements 与受限结果上限。根服务会将它转成目标 active 节点 manifest 明确允许的 `retrieval.query` MCP tool；只有部署管理员配置了 endpoint 且调用方拥有 `retrieval:query` 时才会转发。每个候选必须返回标准 root `asset_id` 或 canonical `offer_id` 至少一个（服务等没有目录资产的垂直只需返回 `offer_id`），并携带分数、provider/model 版本与可解释原因/风险。根当前只负责路径、租户、权限和 ABI 校验；它不会把远端 display_name 或 attributes 当作可信成交授权，也不会凭检索响应直接释放联系人、支付或结算。创建 introduction 时，Rust 网关仍会重新校验 offer 的状态、作用域和双方权限。未配置检索终端、上游超时或返回不符合 ABI 时，根返回可观测的错误，不会默默使用根平台凭据。
 
 请求按 `request_id` 由 provider 自行幂等；provider 应对重试返回同样结果缓存/复用。provider 可返回空候选列表或 `degraded: true`；根必须在审计中保留该状态，而不是静默切换到其他模型。向量数据库和索引 worker 不随根平台默认提供；若部署方启用兼容 provider，也必须通过同一 retrieval ABI 接入，不会成为新子平台的强制要求。
 
@@ -184,6 +186,7 @@ Discovery 进入 `queued → discovering → ready/rejected` 状态；只有 `re
 - 插件是静态前端适配层，不会携带独立数据库、不能签发 token、不能绕过联系人同意、不能直接调用支付方。支付凭据仍由根/payment service 保存。隔离构建器附加 artifact locator 后，激活清单会衍生 `assets.hosted` URL 为 `/api/platform/plugin-assets/<mount>/...`；浏览器在 `sandbox="allow-scripts"` 的 iframe 中承载该发布。由于该沙箱采用不透明 `null` origin，host 通过通配 `postMessage` 目标，但只接收来自精确 iframe 窗口和其主机生成的每实例 `contextToken` 的消息。host 每次发送 versioned `matchplane.plugin/v1` context 与受限 `match.results` 快照；当 host 侧推荐集变化时，快照会更新。插件可请求 `chat.open`、`listing.open`、`listing.select`、`listing.submit` 与 `navigation`；`listing.open` 仅携带结果 id，host 使用最新快照解析后再打开 host-owned 详情/联系人流程。列表提交携带 `requestId`，并返回对应的 `listing.submit.result`。host 在调用 marketplace API 前会校验 seller 角色、Better Auth 会话、激活租户/domain/schema 与受限 JSON。artifact endpoint 在 `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT` 下解析主机本地文件，核验 active build digest，禁止路径穿透与软链接逃逸，并施加严格 CSP。它不会抓取插件提供的 URL 或运行插件服务端代码。
 - 结果桥是“单向数据 + 双向选中”：
   - host 发送 `{ protocol: "matchplane.plugin/v1", type: "match.results", version: 1, contextToken, payload: { listings: [...] } }`，最多包含 100 条由 host 拥有且公开的结果卡片。
+  - 供给方会话的 `platform.context` 可附带 `agentDraft`（`narrative`、可选 `intentId`、不透明 `attributes` 与 `terms`）。它只是聊天材料的可编辑草稿，不是已发布供给，也不携带 token、联系人或支付权限；插件必须让供给方检查并通过 `listing.submit` 明确提交，宿主仍会做 schema、租户和权限校验。草稿在路由到子平台后会通过新的 context 消息补发，避免聊天与表单脱节。
   - 插件发送 `{ type: "listing.open", contextToken, payload: { listingId } }`；host 会忽略当前快照之外的 id。
   这种约束在保留垂直化渲染能力的同时，将作用域、联系人同意与支付行为留在根服务侧。
 - 路径仅在清单校验、API 兼容、CSP/资源检查、包扫描和运营审计通过后才激活。禁用或吊销会移除路径，但根账号与历史会保留。

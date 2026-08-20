@@ -148,8 +148,19 @@
       "required": ["staticDirectory", "buildCommand"],
       "properties": {
         "staticDirectory": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.).+$" },
-        "buildCommand": { "type": "string", "maxLength": 500 }
-      }
+        "buildCommand": { "type": "string", "maxLength": 500 },
+        "dependencyPolicy": {
+          "enum": ["locked", "latest"],
+          "default": "locked",
+          "description": "latest is an explicit Bun-only opt-in; it resolves package.json tags on each build and must not be used when reproducibility is required."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "dependencyPolicy": { "const": "latest" } } },
+          "then": { "properties": { "buildCommand": { "const": "bun run build" } } }
+        }
+      ]
     }
   }
 }

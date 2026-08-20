@@ -15,3 +15,6 @@ result/
 /web/dist/
 /web/.next/
 /web/out/
+/web/web/
+/.playwright-cli/
+/output/

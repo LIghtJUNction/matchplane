@@ -6,10 +6,12 @@ import { loadInternalBearer } from "../../../../src/lib/internal-auth";
 import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization, readActivePlatformScope } from "../../../../src/platform-mount";
 import { isAgentKeyRole, isAgentKeySide, keyCanActAsNeutralSide, keyCanActAsSide, parseAgentSessionRequest, stableAgentPrincipalId } from "../../../../src/platform-agent-session";
 import { verifyPlatformApiKey } from "../../../../src/lib/platform-api-key";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
+import { readJsonBody, readJsonResponseBody, readResponseTextBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { isProductionEnvironment } from "../../../../src/lib/runtime";
 
 export const runtime = "nodejs";
+
+const MAX_GATEWAY_RESPONSE_BYTES = 256 * 1024;
 
 /**
  * Exchange an organization-owned Better Auth API key for a tenant-scoped, short-lived
@@ -116,20 +118,21 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "撮合 Agent 会话服务暂时不可用" }, { status: 503 });
   }
   if (!gatewayResponse.ok) {
-    const message = await gatewayResponse.text();
+    const message = await readResponseTextBody(gatewayResponse, MAX_GATEWAY_RESPONSE_BYTES).catch(() => "");
     return NextResponse.json(
-      { error: message || "machine marketplace session bridge failed" },
+      { error: message.slice(0, 2_000) || "machine marketplace session bridge failed" },
       { status: gatewayResponse.status >= 500 ? 502 : gatewayResponse.status },
     );
   }
 
-  const gatewayBody = (await gatewayResponse.json()) as {
+  const gatewayBody = await readJsonResponseBody<{
     tenant_id: string;
     party_id: string;
     role: "buyer" | "seller" | "both";
     access_token: string;
     access_token_expires_at: string;
-  };
+  }>(gatewayResponse, MAX_GATEWAY_RESPONSE_BYTES).catch(() => null);
+  if (!gatewayBody) return NextResponse.json({ error: "撮合 Agent 会话服务返回了无效响应" }, { status: 502 });
   if (!isUuid(gatewayBody.party_id) || gatewayBody.tenant_id !== input.tenantId) {
     return NextResponse.json({ error: "撮合 Agent 会话服务返回了无效的平台身份" }, { status: 502 });
   }

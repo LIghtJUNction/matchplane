@@ -7,11 +7,20 @@ export type AgentSide = "demand" | "supply";
 /** Stage names are owned by the mounted domain; the root treats them as opaque taxonomy keys. */
 export type AgentStage = string;
 
+const DEFAULT_AGENT_REQUEST_TIMEOUT_MS = 60_000;
+const MAX_AGENT_REQUEST_TIMEOUT_MS = 120_000;
+const MAX_AGENT_RESPONSE_BYTES = 256 * 1024;
+
 export interface MatchPlaneAgentClientOptions {
   /** The public origin, for example `https://matx.tech`; never put this client in browser code. */
   baseUrl: string;
   /** A Better Auth organization API key. Keep it in the Agent's server-side secret store. */
   apiKey: string;
+  /**
+   * Deadline for one MCP or retrieval request. The client applies a hard upper bound so an
+   * external Agent cannot accidentally create an unbounded connection. Defaults to 60 seconds.
+   */
+  requestTimeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -407,13 +416,15 @@ export interface RetrievalQueryInput {
 }
 
 export interface RetrievalCandidate {
-  asset_id: string;
+  /** Optional canonical catalogue asset; generic offers may only have offer_id. */
+  asset_id?: string;
   offer_id?: string;
   display_name?: string;
   attributes?: Record<string, unknown>;
   terms?: Record<string, unknown>;
   score: number;
   reasons: string[];
+  risks?: string[];
   metadata?: Record<string, unknown>;
 }
 
@@ -445,12 +456,14 @@ export class MatchPlaneMcpError extends Error {
 export class MatchPlaneAgentClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
+  private readonly requestTimeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: MatchPlaneAgentClientOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
     this.apiKey = options.apiKey.trim();
     if (!this.apiKey) throw new Error("MatchPlane API key is required");
+    this.requestTimeoutMs = normalizeRequestTimeout(options.requestTimeoutMs);
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -529,7 +542,7 @@ export class MatchPlaneAgentClient {
       limit: input.limit ?? 20,
       ...(input.trace_id === undefined ? {} : { trace_id: input.trace_id }),
     };
-    const response = await this.fetchImpl(`${this.baseUrl}/api/platform/retrieval/query`, {
+    const response = await this.fetchWithDeadline(`${this.baseUrl}/api/platform/retrieval/query`, {
       method: "POST",
       headers: new Headers({
         accept: "application/json",
@@ -538,7 +551,7 @@ export class MatchPlaneAgentClient {
       }),
       body: JSON.stringify(envelope),
     });
-    const raw = await response.json().catch(() => null) as unknown;
+    const raw = await readBoundedJson(response);
     if (!response.ok || !isRecord(raw)) {
       throw new MatchPlaneMcpError(response.status || 502, "MatchPlane retrieval request failed", raw);
     }
@@ -638,6 +651,18 @@ export class MatchPlaneAgentClient {
     return this.callRpc("tools/call", { name, arguments: args }, partyToken);
   }
 
+  private async fetchWithDeadline(input: string, init: RequestInit): Promise<Response> {
+    const signal = AbortSignal.timeout(this.requestTimeoutMs);
+    try {
+      return await this.fetchImpl(input, { ...init, signal });
+    } catch (error) {
+      if (signal.aborted) {
+        throw new MatchPlaneMcpError(504, "MatchPlane request timed out", { timeout_ms: this.requestTimeoutMs });
+      }
+      throw error;
+    }
+  }
+
   private async callRpc(method: string, params: unknown, partyToken?: string): Promise<unknown> {
     const id = crypto.randomUUID();
     const headers = new Headers({
@@ -646,12 +671,12 @@ export class MatchPlaneAgentClient {
       "x-matchplane-api-key": this.apiKey,
     });
     if (partyToken) headers.set("authorization", `Bearer ${partyToken}`);
-    const response = await this.fetchImpl(`${this.baseUrl}/api/mcp`, {
+    const response = await this.fetchWithDeadline(`${this.baseUrl}/api/mcp`, {
       method: "POST",
       headers,
       body: JSON.stringify({ jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) }),
     });
-    const payload = await response.json().catch(() => null) as JsonRpcResponse | null;
+    const payload = await readBoundedJson(response) as JsonRpcResponse | null;
     if (!response.ok || !payload) {
       throw new MatchPlaneMcpError(response.status || 502, "MatchPlane MCP request failed", payload);
     }
@@ -948,12 +973,19 @@ function parseRetrievalResult(raw: unknown, requestId: string, limit: number): R
 }
 
 function parseRetrievalCandidate(value: unknown, index: number): RetrievalCandidate {
-  if (!isRecord(value) || !isUuid(value.asset_id)) throw new Error(`retrieval candidate ${index} asset_id is invalid`);
+  if (!isRecord(value) || (value.asset_id === undefined && value.offer_id === undefined)) {
+    throw new Error(`retrieval candidate ${index} must include asset_id or offer_id`);
+  }
+  if (value.asset_id !== undefined && !isUuid(value.asset_id)) throw new Error(`retrieval candidate ${index} asset_id is invalid`);
   if (value.offer_id !== undefined && !isUuid(value.offer_id)) throw new Error(`retrieval candidate ${index} offer_id is invalid`);
   if (value.display_name !== undefined && !isBoundedString(value.display_name, 500)) throw new Error(`retrieval candidate ${index} display_name is invalid`);
   if (typeof value.score !== "number" || !Number.isFinite(value.score) || value.score < -1 || value.score > 1) throw new Error(`retrieval candidate ${index} score is invalid`);
   if (!Array.isArray(value.reasons) || value.reasons.length > 32
     || value.reasons.some((reason) => !isBoundedString(reason, 500) || !reason.trim())) throw new Error(`retrieval candidate ${index} reasons are invalid`);
+  if (value.risks !== undefined && (!Array.isArray(value.risks) || value.risks.length > 32
+    || value.risks.some((risk) => !isBoundedString(risk, 500) || !risk.trim()))) {
+    throw new Error(`retrieval candidate ${index} risks are invalid`);
+  }
   for (const field of ["attributes", "terms", "metadata"] as const) {
     if (value[field] !== undefined && (!isRecord(value[field]) || serializedBytes(value[field]) > 32 * 1024)) {
       throw new Error(`retrieval candidate ${index} ${field} is invalid`);
@@ -963,13 +995,14 @@ function parseRetrievalCandidate(value: unknown, index: number): RetrievalCandid
   const terms = value.terms === undefined ? undefined : value.terms as Record<string, unknown>;
   const metadata = value.metadata === undefined ? undefined : value.metadata as Record<string, unknown>;
   return {
-    asset_id: value.asset_id,
+    ...(value.asset_id === undefined ? {} : { asset_id: value.asset_id }),
     ...(value.offer_id === undefined ? {} : { offer_id: value.offer_id }),
     ...(value.display_name === undefined ? {} : { display_name: value.display_name }),
     ...(attributes === undefined ? {} : { attributes }),
     ...(terms === undefined ? {} : { terms }),
     score: value.score,
     reasons: [...value.reasons] as string[],
+    ...(value.risks === undefined ? {} : { risks: [...value.risks] as string[] }),
     ...(metadata === undefined ? {} : { metadata }),
   };
 }
@@ -1087,6 +1120,58 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/**
+ * Read a gateway response without handing an unbounded body to JSON.parse. A malformed or
+ * oversized response intentionally becomes `null` so the callers fail closed with their normal
+ * typed MCP error instead of exposing provider response data to the Agent.
+ */
+async function readBoundedJson(response: Response): Promise<unknown | null> {
+  const declaredLength = response.headers.get("content-length");
+  if (declaredLength !== null) {
+    const length = Number(declaredLength);
+    if (Number.isFinite(length) && length > MAX_AGENT_RESPONSE_BYTES) {
+      await response.body?.cancel().catch(() => undefined);
+      return null;
+    }
+  }
+
+  const body = response.body;
+  if (!body) return null;
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > MAX_AGENT_RESPONSE_BYTES) {
+        await reader.cancel("response exceeds MatchPlane client limit").catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/$/, "");
   if (!trimmed) throw new Error("MatchPlane baseUrl is required");
@@ -1099,6 +1184,14 @@ function normalizeBaseUrl(value: string): string {
     throw new Error("MatchPlane baseUrl must use HTTPS in production");
   }
   return parsed.origin;
+}
+
+function normalizeRequestTimeout(value: number | undefined): number {
+  const timeout = value ?? DEFAULT_AGENT_REQUEST_TIMEOUT_MS;
+  if (!isSafeInteger(timeout) || timeout < 1 || timeout > MAX_AGENT_REQUEST_TIMEOUT_MS) {
+    throw new Error(`MatchPlane requestTimeoutMs must be an integer between 1 and ${MAX_AGENT_REQUEST_TIMEOUT_MS}`);
+  }
+  return timeout;
 }
 
 function assertCallerBudget(budget: AgentHandoff["budget"]): void {

@@ -2,15 +2,25 @@
 Description=MatchPlane isolated static subplatform builder
 After=network-online.target matchplane-web.service
 Wants=network-online.target
+# The builder is optional until an operator supplies its isolated token and environment.  Do not
+# let systemd turn an intentionally unconfigured capability into a restart storm.
+ConditionPathExists=/etc/matchplane/services/subplatform-builder.env
+ConditionPathExists=/etc/matchplane/secrets/builder/builder.token
 
 [Service]
 Type=simple
 User=matchplane-builder
 Group=matchplane-builder
-SupplementaryGroups=matchplane-web
+# The builder needs to traverse the shared secret root (group `matchplane`) and
+# read only the web-owned upload mount (group `matchplane-web`).  Its own token
+# remains protected by the `matchplane-builder` group on the leaf file.
+SupplementaryGroups=matchplane matchplane-web
 EnvironmentFile=/etc/matchplane/matchplane.env
 EnvironmentFile=/etc/matchplane/services/subplatform-builder.env
 Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchplane/secrets/builder/builder.token
+# deploy/scripts/install-bun.sh installs the current stable Bun here. An explicit
+# MATCHPLANE_SUBPLATFORM_BUILDER_BUN path still wins when the operator needs one.
+Environment=PATH=/opt/bun-stable/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/matchplane serve subplatform-builder
 Restart=on-failure
 RestartSec=5s

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { statSync } from "node:fs";
 
 import { authDatabase } from "../../../../src/lib/auth";
 import { isPlatformRouterConfigured } from "../../../../src/platform-router";
@@ -17,6 +18,11 @@ interface RootContactField {
 interface RootChatConfig {
   buyerHeadlines?: string[];
   sellerHeadlines?: string[];
+}
+
+interface PlatformBuilderStatus {
+  configured: boolean;
+  status: "ready" | "degraded" | "unconfigured";
 }
 
 /**
@@ -95,6 +101,7 @@ export async function GET(): Promise<Response> {
     const activeChildren = registrations.active ?? 0;
     const contactFields = readRootContactFields();
     const chat = readRootChatConfig();
+    const builder = readBuilderStatus();
 
     return NextResponse.json(
       {
@@ -119,6 +126,7 @@ export async function GET(): Promise<Response> {
           // administrators should be able to see that no platform-owned model is connected.
           status: isPlatformRouterConfigured() ? "ready" : "fallback",
         },
+        builder,
         firstRun: {
           needsRootAccount: rootAdminAccounts === 0,
           // An operator may bootstrap the first account either through the configured
@@ -149,10 +157,74 @@ export async function GET(): Promise<Response> {
         registrations: {},
         routing: { activeChildren: 0, ready: false },
         hostedAgent: { configured: false, status: "fallback" },
+        builder: readBuilderStatus(),
         firstRun: { needsRootAccount: true, readyForAdmin: false },
       },
       { headers: { "cache-control": "no-store" } },
     );
+  }
+}
+
+/**
+ * Report only whether the isolated static builder can be started.  Never expose the token,
+ * secret path, or host paths to a browser; an unconfigured builder must be visible to operators
+ * so package registration cannot look like a successful production activation.
+ */
+function readBuilderStatus(): PlatformBuilderStatus {
+  const webUrl = process.env.MATCHPLANE_SUBPLATFORM_BUILDER_WEB_URL?.trim();
+  const artifactRoot = process.env.MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT?.trim();
+  const uploadRoot = process.env.MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT?.trim();
+  const workRoot = process.env.MATCHPLANE_SUBPLATFORM_BUILDER_WORK_ROOT?.trim();
+  const tokenFile = process.env.MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE?.trim();
+  const tokenConfigured = Boolean(process.env.MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN?.trim())
+    || Boolean(tokenFile && hasNonEmptyFile(tokenFile));
+  if (!webUrl || !artifactRoot || !uploadRoot || !workRoot || !tokenConfigured) {
+    return { configured: false, status: "unconfigured" };
+  }
+  const bwrap = process.env.MATCHPLANE_SUBPLATFORM_BUILDER_BWRAP?.trim();
+  const runtimeAvailable = bwrap
+    ? isExecutableFile(bwrap)
+    : ["/usr/bin/bwrap", "/usr/bin/bubblewrap", "/usr/local/bin/bwrap"].some(isExecutableFile);
+  const packageManagerAvailable = readBuilderPackageManagerPaths().some(isExecutableFile);
+  return { configured: true, status: runtimeAvailable && packageManagerAvailable ? "ready" : "degraded" };
+}
+
+function readBuilderPackageManagerPaths(): string[] {
+  const configuredBun = process.env.MATCHPLANE_SUBPLATFORM_BUILDER_BUN?.trim();
+  if (configuredBun) return [configuredBun];
+  return [
+    "/usr/local/bin/bun",
+    "/usr/local/bin/npm",
+    "/usr/local/bin/pnpm",
+    "/usr/local/bin/yarn",
+    "/usr/bin/bun",
+    "/usr/bin/npm",
+    "/usr/bin/pnpm",
+    "/usr/bin/yarn",
+    "/bin/bun",
+    "/bin/npm",
+    "/bin/pnpm",
+    "/bin/yarn",
+    "/opt/bun/bin/bun",
+  ];
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    const stat = statSync(path);
+    if (!stat.isFile()) return false;
+    return process.platform === "win32" || (stat.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+}
+
+function hasNonEmptyFile(path: string): boolean {
+  try {
+    const stat = statSync(path);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
   }
 }
 

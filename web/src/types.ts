@@ -23,6 +23,7 @@ export interface AssetListing {
   accent: Accent;
   facts: Array<{ label: string; value: string; key?: string }>;
   reasons?: string[];
+  risks?: string[];
   trust?: string[];
   seller?: string;
   response?: string;

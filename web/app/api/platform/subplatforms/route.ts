@@ -100,29 +100,55 @@ export async function POST(request: Request): Promise<Response> {
   const sourceDigest = input.sourceDigest!;
   const registrationId = randomUUID();
   let organization: { id: string; name: string; slug: string };
-  try {
-    organization = (await auth.api.createOrganization({
-      body: {
-        name: manifest.value.displayName,
-        slug: manifest.value.slug,
-        userId: session.user.id,
-        metadata: {
-          tenantId: input.tenantId,
-          domainId: input.domainId,
-          packageId: manifest.value.id,
-          parentOrganizationId: parentId,
+  let organizationCreated = false;
+  const existingOrganization = await authDatabase.query<{ id: string; name: string; slug: string }>(
+    `SELECT id::text, name, slug
+       FROM "organization"
+      WHERE slug = $1
+        AND "tenantId" = $2
+        AND "parentOrganizationId" = $3::uuid
+        AND "rootPlatform" = false
+      LIMIT 1`,
+    [manifest.value.slug, input.tenantId, parentId],
+  );
+  if (existingOrganization.rows[0]) {
+    // A subplatform slug identifies a stable organization node. Reuse that node for an
+    // immutable registration upgrade instead of creating a second Better Auth organization.
+    organization = existingOrganization.rows[0];
+  } else {
+    try {
+      organization = (await auth.api.createOrganization({
+        body: {
+          name: manifest.value.displayName,
+          slug: manifest.value.slug,
+          userId: session.user.id,
+          metadata: {
+            tenantId: input.tenantId,
+            domainId: input.domainId,
+            packageId: manifest.value.id,
+            parentOrganizationId: parentId,
+          },
         },
-      },
-    })) as { id: string; name: string; slug: string };
-  } catch (error) {
-    console.error("subplatform organization creation failed", error);
-    return NextResponse.json({ error: "子平台组织创建失败；slug 可能已被占用" }, { status: 409 });
+      })) as { id: string; name: string; slug: string };
+      organizationCreated = true;
+    } catch (error) {
+      console.error("subplatform organization creation failed", error);
+      return NextResponse.json({ error: "子平台组织创建失败；slug 可能已被占用" }, { status: 409 });
+    }
   }
 
   let client: PoolClient | undefined;
+  let version = "1";
   try {
     client = await authDatabase.connect();
     await client.query("BEGIN");
+    const nextVersion = await client.query<{ version: string }>(
+      `SELECT (COALESCE(MAX(version), 0) + 1)::text AS version
+         FROM subplatform_registrations
+        WHERE tenant_id = $1::uuid AND slug = $2`,
+      [input.tenantId, manifest.value.slug],
+    );
+    version = nextVersion.rows[0]?.version ?? "1";
     const projected = await client.query(
       `UPDATE "organization"
           SET "tenantId" = $2,
@@ -147,9 +173,10 @@ export async function POST(request: Request): Promise<Response> {
       `INSERT INTO subplatform_registrations
         (id, tenant_id, domain_id, package_id, slug, source_kind, source_locator,
          pinned_revision, source_digest, manifest_digest, build_digest, manifest,
-         requested_scopes, membership_policy, state, registered_by)
+         requested_scopes, membership_policy, version, state, registered_by)
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8,
-               decode($9, 'hex'), decode($10, 'hex'), $11, $12::jsonb, $13, $14, 'validated', $15)`,
+               decode($9, 'hex'), decode($10, 'hex'), $11, $12::jsonb, $13, $14,
+               $15::bigint, 'validated', $16)`,
       [
         registrationId,
         input.tenantId,
@@ -165,13 +192,16 @@ export async function POST(request: Request): Promise<Response> {
         JSON.stringify(manifest.value),
         requestedScopes,
         membershipPolicy,
+        version,
         session.user.id,
       ],
     );
     await client.query("COMMIT");
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
-    await authDatabase.query('DELETE FROM "organization" WHERE id = $1::uuid', [organization.id]).catch(() => undefined);
+    if (organizationCreated) {
+      await authDatabase.query('DELETE FROM "organization" WHERE id = $1::uuid', [organization.id]).catch(() => undefined);
+    }
     console.error("subplatform registration persistence failed", error);
     return NextResponse.json({ error: "子平台注册记录保存失败" }, { status: 500 });
   } finally {
@@ -183,6 +213,7 @@ export async function POST(request: Request): Promise<Response> {
     organizationId: organization.id,
     slug: organization.slug,
     state: "validated",
+    version,
     manifestDigest,
     sourceDigest,
     next: "isolated_builder_must_attach_build_digest_before_activation",
@@ -199,9 +230,26 @@ export async function GET(request: Request): Promise<Response> {
   if (!isUuid(configuredTenantId)) {
     return NextResponse.json({ error: "root tenant 尚未配置" }, { status: 503 });
   }
-  const parentId = new URL(request.url).searchParams.get("parentOrganizationId");
-  if (parentId && !isUuid(parentId)) return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
+  const requestedParentId = new URL(request.url).searchParams.get("parentOrganizationId");
+  if (requestedParentId && !isUuid(requestedParentId)) {
+    return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
+  }
   const configuredRootOrganizationId = process.env.MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID?.trim() ?? null;
+  const rootOrganizationId = configuredRootOrganizationId && isUuid(configuredRootOrganizationId)
+    ? configuredRootOrganizationId
+    : ((await authDatabase.query<{ id: string }>(
+        `SELECT id::text
+           FROM "organization"
+          WHERE "tenantId" = $1
+            AND "parentOrganizationId" IS NULL
+            AND "rootPlatform" = true
+          LIMIT 1`,
+        [configuredTenantId],
+      )).rows[0]?.id ?? null);
+  // The dashboard asks for the root's children without a query parameter. Scope that default
+  // to the configured root organization; otherwise registrations projected under the root are
+  // invisible because the recursive anchor only looks for top-level organizations.
+  const parentId = requestedParentId || rootOrganizationId;
   const userRole = (session.user as { role?: string }).role;
   if (!(await canManageParent(session.user.id, userRole, parentId || null))) {
     return NextResponse.json({ error: "平台管理员权限不足" }, { status: 403 });
@@ -212,9 +260,8 @@ export async function GET(request: Request): Promise<Response> {
          FROM "organization"
         WHERE "tenantId" = $2
           AND "rootPlatform" = false
-          AND ($3::uuid IS NULL OR id <> $3::uuid)
           AND (($1::uuid IS NULL AND "parentOrganizationId" IS NULL)
-           OR id = $1::uuid)
+           OR "parentOrganizationId" = $1::uuid)
        UNION ALL
        SELECT child.id, child.name, child.slug, child."parentOrganizationId", child."tenantId",
               child."domainId", child."sourceRepository", child."createdAt"
@@ -237,7 +284,8 @@ export async function GET(request: Request): Promise<Response> {
             registration.build_error AS "buildError"
        FROM nodes
        LEFT JOIN LATERAL (
-         SELECT r.id, r.state, r.build_digest, r.manifest_digest
+         SELECT r.id, r.state, r.build_digest, r.manifest_digest,
+                r.build_attempts, r.build_error
            FROM subplatform_registrations r
           WHERE r.slug = nodes.slug
             AND r.tenant_id::text = nodes."tenantId"
@@ -246,9 +294,8 @@ export async function GET(request: Request): Promise<Response> {
        ) registration ON true
       ORDER BY "createdAt" ASC`,
     [
-      parentId || null,
+      parentId,
       configuredTenantId,
-      configuredRootOrganizationId && isUuid(configuredRootOrganizationId) ? configuredRootOrganizationId : null,
     ],
   );
   return NextResponse.json({ organizations: rows.rows }, { headers: { "cache-control": "no-store" } });
@@ -384,6 +431,10 @@ function validateManifest(value: unknown, slug: string | undefined, packageId: s
   if (!Array.isArray(manifest.capabilities) || manifest.capabilities.some((item) => !stringMatches(item, /^[a-z0-9_:-]+$/))) return { ok: false, error: "manifest.capabilities 无效" };
   if (!Array.isArray(manifest.requiredScopes) || manifest.requiredScopes.some((item) => !allowedScopes.has(item))) return { ok: false, error: "manifest.requiredScopes 无效" };
   if (!manifest.assets || typeof manifest.assets !== "object" || !stringMatches(manifest.assets.staticDirectory, /^(?!\/)(?!.*\.\.).+$/) || !stringMatches(manifest.assets.buildCommand, /^.{1,500}$/u)) return { ok: false, error: "manifest.assets 无效" };
+  if (manifest.assets.dependencyPolicy !== undefined
+    && manifest.assets.dependencyPolicy !== "locked"
+    && manifest.assets.dependencyPolicy !== "latest") return { ok: false, error: "manifest.assets.dependencyPolicy 无效" };
+  if (manifest.assets.dependencyPolicy === "latest" && manifest.assets.buildCommand.trim() !== "bun run build") return { ok: false, error: "latest 依赖策略目前只支持 bun run build" };
   if (manifest.agent && !validateAgentManifest(manifest.agent)) return { ok: false, error: "manifest.agent 无效" };
   if (manifest.retrieval && (manifest.retrieval.protocol !== "matchplane.retrieval/v1" || manifest.retrieval.owner !== "subplatform")) return { ok: false, error: "manifest.retrieval 必须声明 subplatform-owned v1" };
   return { ok: true, value: manifest as Manifest };
@@ -528,7 +579,7 @@ interface Manifest {
   routes: string[];
   capabilities: string[];
   requiredScopes: string[];
-  assets: { staticDirectory: string; buildCommand: string };
+  assets: { staticDirectory: string; buildCommand: string; dependencyPolicy?: "locked" | "latest" };
   agent?: {
     protocol: "matchplane.agent/v1";
     stages: string[];

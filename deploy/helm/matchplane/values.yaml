@@ -1,7 +1,7 @@
 image:
   repository: ghcr.io/lightjunction/matchplane
   # Retained for release metadata; deployments use the immutable digest below.
-  tag: 0.1.9
+  tag: 0.1.10
   # Intentionally empty: production renders must provide the published image digest.
   digest: ''
   pullPolicy: IfNotPresent
@@ -43,6 +43,7 @@ web:
   # The router provider is optional. Keep its API key in existingWebSecret under router-ai-key.
   routerAiUrl: ''
   routerAiModel: ''
+  routerAiProtocol: openai-compatible
   routerAiMaxTokens: 512
   routerAiToolMode: auto
   routerAiMaxSteps: 8

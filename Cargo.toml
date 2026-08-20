@@ -22,7 +22,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT"
@@ -39,6 +39,7 @@ clap = { version = "4.6.6", features = ["derive", "env"] }
 config = "0.15.25"
 futures-util = "0.3.34"
 flate2 = "1.1.1"
+getrandom = "0.3.4"
 hex = "0.4.3"
 metrics = "0.24.6"
 metrics-exporter-prometheus = "0.18.3"
@@ -50,9 +51,14 @@ percent-encoding = "2.3.1"
 prost = "0.14.4"
 prost-types = "0.14.4"
 rdkafka = { version = "0.39.0", features = ["cmake-build", "tracing"] }
-redis = { version = "1.5.0", features = ["connection-manager", "tokio-comp"] }
+redis = {
+    version = "1.5.0",
+    features = ["connection-manager", "tokio-rustls-comp"],
+}
 reqwest = { version = "0.13.4", default-features = false, features = ["form", "json", "rustls", "stream"] }
+rpassword = "7.5.4"
 rsa = { version = "0.9.10", features = ["sha2"] }
+scrypt = "0.11.0"
 secrecy = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
@@ -72,6 +78,7 @@ tracing = "0.1.44"
 tracing-opentelemetry = "0.33.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 uuid = { version = "1.24.0", features = ["serde", "v5", "v7"] }
+unicode-normalization = "0.1.25"
 walkdir = "2.5.0"
 zstd = "0.13.2"
 url = "2.5.8"

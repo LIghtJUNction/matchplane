@@ -21,6 +21,15 @@ interface PluginHostProps {
   listings?: AssetListing[];
   /** Open a result in the host-owned detail sheet and contact flow. */
   onOpenListing?: (listing: AssetListing) => void;
+  /** Opaque conversational seller draft; the plugin may import it into its editable form. */
+  sellerDraft?: {
+    narrative: string;
+    intentId?: string;
+    attributes: Record<string, unknown>;
+    terms: Record<string, unknown>;
+  } | null;
+  /** Let a mounted child platform own the viewport below the host back control. */
+  fullscreen?: boolean;
 }
 
 /**
@@ -29,7 +38,7 @@ interface PluginHostProps {
  * but it never receives a session token or payment authority. Contact updates are validated by
  * the host and forwarded through the same Better Auth session bridge as the generic workspace.
  */
-export function PluginHost({ subplatform, role, theme, locale, onNotice, fallback, listings = [], onOpenListing }: PluginHostProps) {
+export function PluginHost({ subplatform, role, theme, locale, onNotice, fallback, listings = [], onOpenListing, sellerDraft = null, fullscreen = false }: PluginHostProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const contextTokenRef = useRef<string | null>(null);
   const pluginReadyRef = useRef(false);
@@ -73,6 +82,7 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
         assetSchema: subplatform.assetSchema,
         ui: subplatform.ui,
         capabilities: ["chat.open", "match.results", "listing.open", "listing.select", "listing.submit", "contact.update", "navigation"],
+        ...(role === "seller" && sellerDraft ? { agentDraft: sellerDraft } : {}),
       },
     }, "*");
     // onLoad can precede plugin.ready. Messages are ordered, so the plugin can
@@ -145,17 +155,23 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
     postResults();
   }, [listings]);
 
+  useEffect(() => {
+    // A routed seller draft may arrive after the iframe has already loaded. Re-send the
+    // versioned context so the plugin can offer an import action without a page reload.
+    if (pluginReadyRef.current) postContext();
+  }, [sellerDraft]);
+
   if (!artifact) return null;
 
   return (
-    <div className="plugin-workspace">
-      <section className="plugin-host" aria-label={`${subplatform.brandName} 插件界面`}>
-        <div className="plugin-host-bar">
+    <div className={`plugin-workspace${fullscreen ? " is-fullscreen" : ""}`}>
+      <section className={`plugin-host${fullscreen ? " is-fullscreen" : ""}`} aria-label={`${subplatform.brandName} 插件界面`}>
+        {fullscreen ? null : <div className="plugin-host-bar">
           <span>{subplatform.brandName}</span>
           <a href={artifact.url} target="_blank" rel="noreferrer">
             <ExternalLink size={14} aria-hidden="true" />{copy("openPluginLabel", "独立打开")}
           </a>
-        </div>
+        </div>}
         {failed ? (
           <div className="plugin-host-fallback">
             <p role="status">{copy("pluginFallbackNotice", "插件界面暂时不可用，已回退到平台通用工作台。")}</p>
@@ -169,7 +185,7 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
             src={artifact.url}
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
-            loading="lazy"
+            loading={fullscreen ? "eager" : "lazy"}
             onError={() => setFailed(true)}
             onLoad={postContext}
           />

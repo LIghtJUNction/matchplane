@@ -52,6 +52,8 @@ pub struct AppConfig {
     pub kafka_ssl_key_location: String,
     /// Valkey connection URL.
     pub valkey_url: String,
+    /// Optional PEM CA bundle used to verify a private Valkey TLS certificate.
+    pub valkey_ca_file: String,
     /// `tracing_subscriber` filter expression.
     pub log_filter: String,
     /// OpenTelemetry Collector gRPC endpoint.
@@ -95,6 +97,8 @@ pub struct ValidatedConfig {
     pub kafka_ssl_key_location: String,
     /// Valkey connection URL.
     pub valkey_url: String,
+    /// Optional PEM CA bundle used to verify a private Valkey TLS certificate.
+    pub valkey_ca_file: String,
     /// Log filter expression.
     pub log_filter: String,
     /// OTLP endpoint.
@@ -180,6 +184,7 @@ impl AppConfig {
             .set_default("kafka_ssl_certificate_location", "")?
             .set_default("kafka_ssl_key_location", "")?
             .set_default("valkey_url", "redis://localhost:6379/")?
+            .set_default("valkey_ca_file", "")?
             .set_default("log_filter", "info,matchplane=debug")?
             .set_default("otlp_endpoint", "http://localhost:4317")?
             .set_default("require_tls", false)?
@@ -233,6 +238,7 @@ impl AppConfig {
             kafka_ssl_certificate_location: self.kafka_ssl_certificate_location,
             kafka_ssl_key_location: self.kafka_ssl_key_location,
             valkey_url: self.valkey_url,
+            valkey_ca_file: self.valkey_ca_file,
             log_filter: self.log_filter,
             otlp_endpoint: self.otlp_endpoint,
             require_tls: self.require_tls,
@@ -488,6 +494,7 @@ mod tests {
             kafka_ssl_certificate_location: "/run/matchplane/kafka/client.crt".to_owned(),
             kafka_ssl_key_location: "/run/matchplane/kafka/client.key".to_owned(),
             valkey_url: "rediss://valkey:6380/".to_owned(),
+            valkey_ca_file: String::new(),
             log_filter: "info".to_owned(),
             otlp_endpoint: "https://otel:4317".to_owned(),
             require_tls: true,

@@ -26,6 +26,20 @@ export function validateMcpToolArguments(
       return validateAgentSession(args);
     case "marketplace.intent.create":
       return validateIntent(args);
+    case "marketplace.intent.update":
+      return validateIntentUpdate(args);
+    case "marketplace.profile.get":
+      return validateProfileGet(args);
+    case "marketplace.profile.upsert":
+      return validateProfileUpsert(args);
+    case "marketplace.behavior.record":
+      return validateBehaviorRecord(args);
+    case "marketplace.preferences.list":
+      return validatePreferencesList(args);
+    case "marketplace.preference.set":
+      return validatePreferenceSet(args);
+    case "marketplace.sales.handoff":
+      return validateSalesHandoff(args);
     case "marketplace.offer.create":
       return validateOffer(args);
     case "marketplace.offer.match":
@@ -143,6 +157,80 @@ function validateIntent(args: Record<string, unknown>): string | null {
     }
   }
   return optionalUuid(args, "intent_id");
+}
+
+function validateIntentUpdate(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const intent = uuidArgument(args, "intent_id");
+  if (intent) return intent;
+  const participant = uuidArgument(args, "participant_id");
+  if (participant) return participant;
+  const narrative = requiredString(args, "narrative", 10_000);
+  if (narrative) return narrative;
+  const version = integerArgument(args, "expected_version", 1, Number.MAX_SAFE_INTEGER);
+  if (version) return version;
+  return validateOptionalObjects(args, ["attributes", "terms"]);
+}
+
+function validateProfileGet(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  return uuidArgument(args, "participant_id");
+}
+
+function validateProfileUpsert(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const participant = uuidArgument(args, "participant_id");
+  if (participant) return participant;
+  return typeof recordArgument(args, "profile") === "string" ? recordArgument(args, "profile") as string : null;
+}
+
+function validateBehaviorRecord(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const participant = uuidArgument(args, "participant_id");
+  if (participant) return participant;
+  const eventType = requiredString(args, "event_type", 64);
+  if (eventType) return eventType;
+  if (!/^[a-z][a-z0-9._:-]{1,63}$/.test(args.event_type as string)) return "event_type must be a lowercase taxonomy key";
+  const intent = optionalUuid(args, "intent_id");
+  if (intent) return intent;
+  const offer = optionalUuid(args, "offer_id");
+  if (offer) return offer;
+  const objects = validateOptionalObjects(args, ["metadata"]);
+  if (objects) return objects;
+  return requiredString(args, "idempotency_key", 240);
+}
+
+function validatePreferencesList(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  return uuidArgument(args, "participant_id");
+}
+
+function validatePreferenceSet(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const participant = uuidArgument(args, "participant_id");
+  if (participant) return participant;
+  const offer = uuidArgument(args, "offer_id");
+  if (offer) return offer;
+  if (!["saved", "dismissed", "neutral"].includes(args.state as string)) return "state must be saved, dismissed, or neutral";
+  return optionalString(args, "reason", 500);
+}
+
+function validateSalesHandoff(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const participant = uuidArgument(args, "participant_id");
+  if (participant) return participant;
+  const intent = optionalUuid(args, "intent_id");
+  if (intent) return intent;
+  const summary = recordArgument(args, "summary");
+  if (typeof summary === "string") return summary;
+  return requiredString(args, "idempotency_key", 240);
 }
 
 function validateOffer(args: Record<string, unknown>): string | null {

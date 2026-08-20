@@ -15,7 +15,6 @@ import {
   Upload,
   WalletCards,
 } from "lucide-react";
-import { motion } from "motion/react";
 
 import {
   getInvoiceAdminRecords,
@@ -25,6 +24,8 @@ import {
   getPaymentGateways,
   getPaymentRoutes,
   getPlatformSetupStatus,
+  getPlatformAiStatus,
+  testPlatformAi,
   getSubplatformOrganizations,
   getRefundAdminRecords,
   createAdminRefund,
@@ -49,6 +50,7 @@ import {
   type PaymentGatewayRecord,
   type PaymentRouteRecord,
   type PlatformSetupStatus,
+  type PlatformAiStatus,
   type PlatformDomainRecord,
   type RefundAdminRecord,
   type SubplatformArchiveUpload,
@@ -57,7 +59,7 @@ import {
 import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
-import { MetricCard, SectionHeading, spring } from "./Primitives";
+import { MetricCard, SectionHeading } from "./Primitives";
 
 interface PlatformDashboardProps {
   paymentMode: "test" | "production";
@@ -66,6 +68,8 @@ interface PlatformDashboardProps {
   onNotice: (message: string) => void;
 }
 
+type PlatformSection = "overview" | "tree" | "access" | "payments" | "finance" | "site";
+
 export function PlatformDashboard({
   paymentMode,
   rootRole,
@@ -73,6 +77,8 @@ export function PlatformDashboard({
   onNotice,
 }: PlatformDashboardProps) {
   const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
+  const [activeSection, setActiveSection] = useState<PlatformSection>("overview");
+  const [aiStatus, setAiStatus] = useState<PlatformAiStatus | null>(null);
   const [setupError, setSetupError] = useState(false);
   const [domains, setDomains] = useState<PlatformDomainRecord[]>([]);
   const [subplatforms, setSubplatforms] = useState<SubplatformOrganizationRecord[]>([]);
@@ -94,6 +100,7 @@ export function PlatformDashboard({
   const [invoiceModeDialogOpen, setInvoiceModeDialogOpen] = useState(false);
   const [domainEditorOpen, setDomainEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [aiTesting, setAiTesting] = useState(false);
   const [gatewayName, setGatewayName] = useState("");
   const [gatewayKind, setGatewayKind] = useState<PaymentGatewayRecord["kind"]>("test");
   const [gatewayMode, setGatewayMode] = useState<"test" | "production">("test");
@@ -151,8 +158,8 @@ export function PlatformDashboard({
   useEffect(() => {
     if (!rootRole) return;
     let mounted = true;
-    void Promise.allSettled([getPlatformSetupStatus(), getPlatformDomains()])
-      .then(([statusResult, domainsResult]) => {
+    void Promise.allSettled([getPlatformSetupStatus(), getPlatformDomains(), getPlatformAiStatus()])
+      .then(([statusResult, domainsResult, aiResult]) => {
         if (!mounted) return;
         if (statusResult.status === "fulfilled") {
           setSetup(statusResult.value);
@@ -164,6 +171,7 @@ export function PlatformDashboard({
         // Keep that useful state visible instead of turning the whole admin panel into a generic
         // error just because the domain endpoint correctly returned 503.
         setDomains(domainsResult.status === "fulfilled" ? domainsResult.value : []);
+        if (aiResult.status === "fulfilled") setAiStatus(aiResult.value);
       });
     return () => {
       mounted = false;
@@ -222,6 +230,19 @@ export function PlatformDashboard({
     setPayments(nextPayments);
     setRefunds(nextRefunds);
     setInvoices(nextInvoices);
+  };
+
+  const testAiConnection = async () => {
+    setAiTesting(true);
+    try {
+      const result = await testPlatformAi();
+      setAiStatus(await getPlatformAiStatus());
+      onNotice(`${result.message}${result.latencyMs ? `（${result.latencyMs} ms）` : ""}`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "AI 连接测试失败");
+    } finally {
+      setAiTesting(false);
+    }
   };
 
   const submitRefund = async () => {
@@ -656,6 +677,13 @@ export function PlatformDashboard({
     : setup?.hostedAgent.configured
       ? "平台 Agent 已连接"
       : "平台 Agent 使用受控降级";
+  const builderStatus = setupError
+    ? "构建器状态不可用"
+    : setup?.builder?.status === "ready"
+      ? "子平台构建器已就绪"
+      : setup?.builder?.status === "degraded"
+        ? "子平台构建器待补运行时"
+        : "子平台构建器未配置";
   const subplatformStateLabel: Record<string, string> = {
     active: "已激活",
     ready: "构建完成",
@@ -670,31 +698,30 @@ export function PlatformDashboard({
         <div>
           <p className="eyebrow">平台管理</p>
           <h1>平台管理</h1>
-          <p>管理平台树、支付、发票和退款。</p>
-        </div>
-        <div className={`mode-summary mode-${paymentMode}`}>
-          <span className="status-orb" aria-hidden="true" />
-          <div><small>当前支付模式</small><strong>{paymentMode === "test" ? "测试模式" : "生产模式"}</strong></div>
-          <motion.button
-            type="button"
-            onClick={onRequestModeChange}
-            whileTap={{ scale: 0.94 }}
-            transition={spring}
-          >
-            切换
-          </motion.button>
+          <p>一次只处理一个管理分区；线上支付是可选能力。</p>
         </div>
       </section>
 
-      <section className="metric-grid" aria-label="平台经营指标">
-        <MetricCard icon={CircleDollarSign} label="平台服务费" value="—" detail="等待实时结算数据" tone="cactus" />
-        <MetricCard icon={HandCoins} label="完成撮合" value="—" detail="由 API 提供统计" tone="heather" />
-        <MetricCard icon={WalletCards} label="待结算" value="—" detail="等待双方确认" />
-        <MetricCard icon={RefreshCcw} label="退款率" value="—" detail="由支付服务计算" tone="clay" />
-      </section>
+      <div className="platform-admin-shell">
+        <nav className="platform-admin-nav" role="tablist" aria-label="平台管理分区">
+          <button id="platform-tab-overview" type="button" role="tab" aria-selected={activeSection === "overview"} aria-controls="platform-panel-overview" className={activeSection === "overview" ? "is-active" : ""} onClick={() => setActiveSection("overview")}><BadgeCheck size={17} aria-hidden="true" /><span>总览</span></button>
+          <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>平台树</span></button>
+          <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>访问与接入</span></button>
+          <button id="platform-tab-payments" type="button" role="tab" aria-selected={activeSection === "payments"} aria-controls="platform-panel-payments" className={activeSection === "payments" ? "is-active" : ""} onClick={() => setActiveSection("payments")}><CreditCard size={17} aria-hidden="true" /><span>支付（可选）</span></button>
+          <button id="platform-tab-finance" type="button" role="tab" aria-selected={activeSection === "finance"} aria-controls="platform-panel-finance" className={activeSection === "finance" ? "is-active" : ""} onClick={() => setActiveSection("finance")}><ReceiptText size={17} aria-hidden="true" /><span>财务与退款</span></button>
+          <button id="platform-tab-site" type="button" role="tab" aria-selected={activeSection === "site"} aria-controls="platform-panel-site" className={activeSection === "site" ? "is-active" : ""} onClick={() => setActiveSection("site")}><FileCheck2 size={17} aria-hidden="true" /><span>网站与合规</span></button>
+        </nav>
 
-      <div className="platform-layout">
-        <section className="surface platform-readiness" aria-label="首启与平台树">
+        <div className="platform-admin-content">
+          <section className="metric-grid" aria-label="平台经营指标" hidden={activeSection !== "overview"}>
+            <MetricCard icon={CircleDollarSign} label="平台服务费" value="—" detail="等待实时结算数据" tone="cactus" />
+            <MetricCard icon={HandCoins} label="完成撮合" value="—" detail="由 API 提供统计" tone="heather" />
+            <MetricCard icon={WalletCards} label="待结算" value="—" detail="等待双方确认" />
+            <MetricCard icon={RefreshCcw} label="退款率" value="—" detail="由支付服务计算" tone="clay" />
+          </section>
+
+          <div className="platform-layout">
+        <section id="platform-panel-overview" className="surface platform-readiness" role="tabpanel" aria-labelledby="platform-tab-overview" hidden={activeSection !== "overview"}>
           <SectionHeading eyebrow="首启与平台树" title="先确认平台已经准备好" />
           <div className="readiness-grid">
             <div className={setup?.firstRun.needsRootAccount ? "readiness-item readiness-attention" : "readiness-item"}>
@@ -712,6 +739,11 @@ export function PlatformDashboard({
               <strong>{hostedAgentStatus}</strong>
               <small>{setup?.hostedAgent.configured ? "托管模型负责没有自有 Agent 的买家和卖家" : "配置 MATCHPLANE_ROUTER_AI_URL、KEY、MODEL 后启用"}</small>
             </div>
+            <div className={setup?.builder?.status === "ready" ? "readiness-item" : "readiness-item readiness-attention"}>
+              <span aria-hidden="true" />
+              <strong>{builderStatus}</strong>
+              <small>{setup?.builder?.status === "ready" ? "Git/归档包会在隔离构建器中生成 immutable artifact" : "配置 builder token、工作目录与 bubblewrap 后再激活新包"}</small>
+            </div>
           </div>
           {setup?.firstRun.needsRootAccount ? (
             <a className="button button-dark readiness-action" href="/login?role=platform&next=%2F%3Frole%3Dplatform">去创建或登录根管理员</a>
@@ -726,7 +758,40 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
-        <section className="surface domain-panel" aria-labelledby="domain-title">
+        <section className="surface platform-agent-config" aria-label="AI 与登录配置" hidden={activeSection !== "access"}>
+          <SectionHeading eyebrow="AI 与登录" title="把真实服务接到这一个管理员入口" />
+          <div className="readiness-grid">
+            <div className={aiStatus?.router.configured ? "readiness-item" : "readiness-item readiness-attention"}>
+              <span aria-hidden="true" />
+              <strong>{aiStatus?.router.configured ? `托管 Agent 已连接${aiStatus.router.model ? ` · ${aiStatus.router.model}` : ""}` : "托管 Agent 尚未连接"}</strong>
+              <small>{aiStatus?.router.configured ? `${routerProtocolLabel(aiStatus.router.protocol)} · ${aiStatus.router.endpointOrigin || "服务端端点"}` : "把模型网关配置在 web 服务端，浏览器不会接触密钥"}</small>
+            </div>
+            <div className="readiness-item">
+              <span aria-hidden="true" />
+              <strong>统一登录已就绪</strong>
+              <small>{authCapabilitySummary(aiStatus)}</small>
+            </div>
+          </div>
+          <div className="platform-agent-config-body">
+            <p>模型由根平台负责有限路由；子平台检索和领域 Agent 仍由各自 manifest/MCP 端点提供。管理员页面只显示状态，不保存 OAuth 或模型密钥。</p>
+            <div className="platform-agent-config-snippets" aria-label="服务端配置项">
+              <code>MATCHPLANE_ROUTER_AI_URL=https://your-gateway.example/v1/chat/completions</code>
+              <code>MATCHPLANE_ROUTER_AI_KEY=server-secret</code>
+              <code>MATCHPLANE_ROUTER_AI_MODEL=provider/model</code>
+              <code>MATCHPLANE_ROUTER_AI_PROTOCOL=openai-compatible</code>
+              <small>可选协议：openai-compatible、anthropic-messages、gemini-generate-content</small>
+            </div>
+            <div className="platform-agent-config-actions">
+              <button className="button button-light" type="button" disabled={aiTesting || !aiStatus?.router.configured} onClick={() => void testAiConnection()}>
+                {aiTesting ? "测试中…" : "测试连接"}
+              </button>
+              <a className="button button-light" href="/?role=buyer">打开买方对话测试</a>
+              <span>{aiStatus?.router.configured ? `每小时上限 ${aiStatus.router.globalRequestsPerHour} 次 · 单次最长 ${Math.round(aiStatus.router.totalTimeoutMs / 1000)} 秒` : "配置后刷新此页，再用买方对话发送一句真实需求"}</span>
+            </div>
+          </div>
+        </section>
+
+        <section id="platform-panel-tree" className="surface domain-panel" role="tabpanel" aria-labelledby="platform-tab-tree" hidden={activeSection !== "tree"}>
           <SectionHeading
             eyebrow="平台范围"
             title="管理 domain"
@@ -759,14 +824,16 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
-        <PlatformSiteSettingsPanel
-          organizationId={setup?.root.organization?.id}
-          platformPath="/"
-          platformName={setup?.root.organization?.name || "根平台"}
-          onNotice={onNotice}
-        />
+        <div id="platform-panel-site" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-site" hidden={activeSection !== "site"}>
+          <PlatformSiteSettingsPanel
+            organizationId={setup?.root.organization?.id}
+            platformPath="/"
+            platformName={setup?.root.organization?.name || "根平台"}
+            onNotice={onNotice}
+          />
+        </div>
 
-        <section className="surface subplatform-panel" aria-labelledby="subplatform-title">
+        <section className="surface subplatform-panel" aria-labelledby="subplatform-title" hidden={activeSection !== "tree"}>
           <div className="subplatform-header">
             <div>
               <p className="eyebrow">递归平台树</p>
@@ -857,10 +924,16 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
-        <PlatformAccessPanel organizations={accessOrganizations} rootRole={rootRole} onNotice={onNotice} />
+        <div id="platform-panel-access" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-access" hidden={activeSection !== "access"}>
+          <PlatformAccessPanel organizations={accessOrganizations} rootRole={rootRole} onNotice={onNotice} />
+        </div>
 
-        <section className="surface gateway-panel" aria-labelledby="gateway-title">
-          <SectionHeading eyebrow="标准化支付接口" title="支付网关" action="配置网关" onAction={() => setGatewayEditorOpen(true)} />
+        <section id="platform-panel-payments" className="surface gateway-panel" role="tabpanel" aria-labelledby="platform-tab-payments" hidden={activeSection !== "payments"}>
+          <div className={`payment-mode-control mode-${paymentMode}`}>
+            <div><span className="status-orb" aria-hidden="true" /><span><small>可选线上支付</small><strong>{paymentMode === "test" ? "测试模式" : "生产模式"}</strong></span></div>
+            <button type="button" onClick={onRequestModeChange}>切换支付模式</button>
+          </div>
+          <SectionHeading eyebrow="可选能力" title="线上支付网关" action="配置网关" onAction={() => setGatewayEditorOpen(true)} />
           <div className="gateway-list">
             {gateways.length ? gateways.map((gateway) => (
               <div className="gateway-row" key={gateway.gateway_id}>
@@ -871,8 +944,8 @@ export function PlatformDashboard({
             )) : (
               <div className="gateway-empty">
                 <CreditCard size={24} aria-hidden="true" />
-                <strong>尚未配置支付网关</strong>
-                <p>选择 EPay、Waffo Pancake、微信支付、支付宝或测试网关。</p>
+                <strong>暂不使用线上支付</strong>
+                <p>这不会阻断撮合。默认在双方同意后交换微信和手机号；需要平台内收款时再配置网关。</p>
                 <button type="button" onClick={() => setGatewayEditorOpen(true)}>打开配置</button>
               </div>
             )}
@@ -910,7 +983,7 @@ export function PlatformDashboard({
                   );
                 })}
               </div>
-            ) : <p className="route-empty">还没有路由；先保存一个网关，再为微信、支付宝或其他协议指定币种。</p>}
+            ) : <p className="route-empty">线上支付为可选；添加网关后，再为微信支付、支付宝或其他协议指定币种。</p>}
             {routeEditorOpen ? (
               <div className="admin-editor route-editor" aria-label="支付路由配置">
                 <div className="admin-editor-heading"><strong>新增支付路由</strong><button type="button" onClick={() => setRouteEditorOpen(false)}>关闭</button></div>
@@ -926,7 +999,7 @@ export function PlatformDashboard({
           </div>
         </section>
 
-        <section className="surface commission-panel" aria-labelledby="commission-title">
+        <section id="platform-panel-finance" className="surface commission-panel" role="tabpanel" aria-labelledby="platform-tab-finance" hidden={activeSection !== "finance"}>
           <SectionHeading eyebrow="提成模型" title="本月收入构成" />
           <div className="commission-total">
             <span>已确认净收入</span>
@@ -940,7 +1013,7 @@ export function PlatformDashboard({
           </div>
         </section>
 
-        <section className="surface finance-activity" aria-labelledby="finance-activity-title">
+        <section className="surface finance-activity" aria-labelledby="finance-activity-title" hidden={activeSection !== "finance"}>
           <SectionHeading eyebrow="财务动态" title="支付、发票与退款" action="配置发票" onAction={() => setInvoiceEditorOpen(true)} />
           <div className="finance-empty">
             <ReceiptText size={22} aria-hidden="true" />
@@ -1005,11 +1078,13 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
-        <section className="operations-strip" aria-label="支付运营状态">
+        <section className="operations-strip" aria-label="支付运营状态" hidden={activeSection !== "overview"}>
           <div><span><BadgeCheck aria-hidden="true" /></span><p><strong>网关健康</strong><small>等待配置数据</small></p></div>
           <div><span><Clock3 aria-hidden="true" /></span><p><strong>主动对账</strong><small>由支付服务报告</small></p></div>
           <div><span><FileCheck2 aria-hidden="true" /></span><p><strong>审计记录</strong><small>由根平台审计流报告</small></p></div>
         </section>
+          </div>
+        </div>
       </div>
       <ModeDialog
         open={invoiceModeDialogOpen}
@@ -1020,4 +1095,27 @@ export function PlatformDashboard({
       />
     </div>
   );
+}
+
+function routerProtocolLabel(protocol: PlatformAiStatus["router"]["protocol"]): string {
+  switch (protocol) {
+    case "anthropic-messages":
+      return "Anthropic Messages";
+    case "gemini-generate-content":
+      return "Gemini GenerateContent";
+    default:
+      return "OpenAI-compatible";
+  }
+}
+
+function authCapabilitySummary(status: PlatformAiStatus | null): string {
+  if (!status) return "正在读取已配置的密码、验证码、Passkey 与第三方登录";
+  const labels: string[] = [];
+  if (status.auth.password) labels.push("密码");
+  if (status.auth.emailOtp) labels.push("邮箱验证码");
+  if (status.auth.phoneOtp) labels.push("手机验证码");
+  if (status.auth.magicLink) labels.push("免密链接");
+  if (status.auth.passkey) labels.push("Passkey");
+  labels.push(...status.auth.primary, ...status.auth.fallback);
+  return labels.length ? `${labels.join("、")} 可用` : "尚未配置额外登录方式";
 }

@@ -15,22 +15,26 @@ import { AnimatePresence, motion } from "motion/react";
 
 import type { AssetListing } from "../types";
 import { subplatformCopy, type SubplatformConfig } from "../subplatform";
+import type { InterfaceLocale } from "../lib/preferences";
+import { localizedSubplatformCopy } from "../lib/localized-copy";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { ListingVisual, momentumSpring, spring } from "./Primitives";
 
 interface ListingSheetProps {
   listing: AssetListing | null;
   subplatform: SubplatformConfig;
+  locale: InterfaceLocale;
   onClose: () => void;
   onContact: (listing: AssetListing) => Promise<void> | void;
   /** Contact requests are disabled when the host is running without a live API. */
   contactDisabled?: boolean;
 }
 
-export function ListingSheet({ listing, subplatform, onClose, onContact, contactDisabled = false }: ListingSheetProps) {
+export function ListingSheet({ listing, subplatform, locale, onClose, onContact, contactDisabled = false }: ListingSheetProps) {
   const desktop = useMediaQuery("(min-width: 56rem)");
   const closeRef = useRef<HTMLButtonElement>(null);
   const [contactSubmitting, setContactSubmitting] = useState(false);
+  const copy = (key: string, fallbackZh: string, fallbackEn: string) => localizedSubplatformCopy(subplatform, locale, key, fallbackZh, fallbackEn);
 
   useOverlayLifecycle(Boolean(listing), onClose, closeRef);
 
@@ -55,7 +59,7 @@ export function ListingSheet({ listing, subplatform, onClose, onContact, contact
           <motion.button
             className="overlay-backdrop"
             type="button"
-            aria-label="关闭供给详情"
+            aria-label={copy("closeOfferDetailLabel", "关闭供给详情", "Close offer details")}
             onClick={onClose}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -79,11 +83,11 @@ export function ListingSheet({ listing, subplatform, onClose, onContact, contact
           >
             <div className="sheet-handle" aria-hidden="true" />
             <div className="sheet-header">
-              <span className="sheet-label">{subplatformCopy(subplatform, "offerDetailLabel", "供给详情")}</span>
+              <span className="sheet-label">{copy("offerDetailLabel", "供给详情", "Offer details")}</span>
               <motion.button
                 ref={closeRef}
                 type="button"
-                aria-label="关闭供给详情"
+                aria-label={copy("closeOfferDetailLabel", "关闭供给详情", "Close offer details")}
                 onClick={onClose}
                 whileTap={{ scale: 0.88 }}
                 transition={spring}
@@ -93,20 +97,29 @@ export function ListingSheet({ listing, subplatform, onClose, onContact, contact
             </div>
             <div className="sheet-scroll">
               <ListingVisual accent={listing.accent} label={listing.trust?.[0]} />
-              {listing.matchScore !== undefined ? <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {listing.matchScore}% {subplatformCopy(subplatform, "matchLabel", "匹配")}</div> : null}
+              {listing.matchScore !== undefined ? <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {matchLevelForScore(listing.matchScore, locale)} · {copy("matchLabel", "匹配", "match")}</div> : null}
               <h2 id="listing-sheet-title">{listing.title}</h2>
               <p className="sheet-subtitle">{listing.subtitle}</p>
               <div className="sheet-price"><strong>{listing.price}</strong>{listing.priceLabel ? <span>{listing.priceLabel}</span> : null}</div>
               <dl className="sheet-facts">
                 {listing.facts.map((fact) => <div key={`${fact.label}-${fact.value}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
-                {listing.location ? <div><dt>位置</dt><dd>{listing.location}</dd></div> : null}
+                {listing.location ? <div><dt>{copy("locationLabel", "位置", "Location")}</dt><dd>{listing.location}</dd></div> : null}
               </dl>
 
               {listing.reasons?.length ? <section className="sheet-section">
-                <h3>匹配理由</h3>
+                <h3>{copy("matchReasonsTitle", "匹配理由", "Why it matches")}</h3>
                 <ul className="reason-list">
                   {listing.reasons.map((reason) => (
                     <li key={reason}><span><Check size={14} aria-hidden="true" /></span>{reason}</li>
+                  ))}
+                </ul>
+              </section> : null}
+
+              {listing.risks?.length ? <section className="sheet-section risk-section">
+                <h3>{copy("matchRisksTitle", "需要留意", "Things to consider")}</h3>
+                <ul className="reason-list">
+                  {listing.risks.map((risk) => (
+                    <li key={risk}><span>!</span>{risk}</li>
                   ))}
                 </ul>
               </section> : null}
@@ -115,7 +128,7 @@ export function ListingSheet({ listing, subplatform, onClose, onContact, contact
                 <div className="seller-line">
                   <span className="seller-avatar">{listing.seller.slice(0, 1)}</span>
                   <div><strong>{listing.seller}</strong>{listing.response ? <small>{listing.response}</small> : null}</div>
-                  <BadgeCheck size={20} aria-label={subplatformCopy(subplatform, "verifiedSupplyLabel", "供给方身份已核验")} />
+                  <BadgeCheck size={20} aria-label={copy("verifiedSupplyLabel", "供给方身份已核验", "Supply identity verified")} />
                 </div>
                 {listing.trust?.length ? <ul>{listing.trust.map((item) => <li key={item}>{item}</li>)}</ul> : null}
               </section> : null}
@@ -123,33 +136,33 @@ export function ListingSheet({ listing, subplatform, onClose, onContact, contact
               <section className="offline-contact-card">
                 <span className="contact-icon"><LockKeyhole aria-hidden="true" /></span>
                 <div>
-                  <h3>{subplatformCopy(subplatform, "contactTitle", "匹配后直接联系供给方")}</h3>
-                  <p>{subplatformCopy(subplatform, "contactDescription", "平台确认撮合与服务安排后，双方联系方式按权限解锁；后续可以在线下完成。")}</p>
+                  <h3>{copy("contactTitle", "匹配后直接联系供给方", "Contact the supply side after a match")}</h3>
+                  <p>{copy("contactDescription", "平台确认撮合与服务安排后，双方联系方式按权限解锁；后续可以在线下完成。", "Contact details unlock after the platform confirms the match and arrangements; you can continue offline.")}</p>
                 </div>
                 <div className="contact-options">
-                  <span><MessageCircle size={15} aria-hidden="true" />站内沟通</span>
-                  <span><Phone size={15} aria-hidden="true" />{subplatformCopy(subplatform, "contactChannelsLabel", "联系方式")}</span>
-                  <span><CalendarDays size={15} aria-hidden="true" />{subplatformCopy(subplatform, "appointmentLabel", "预约协商")}</span>
-                  <span><MapPin size={15} aria-hidden="true" />{subplatformCopy(subplatform, "locationLabel", "地点受控")}</span>
+                  <span><MessageCircle size={15} aria-hidden="true" />{copy("inPlatformContactLabel", "站内沟通", "In-platform chat")}</span>
+                  <span><Phone size={15} aria-hidden="true" />{copy("contactChannelsLabel", "联系方式", "Contact channels")}</span>
+                  <span><CalendarDays size={15} aria-hidden="true" />{copy("appointmentLabel", "预约协商", "Arrange a time")}</span>
+                  <span><MapPin size={15} aria-hidden="true" />{copy("locationLabel", "地点受控", "Location controlled")}</span>
                 </div>
               </section>
             </div>
             <div className="sheet-footer">
-              <div><small>{subplatformCopy(subplatform, "platformFeeLabel", "平台服务费")}</small><strong>{subplatformCopy(subplatform, "platformFeeDescription", "按当前子平台披露规则结算")}</strong></div>
+              <div><small>{copy("platformFeeLabel", "平台服务费", "Platform service fee")}</small><strong>{copy("platformFeeDescription", "按当前子平台披露规则结算", "Settled under the active platform disclosure")}</strong></div>
               <motion.button
                 className="button button-dark"
                 type="button"
                 onClick={() => void submitContact()}
                 disabled={contactSubmitting || contactDisabled}
-                title={contactDisabled ? "当前环境未连接真实撮合 API" : undefined}
+                title={contactDisabled ? copy("contactUnavailableTitle", "当前环境未连接真实撮合 API", "The live matching API is not connected") : undefined}
                 whileTap={{ scale: 0.97 }}
                 transition={momentumSpring}
               >
                 {contactSubmitting
-                  ? subplatformCopy(subplatform, "contactSubmittingLabel", "正在提交…")
+                  ? copy("contactSubmittingLabel", "正在提交…", "Submitting…")
                   : contactDisabled
-                    ? subplatformCopy(subplatform, "contactUnavailableLabel", "演示环境不可用")
-                    : subplatformCopy(subplatform, "requestContactLabel", "申请联系")}
+                    ? copy("contactUnavailableLabel", "当前暂不可用", "Unavailable right now")
+                    : copy("requestContactLabel", "申请联系", "Request contact")}
               </motion.button>
             </div>
           </motion.aside>
@@ -165,6 +178,11 @@ interface ModeDialogProps {
   onClose: () => void;
   onConfirm: () => void;
   resourceLabel?: string;
+}
+
+function matchLevelForScore(score: number, locale: InterfaceLocale): string {
+  if (locale === "en") return score >= 80 ? "Strong fit" : score >= 60 ? "Good fit" : score >= 40 ? "Possible fit" : "Weak fit";
+  return score >= 80 ? "非常适合" : score >= 60 ? "比较适合" : score >= 40 ? "一般" : "不太适合";
 }
 
 export function ModeDialog({ open, currentMode, onClose, onConfirm, resourceLabel = "" }: ModeDialogProps) {
