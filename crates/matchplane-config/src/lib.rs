@@ -10,6 +10,7 @@ use thiserror::Error;
 use url::Url;
 
 pub mod auth;
+pub mod provider_registry;
 
 pub use auth::{AuthError, BearerToken};
 

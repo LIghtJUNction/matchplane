@@ -46,9 +46,7 @@ impl ProviderRegistry {
 
     /// Find an enabled provider by identifier.
     pub fn get_enabled(&self, id: &str) -> Option<&ProviderDefinition> {
-        self.providers
-            .get(id)
-            .filter(|provider| provider.enabled)
+        self.providers.get(id).filter(|provider| provider.enabled)
     }
 
     /// List enabled providers of a category.

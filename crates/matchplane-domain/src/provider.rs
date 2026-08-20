@@ -20,7 +20,11 @@ pub struct ProviderDescriptor {
 
 impl ProviderDescriptor {
     #[must_use]
-    pub fn enabled(id: impl Into<String>, name: impl Into<String>, capability: ProviderCapability) -> Self {
+    pub fn enabled(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        capability: ProviderCapability,
+    ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
