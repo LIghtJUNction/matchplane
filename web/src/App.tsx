@@ -74,6 +74,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
+  const [authResolved, setAuthResolved] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -115,11 +116,19 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    // A session is cookie-backed and therefore arrives asynchronously after a
+    // hard refresh. Keep the header neutral until that check has completed;
+    // also discard an older request when a subplatform transition starts a
+    // newer one, so a late failure cannot briefly replace a valid session.
+    setAuthResolved(false);
     void authClient
       .getSession({ fetchOptions: authFetchOptions(subplatform.slug) })
       .then(({ data }) => {
+        if (cancelled) return;
         const user = data?.user as AuthenticatedUser | undefined;
         setAuthUser(user?.id ? user : null);
+        setAuthResolved(true);
         const requestedRole = requestedRoleRef.current;
         const userRole = user?.role;
         const isRootManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
@@ -140,13 +149,18 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         }
       })
       .catch(() => {
+        if (cancelled) return;
         setAuthUser(null);
+        setAuthResolved(true);
         const requestedRole = requestedRoleRef.current;
         if (requiresAuthenticatedWorkspace(requestedRole)) {
           setRole("buyer");
           window.location.assign(loginHref(requestedRole));
         }
       });
+    return () => {
+      cancelled = true;
+    };
   }, [subplatform.slug]);
 
   const openSignIn = (targetRole: WorkspaceRole = role) => {
@@ -302,7 +316,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               </div>
               <div className="header-actions">
                 <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
-                {!authUser ? (
+                {!authUser && authResolved ? (
                   <motion.button
                     className="header-signin-action"
                     type="button"

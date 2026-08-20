@@ -62,7 +62,7 @@ describe("MatchPlane workspaces", () => {
     expect(screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" })).toBeInTheDocument();
 
     expect(screen.queryByText("其他入口")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "登录" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "切换到暗色" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("供给名称")).not.toBeInTheDocument();
@@ -100,7 +100,7 @@ describe("MatchPlane workspaces", () => {
     await waitFor(() => expect(authClient.getSession).toHaveBeenCalled());
     expect(screen.queryByLabelText("供给名称")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 
   it("does not fabricate a seller submission when the marketplace API is disabled", async () => {
@@ -110,8 +110,9 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     await openConsoleFromAccountMenu(user);
-    await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
-    await user.type(screen.getByLabelText("内部编号"), "seller-item");
+    await user.type(await screen.findByLabelText("商品名称"), "由卖家提交的资料");
+    await user.type(screen.getByLabelText("商品描述"), "一辆经过整理的二手车");
+    await user.type(screen.getByLabelText("价格"), "128000");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
 
     expect(screen.getByRole("status")).toHaveTextContent("没有写入系统");
@@ -272,7 +273,7 @@ describe("MatchPlane workspaces", () => {
 
     expect(screen.queryByLabelText("手机号")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("微信号")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "登录" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, FileUp, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, FileUp, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 
 import {
@@ -98,6 +98,7 @@ const sellerEnglishFallbacks: Record<string, string> = {
 export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = null }: SellerDashboardProps) {
   const [externalKey, setExternalKey] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [productDescription, setProductDescription] = useState("");
   const [askingAmount, setAskingAmount] = useState("");
   const [askingAmountMin, setAskingAmountMin] = useState("");
   const [askingAmountMax, setAskingAmountMax] = useState("");
@@ -107,15 +108,10 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
   const isFixedPrice = pricing.mode === "fixed";
   const isRangePrice = pricing.mode === "range";
   const isNegotiablePrice = pricing.mode === "negotiable";
-  const mediaUploadEnabled = subplatform.agentMcpTools?.includes("media.upload") === true;
   const usesLegacyMarketplace = subplatform.marketplaceContract === "legacy-v1";
   const pricingCurrency = pricing.currency ?? subplatform.currency;
   const pricingScale = pricing.currencyScale ?? subplatform.currencyScale;
   const [currency, setCurrency] = useState(pricingCurrency ?? "");
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
-  const [customFields, setCustomFields] = useState<Array<{ id: string; key: string; value: string }>>([]);
-  const [advancedAttributes, setAdvancedAttributes] = useState("{}");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [draftImported, setDraftImported] = useState(false);
   const [attachments, setAttachments] = useState<MarketplaceAttachment[]>([]);
   const [mediaUploading, setMediaUploading] = useState(false);
@@ -288,27 +284,14 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
 
   const importAgentDraft = () => {
     if (!agentDraft) return;
-    const draft = {
-      conversation: {
-        narrative: agentDraft.narrative,
-        intent_id: agentDraft.intentId ?? null,
-      },
-      ...agentDraft.attributes,
-      _terms: agentDraft.terms,
-    };
-    setAdvancedAttributes(JSON.stringify(draft, null, 2));
+    setProductDescription(agentDraft.narrative);
     if (agentDraft.attachments?.length) setAttachments(agentDraft.attachments.slice(0, 8));
-    setAdvancedOpen(true);
     setDraftImported(true);
-    onNotice(copy("agentDraftImportedNotice", "已把对话草稿放入高级资料，请检查并补齐字段后提交", "The conversation draft is in advanced attributes; review it before submitting"));
+    onNotice(copy("agentDraftImportedNotice", "已把对话草稿放入商品描述，请检查后提交", "The conversation draft was added to the product description"));
   };
 
   const uploadFiles = async (files: FileList | null) => {
     if (!files || !files.length || mediaUploading) return;
-    if (!mediaUploadEnabled) {
-      onNotice(copy("mediaUnavailableNotice", "当前子平台没有启用资料上传适配器", "This platform has not enabled its media adapter"));
-      return;
-    }
     if (!subplatform.tenantId || !subplatform.domainId) {
       onNotice(copy("platformIdentityIncompleteNotice", "当前子平台尚未完成身份配置", "This platform's identity configuration is incomplete"));
       return;
@@ -343,27 +326,6 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
     [submissions],
   );
 
-  const schemaFields = useMemo(() => {
-    const configured = subplatform.ui?.supplyFields ?? [];
-    if (configured.length) return configured;
-    const properties = subplatform.assetSchema?.properties;
-    if (!properties || typeof properties !== "object" || Array.isArray(properties)) return [];
-    const required = new Set(Array.isArray(subplatform.assetSchema?.required) ? subplatform.assetSchema.required.filter((key): key is string => typeof key === "string") : []);
-    return Object.entries(properties).slice(0, 64).flatMap(([key, value]) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-      const descriptor = value as { title?: unknown; type?: unknown; format?: unknown; description?: unknown; enum?: unknown };
-      const type = descriptor.enum && Array.isArray(descriptor.enum) ? "select" : descriptor.format === "uri" ? "url" : descriptor.type === "number" || descriptor.type === "integer" ? "number" : descriptor.format === "date" ? "date" : "text";
-      return [{
-        key,
-        label: typeof descriptor.title === "string" && descriptor.title.trim() ? descriptor.title : key,
-        type: type as "text" | "number" | "url" | "date" | "select",
-        required: required.has(key),
-        placeholder: typeof descriptor.description === "string" ? descriptor.description : undefined,
-        options: Array.isArray(descriptor.enum) ? descriptor.enum.filter((item): item is string => typeof item === "string") : undefined,
-      }];
-    });
-  }, [subplatform.assetSchema, subplatform.ui?.supplyFields]);
-
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedName = displayName.trim();
@@ -372,20 +334,16 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
     const normalizedAmount = isFixedPrice ? toMinorUnits(askingAmount, pricingScale ?? 0) : null;
     const normalizedMin = isRangePrice ? toMinorUnits(askingAmountMin, pricingScale ?? 0) : null;
     const normalizedMax = isRangePrice ? toMinorUnits(askingAmountMax, pricingScale ?? 0) : null;
-    if (!normalizedName || (isFixedPrice && (!normalizedAmount || !normalizedCurrency)) || (isRangePrice && (!normalizedMin || !normalizedMax || !normalizedCurrency))) {
-      onNotice(isFixedPrice
-        ? copy("fixedPriceRequired", "请完整填写名称、报价和结算币种", "Enter a name, price, and currency")
-        : isRangePrice
-          ? copy("rangePriceRequired", "请完整填写价格区间和结算币种", "Enter a price range and currency")
-          : copy("offerNameRequired", "请填写供给名称", "Enter an offer name"));
+    if (!isLiveMarketplaceEnabled()) {
+      onNotice(copy("supplyApiUnavailableNotice", "当前环境未启用真实供给 API，资料没有写入系统", "The live supply API is disabled; nothing was saved"));
+      return;
+    }
+    if (!normalizedName || !productDescription.trim() || !askingAmount.trim() || !attachments.length) {
+      onNotice(copy("productRequired", "请填写商品名称、商品描述、价格并上传商品介绍图", "Enter a product name, description, price, and product image"));
       return;
     }
     if (isRangePrice && BigInt(normalizedMin as string) > BigInt(normalizedMax as string)) {
       onNotice(copy("rangePriceOrderError", "价格区间的最低值不能高于最高值", "The minimum price cannot exceed the maximum"));
-      return;
-    }
-    if (!isLiveMarketplaceEnabled()) {
-      onNotice(copy("supplyApiUnavailableNotice", "当前环境未启用真实供给 API，资料没有写入系统", "The live supply API is disabled; nothing was saved"));
       return;
     }
     if (!subplatform.domainId) {
@@ -399,16 +357,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       onNotice(copy("platformSchemaIncomplete", "当前子平台尚未配置完整的资料 schema、结算币种和价格精度", "This platform has incomplete schema, currency, or price precision settings"));
       return;
     }
-    const missing = schemaFields.find((field) => field.required && !fieldValues[field.key]?.trim());
-    if (missing) {
-      onNotice(locale === "en" ? `Enter ${missing.label}` : `请填写${missing.label}`);
-      return;
-    }
-    const parsedAttributes = attributesFromForm(fieldValues, customFields, schemaFields, advancedOpen ? advancedAttributes : null);
-    if (!parsedAttributes) {
-      onNotice(copy("advancedJsonError", "高级资料必须是有效的 JSON 对象", "Advanced attributes must be a valid JSON object"));
-      return;
-    }
+    const parsedAttributes: Record<string, unknown> = { description: productDescription.trim() };
     const attributesWithAttachments = attachments.length
       ? { ...parsedAttributes, attachments: attachments.map(publicAttachment) }
       : parsedAttributes;
@@ -469,15 +418,12 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       setSubmissions((current) => [record, ...current]);
       setExternalKey("");
       setDisplayName("");
+      setProductDescription("");
       setAskingAmount("");
       setAskingAmountMin("");
       setAskingAmountMax("");
       setPricingNote("");
       setCurrency(pricingCurrency ?? "");
-      setFieldValues({});
-      setCustomFields([]);
-      setAdvancedAttributes("{}");
-      setAdvancedOpen(false);
       setAttachments([]);
       onNotice(copy("offerSubmittedNotice", "供给已提交，等待平台审核后展示", "Offer submitted; it will appear after platform review"));
     } catch (error) {
@@ -507,9 +453,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       <div id="seller-panel-details" className="seller-settings-panel" role="tabpanel" hidden={activePanel !== "details"}>
         <section className="surface seller-upload" aria-labelledby="seller-upload-title">
         <SectionHeading eyebrow={copy("uploadEyebrow", "资料上传")} title={copy("uploadTitle", "提交一份新的供给资料")} />
-        <p className="seller-upload-intro">
-          {copy("uploadDescription", "字段由当前子平台的 schema 定义。根平台只保存结构化 JSON，不会替供给方猜测或填充领域信息。")}
-        </p>
+        <p className="seller-upload-intro">填写商品的核心资料后提交审核。</p>
         {agentDraft ? (
           <div className="seller-agent-draft" role="status">
             <div>
@@ -521,20 +465,19 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
             </button>
           </div>
         ) : null}
-        {mediaUploadEnabled ? (
           <div className="seller-media-uploader seller-upload-wide">
             <div className="seller-media-uploader-heading">
               <div>
-                <strong>{copy("mediaUploadTitle", "把图片或资料交给平台")}</strong>
-                <small>{copy("mediaUploadDescription", "由当前子平台的 Agent 读取和保存；你仍可以在下面手动修改资料。")}</small>
+                <strong>商品介绍图</strong>
+                <small>上传清晰的商品图片，至少一张。</small>
               </div>
               <label className="text-action seller-media-picker" htmlFor="seller-media-input">
                 <FileUp size={16} aria-hidden="true" />
-                {mediaUploading ? copy("mediaUploadingLabel", "处理中…") : copy("mediaChooseLabel", "添加附件")}
+                {mediaUploading ? "上传中…" : "上传图片"}
                 <input
                   id="seller-media-input"
                   type="file"
-                  accept="image/*,application/pdf,text/plain,application/json"
+                  accept="image/*"
                   multiple
                   onChange={(event) => {
                     void uploadFiles(event.currentTarget.files);
@@ -563,16 +506,13 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
               </ul>
             ) : null}
           </div>
-        ) : null}
         <form className="seller-upload-form" onSubmit={submit}>
           <label htmlFor="seller-display-name">
-            <span>{copy("offerNameLabel", "供给名称")}</span>
-            <input id="seller-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder={copy("offerNamePlaceholder", "由你填写")} maxLength={500} required />
+            <span>商品名称</span>
+            <input id="seller-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="例如：2023 款新能源轿车" maxLength={500} required />
           </label>
-          <label htmlFor="seller-external-key">
-            <span>{copy("externalKeyLabel", "内部编号")}</span>
-            <input id="seller-external-key" value={externalKey} onChange={(event) => setExternalKey(event.target.value)} placeholder={copy("externalKeyPlaceholder", "留空则由平台生成")} maxLength={256} />
-          </label>
+          <label className="seller-upload-wide" htmlFor="seller-product-description"><span>商品描述</span><textarea id="seller-product-description" value={productDescription} onChange={(event) => setProductDescription(event.target.value)} rows={4} maxLength={4000} placeholder="介绍商品的主要特点、状况和交付信息" required /></label>
+          <label htmlFor="seller-asking-amount-simple"><span>价格</span><input id="seller-asking-amount-simple" value={askingAmount} onChange={(event) => setAskingAmount(event.target.value)} inputMode="decimal" placeholder="例如：128000" required /></label>
           {isFixedPrice ? (
             <>
               <label htmlFor="seller-asking-amount">
@@ -605,36 +545,6 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
             <label className="seller-upload-wide" htmlFor="seller-pricing-note">
               <span>{copy("pricingNoteLabel", "议价条件")}</span>
               <textarea id="seller-pricing-note" value={pricingNote} onChange={(event) => setPricingNote(event.target.value)} rows={3} maxLength={500} placeholder={copy("pricingNotePlaceholder", "由你说明价格、条件或面议范围")} />
-            </label>
-          ) : null}
-          {schemaFields.map((field) => (
-            <label key={field.key} htmlFor={`seller-attribute-${field.key}`}>
-              <span>{field.label}{field.required ? " *" : ""}</span>
-              {field.type === "select" ? (
-                <select id={`seller-attribute-${field.key}`} value={fieldValues[field.key] ?? ""} onChange={(event) => setFieldValues((current) => ({ ...current, [field.key]: event.target.value }))}>
-                  <option value="">{copy("selectFieldPlaceholder", "请选择", "Select")}</option>
-                  {field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-              ) : (
-                <input id={`seller-attribute-${field.key}`} type={field.type ?? "text"} value={fieldValues[field.key] ?? ""} onChange={(event) => setFieldValues((current) => ({ ...current, [field.key]: event.target.value }))} placeholder={field.placeholder} required={field.required} />
-              )}
-            </label>
-          ))}
-          {customFields.map((field) => (
-            <div className="seller-custom-field" key={field.id}>
-              <input aria-label={copy("customFieldNameLabel", "自定义字段名", "Custom field name")} value={field.key} onChange={(event) => setCustomFields((current) => current.map((item) => item.id === field.id ? { ...item, key: event.target.value } : item))} placeholder={copy("customFieldNamePlaceholder", "字段名", "Field name")} />
-              <input aria-label={copy("customFieldValueLabel", "自定义字段值", "Custom field value")} value={field.value} onChange={(event) => setCustomFields((current) => current.map((item) => item.id === field.id ? { ...item, value: event.target.value } : item))} placeholder={copy("customFieldValuePlaceholder", "字段值", "Field value")} />
-              <button type="button" aria-label={copy("removeCustomFieldLabel", "删除自定义字段", "Remove custom field")} onClick={() => setCustomFields((current) => current.filter((item) => item.id !== field.id))}><Trash2 size={16} aria-hidden="true" /></button>
-            </div>
-          ))}
-          <div className="seller-upload-wide seller-form-tools">
-            <button className="text-action" type="button" onClick={() => setCustomFields((current) => [...current, { id: crypto.randomUUID(), key: "", value: "" }])}><Plus size={16} aria-hidden="true" /> {copy("addCustomFieldLabel", "添加字段", "Add field")}</button>
-            <button className="text-action" type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? copy("collapseAdvancedLabel", "收起高级资料", "Hide advanced attributes") : copy("advancedJsonToggleLabel", "使用高级 JSON", "Use advanced JSON")}</button>
-          </div>
-          {advancedOpen ? (
-            <label className="seller-upload-wide" htmlFor="seller-attributes">
-                <span>{copy("advancedAttributesLabel", "高级资料（JSON）")}</span>
-              <textarea id="seller-attributes" value={advancedAttributes} onChange={(event) => setAdvancedAttributes(event.target.value)} rows={8} spellCheck={false} />
             </label>
           ) : null}
           <div className="seller-upload-actions seller-upload-wide">
