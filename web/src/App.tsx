@@ -282,6 +282,19 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">{ui.rootPlatform}</a> : null}
               </div>
               <div className="header-actions">
+                <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
+                {!authUser ? (
+                  <motion.button
+                    className="header-signin-action"
+                    type="button"
+                    onClick={openSignIn}
+                    whileTap={{ scale: 0.97 }}
+                    transition={spring}
+                  >
+                    <LogIn size={17} aria-hidden="true" />
+                    <span>{ui.signIn}</span>
+                  </motion.button>
+                ) : null}
                 <motion.button
                   className="workspace-settings-trigger"
                   type="button"
@@ -339,28 +352,19 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           backdropLabel={ui.closeSettingsDialog}
         >
           <div className="workspace-settings-overview">
-            <section className="workspace-settings-section workspace-account-section" aria-labelledby="workspace-account-title">
-              <div className="workspace-settings-section-heading">
-                <h3 id="workspace-account-title">{ui.account}</h3>
-                <span>{roleLabel(role, locale, subplatform)}</span>
-              </div>
-              {authUser ? (
+            {authUser ? (
+              <section className="workspace-settings-section workspace-account-section" aria-labelledby="workspace-account-title">
+                <div className="workspace-settings-section-heading">
+                  <h3 id="workspace-account-title">{ui.account}</h3>
+                  <span>{roleLabel(role, locale, subplatform)}</span>
+                </div>
                 <div className="workspace-account-row">
                   <span className="workspace-account-avatar"><UserRound size={19} aria-hidden="true" /></span>
                   <span className="workspace-account-copy"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></span>
                   <button className="workspace-account-action" type="button" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
                 </div>
-              ) : (
-                <button className="button button-dark workspace-signin-action" type="button" onClick={openSignIn}><LogIn size={17} aria-hidden="true" />{ui.signIn}</button>
-              )}
-            </section>
-
-            <section className="workspace-settings-section" aria-labelledby="workspace-preferences-title">
-              <div className="workspace-settings-section-heading">
-                <h3 id="workspace-preferences-title">{ui.appearance}</h3>
-              </div>
-              <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
-            </section>
+              </section>
+            ) : null}
 
             <section className="workspace-settings-section" aria-labelledby="workspace-switch-title">
               <div className="workspace-settings-section-heading">
@@ -378,7 +382,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               ) : null}
             </section>
 
-            {role === "buyer" ? <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} /> : null}
+            {authUser && role === "buyer" ? <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} /> : null}
             {role === "seller" ? <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} agentDraft={sellerDraft} /> : null}
           </div>
         </WorkspaceSettingsDialog>}
@@ -559,7 +563,7 @@ function appCopy(locale: "zh" | "en") {
       rootPlatform: "Root platform",
       settings: "Settings",
       settingsTitle: "Settings",
-      settingsDescription: "Account, display, and workspace preferences.",
+      settingsDescription: "Manage your account and workspace preferences.",
       closeSettings: "Close settings",
       closeSettingsDialog: "Close settings dialog",
       sellerSettingsTitle: "Offer settings",
@@ -585,7 +589,7 @@ function appCopy(locale: "zh" | "en") {
     rootPlatform: "根平台",
     settings: "设置",
     settingsTitle: "设置",
-    settingsDescription: "管理账号、显示与工作台偏好。",
+    settingsDescription: "管理账号与工作台偏好。",
     closeSettings: "关闭设置",
     closeSettingsDialog: "关闭设置对话框",
     sellerSettingsTitle: "供给设置",

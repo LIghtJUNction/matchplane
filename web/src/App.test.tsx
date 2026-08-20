@@ -57,6 +57,8 @@ describe("MatchPlane workspaces", () => {
     expect(screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" })).toBeInTheDocument();
 
     expect(screen.queryByText("其他入口")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切换到暗色" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
     expect(screen.queryByLabelText("供给名称")).not.toBeInTheDocument();
   });
@@ -230,17 +232,16 @@ describe("MatchPlane workspaces", () => {
     expect(screen.getByRole("status")).toHaveTextContent("已退出当前账号");
   });
 
-  it("lets a signed-in user change theme and language from settings", async () => {
+  it("keeps theme and language controls in the header", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "设置" }));
     await user.click(screen.getByRole("button", { name: "切换到暗色" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
     await user.click(screen.getByRole("button", { name: "EN" }));
     expect(document.documentElement.lang).toBe("en");
-    expect(screen.getByRole("button", { name: "Buyer workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
   });
 
   it("keeps a persisted dark preference during the initial hydration", async () => {
@@ -256,11 +257,20 @@ describe("MatchPlane workspaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "设置" }));
     await user.click(screen.getByRole("button", { name: "EN" }));
-    await user.click(screen.getByRole("button", { name: "Close settings" }));
 
     expect(screen.getByRole("heading", { name: "Tell us what you want to solve." })).toBeInTheDocument();
     expect(screen.queryByText("More entry points")).not.toBeInTheDocument();
+  });
+
+  it("does not expose contact settings before a user signs in", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "设置" }));
+
+    expect(screen.queryByLabelText("手机号")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("微信号")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "登录" })).not.toBeInTheDocument();
   });
 });
