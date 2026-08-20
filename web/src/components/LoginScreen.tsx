@@ -41,6 +41,7 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
   const copy = loginCopy(locale);
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState("");
   const [method, setMethod] = useState<AuthMethod>("password");
@@ -247,6 +248,10 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
       setError(copy.passwordTooShort);
       return;
     }
+    if (authIntent === "sign-up" && method === "password" && !registrationPending && password !== confirmPassword) {
+      setError(copy.passwordMismatch);
+      return;
+    }
     if (method === "email-otp" && otpSent && !/^\d{6}$/.test(otp.trim())) {
       setError(copy.invalidOtp);
       return;
@@ -361,7 +366,11 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
               callbackURL: authCallbackURL(next, adminInviteToken),
               fetchOptions: options,
             } as never);
-            if (signedIn.error) throw new Error(copy.invalidCredentials);
+            if (signedIn.error) {
+              setError(copy.existingAccountPasswordFailed);
+              setSubmitting(false);
+              return;
+            }
             await finishSignIn();
             return;
           }
@@ -447,6 +456,7 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
     setOtpSent(false);
     setRegistrationPending(false);
     setShowPassword(false);
+    setConfirmPassword("");
     setOtp("");
     setError(null);
     setNotice(null);
@@ -526,6 +536,14 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
                     {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
                   </Button>
                 </span>
+              </span>
+            </div>
+          ) : null}
+          {method === "password" && isRegistration && !registrationPending ? (
+            <div className="login-password-field">
+              <label htmlFor="login-password-confirm"><span>{copy.confirmPassword}</span></label>
+              <span className="login-password-control">
+                <Input id="login-password-confirm" type={showPassword ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" placeholder={copy.confirmPasswordPlaceholder} />
               </span>
             </div>
           ) : null}
@@ -672,6 +690,7 @@ function loginCopy(locale: "zh" | "en") {
       nationalIdentity: "National online identity",
       socialMethods: "Social sign-in",
       password: "Password",
+      confirmPassword: "Confirm password",
       emailOtp: "Code",
       magicLink: "Magic link",
       email: "Email",
@@ -679,6 +698,7 @@ function loginCopy(locale: "zh" | "en") {
       identifier: "Email or phone",
       identifierPlaceholder: "name@example.com or +86 138…",
       passwordPlaceholder: "At least 8 characters",
+      confirmPasswordPlaceholder: "Enter the password again",
       otp: "Code",
       otpPlaceholder: "6-digit code",
       loading: "Signing in…",
@@ -690,6 +710,8 @@ function loginCopy(locale: "zh" | "en") {
       continue: "Continue",
       otherMethods: "Other ways",
       passwordTooShort: "Password must be at least 8 characters.",
+      passwordMismatch: "The two passwords do not match.",
+      existingAccountPasswordFailed: "This email already has an account. Enter its existing password, or use the sign-in page.",
       invalidOtp: "Enter the 6-digit code.",
       oauthMagicLinkBlocked: "Use a password or email code for platform authorization.",
       otpSent: "Code sent.",
@@ -743,6 +765,7 @@ function loginCopy(locale: "zh" | "en") {
     nationalIdentity: "国家网络身份认证",
     socialMethods: "第三方登录",
     password: "密码",
+    confirmPassword: "确认密码",
     emailOtp: "验证码",
     magicLink: "免密链接",
     email: "邮箱",
@@ -750,6 +773,7 @@ function loginCopy(locale: "zh" | "en") {
     identifier: "邮箱或手机号",
     identifierPlaceholder: "name@example.com 或 138…",
     passwordPlaceholder: "至少 8 位",
+    confirmPasswordPlaceholder: "请再次输入密码",
     otp: "验证码",
     otpPlaceholder: "6 位验证码",
     loading: "正在登录…",
@@ -761,6 +785,8 @@ function loginCopy(locale: "zh" | "en") {
     continue: "继续",
     otherMethods: "其他方式",
     passwordTooShort: "密码至少需要 8 位。",
+    passwordMismatch: "两次输入的密码不一致。",
+    existingAccountPasswordFailed: "该邮箱已有账号，请输入原密码，或前往登录。",
     invalidOtp: "请输入 6 位验证码。",
     oauthMagicLinkBlocked: "平台授权请使用密码或邮箱验证码。",
     otpSent: "验证码已发送。",
