@@ -12,6 +12,7 @@ import {
 import { authClient, authFetchOptions } from "../lib/auth-client";
 import { useInterfacePreferences } from "../lib/preferences";
 import { loadSubplatform, resolveSubplatform, type SubplatformConfig } from "../subplatform";
+import { Brand } from "./Primitives";
 import { PreferenceControls } from "./PreferenceControls";
 
 type AuthMethod = "password" | "email-otp" | "magic-link";
@@ -55,6 +56,7 @@ export function LoginScreen() {
     passkey: true,
   });
   const [otpSent, setOtpSent] = useState(false);
+  const [registrationPending, setRegistrationPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -197,6 +199,16 @@ export function LoginScreen() {
       setError(copy.phonePasswordUnavailable);
       return;
     }
+    if (registrationPending) {
+      if (resolvedIdentifier.kind !== "email") {
+        setError(copy.invalidIdentifier);
+        return;
+      }
+      if (!/^\d{6}$/.test(otp.trim())) {
+        setError(copy.invalidOtp);
+        return;
+      }
+    }
     if (method === "email-otp" && resolvedIdentifier.kind === "email" && !capabilities.emailOtp) {
       setError(copy.emailOtpUnavailable);
       return;
@@ -213,7 +225,7 @@ export function LoginScreen() {
       setError(copy.magicLinkUnavailable);
       return;
     }
-    if (method === "password" && password.length < 8) {
+    if (method === "password" && !registrationPending && password.length < 8) {
       setError(copy.passwordTooShort);
       return;
     }
@@ -226,6 +238,17 @@ export function LoginScreen() {
     setNotice(null);
     try {
       const options = authFetchOptions(subplatform.slug);
+      if (registrationPending) {
+        const result = await authClient.emailOtp.verifyEmail({
+          email: resolvedIdentifier.value,
+          otp: otp.trim(),
+          fetchOptions: options,
+        } as never);
+        if (result.error) throw new Error(result.error.message || copy.authFailed);
+        setRegistrationPending(false);
+        await finishSignIn();
+        return;
+      }
       if (method === "email-otp" && !otpSent) {
         const result = resolvedIdentifier.kind === "phone"
           ? await authClient.phoneNumber.sendOtp({
@@ -289,10 +312,10 @@ export function LoginScreen() {
       } as never);
       if (result.error) {
         if (oauthQuery) throw new Error(copy.authFailed);
-        // One neutral action handles both returning and first-time users. A
-        // failed sign-in is followed by an idempotent sign-up attempt: an
-        // existing account remains untouched, while a new account receives
-        // the normal Better Auth verification email.
+        // The password form also acts as the registration entry point, but only when the
+        // deployment has an email route that can deliver the verification code. Without it,
+        // never turn a failed login into a misleading "check your email" state.
+        if (!capabilities.emailOtp && !capabilities.magicLink) throw new Error(copy.authFailed);
         const created = await authClient.signUp.email({
           name: displayNameFromIdentifier(resolvedIdentifier.value),
           email: resolvedIdentifier.value,
@@ -301,7 +324,9 @@ export function LoginScreen() {
           fetchOptions: options,
         });
         if (!created.error) {
-          setNotice(copy.signUpSent);
+          setRegistrationPending(true);
+          setOtp("");
+          setNotice(copy.otpSent);
           setSubmitting(false);
           return;
         }
@@ -364,6 +389,7 @@ export function LoginScreen() {
   const switchMethod = (nextMethod: AuthMethod) => {
     setMethod(nextMethod);
     setOtpSent(false);
+    setRegistrationPending(false);
     setOtp("");
     setError(null);
     setNotice(null);
@@ -383,12 +409,16 @@ export function LoginScreen() {
         </a>
         <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
       </div>
-      <section className="login-card" aria-labelledby="login-title">
-        <h1 id="login-title" className="sr-only">{copy.account}</h1>
-        <button className="login-qr-corner" type="button" onClick={() => setQrOpen(true)} aria-label={copy.qrLogin}>
-          <span className="login-qr-corner-mark" aria-hidden="true"><QrCode size={22} strokeWidth={1.7} /></span>
-          <span>{copy.qrLogin}</span>
-        </button>
+      <div className="login-layout">
+        <section className="login-card" aria-labelledby="login-title">
+          <h1 id="login-title" className="sr-only">{copy.account}</h1>
+          <div className="login-card-header">
+            <Brand homeHref="/" />
+            <button className="login-qr-entry" type="button" onClick={() => setQrOpen(true)} aria-label={copy.qrLogin}>
+              <QrCode size={17} strokeWidth={1.8} aria-hidden="true" />
+              <span>{copy.qrLogin}</span>
+            </button>
+          </div>
 
         {nationalIdentityEnabled ? (
           <div className="login-primary-provider">
@@ -406,8 +436,8 @@ export function LoginScreen() {
         </div>
 
         <form className="login-form" onSubmit={submit}>
-          <label htmlFor="login-identifier"><span>{copy.identifier}</span><input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} autoComplete="username webauthn" inputMode="text" placeholder={copy.identifierPlaceholder} autoFocus /></label>
-          {method === "password" ? (
+          <label htmlFor="login-identifier"><span>{copy.identifier}</span><input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} readOnly={registrationPending} autoComplete="username webauthn" inputMode="text" placeholder={copy.identifierPlaceholder} autoFocus /></label>
+          {method === "password" && !registrationPending ? (
             <div className="login-password-field">
               <label htmlFor="login-password"><span>{copy.password}</span></label>
               <span className="login-password-control">
@@ -420,13 +450,13 @@ export function LoginScreen() {
               </span>
             </div>
           ) : null}
-          {method === "email-otp" && otpSent ? (
+          {((method === "email-otp" && otpSent) || registrationPending) ? (
             <label htmlFor="login-otp"><span>{copy.otp}</span><input id="login-otp" inputMode="numeric" pattern="[0-9]{6}" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} autoComplete="one-time-code" placeholder={copy.otpPlaceholder} /></label>
           ) : null}
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           {notice ? <p className="login-notice" role="status">{notice}</p> : null}
           <button className="button button-dark login-submit" type="submit" disabled={submitting}>
-            {submitting ? copy.loading : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : copy.continue}
+            {submitting ? copy.loading : registrationPending ? copy.verifyAndContinue : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : copy.continue}
             {!submitting ? <ArrowRight size={17} aria-hidden="true" /> : null}
           </button>
         </form>
@@ -444,7 +474,8 @@ export function LoginScreen() {
             </div>
           </div>
         ) : null}
-      </section>
+        </section>
+      </div>
       {qrOpen ? (
         <div className="login-qr-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setQrOpen(false); }}>
           <section className="login-qr-dialog" role="dialog" aria-modal="true" aria-labelledby="login-qr-title">
@@ -539,7 +570,6 @@ function loginCopy(locale: "zh" | "en") {
       oauthMagicLinkBlocked: "Use a password or email code for platform authorization.",
       otpSent: "Code sent.",
       magicLinkSent: "Magic link sent.",
-      signUpSent: "Check your email to verify your account.",
       authFailed: "Sign-in did not complete. Try again.",
       invalidIdentifier: "Enter a valid email address or phone number.",
       phonePasswordUnavailable: "Use the code method to sign in with a phone number.",
@@ -585,7 +615,6 @@ function loginCopy(locale: "zh" | "en") {
     oauthMagicLinkBlocked: "平台授权请使用密码或邮箱验证码。",
     otpSent: "验证码已发送。",
     magicLinkSent: "免密链接已发送。",
-    signUpSent: "请查收邮件并完成验证。",
     authFailed: "登录没有完成，请再试一次。",
     invalidIdentifier: "请输入有效的邮箱或手机号。",
     phonePasswordUnavailable: "手机号请使用验证码登录。",

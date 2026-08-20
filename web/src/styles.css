@@ -3774,3 +3774,125 @@ body,
   .platform-federation-row { grid-template-columns: minmax(0, 1fr) auto; }
   .platform-federation-row input { grid-column: 1 / -1; grid-row: 2; }
 }
+
+/* Login surface: a compact identity gate, not a floating marketing card. */
+.login-page {
+  min-height: 100svh;
+  padding: clamp(4.75rem, 9vh, 7rem) 1.25rem 2rem;
+  background: var(--paper);
+}
+
+.login-topbar {
+  top: 1rem;
+  right: clamp(1rem, 3vw, 2.25rem);
+  left: clamp(1rem, 3vw, 2.25rem);
+}
+
+.login-layout {
+  width: min(100%, 31rem);
+  margin: 0 auto;
+}
+
+.login-card {
+  width: 100%;
+  padding: 1.35rem clamp(1.15rem, 4vw, 2rem) 1.55rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 1.35rem;
+  background: var(--ivory);
+  box-shadow: var(--shadow-large);
+}
+
+.login-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1.15rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.login-card-header .brand {
+  font-size: 1rem;
+}
+
+.login-card-header .brand-mark {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.68rem;
+}
+
+.login-qr-entry {
+  min-height: 2.35rem;
+  padding: 0 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--paper);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.login-qr-entry:hover,
+.login-qr-entry:focus-visible {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  outline: 0;
+}
+
+.login-card .login-methods {
+  margin-top: 1.15rem;
+  border-radius: 0.85rem;
+}
+
+.login-card .login-methods button {
+  min-height: 2.55rem;
+}
+
+.login-card .login-form {
+  margin-top: 1rem;
+  gap: 0.8rem;
+}
+
+.login-card .login-form input,
+.login-card .login-form select {
+  min-height: 3rem;
+  border-radius: 0.78rem;
+}
+
+.login-card .login-submit {
+  min-height: 3rem;
+  margin-top: 0.2rem;
+  border-radius: 0.78rem;
+}
+
+.login-card .social-login {
+  margin-top: 1.1rem;
+}
+
+@media (max-width: 40rem) {
+  .login-page {
+    padding: 4.5rem 0.85rem 1rem;
+  }
+
+  .login-topbar {
+    top: 0.75rem;
+    right: 0.85rem;
+    left: 0.85rem;
+  }
+
+  .login-card {
+    padding: 1rem 0.9rem 1.2rem;
+    border-radius: 1.15rem;
+  }
+
+  .login-qr-entry {
+    width: 2.35rem;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .login-qr-entry span { display: none; }
+}
