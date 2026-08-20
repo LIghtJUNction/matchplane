@@ -83,13 +83,13 @@ commit or log it):
 cargo run --locked -p xtask -- admin-invite --role root-admin
 ```
 
-To change a root administrator password from the host, use the operator-only CLI command. It uses
-`MATCHPLANE_ROOT_ADMIN_EMAIL` by default, reads the password from a hidden prompt (or from stdin
-with `--password-stdin`), never places the password in command-line arguments, and revokes every
-existing session for the account:
+To change a root administrator password from the host, use the operator-only CLI command. It reads
+the protected host configuration automatically, then reads the password from a hidden prompt (or
+from stdin with `--password-stdin`), never places the password in command-line arguments, and
+revokes every existing session for the account:
 
 ```sh
-sudo bash -lc 'set -a; . /etc/matchplane/matchplane.env; . /etc/matchplane/services/web.env; set +a; exec /usr/bin/matchplane auth passwd'
+sudo matchplane passwd
 ```
 
 Open the returned `/admin/register?token=...&next=...` link; it uses the same login/register page as every

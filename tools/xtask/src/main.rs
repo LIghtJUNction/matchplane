@@ -1,5 +1,5 @@
 use std::{
-    env,
+    env, fs,
     io::{self, IsTerminal, Write},
     path::Path,
     process::Command as ProcessCommand,
@@ -87,6 +87,15 @@ enum Command {
         #[command(subcommand)]
         command: AuthCommand,
     },
+    /// Change a root administrator password with the host's protected MatchPlane configuration.
+    Passwd {
+        /// Root administrator email. Omit to use MATCHPLANE_ROOT_ADMIN_EMAIL.
+        #[arg(long)]
+        email: Option<String>,
+        /// Read one new password line from stdin instead of opening hidden TTY prompts.
+        #[arg(long)]
+        password_stdin: bool,
+    },
     /// Issue a one-time invite for a signed remote MatchPlane platform enrollment.
     #[command(name = "federation-invite")]
     FederationInvite {
@@ -160,7 +169,7 @@ enum AuthCommand {
     Passwd {
         /// Root administrator email. Defaults to MATCHPLANE_ROOT_ADMIN_EMAIL; a TTY prompt is
         /// used only when neither is available.
-        #[arg(long, env = "MATCHPLANE_ROOT_ADMIN_EMAIL")]
+        #[arg(long)]
         email: Option<String>,
         /// Read one new password line from stdin instead of opening hidden TTY prompts.
         /// This is intended for a secret manager pipe; the password is never a CLI argument.
@@ -212,6 +221,10 @@ async fn main() -> Result<()> {
                     email,
                     password_stdin,
                 },
+        } => reset_root_admin_password(email, password_stdin).await,
+        Command::Passwd {
+            email,
+            password_stdin,
         } => reset_root_admin_password(email, password_stdin).await,
         Command::FederationInvite {
             domain_id,
@@ -428,10 +441,9 @@ async fn create_admin_invite(
 }
 
 async fn reset_root_admin_password(email: Option<String>, password_stdin: bool) -> Result<()> {
-    let email = resolve_root_admin_email(email)?;
-
-    let config = AppConfig::load().context("password reset configuration is invalid")?;
-    let store = PgStore::connect(&config.database_url, 2)
+    let maintenance_config = load_password_maintenance_config()?;
+    let email = resolve_root_admin_email(email, maintenance_config.root_admin_email)?;
+    let store = PgStore::connect(&maintenance_config.database_url, 2)
         .await
         .context("password reset could not connect to PostgreSQL")?;
     let user = sqlx::query(
@@ -544,8 +556,114 @@ async fn reset_root_admin_password(email: Option<String>, password_stdin: bool) 
     Ok(())
 }
 
-fn resolve_root_admin_email(email: Option<String>) -> Result<String> {
-    let email = select_root_admin_email(email, env::var("MATCHPLANE_ROOT_ADMIN_EMAIL").ok())
+const PASSWORD_MAINTENANCE_ENV_FILES: [&str; 3] = [
+    "/etc/matchplane/matchplane.env",
+    "/etc/matchplane/services/web.env",
+    "/etc/matchplane/services/migration.env",
+];
+
+struct PasswordMaintenanceConfig {
+    database_url: String,
+    root_admin_email: Option<String>,
+}
+
+fn load_password_maintenance_config() -> Result<PasswordMaintenanceConfig> {
+    let mut database_url = non_empty_environment_value("MATCHPLANE_DATABASE_URL");
+    let mut root_admin_email = non_empty_environment_value("MATCHPLANE_ROOT_ADMIN_EMAIL");
+
+    for path in PASSWORD_MAINTENANCE_ENV_FILES {
+        if database_url.is_some() && root_admin_email.is_some() {
+            break;
+        }
+        let Some(values) = read_password_maintenance_env_file(Path::new(path))? else {
+            continue;
+        };
+        if database_url.is_none() {
+            database_url = values.database_url;
+        }
+        if root_admin_email.is_none() {
+            root_admin_email = values.root_admin_email;
+        }
+    }
+
+    let Some(database_url) = database_url else {
+        bail!(
+            "MATCHPLANE_DATABASE_URL is unavailable; run this command with sudo on the MatchPlane host or set it in the process environment"
+        )
+    };
+    Ok(PasswordMaintenanceConfig {
+        database_url,
+        root_admin_email,
+    })
+}
+
+struct PasswordMaintenanceEnvValues {
+    database_url: Option<String>,
+    root_admin_email: Option<String>,
+}
+
+fn read_password_maintenance_env_file(path: &Path) -> Result<Option<PasswordMaintenanceEnvValues>> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("could not inspect {}", path.display()));
+        }
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+            bail!(
+                "{} must be root-owned and not writable by group or others",
+                path.display()
+            )
+        }
+    }
+    let content =
+        fs::read_to_string(path).with_context(|| format!("could not read {}", path.display()))?;
+    Ok(Some(PasswordMaintenanceEnvValues {
+        database_url: dotenv_value(&content, "MATCHPLANE_DATABASE_URL"),
+        root_admin_email: dotenv_value(&content, "MATCHPLANE_ROOT_ADMIN_EMAIL"),
+    }))
+}
+
+fn non_empty_environment_value(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.trim().is_empty())
+}
+
+fn dotenv_value(content: &str, name: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return None;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let (key, value) = line.split_once('=')?;
+        if key.trim() != name {
+            return None;
+        }
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .or_else(|| {
+                value
+                    .strip_prefix('\'')
+                    .and_then(|value| value.strip_suffix('\''))
+            })
+            .unwrap_or(value)
+            .trim();
+        (!value.is_empty()).then(|| value.to_owned())
+    })
+}
+
+fn resolve_root_admin_email(
+    email: Option<String>,
+    configured_email: Option<String>,
+) -> Result<String> {
+    let email = select_root_admin_email(email, configured_email)
         .map_or_else(prompt_root_admin_email, Ok)?;
     let email = email.trim().to_lowercase();
     validate_operator_email(&email)
@@ -1345,9 +1463,10 @@ impl JsonRpcResponse {
 mod tests {
     use super::{
         AdminInviteRole, AuthCommand, Cli, Command, Service, admin_invite_role_value,
-        better_auth_derived_key, hosted_agent_report_from_values, normalize_admin_base_url,
-        resolve_web_node_with, safe_endpoint_origin, select_root_admin_email, service_command,
-        sha256, validate_operator_email, validate_operator_uuid,
+        better_auth_derived_key, dotenv_value, hosted_agent_report_from_values,
+        normalize_admin_base_url, resolve_web_node_with, safe_endpoint_origin,
+        select_root_admin_email, service_command, sha256, validate_operator_email,
+        validate_operator_uuid,
     };
     use clap::Parser;
     use uuid::Uuid;
@@ -1480,6 +1599,29 @@ mod tests {
                 },
             }
         ));
+    }
+
+    #[test]
+    fn top_level_passwd_should_not_require_an_email_argument() {
+        let cli = Cli::try_parse_from(["matchplane", "passwd", "--password-stdin"]).unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Command::Passwd {
+                email: None,
+                password_stdin: true,
+            }
+        ));
+    }
+
+    #[test]
+    fn dotenv_value_should_read_only_the_named_assignment() {
+        let value = dotenv_value(
+            "MATCHPLANE_DATABASE_URL=postgres://operator:secret@db/matchplane\nMATCHPLANE_ROOT_ADMIN_EMAIL=admin@matx.tech",
+            "MATCHPLANE_ROOT_ADMIN_EMAIL",
+        );
+
+        assert_eq!(value.as_deref(), Some("admin@matx.tech"));
     }
 
     #[test]
