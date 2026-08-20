@@ -4115,6 +4115,29 @@ main.subplatform-fullscreen-main {
   color: var(--ink);
 }
 
+.header-signin-action {
+  min-height: 2.65rem;
+  padding: 0 0.82rem;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.42rem;
+  border: 1px solid var(--ink);
+  border-radius: 0.85rem;
+  background: var(--ink);
+  color: var(--ivory);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 650;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.header-signin-action:hover,
+.header-signin-action:focus-visible {
+  border-color: var(--ink-soft);
+  background: var(--ink-soft);
+}
+
 .platform-menu {
   position: relative;
 }
@@ -5037,6 +5060,10 @@ main.subplatform-fullscreen-main {
 
   .workspace-settings-trigger span {
     display: none;
+  }
+
+  .header-signin-action {
+    padding-inline: 0.68rem;
   }
 
   .platform-menu-popover {
