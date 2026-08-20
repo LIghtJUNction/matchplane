@@ -12,6 +12,7 @@ import {
   configuredPlatformRouterProtocol,
   isPlatformRouterConfigured,
 } from "../../../../../src/platform-router";
+import { getManagedPlatformRouterConfig } from "../../../../../src/lib/platform-router-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,8 +36,9 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const emailAuth = await isRootEmailAuthConfigured();
-  const endpoint = readEndpointSummary(process.env.MATCHPLANE_ROUTER_AI_URL);
-  const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
+  const managed = getManagedPlatformRouterConfig();
+  const endpoint = readEndpointSummary(managed?.endpoint ?? process.env.MATCHPLANE_ROUTER_AI_URL);
+  const model = managed?.model ?? (process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null);
   const toolMode = parseToolMode(process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE);
   return NextResponse.json(
     {
