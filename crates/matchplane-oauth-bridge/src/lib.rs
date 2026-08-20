@@ -7,6 +7,8 @@
 //! remains the authority for users, sessions, organization membership, and
 //! login cookies after it verifies the bridge result.
 
+pub mod provider;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
