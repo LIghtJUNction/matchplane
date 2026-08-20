@@ -218,6 +218,8 @@ async function readOwnedStores(request: Request): Promise<Response> {
   if (!hasTrustedBrowserOrigin(request)) return jsonError("请求来源未被商城信任", 403);
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return jsonError("请先登录", 401);
+  const role = (session.user as { role?: unknown }).role;
+  const mallOperator = role === "rootSuperAdmin" || role === "rootAdmin";
   const tenantId = configuredTenantId();
   if (!tenantId) return jsonError("商城尚未完成初始化", 503);
   const result = await authDatabase.query(
@@ -231,13 +233,14 @@ async function readOwnedStores(request: Request): Promise<Response> {
        FROM stores store
        JOIN store_path_aliases alias
          ON alias.tenant_id = store.tenant_id AND alias.store_id = store.id AND alias.is_canonical = true
-       JOIN "member" membership ON membership."organizationId" = store.organization_id
-      WHERE store.tenant_id = $1::uuid
+       LEFT JOIN "member" membership
+         ON membership."organizationId" = store.organization_id
         AND membership."userId" = $2::uuid
-        AND membership.role = ANY($3::text[])
+      WHERE store.tenant_id = $1::uuid
+        AND ($3::boolean IS TRUE OR membership.role = ANY($4::text[]))
         AND store.status <> 'closed'
       ORDER BY store.created_at DESC`,
-    [tenantId, session.user.id, ["owner", "admin", "subplatform_admin"]],
+    [tenantId, session.user.id, mallOperator, ["owner", "admin", "subplatform_admin"]],
   );
   return NextResponse.json({ stores: result.rows }, { headers: { "cache-control": "no-store" } });
 }

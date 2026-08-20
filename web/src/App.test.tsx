@@ -59,6 +59,17 @@ beforeEach(() => {
     if (url === "/api/stores") {
       return new Response(JSON.stringify({ stores: [] }), { status: 200, headers: { "content-type": "application/json" } });
     }
+    if (url === "/api/stores?mine=1") {
+      return new Response(JSON.stringify({ stores: [{
+        id: "33333333-3333-4333-8333-333333333333",
+        slug: "used-car",
+        path: "/used-car",
+        displayName: "Matx Auto",
+        description: "二手车",
+        integrationKind: "package",
+        status: "active",
+      }] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
     return new Response(JSON.stringify({ error: "test service unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
   });
 });
@@ -127,7 +138,29 @@ describe("MatchPlane workspaces", () => {
     expect(await screen.findByRole("heading", { name: "我的店铺" })).toBeInTheDocument();
     expect(screen.getByLabelText("店铺名称")).toBeInTheDocument();
     expect(screen.getByLabelText(/^店铺地址/)).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "管理商品" })).toHaveAttribute("href", "/used-car?console=products");
     expect(screen.queryByLabelText("商品名称")).not.toBeInTheDocument();
+  });
+
+  it("opens the product console over a fullscreen store from an explicit account link", async () => {
+    window.history.replaceState(null, "", "/used-car?console=products");
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith("/api/platform/manifest?path=")) {
+        return new Response(JSON.stringify({
+          displayName: "Matx Auto",
+          assets: { hosted: { entry: "index.html", url: "/api/platform/plugin-assets/used-car/index.html?build=test", digest: "a".repeat(64) } },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ error: "test service unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+    });
+
+    render(<App initialPath="/used-car" />);
+
+    expect(await screen.findByTitle("Matx Auto buyer 工作台")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "控制台" })).toBeInTheDocument();
+    expect(window.location.search).not.toContain("console");
   });
 
   it("requires an explicit administrator confirmation before changing payment mode", async () => {

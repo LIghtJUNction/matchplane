@@ -48,9 +48,12 @@ export function HostedStoreOnboarding({ locale, onNotice }: { locale: InterfaceL
         <ul className="owned-store-list">
           {stores.map((store) => (
             <li key={store.id}>
-              <a href={store.path}>
+              <a className="owned-store-browse" href={store.path}>
                 <span><strong>{store.displayName}</strong><small>{store.path}</small></span>
                 <ArrowRight size={17} aria-hidden="true" />
+              </a>
+              <a className="owned-store-manage" href={`${store.path}?console=products`}>
+                {locale === "en" ? "Manage products" : "管理商品"}
               </a>
             </li>
           ))}

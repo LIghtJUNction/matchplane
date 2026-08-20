@@ -3909,8 +3909,11 @@ main.subplatform-fullscreen-main {
 .hosted-store-heading h2 { font-size: 1.25rem; font-weight: 540; letter-spacing: -0.035em; }
 .hosted-store-heading p { margin-top: 0.25rem; color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
 .owned-store-list { margin: 0; padding: 0; display: grid; list-style: none; border: 1px solid var(--line); border-radius: 0.95rem; overflow: hidden; }
+.owned-store-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; }
 .owned-store-list li + li { border-top: 1px solid var(--line); }
-.owned-store-list a { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 3.7rem; padding: 0.75rem 0.9rem; color: var(--ink); text-decoration: none; }
+.owned-store-list a { color: var(--ink); text-decoration: none; }
+.owned-store-browse { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 1rem; min-height: 3.7rem; padding: 0.75rem 0.9rem; }
+.owned-store-manage { display: grid; min-width: 7rem; place-items: center; padding: 0.65rem 0.9rem; border-left: 1px solid var(--line); color: var(--ink-soft) !important; font-size: 0.7rem; font-weight: 680; }
 .owned-store-list a:hover { background: var(--mist); }
 .owned-store-list strong, .owned-store-list small { display: block; }
 .owned-store-list strong { font-size: 0.78rem; }

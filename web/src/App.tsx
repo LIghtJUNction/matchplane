@@ -95,13 +95,20 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   useEffect(() => {
     const requestedPath = window.location.pathname;
-    const accountTarget = new URL(window.location.href).searchParams.get("account");
+    const url = new URL(window.location.href);
+    const accountTarget = url.searchParams.get("account");
+    let cleanWorkspaceTarget = false;
     if (accountTarget === "identity") {
       setAccountOpen(true);
-      const url = new URL(window.location.href);
       url.searchParams.delete("account");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      cleanWorkspaceTarget = true;
     }
+    if (url.searchParams.get("console") === "products") {
+      setSettingsOpen(true);
+      url.searchParams.delete("console");
+      cleanWorkspaceTarget = true;
+    }
+    if (cleanWorkspaceTarget) window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
     setSubplatform(resolveSubplatform(requestedPath));
     void loadSubplatform(requestedPath).then(setSubplatform);
     const requestedRole = roleFromLocation();
@@ -370,7 +377,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         </main>
         {fullscreenPlugin ? null : <PlatformFooter subplatform={subplatform} />}
 
-        {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
+        {!authUser ? null : <WorkspaceSettingsDialog
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           title={ui.console}
