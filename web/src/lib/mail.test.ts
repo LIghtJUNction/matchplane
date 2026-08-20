@@ -31,13 +31,13 @@ describe("rootEmailRouteFromEnv", () => {
     });
   });
 
-  it("fails closed when a partial root route is configured", () => {
+  it("fails closed when a partial root route is configured", async () => {
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_HOST", "smtp.example.test");
     expect(() => rootEmailRouteFromEnv("production")).toThrow(/SMTP/);
-    expect(isRootEmailAuthConfigured()).toBe(false);
+    await expect(isRootEmailAuthConfigured()).resolves.toBe(false);
   });
 
-  it("reports a complete enabled route as an available auth capability", () => {
+  it("reports a complete enabled route as an available auth capability", async () => {
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_HOST", "smtp.example.test");
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_PORT", "587");
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_TLS_MODE", "starttls");
@@ -45,6 +45,6 @@ describe("rootEmailRouteFromEnv", () => {
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_CREDENTIAL_SECRET_REF", "env://MATCHPLANE_TEST_SMTP_PASSWORD");
     vi.stubEnv("MATCHPLANE_ROOT_SMTP_FROM_ADDRESS", "no-reply@example.test");
     vi.stubEnv("MATCHPLANE_TEST_SMTP_PASSWORD", "test-secret");
-    expect(isRootEmailAuthConfigured()).toBe(true);
+    await expect(isRootEmailAuthConfigured()).resolves.toBe(true);
   });
 });
