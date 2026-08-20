@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
-  BadgeCheck,
-  CalendarDays,
   Check,
-  ChevronDown,
   Heart,
   MapPin,
   Search,
@@ -12,7 +9,6 @@ import {
   Sparkles,
   ThumbsDown,
   Scale,
-  UserRoundCheck,
 } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -21,19 +17,16 @@ import type { AssetListing } from "../types";
 import {
   getMarketplaceIntroductions,
   getMarketplaceOfferPreferences,
-  getPlatformChildren,
   recordMarketplaceBehaviorEvent,
   retrieveMarketplaceContact,
   setMarketplaceOfferPreference,
   type MarketplaceContactResponse,
   type MarketplaceIntroduction,
-  type PlatformChildSummary,
 } from "../api";
 import { getMarketplaceSession as getCapability } from "../lib/marketplace-session";
 import type { InterfaceLocale } from "../lib/preferences";
 import { localizedSubplatformCopy } from "../lib/localized-copy";
 import { ListingVisual, SectionHeading, spring } from "./Primitives";
-import { ContactProfileCard } from "./ContactProfileCard";
 
 interface BuyerDashboardProps {
   listings: AssetListing[];
@@ -62,7 +55,6 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
   const [compareIds, setCompareIds] = useState<Set<string>>(() => new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(() => new Set());
-  const [childPlatforms, setChildPlatforms] = useState<PlatformChildSummary[]>([]);
   const [introductions, setIntroductions] = useState<IntroductionEntry[]>([]);
   const [contacts, setContacts] = useState<Record<string, MarketplaceContactResponse>>({});
   const [contactLoading, setContactLoading] = useState<string | null>(null);
@@ -100,24 +92,6 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
       .catch(() => undefined);
     return () => { active = false; };
   }, [subplatform.domainId, subplatform.path, subplatform.slug, subplatform.tenantId]);
-
-  useEffect(() => {
-    if (!isRoot) {
-      setChildPlatforms([]);
-      return;
-    }
-    let active = true;
-    void getPlatformChildren(subplatform.path)
-      .then((children) => {
-        if (active) setChildPlatforms(children);
-      })
-      .catch(() => {
-        if (active) setChildPlatforms([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [isRoot, subplatform.path]);
 
   const loadIntroductions = useCallback(async () => {
     const scopes = new Map<string, IntroductionScope>();
@@ -315,79 +289,10 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
     void recordBehavior(listing, "offer.compare");
   };
 
-  const scrollToListings = () => {
-    document.getElementById("recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-  const showRecommendations = !isRoot || listings.length > 0 || query.trim().length > 0;
+  const showRecommendations = listings.length > 0 || query.trim().length > 0;
 
   return (
     <div className="dashboard buyer-dashboard">
-      {isRoot ? (
-        <RootFlow subplatform={subplatform} childPlatforms={childPlatforms} locale={locale} />
-      ) : (
-        <section className="buyer-hero" aria-labelledby="buyer-hero-title">
-          <div className="hero-copy">
-            <span className="hero-kicker">
-              <Sparkles size={16} aria-hidden="true" />
-              {copy("demandEyebrow", "需求由你定义")}
-            </span>
-            <h1 id="buyer-hero-title">
-              {copy("demandTitle", "把目标说清楚，")}
-              <span>{copy("demandTitleAccent", "找到合适的供给方。")}</span>
-            </h1>
-            <p>{copy("demandDescription", "告诉我们目标、预算和不能妥协的条件。平台会解释每一次推荐，撮合后你可以直接联系供给方，也可以在线下完成后续安排。")}</p>
-            <div className="hero-actions">
-              <motion.button
-                className="button button-dark"
-                type="button"
-                onClick={scrollToListings}
-                whileTap={{ scale: 0.97 }}
-                transition={spring}
-              >
-                {copy("browseOffersLabel", "查看可用供给")}
-                <ArrowRight size={18} aria-hidden="true" />
-              </motion.button>
-              <a className="button button-quiet" href={`${subplatform.path}?role=seller`}>
-                {copy("supplyActionLabel", "我来提供")}
-              </a>
-              <motion.button
-                className="button button-quiet"
-                type="button"
-                onClick={() => {
-                  document.getElementById("match-chat-input")?.focus();
-                  onNotice(copy("refineDemandNotice", "已回到需求输入框，可以继续补充目标、预算和限制条件"));
-                }}
-                whileTap={{ scale: 0.97 }}
-                transition={spring}
-              >
-                {copy("refineDemandLabel", "调整需求")}
-              </motion.button>
-            </div>
-            <div className="hero-proof" aria-label={copy("trustLabel", "平台保障")}>
-              <span><BadgeCheck size={16} aria-hidden="true" /> {copy("explainableMatchLabel", "匹配理由可解释")}</span>
-            </div>
-          </div>
-          <motion.div
-            className="hero-art-wrap generic-match-art"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={spring}
-            aria-hidden="true"
-          >
-            <span className="generic-art-orbit orbit-one" />
-            <span className="generic-art-orbit orbit-two" />
-            <span className="generic-art-core"><Sparkles size={40} strokeWidth={1.3} /></span>
-            <div className="floating-match-card">
-              <span>{copy("matchingCoreLabel", "匹配核心")}</span>
-              <strong>AI</strong>
-              <small>{copy("matchingCoreDetail", "目标 · 约束 · 可信度")}</small>
-            </div>
-          </motion.div>
-        </section>
-      )}
-
-      <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={onNotice} />
-
       {listings.length ? (
         <section className="discovery-panel" aria-label={copy("searchOffersLabel", "搜索供给")}>
           <label className="search-field">
@@ -534,29 +439,6 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
         </section>
       ) : null}
 
-      {!isRoot ? <section className="offline-section" aria-labelledby="offline-title">
-        <div className="offline-intro">
-          <span className="eyebrow">{copy("offlineEyebrow", "线上撮合 · 线下协商")}</span>
-          <h2 id="offline-title">{copy("offlineTitle", "双方在哪完成后续安排，由双方决定。")}</h2>
-          <p>
-            {copy("offlineDescription", "平台确认双方匹配与服务安排后，才按权限交换联系方式。线下完成后续安排也会保留撮合记录，平台只收取事先披露的服务费用。")}
-          </p>
-        </div>
-        <ol className="offline-steps">
-          <li>
-            <span><UserRoundCheck aria-hidden="true" /></span>
-            <div><small>01</small><strong>{copy("offlineStepOneTitle", "匹配并解锁联系", "Match and unlock contact")}</strong><p>{copy("offlineStepOneDescription", "仅双方可见，访问留有审计记录。", "Visible only to both parties, with access recorded.")}</p></div>
-          </li>
-          <li>
-            <span><CalendarDays aria-hidden="true" /></span>
-            <div><small>02</small><strong>{copy("offlineStepTwoTitle", "预约或线下协商", "Arrange a meeting or continue offline")}</strong><p>{copy("offlineStepTwoDescription", "地点和时间在双方确认后生效。", "Place and time take effect after both sides confirm.")}</p></div>
-          </li>
-          <li>
-            <span><BadgeCheck aria-hidden="true" /></span>
-            <div><small>03</small><strong>{copy("offlineStepThreeTitle", "确认结果与平台提成", "Confirm the outcome and platform fee")}</strong><p>{copy("offlineStepThreeDescription", "成交后按披露规则结算平台服务费。", "The platform fee follows the disclosed terms after completion.")}</p></div>
-          </li>
-        </ol>
-      </section> : null}
     </div>
   );
 }
@@ -589,43 +471,6 @@ function matchLevelForScore(score: number, locale: InterfaceLocale): string {
     return score >= 80 ? "Strong fit" : score >= 60 ? "Good fit" : score >= 40 ? "Possible fit" : "Weak fit";
   }
   return score >= 80 ? "非常适合" : score >= 60 ? "比较适合" : score >= 40 ? "一般" : "不太适合";
-}
-
-function RootFlow({
-  subplatform,
-  childPlatforms,
-  locale,
-}: {
-  subplatform: SubplatformConfig;
-  childPlatforms: PlatformChildSummary[];
-  locale: InterfaceLocale;
-}) {
-  const copy = (key: string, fallbackZh: string, fallbackEn = fallbackZh) => localizedSubplatformCopy(subplatform, locale, key, fallbackZh, fallbackEn);
-  return (
-    <details className="root-routing-disclosure">
-      <summary>
-        <span>{copy("moreEntryPointsLabel", "其他入口", "More entry points")}</span>
-        <ChevronDown size={16} aria-hidden="true" />
-      </summary>
-      <div className="root-routing-disclosure-content">
-        <a className="root-routing-seller-link" href={`${subplatform.path}?role=seller`}>
-          {copy("supplyActionLabel", "我来提供", "I can provide")}
-          <ArrowRight size={17} aria-hidden="true" />
-        </a>
-        {childPlatforms.length ? (
-          <div className="root-platform-links" aria-label={copy("activePlatformsLabel", "已激活的平台", "Active platforms")}>
-            {childPlatforms.map((child) => (
-              <a className="root-platform-link-card" key={child.path} href={child.path}>
-                <strong>{child.displayName}</strong>
-                {child.description ? <small>{child.description}</small> : null}
-                <ArrowRight size={16} aria-hidden="true" />
-              </a>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </details>
-  );
 }
 
 function AssetCard({

@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./lib/auth-client", () => ({
   authClient: {
@@ -43,8 +43,12 @@ beforeEach(() => {
   clearPartySessionCache();
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("MatchPlane workspaces", () => {
-  it("keeps the root entry focused on one chat with secondary routes collapsed", async () => {
+  it("keeps the root entry focused on one chat and one settings entry", async () => {
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "先说说你想解决什么。" })).toBeInTheDocument();
@@ -52,8 +56,34 @@ describe("MatchPlane workspaces", () => {
     expect(screen.queryByRole("tab", { name: "卖方供给" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" })).toBeInTheDocument();
 
-    const disclosure = screen.getByText("其他入口").closest("details");
-    expect(disclosure).not.toHaveAttribute("open");
+    expect(screen.queryByText("其他入口")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("供给名称")).not.toBeInTheDocument();
+  });
+
+  it("lets a mounted child platform own the viewport with only a parent back control", async () => {
+    window.history.replaceState(null, "", "/market/auto");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        displayName: "Match Auto",
+        assets: {
+          hosted: {
+            entry: "index.html",
+            url: "/api/platform/plugin-assets/market/auto/index.html?build=review",
+            digest: "a".repeat(64),
+          },
+        },
+      }),
+    }) as Response);
+
+    render(<App initialPath="/market/auto" />);
+
+    expect(await screen.findByTitle("Match Auto buyer 工作台")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "返回上一级平台" })).toHaveAttribute("href", "/market");
+    expect(screen.queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "先说说你想解决什么。" })).not.toBeInTheDocument();
+    expect(screen.queryByText("独立打开")).not.toBeInTheDocument();
   });
 
   it("requires a seller session before accepting supply uploads", async () => {
@@ -61,6 +91,7 @@ describe("MatchPlane workspaces", () => {
     window.history.replaceState(null, "", "/?role=seller");
     render(<App />);
 
+    await user.click(screen.getByRole("button", { name: "设置" }));
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("内部编号"), "seller-item");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
@@ -74,6 +105,7 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
+    await user.click(screen.getByRole("button", { name: "设置" }));
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("内部编号"), "seller-item");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
@@ -89,7 +121,8 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "平台管理" });
-    await user.click(screen.getByRole("button", { name: "切换" }));
+    await user.click(screen.getByRole("tab", { name: "支付（可选）" }));
+    await user.click(screen.getByRole("button", { name: "切换支付模式" }));
 
     const dialog = screen.getByRole("dialog", { name: "切换到生产模式？" });
     expect(dialog).toHaveTextContent("未决订单检查");
@@ -175,52 +208,59 @@ describe("MatchPlane workspaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "通知" }));
-    expect(screen.getByRole("status")).toHaveTextContent("目前没有新的平台通知");
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    expect(screen.getByRole("dialog", { name: "设置" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭设置" }));
 
     const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
     await user.click(input);
     expect(input).toHaveFocus();
   });
 
-  it("shows an account menu and signs out through Better Auth", async () => {
+  it("shows account controls in settings and signs out through Better Auth", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "打开个人账户菜单" }));
-    expect(screen.getByRole("menu", { name: "个人账户菜单" })).toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "退出登录" }));
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByRole("dialog", { name: "设置" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "退出登录" }));
 
     expect(authClient.signOut).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("status")).toHaveTextContent("已退出当前账号");
   });
 
-  it("lets a signed-in user change theme and language from the account menu", async () => {
+  it("lets a signed-in user change theme and language from settings", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "打开个人账户菜单" }));
+    await user.click(screen.getByRole("button", { name: "设置" }));
     await user.click(screen.getByRole("button", { name: "切换到暗色" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
     await user.click(screen.getByRole("button", { name: "EN" }));
     expect(document.documentElement.lang).toBe("en");
-    expect(screen.getByRole("menuitem", { name: "Buyer workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Buyer workspace" })).toBeInTheDocument();
   });
 
-  it("passes the selected language into the generic buyer workspace", async () => {
+  it("keeps a persisted dark preference during the initial hydration", async () => {
+    window.localStorage.setItem("matchplane.theme", "dark");
+
+    render(<App />);
+
+    await waitFor(() => expect(document.documentElement.dataset.theme).toBe("dark"));
+    expect(window.localStorage.getItem("matchplane.theme")).toBe("dark");
+  });
+
+  it("passes the selected language into the chat-first buyer workspace", async () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await user.click(screen.getByRole("button", { name: "设置" }));
     await user.click(screen.getByRole("button", { name: "EN" }));
+    await user.click(screen.getByRole("button", { name: "Close settings" }));
 
-    expect(screen.getByText("More entry points")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Start with one sentence.", level: 2 })).not.toBeInTheDocument();
-
-    const disclosure = screen.getByText("More entry points").closest("details");
-    expect(disclosure).not.toHaveAttribute("open");
-    await user.click(screen.getByText("More entry points"));
-    expect(screen.getByRole("link", { name: "I can provide" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tell us what you want to solve." })).toBeInTheDocument();
+    expect(screen.queryByText("More entry points")).not.toBeInTheDocument();
   });
 });

@@ -15,7 +15,6 @@ import {
   Upload,
   WalletCards,
 } from "lucide-react";
-import { motion } from "motion/react";
 
 import {
   getInvoiceAdminRecords,
@@ -60,7 +59,7 @@ import {
 import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
-import { MetricCard, SectionHeading, spring } from "./Primitives";
+import { MetricCard, SectionHeading } from "./Primitives";
 
 interface PlatformDashboardProps {
   paymentMode: "test" | "production";
@@ -69,6 +68,8 @@ interface PlatformDashboardProps {
   onNotice: (message: string) => void;
 }
 
+type PlatformSection = "overview" | "tree" | "access" | "payments" | "finance" | "site";
+
 export function PlatformDashboard({
   paymentMode,
   rootRole,
@@ -76,6 +77,7 @@ export function PlatformDashboard({
   onNotice,
 }: PlatformDashboardProps) {
   const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
+  const [activeSection, setActiveSection] = useState<PlatformSection>("overview");
   const [aiStatus, setAiStatus] = useState<PlatformAiStatus | null>(null);
   const [setupError, setSetupError] = useState(false);
   const [domains, setDomains] = useState<PlatformDomainRecord[]>([]);
@@ -696,31 +698,30 @@ export function PlatformDashboard({
         <div>
           <p className="eyebrow">平台管理</p>
           <h1>平台管理</h1>
-          <p>管理平台树、支付、发票和退款。</p>
-        </div>
-        <div className={`mode-summary mode-${paymentMode}`}>
-          <span className="status-orb" aria-hidden="true" />
-          <div><small>当前支付模式</small><strong>{paymentMode === "test" ? "测试模式" : "生产模式"}</strong></div>
-          <motion.button
-            type="button"
-            onClick={onRequestModeChange}
-            whileTap={{ scale: 0.94 }}
-            transition={spring}
-          >
-            切换
-          </motion.button>
+          <p>一次只处理一个管理分区；线上支付是可选能力。</p>
         </div>
       </section>
 
-      <section className="metric-grid" aria-label="平台经营指标">
-        <MetricCard icon={CircleDollarSign} label="平台服务费" value="—" detail="等待实时结算数据" tone="cactus" />
-        <MetricCard icon={HandCoins} label="完成撮合" value="—" detail="由 API 提供统计" tone="heather" />
-        <MetricCard icon={WalletCards} label="待结算" value="—" detail="等待双方确认" />
-        <MetricCard icon={RefreshCcw} label="退款率" value="—" detail="由支付服务计算" tone="clay" />
-      </section>
+      <div className="platform-admin-shell">
+        <nav className="platform-admin-nav" role="tablist" aria-label="平台管理分区">
+          <button id="platform-tab-overview" type="button" role="tab" aria-selected={activeSection === "overview"} aria-controls="platform-panel-overview" className={activeSection === "overview" ? "is-active" : ""} onClick={() => setActiveSection("overview")}><BadgeCheck size={17} aria-hidden="true" /><span>总览</span></button>
+          <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>平台树</span></button>
+          <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>访问与接入</span></button>
+          <button id="platform-tab-payments" type="button" role="tab" aria-selected={activeSection === "payments"} aria-controls="platform-panel-payments" className={activeSection === "payments" ? "is-active" : ""} onClick={() => setActiveSection("payments")}><CreditCard size={17} aria-hidden="true" /><span>支付（可选）</span></button>
+          <button id="platform-tab-finance" type="button" role="tab" aria-selected={activeSection === "finance"} aria-controls="platform-panel-finance" className={activeSection === "finance" ? "is-active" : ""} onClick={() => setActiveSection("finance")}><ReceiptText size={17} aria-hidden="true" /><span>财务与退款</span></button>
+          <button id="platform-tab-site" type="button" role="tab" aria-selected={activeSection === "site"} aria-controls="platform-panel-site" className={activeSection === "site" ? "is-active" : ""} onClick={() => setActiveSection("site")}><FileCheck2 size={17} aria-hidden="true" /><span>网站与合规</span></button>
+        </nav>
 
-      <div className="platform-layout">
-        <section className="surface platform-readiness" aria-label="首启与平台树">
+        <div className="platform-admin-content">
+          <section className="metric-grid" aria-label="平台经营指标" hidden={activeSection !== "overview"}>
+            <MetricCard icon={CircleDollarSign} label="平台服务费" value="—" detail="等待实时结算数据" tone="cactus" />
+            <MetricCard icon={HandCoins} label="完成撮合" value="—" detail="由 API 提供统计" tone="heather" />
+            <MetricCard icon={WalletCards} label="待结算" value="—" detail="等待双方确认" />
+            <MetricCard icon={RefreshCcw} label="退款率" value="—" detail="由支付服务计算" tone="clay" />
+          </section>
+
+          <div className="platform-layout">
+        <section id="platform-panel-overview" className="surface platform-readiness" role="tabpanel" aria-labelledby="platform-tab-overview" hidden={activeSection !== "overview"}>
           <SectionHeading eyebrow="首启与平台树" title="先确认平台已经准备好" />
           <div className="readiness-grid">
             <div className={setup?.firstRun.needsRootAccount ? "readiness-item readiness-attention" : "readiness-item"}>
@@ -757,7 +758,7 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
-        <section className="surface platform-agent-config" aria-label="AI 与登录配置">
+        <section className="surface platform-agent-config" aria-label="AI 与登录配置" hidden={activeSection !== "access"}>
           <SectionHeading eyebrow="AI 与登录" title="把真实服务接到这一个管理员入口" />
           <div className="readiness-grid">
             <div className={aiStatus?.router.configured ? "readiness-item" : "readiness-item readiness-attention"}>
@@ -790,7 +791,7 @@ export function PlatformDashboard({
           </div>
         </section>
 
-        <section className="surface domain-panel" aria-labelledby="domain-title">
+        <section id="platform-panel-tree" className="surface domain-panel" role="tabpanel" aria-labelledby="platform-tab-tree" hidden={activeSection !== "tree"}>
           <SectionHeading
             eyebrow="平台范围"
             title="管理 domain"
@@ -823,14 +824,16 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
-        <PlatformSiteSettingsPanel
-          organizationId={setup?.root.organization?.id}
-          platformPath="/"
-          platformName={setup?.root.organization?.name || "根平台"}
-          onNotice={onNotice}
-        />
+        <div id="platform-panel-site" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-site" hidden={activeSection !== "site"}>
+          <PlatformSiteSettingsPanel
+            organizationId={setup?.root.organization?.id}
+            platformPath="/"
+            platformName={setup?.root.organization?.name || "根平台"}
+            onNotice={onNotice}
+          />
+        </div>
 
-        <section className="surface subplatform-panel" aria-labelledby="subplatform-title">
+        <section className="surface subplatform-panel" aria-labelledby="subplatform-title" hidden={activeSection !== "tree"}>
           <div className="subplatform-header">
             <div>
               <p className="eyebrow">递归平台树</p>
@@ -921,10 +924,16 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
-        <PlatformAccessPanel organizations={accessOrganizations} rootRole={rootRole} onNotice={onNotice} />
+        <div id="platform-panel-access" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-access" hidden={activeSection !== "access"}>
+          <PlatformAccessPanel organizations={accessOrganizations} rootRole={rootRole} onNotice={onNotice} />
+        </div>
 
-        <section className="surface gateway-panel" aria-labelledby="gateway-title">
-          <SectionHeading eyebrow="标准化支付接口" title="支付网关" action="配置网关" onAction={() => setGatewayEditorOpen(true)} />
+        <section id="platform-panel-payments" className="surface gateway-panel" role="tabpanel" aria-labelledby="platform-tab-payments" hidden={activeSection !== "payments"}>
+          <div className={`payment-mode-control mode-${paymentMode}`}>
+            <div><span className="status-orb" aria-hidden="true" /><span><small>可选线上支付</small><strong>{paymentMode === "test" ? "测试模式" : "生产模式"}</strong></span></div>
+            <button type="button" onClick={onRequestModeChange}>切换支付模式</button>
+          </div>
+          <SectionHeading eyebrow="可选能力" title="线上支付网关" action="配置网关" onAction={() => setGatewayEditorOpen(true)} />
           <div className="gateway-list">
             {gateways.length ? gateways.map((gateway) => (
               <div className="gateway-row" key={gateway.gateway_id}>
@@ -935,8 +944,8 @@ export function PlatformDashboard({
             )) : (
               <div className="gateway-empty">
                 <CreditCard size={24} aria-hidden="true" />
-                <strong>尚未配置支付网关</strong>
-                <p>选择 EPay、Waffo Pancake、微信支付、支付宝或测试网关。</p>
+                <strong>暂不使用线上支付</strong>
+                <p>这不会阻断撮合。默认在双方同意后交换微信和手机号；需要平台内收款时再配置网关。</p>
                 <button type="button" onClick={() => setGatewayEditorOpen(true)}>打开配置</button>
               </div>
             )}
@@ -974,7 +983,7 @@ export function PlatformDashboard({
                   );
                 })}
               </div>
-            ) : <p className="route-empty">还没有路由；先保存一个网关，再为微信、支付宝或其他协议指定币种。</p>}
+            ) : <p className="route-empty">线上支付为可选；添加网关后，再为微信支付、支付宝或其他协议指定币种。</p>}
             {routeEditorOpen ? (
               <div className="admin-editor route-editor" aria-label="支付路由配置">
                 <div className="admin-editor-heading"><strong>新增支付路由</strong><button type="button" onClick={() => setRouteEditorOpen(false)}>关闭</button></div>
@@ -990,7 +999,7 @@ export function PlatformDashboard({
           </div>
         </section>
 
-        <section className="surface commission-panel" aria-labelledby="commission-title">
+        <section id="platform-panel-finance" className="surface commission-panel" role="tabpanel" aria-labelledby="platform-tab-finance" hidden={activeSection !== "finance"}>
           <SectionHeading eyebrow="提成模型" title="本月收入构成" />
           <div className="commission-total">
             <span>已确认净收入</span>
@@ -1004,7 +1013,7 @@ export function PlatformDashboard({
           </div>
         </section>
 
-        <section className="surface finance-activity" aria-labelledby="finance-activity-title">
+        <section className="surface finance-activity" aria-labelledby="finance-activity-title" hidden={activeSection !== "finance"}>
           <SectionHeading eyebrow="财务动态" title="支付、发票与退款" action="配置发票" onAction={() => setInvoiceEditorOpen(true)} />
           <div className="finance-empty">
             <ReceiptText size={22} aria-hidden="true" />
@@ -1069,11 +1078,13 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
-        <section className="operations-strip" aria-label="支付运营状态">
+        <section className="operations-strip" aria-label="支付运营状态" hidden={activeSection !== "overview"}>
           <div><span><BadgeCheck aria-hidden="true" /></span><p><strong>网关健康</strong><small>等待配置数据</small></p></div>
           <div><span><Clock3 aria-hidden="true" /></span><p><strong>主动对账</strong><small>由支付服务报告</small></p></div>
           <div><span><FileCheck2 aria-hidden="true" /></span><p><strong>审计记录</strong><small>由根平台审计流报告</small></p></div>
         </section>
+          </div>
+        </div>
       </div>
       <ModeDialog
         open={invoiceModeDialogOpen}

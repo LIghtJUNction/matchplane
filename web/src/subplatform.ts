@@ -15,6 +15,11 @@ export interface ContactField {
   placeholder?: string;
 }
 
+const ROOT_DEFAULT_CONTACT_FIELDS: ContactField[] = [
+  { key: "phone", label: "手机号", type: "tel", placeholder: "例如：138 0000 0000" },
+  { key: "wechat", label: "微信号", type: "text", placeholder: "填写可用于联系的微信号" },
+];
+
 export interface ChatUiConfig {
   /** Optional headline copy owned by the mounted platform package. */
   buyerHeadlines?: string[];
@@ -100,6 +105,7 @@ export function resolveSubplatform(pathname = "/"): SubplatformConfig {
         description: "把需求交给合适的供给方。",
         pricing: { mode: "none" },
         marketplaceContract: "generic-v1",
+        ui: { contactFields: ROOT_DEFAULT_CONTACT_FIELDS },
       }
     : {
         slug,
@@ -266,10 +272,11 @@ export function subplatformFieldLabel(
   return key.replace(/[_.-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-/** Resolve a configured contact channel label without teaching the kernel phone/WeChat names. */
+/** Resolve a configured contact channel label, including the root platform's default channels. */
 export function subplatformContactLabel(subplatform: SubplatformConfig, key: string): string {
   const configured = subplatform.ui?.contactFields?.find((field) => field.key === key)?.label;
-  return configured?.trim() || key;
+  if (configured?.trim()) return configured.trim();
+  return ROOT_DEFAULT_CONTACT_FIELDS.find((field) => field.key === key)?.label ?? key;
 }
 
 function validPricing(value: PricingConfig | undefined): PricingConfig | undefined {

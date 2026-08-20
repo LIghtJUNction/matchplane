@@ -11,6 +11,7 @@ const LOCALE_KEY = "matchplane.locale";
 export function useInterfacePreferences() {
   const [theme, setThemeState] = useState<InterfaceTheme>("light");
   const [locale, setLocaleState] = useState<InterfaceLocale>("zh");
+  const [preferencesReady, setPreferencesReady] = useState(false);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem(THEME_KEY);
@@ -21,17 +22,20 @@ export function useInterfacePreferences() {
     setLocaleState(nextLocale);
     applyInterfaceTheme(nextTheme);
     applyInterfaceLocale(nextLocale);
+    setPreferencesReady(true);
   }, []);
 
   useEffect(() => {
+    if (!preferencesReady) return;
     applyInterfaceTheme(theme);
     window.localStorage.setItem(THEME_KEY, theme);
-  }, [theme]);
+  }, [preferencesReady, theme]);
 
   useEffect(() => {
+    if (!preferencesReady) return;
     applyInterfaceLocale(locale);
     window.localStorage.setItem(LOCALE_KEY, locale);
-  }, [locale]);
+  }, [locale, preferencesReady]);
 
   return {
     theme,

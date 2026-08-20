@@ -23,9 +23,8 @@ interface ContactProfileCardProps {
  * The server encrypts the map and only releases the counterpart after the consent transition.
  */
 export function ContactProfileCard({ locale, subplatform, role, onNotice }: ContactProfileCardProps) {
-  // Contact channel names are platform-owned configuration. The kernel deliberately does not
-  // invent phone/WeChat/QQ fields for a new vertical; a root operator or mounted package must
-  // declare the fields in its manifest/configuration before the form is shown.
+  // The root platform supplies phone and WeChat defaults; mounted packages may replace them with
+  // their own declared channels. Values still remain encrypted and consent-gated.
   const fields = useMemo(() => subplatform.ui?.contactFields ?? [], [subplatform.ui?.contactFields]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
