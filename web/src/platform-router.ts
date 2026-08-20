@@ -9,6 +9,7 @@
 
 import { isProductionEnvironment } from "./lib/runtime";
 import { readJsonResponseBody } from "./lib/body-limit";
+import { readManagedPlatformRouterConfig } from "./lib/platform-router-config";
 
 export interface PlatformRouteCandidate {
   slug: string;
@@ -116,11 +117,12 @@ export async function decidePlatformRoutes(input: {
     };
   }
 
-  const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
-  const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
-  const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
-  const protocol = configuredPlatformRouterProtocol();
-  if (!isPlatformRouterConfigured() || !endpoint || !apiKey || !model) {
+  const router = configuredPlatformRouter();
+  const endpoint = router?.endpoint;
+  const apiKey = router?.apiKey;
+  const model = router?.model ?? null;
+  const protocol = router?.protocol ?? DEFAULT_ROUTER_PROTOCOL;
+  if (!router || !endpoint || !apiKey || !model) {
     return policyFallback(candidates, input.narrative, "AI 路由服务未配置，使用受控相关性降级。", null);
   }
 
@@ -215,24 +217,30 @@ function stableHash(value: string): number {
   return hash >>> 0;
 }
 
-/** True when a server-side provider credential is present and the endpoint is allowed. */
-export function isPlatformRouterConfigured(): boolean {
+function configuredPlatformRouter(): { endpoint: string; apiKey: string; model: string; protocol: PlatformRouterProtocol } | null {
+  const managed = readManagedPlatformRouterConfig();
+  if (managed?.enabled && isAllowedEndpoint(managed.endpoint)) {
+    return managed;
+  }
   const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
   const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim();
   const rawProtocol = process.env.MATCHPLANE_ROUTER_AI_PROTOCOL?.trim().toLowerCase();
-  const supportedProtocol = !rawProtocol
-    || rawProtocol === "openai-compatible"
-    || rawProtocol === "anthropic-messages"
-    || rawProtocol === "gemini-generate-content";
-  return Boolean(endpoint && apiKey && model && supportedProtocol && isAllowedEndpoint(endpoint));
+  if (rawProtocol && rawProtocol !== "openai-compatible" && rawProtocol !== "anthropic-messages" && rawProtocol !== "gemini-generate-content") return null;
+  const protocol = rawProtocol === "anthropic-messages" || rawProtocol === "gemini-generate-content"
+    ? rawProtocol
+    : DEFAULT_ROUTER_PROTOCOL;
+  if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) return null;
+  return { endpoint, apiKey, model, protocol };
+}
+
+/** True when a server-side provider credential is present and the endpoint is allowed. */
+export function isPlatformRouterConfigured(): boolean {
+  return configuredPlatformRouter() !== null;
 }
 
 export function configuredPlatformRouterProtocol(): PlatformRouterProtocol {
-  const value = process.env.MATCHPLANE_ROUTER_AI_PROTOCOL?.trim().toLowerCase();
-  return value === "anthropic-messages" || value === "gemini-generate-content"
-    ? value
-    : DEFAULT_ROUTER_PROTOCOL;
+  return configuredPlatformRouter()?.protocol ?? DEFAULT_ROUTER_PROTOCOL;
 }
 
 export interface PlatformRouterProbeResult {
@@ -254,12 +262,13 @@ export async function probePlatformRouter(options: {
   fetcher?: typeof fetch;
   timeoutMs?: number;
 } = {}): Promise<PlatformRouterProbeResult> {
-  const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
-  const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
-  const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
-  const protocol = configuredPlatformRouterProtocol();
+  const router = configuredPlatformRouter();
+  const endpoint = router?.endpoint;
+  const apiKey = router?.apiKey;
+  const model = router?.model ?? null;
+  const protocol = router?.protocol ?? DEFAULT_ROUTER_PROTOCOL;
   const startedAt = Date.now();
-  if (!isPlatformRouterConfigured() || !endpoint || !apiKey || !model) {
+  if (!router || !endpoint || !apiKey || !model) {
     return {
       status: "unconfigured",
       model,

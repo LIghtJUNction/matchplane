@@ -54,6 +54,7 @@ import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
+import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
 import { SectionHeading } from "./Primitives";
 
 interface PlatformDashboardProps {
@@ -661,37 +662,8 @@ export function PlatformDashboard({
 
         <div className="platform-admin-content">
           <div className="platform-layout">
-        <section className="surface platform-agent-config" aria-label="AI 与登录配置" hidden={activeSection !== "access"}>
-          <SectionHeading eyebrow="AI 与登录" title="把真实服务接到这一个管理员入口" />
-          <div className="readiness-grid">
-            <div className={aiStatus?.router.configured ? "readiness-item" : "readiness-item readiness-attention"}>
-              <span aria-hidden="true" />
-              <strong>{aiStatus?.router.configured ? `托管 Agent 已连接${aiStatus.router.model ? ` · ${aiStatus.router.model}` : ""}` : "托管 Agent 尚未连接"}</strong>
-              <small>{aiStatus?.router.configured ? `${routerProtocolLabel(aiStatus.router.protocol)} · ${aiStatus.router.endpointOrigin || "服务端端点"}` : "把模型网关配置在 web 服务端，浏览器不会接触密钥"}</small>
-            </div>
-            <div className="readiness-item">
-              <span aria-hidden="true" />
-              <strong>统一登录已就绪</strong>
-              <small>{authCapabilitySummary(aiStatus)}</small>
-            </div>
-          </div>
-          <div className="platform-agent-config-body">
-            <p>模型由根平台负责有限路由；子平台检索和领域 Agent 仍由各自 manifest/MCP 端点提供。本区展示 AI 与 OAuth 的当前运行状态。</p>
-            <div className="platform-agent-config-snippets" aria-label="服务端配置项">
-              <code>MATCHPLANE_ROUTER_AI_URL=https://your-gateway.example/v1/chat/completions</code>
-              <code>MATCHPLANE_ROUTER_AI_KEY=server-secret</code>
-              <code>MATCHPLANE_ROUTER_AI_MODEL=provider/model</code>
-              <code>MATCHPLANE_ROUTER_AI_PROTOCOL=openai-compatible</code>
-              <small>可选协议：openai-compatible、anthropic-messages、gemini-generate-content</small>
-            </div>
-            <div className="platform-agent-config-actions">
-              <button className="button button-light" type="button" disabled={aiTesting || !aiStatus?.router.configured} onClick={() => void testAiConnection()}>
-                {aiTesting ? "测试中…" : "测试连接"}
-              </button>
-              <a className="button button-light" href="/?role=buyer">打开买方对话测试</a>
-              <span>{aiStatus?.router.configured ? `每小时上限 ${aiStatus.router.globalRequestsPerHour} 次 · 单次最长 ${Math.round(aiStatus.router.totalTimeoutMs / 1000)} 秒` : "配置后刷新此页，再用买方对话发送一句真实需求"}</span>
-            </div>
-          </div>
+        <section className="platform-component-panel" aria-label="AI 与登录配置" hidden={activeSection !== "access"}>
+          <PlatformAiConfigPanel rootRole={rootRole} onNotice={onNotice} />
           <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
         </section>
 

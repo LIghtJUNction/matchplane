@@ -736,6 +736,14 @@ export interface PlatformAdminInvite {
   registrationUrl: string;
 }
 
+export interface ManagedPlatformRouterConfig {
+  endpoint: string;
+  model: string;
+  protocol: "openai-compatible" | "anthropic-messages" | "gemini-generate-content";
+  enabled: boolean;
+  credentialConfigured: boolean;
+}
+
 /** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
 export type ContactExchange = Record<string, string>;
 
@@ -1128,6 +1136,22 @@ export async function testPlatformAi(): Promise<PlatformAiProbeResult> {
     throw new MarketplaceApiError(response.status, body?.message || body?.error || "AI 连接测试失败");
   }
   return body;
+}
+
+export async function getManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterConfig | null> {
+  const response = await fetch("/api/platform/ai/config", { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
+  const body = await response.json().catch(() => null) as { config?: ManagedPlatformRouterConfig | null; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "AI 配置读取失败");
+  return body?.config ?? null;
+}
+
+export async function saveManagedPlatformRouterConfig(input: Omit<ManagedPlatformRouterConfig, "credentialConfigured"> & { apiKey?: string }): Promise<ManagedPlatformRouterConfig> {
+  const response = await fetch("/api/platform/ai/config", {
+    method: "PATCH", credentials: "include", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { config?: ManagedPlatformRouterConfig; error?: string } | null;
+  if (!response.ok || !body?.config) throw new MarketplaceApiError(response.status, body?.error || "AI 配置保存失败");
+  return body.config;
 }
 
 export async function getRootEmailConfig(): Promise<RootEmailConfig | null> {
