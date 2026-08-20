@@ -1,0 +1,76 @@
+.admin-dashboard {
+  width: min(100%, 86rem);
+  margin: 0 auto;
+  padding: 2rem 0;
+}
+
+.admin-dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.admin-dashboard-badge,
+.admin-dashboard-status {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem .8rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.admin-dashboard-header h1 {
+  margin-top: 1rem;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+}
+
+.admin-dashboard-header p {
+  margin-top: .6rem;
+  color: var(--muted);
+}
+
+.admin-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.2rem;
+}
+
+.admin-dashboard-card {
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 1.5rem;
+  background: var(--surface);
+  box-shadow: var(--shadow-small);
+}
+
+.admin-dashboard-icon {
+  width: 3rem;
+  height: 3rem;
+  display: grid;
+  place-items: center;
+  border-radius: 1rem;
+  background: var(--paper-deep);
+}
+
+.admin-dashboard-card h2 {
+  margin-top: 1.2rem;
+}
+
+.admin-dashboard-card p {
+  margin: .5rem 0 1.2rem;
+  color: var(--muted);
+}
+
+.admin-dashboard-card button {
+  border: 0;
+  border-radius: .8rem;
+  padding: .7rem 1rem;
+  background: var(--ink);
+  color: var(--ivory);
+  cursor: pointer;
+}
