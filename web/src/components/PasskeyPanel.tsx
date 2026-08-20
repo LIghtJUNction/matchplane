@@ -17,11 +17,12 @@ interface PasskeyRecord {
 interface PasskeyPanelProps {
   locale: InterfaceLocale;
   subplatform: SubplatformConfig;
+  accountLabel?: string | null;
   onNotice: (message: string) => void;
 }
 
 /** Account-owned WebAuthn credentials. Better Auth remains the sole credential authority. */
-export function PasskeyPanel({ locale, subplatform, onNotice }: PasskeyPanelProps) {
+export function PasskeyPanel({ locale, subplatform, accountLabel, onNotice }: PasskeyPanelProps) {
   const [passkeys, setPasskeys] = useState<PasskeyRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [binding, setBinding] = useState(false);
@@ -38,7 +39,7 @@ export function PasskeyPanel({ locale, subplatform, onNotice }: PasskeyPanelProp
       });
       if (!response.ok) throw new Error("list passkeys failed");
       const body = await response.json() as unknown;
-      setPasskeys(Array.isArray(body) ? body.flatMap((item): PasskeyRecord[] => {
+      const loaded = Array.isArray(body) ? body.flatMap((item): PasskeyRecord[] => {
         if (!item || typeof item !== "object") return [];
         const record = item as { id?: unknown; name?: unknown; createdAt?: unknown };
         if (typeof record.id !== "string" || !record.id) return [];
@@ -47,7 +48,28 @@ export function PasskeyPanel({ locale, subplatform, onNotice }: PasskeyPanelProp
           name: typeof record.name === "string" && record.name.trim() ? record.name.trim() : null,
           createdAt: typeof record.createdAt === "string" ? record.createdAt : null,
         }];
-      }) : []);
+      }) : [];
+      const legacy = loaded.filter((passkey) => isLegacyPasskeyName(passkey.name));
+      const renamed = accountLabel && legacy.length
+        ? loaded.map((passkey) => {
+            const index = legacy.findIndex((legacyPasskey) => legacyPasskey.id === passkey.id);
+            if (index < 0) return passkey;
+            const suffix = legacy.length > 1 ? ` · ${index + 1}` : "";
+            return { ...passkey, name: `${copy.thisDevice} · ${accountLabel}${suffix}`.slice(0, 128) };
+          })
+        : loaded;
+      setPasskeys(renamed);
+      if (accountLabel && legacy.length) {
+        await Promise.all(legacy.map(async (passkey, index) => {
+          const suffix = legacy.length > 1 ? ` · ${index + 1}` : "";
+          await fetch("/api/auth/update-passkey", {
+            method: "POST",
+            credentials: "include",
+            headers: { accept: "application/json", "content-type": "application/json", ...authFetchOptions(subplatform.slug).headers },
+            body: JSON.stringify({ id: passkey.id, name: `${copy.thisDevice} · ${accountLabel}${suffix}`.slice(0, 128) }),
+          }).catch(() => undefined);
+        }));
+      }
     } catch {
       onNotice(copy.loadFailed);
     } finally {
@@ -65,7 +87,7 @@ export function PasskeyPanel({ locale, subplatform, onNotice }: PasskeyPanelProp
     setBinding(true);
     try {
       const result = await authClient.passkey.addPasskey({
-        name: copy.thisDevice,
+        name: accountLabel ? `${copy.thisDevice} · ${accountLabel}`.slice(0, 128) : copy.thisDevice,
         fetchOptions: authFetchOptions(subplatform.slug),
       });
       if (result.error) throw new Error(passkeyFailureMessage(result.error, copy));
@@ -134,6 +156,10 @@ function formatDate(value: string, locale: InterfaceLocale): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en", { dateStyle: "medium" }).format(date);
+}
+
+function isLegacyPasskeyName(value: string | null): boolean {
+  return value === "当前设备" || value === "This device" || value === "未命名设备" || value === "Unnamed device";
 }
 
 function passkeyCopy(locale: InterfaceLocale) {
