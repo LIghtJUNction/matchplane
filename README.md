@@ -83,6 +83,14 @@ commit or log it):
 cargo run --locked -p xtask -- admin-invite --role root-admin
 ```
 
+To reset a root administrator password from the host, use the operator-only CLI command. It reads
+the password from a hidden prompt, or from stdin with `--password-stdin`; the password is never a
+command-line argument, and all existing sessions for the account are revoked:
+
+```sh
+sudo bash -lc 'set -a; . /etc/matchplane/matchplane.env; . /etc/matchplane/services/web.env; set +a; exec /usr/bin/matchplane auth reset-password --email <root-admin-email>'
+```
+
 Open the returned `/admin/register?token=...&next=...` link; it uses the same login/register page as every
 other account, returns to the requested administrator workspace, and promotes the signed-in user only after Better Auth verification. Omit the domain flags when the
 root should start without a child; to add a domain later, reuse the exact `--tenant-id` printed by

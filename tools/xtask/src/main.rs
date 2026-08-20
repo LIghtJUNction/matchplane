@@ -1,6 +1,6 @@
-use std::{env, path::Path, process::Command as ProcessCommand, time::Duration};
+use std::{env, io, path::Path, process::Command as ProcessCommand, time::Duration};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use matchplane_config::{AppConfig, ConfigurationDiagnostics, Environment};
 use matchplane_domain::{DomainId, TenantId};
@@ -8,12 +8,16 @@ use matchplane_storage::{
     PgStore, ProvisionRootDomain, ProvisionRootPlatform, ProvisionedRootPlatform,
 };
 use reqwest::Client;
+use rpassword::prompt_password;
+use scrypt::{Params as ScryptParams, scrypt as derive_scrypt};
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use time::{Duration as TimeDuration, OffsetDateTime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use unicode_normalization::UnicodeNormalization;
 use url::Url;
 use uuid::{Uuid, Variant};
 
@@ -71,6 +75,11 @@ enum Command {
         /// Public web origin to place in the registration URL. Defaults to BETTER_AUTH_URL.
         #[arg(long, env = "BETTER_AUTH_URL")]
         base_url: Option<String>,
+    },
+    /// Manage Better Auth credentials through operator-only maintenance actions.
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommand,
     },
     /// Issue a one-time invite for a signed remote MatchPlane platform enrollment.
     #[command(name = "federation-invite")]
@@ -139,6 +148,20 @@ enum AdminInviteRole {
 }
 
 #[derive(Debug, Subcommand)]
+enum AuthCommand {
+    /// Reset a root administrator's password and revoke all of that account's sessions.
+    ResetPassword {
+        /// Existing root administrator email address.
+        #[arg(long)]
+        email: String,
+        /// Read one new password line from stdin instead of opening hidden TTY prompts.
+        /// This is intended for a secret manager pipe; the password is never a CLI argument.
+        #[arg(long)]
+        password_stdin: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum McpCommand {
     /// Serve `platform.status`, `platform.doctor`, and `platform.health` tools.
     Serve,
@@ -175,6 +198,13 @@ async fn main() -> Result<()> {
             expires_hours,
             base_url,
         } => create_admin_invite(role, organization_id, expires_hours, base_url).await,
+        Command::Auth {
+            command:
+                AuthCommand::ResetPassword {
+                    email,
+                    password_stdin,
+                },
+        } => reset_root_admin_password(email, password_stdin).await,
         Command::FederationInvite {
             domain_id,
             parent_organization_id,
@@ -387,6 +417,183 @@ async fn create_admin_invite(
         .context("administrator invite output failed")?
     );
     Ok(())
+}
+
+async fn reset_root_admin_password(email: String, password_stdin: bool) -> Result<()> {
+    let email = email.trim().to_lowercase();
+    validate_operator_email(&email)?;
+
+    let config = AppConfig::load().context("password reset configuration is invalid")?;
+    let store = PgStore::connect(&config.database_url, 2)
+        .await
+        .context("password reset could not connect to PostgreSQL")?;
+    let user = sqlx::query(
+        r#"SELECT id, role
+             FROM "user"
+            WHERE lower("email") = lower($1)
+            LIMIT 1"#,
+    )
+    .bind(&email)
+    .fetch_optional(store.pool())
+    .await
+    .context("password reset user lookup failed")?;
+    let Some(user) = user else {
+        bail!("no Better Auth account exists for the supplied email")
+    };
+    let user_id: Uuid = user
+        .try_get("id")
+        .context("password reset user id is invalid")?;
+    let role: String = user
+        .try_get::<Option<String>, _>("role")
+        .context("password reset user role is invalid")?
+        .unwrap_or_default();
+    if !role
+        .split(',')
+        .any(|value| matches!(value.trim(), "rootSuperAdmin" | "rootAdmin"))
+    {
+        bail!("password reset is limited to root administrator accounts")
+    }
+
+    let password = read_new_password(password_stdin)?;
+    let password_hash = better_auth_password_hash(password.expose_secret())?;
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .context("password reset transaction could not start")?;
+    let locked_user = sqlx::query(
+        r#"SELECT id, role
+             FROM "user"
+            WHERE id = $1::uuid
+            FOR UPDATE"#,
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .context("password reset could not lock the user")?;
+    let Some(locked_user) = locked_user else {
+        bail!("the target account disappeared during password reset")
+    };
+    let locked_role: String = locked_user
+        .try_get::<Option<String>, _>("role")
+        .context("password reset locked user role is invalid")?
+        .unwrap_or_default();
+    if !locked_role
+        .split(',')
+        .any(|value| matches!(value.trim(), "rootSuperAdmin" | "rootAdmin"))
+    {
+        bail!("the target account is no longer a root administrator")
+    }
+
+    let account_id = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+             FROM "account"
+            WHERE "userId" = $1::uuid AND "providerId" = 'credential'
+            ORDER BY "updatedAt" DESC
+            LIMIT 1"#,
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .context("password reset credential lookup failed")?;
+    if let Some(account_id) = account_id {
+        sqlx::query(
+            r#"UPDATE "account"
+                  SET "password" = $1,
+                      "issuer" = 'local:credential',
+                      "updatedAt" = CURRENT_TIMESTAMP
+                WHERE id = $2::uuid"#,
+        )
+        .bind(&password_hash)
+        .bind(account_id)
+        .execute(&mut *transaction)
+        .await
+        .context("password reset credential update failed")?;
+    } else {
+        sqlx::query(
+            r#"INSERT INTO "account"
+                 ("accountId", "providerId", "userId", "password", "issuer", "createdAt", "updatedAt")
+               VALUES ($1, 'credential', $2::uuid, $3, 'local:credential', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"#,
+        )
+        .bind(user_id.to_string())
+        .bind(user_id)
+        .bind(&password_hash)
+        .execute(&mut *transaction)
+        .await
+        .context("password reset credential creation failed")?;
+    }
+    let sessions_revoked = sqlx::query(r#"DELETE FROM "session" WHERE "userId" = $1::uuid"#)
+        .bind(user_id)
+        .execute(&mut *transaction)
+        .await
+        .context("password reset session revocation failed")?
+        .rows_affected();
+    transaction
+        .commit()
+        .await
+        .context("password reset transaction commit failed")?;
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "passwordReset": true,
+            "email": email,
+            "role": locked_role,
+            "sessionsRevoked": sessions_revoked,
+        }))
+        .context("password reset output failed")?
+    );
+    Ok(())
+}
+
+fn read_new_password(from_stdin: bool) -> Result<SecretString> {
+    let password = if from_stdin {
+        let mut value = String::new();
+        io::stdin()
+            .read_line(&mut value)
+            .context("could not read the password from stdin")?;
+        value.trim_end_matches(['\r', '\n']).to_owned()
+    } else {
+        let first = prompt_password("New password: ").context("could not read the new password")?;
+        let confirmation = prompt_password("Confirm new password: ")
+            .context("could not read the password confirmation")?;
+        if first != confirmation {
+            bail!("password confirmation does not match")
+        }
+        first
+    };
+    let password = SecretString::from(password);
+    let length = password.expose_secret().chars().count();
+    if !(8..=128).contains(&length) {
+        bail!("password must contain between 8 and 128 characters")
+    }
+    Ok(password)
+}
+
+fn better_auth_password_hash(password: &str) -> Result<String> {
+    let mut raw_salt = [0_u8; 16];
+    getrandom::fill(&mut raw_salt)
+        .map_err(|error| anyhow!("could not generate a password salt: {error}"))?;
+    let salt = hex::encode(raw_salt);
+    Ok(format!(
+        "{salt}:{}",
+        better_auth_derived_key(password, &salt)?
+    ))
+}
+
+fn better_auth_derived_key(password: &str, salt: &str) -> Result<String> {
+    let normalized: String = password.nfkc().collect();
+    let params =
+        ScryptParams::new(14, 16, 1, 64).context("Better Auth scrypt parameters are invalid")?;
+    let mut derived_key = [0_u8; 64];
+    derive_scrypt(
+        normalized.as_bytes(),
+        salt.as_bytes(),
+        &params,
+        &mut derived_key,
+    )
+    .context("could not derive the Better Auth password hash")?;
+    Ok(hex::encode(derived_key))
 }
 
 async fn create_federation_invite(
@@ -1102,9 +1309,10 @@ impl JsonRpcResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdminInviteRole, Service, admin_invite_role_value, hosted_agent_report_from_values,
-        normalize_admin_base_url, resolve_web_node_with, safe_endpoint_origin, service_command,
-        sha256, validate_operator_email, validate_operator_uuid,
+        AdminInviteRole, Service, admin_invite_role_value, better_auth_derived_key,
+        hosted_agent_report_from_values, normalize_admin_base_url, resolve_web_node_with,
+        safe_endpoint_origin, service_command, sha256, validate_operator_email,
+        validate_operator_uuid,
     };
     use uuid::Uuid;
 
@@ -1185,6 +1393,17 @@ mod tests {
         assert_eq!(
             admin_invite_role_value(AdminInviteRole::SubplatformAdmin),
             "subplatform_admin"
+        );
+    }
+
+    #[test]
+    fn better_auth_hash_matches_the_node_scrypt_fixture() {
+        let (salt, expected_key) = "2fed236420c93b71f823a22012f34f9a:9a4c013d8e168bda79db6de1e0ffc7607db2be2f0850c1f4daa0a8fc04afb12e7b67ce60cc8f5bd0a206ef4181ad0d5d70012e445c7b171becbd0fd9d814923f"
+            .split_once(':')
+            .expect("fixture must contain a salt separator");
+        assert_eq!(
+            better_auth_derived_key("MatchPlane-CLI-Test-2026!", salt).unwrap(),
+            expected_key
         );
     }
 

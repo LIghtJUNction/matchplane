@@ -8,6 +8,7 @@ matchplane status --json
 matchplane migrate
 matchplane provision-root --tenant-slug <slug> --tenant-name <name> --admin-email <operator-email>
 matchplane admin-invite --role root-admin
+matchplane auth reset-password --email <root-admin-email>
 matchplane admin-invite --role subplatform-admin --organization-id <organization-uuid>
 matchplane federation-invite --domain-id <domain-uuid>
 matchplane serve gateway
@@ -17,7 +18,15 @@ matchplane mcp serve
 
 `provision-root` 是干净安装时的身份初始化步骤。该命令要求运营者提供租户 slug 与展示名，支持可选的首个域名 slug/name/UUID，并通过 `--admin-email`（或 `MATCHPLANE_ROOT_ADMIN_EMAIL`）仅用于打印下一步配置分配。该命令仅在运营者未提供时生成 UUIDv7 标识符，执行迁移，执行幂等的创建/验证事务，并打印生成的 `MATCHPLANE_ROOT_TENANT_ID`、管理员邮箱和登录路径。它不会创建目录、资产 schema、列表、支付提供商或任何业务样例数据。若与现有 ID 或 slug 冲突会失败，而不是覆盖持久化配置。后续要新增域名时，请复用首次调用输出中的 `--tenant-id`，并携带新的域名参数；省略 `--tenant-id` 会生成新 UUID，并且这不是隐式查找。
 
-`admin-invite` 是唯一的管理员入驻入口。它在数据库中只保存 SHA-256 token 摘要，默认 24 小时过期且最多 7 天，只能兑换一次；原始 token 只出现在 CLI 输出的注册 URL 中。首次部署必须先由已验证的 `MATCHPLANE_ROOT_ADMIN_EMAIL` 登录并在 Web 初始化 Better Auth 根组织，之后 `root-admin` 才能自动定位该根组织；`subplatform-admin` 必须显式指定目标组织 UUID。CLI URL 自带 `next` 回跳参数。管理员和普通用户使用同一个 `/login` 表单，Better Auth 建立并验证会话后服务端才兑换邀请并授予 root 角色或组织 admin 成员资格。不要把 URL 写入日志、工单或 shell 历史；如果泄露，请删除对应邀请或等待过期后重新签发。
+`admin-invite` 是唯一的管理员入驻入口。它在数据库中只保存 SHA-256 token 摘要，默认 24 小时过期且最多 7 天，只能兑换一次；原始 token 只出现在 CLI 输出的注册 URL 中。首次部署必须先由已验证的 `MATCHPLANE_ROOT_ADMIN_EMAIL` 登录并在 Web 初始化 Better Auth 根组织，之后 `root-admin` 才能自动定位该根组织；`subplatform-admin` 必须显式指定目标组织 UUID。CLI URL 自带 `next` 回跳参数。管理员和普通用户使用同一个 `/login` 表单，Better Auth 建立并验证会话后服务端才兑换邀请并授予 root 角色或组织 admin 成员关系。不要把 URL 写入日志、工单或 shell 历史；如果泄露，请删除对应邀请或等待过期后重新签发。
+
+`auth reset-password` 是服务器上的根管理员维护命令。它只接受 `rootSuperAdmin` 或 `rootAdmin` 账号，默认通过隐藏的 TTY 两次读取新密码；`--password-stdin` 可用于从 secret manager 传入一行密码。密码不会出现在命令参数、日志或 JSON 输出中，成功后会撤销目标账号的全部 Better Auth 会话：
+
+```sh
+sudo bash -lc 'set -a; . /etc/matchplane/matchplane.env; . /etc/matchplane/services/web.env; set +a; exec /usr/bin/matchplane auth reset-password --email admin@matx.tech'
+```
+
+命令依赖 `MATCHPLANE_DATABASE_URL`，生产机需要同时加载共享环境和 Web 工作负载环境。使用 `--password-stdin` 时，请让 secret manager 直接提供密码，不要把密码写进 shell 历史或命令参数。
 
 根作用域的 Better Auth API key 要求运营者通过 `MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID` 提供对应的组织 UUID；web 服务不会从子平台或 marketplace 记录中推断。
 
