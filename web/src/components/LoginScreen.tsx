@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useId, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint, KeyRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint } from "lucide-react";
 import { Button } from "@appica/ui-react/button";
 import { Input } from "@appica/ui-react/input";
 
@@ -36,7 +36,7 @@ const socialLabels: Record<SocialProvider, Record<"zh" | "en", string>> = {
   alipay: { zh: "支付宝", en: "Alipay" },
 };
 
-export function LoginScreen() {
+export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign-up" }) {
   const { theme, locale, setTheme, setLocale } = useInterfacePreferences();
   const copy = loginCopy(locale);
   const [identifier, setIdentifier] = useState("");
@@ -44,11 +44,13 @@ export function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState("");
   const [method, setMethod] = useState<AuthMethod>("password");
-  const [authIntent, setAuthIntent] = useState<"sign-in" | "sign-up">("sign-in");
+  const [authIntent, setAuthIntent] = useState<"sign-in" | "sign-up">(intent);
   const [next, setNext] = useState("/");
   const [oauthQuery, setOauthQuery] = useState<string | null>(null);
   const [adminInviteToken, setAdminInviteToken] = useState<string | null>(null);
+  const [superAdminBootstrapToken, setSuperAdminBootstrapToken] = useState<string | null>(null);
   const [role, setRole] = useState<BetterAuthMarketplaceRole>("buyer");
+  const [registrationRoleSelected, setRegistrationRoleSelected] = useState(intent !== "sign-up");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform());
   const [socialProviders, setSocialProviders] = useState<SocialProvider[]>([]);
   const [nationalIdentityEnabled, setNationalIdentityEnabled] = useState(false);
@@ -74,13 +76,19 @@ export function LoginScreen() {
       ? params.toString()
       : null;
     setOauthQuery(signedOAuthQuery);
+    const bootstrap = params.get("bootstrap_token");
+    const bootstrapToken = bootstrap && /^mpsa_[0-9a-f]{64}$/.test(bootstrap) ? bootstrap : null;
+    setSuperAdminBootstrapToken(bootstrapToken);
     const invite = params.get("token") || params.get("admin_invite");
     const inviteToken = invite && /^mpa_[0-9a-f]{64}$/.test(invite) ? invite : null;
     setAdminInviteToken(inviteToken);
-    if (inviteToken) setAuthIntent("sign-up");
+    if (inviteToken || bootstrapToken) {
+      setAuthIntent("sign-up");
+      setRegistrationRoleSelected(true);
+    }
     const requestedRole = params.get("role");
     setRole(
-      inviteToken
+      bootstrapToken || inviteToken
         ? "platform"
         : requestedRole === "seller"
         ? "seller"
@@ -206,7 +214,7 @@ export function LoginScreen() {
       return;
     }
     if (method === "password" && resolvedIdentifier.kind === "phone") {
-      setError(copy.phonePasswordUnavailable);
+      setError(isRegistration ? copy.registrationEmailOnly : copy.invalidCredentials);
       return;
     }
     if (registrationPending) {
@@ -315,15 +323,43 @@ export function LoginScreen() {
 
       if (authIntent === "sign-up") {
         if (resolvedIdentifier.kind !== "email") throw new Error(copy.registrationEmailOnly);
-        if (!capabilities.emailOtp && !capabilities.magicLink) throw new Error(copy.emailOtpUnavailable);
+        if (!superAdminBootstrapToken && !capabilities.emailOtp && !capabilities.magicLink) throw new Error(copy.emailOtpUnavailable);
+        if (superAdminBootstrapToken) {
+          const claim = await fetch("/api/super-admin-bootstrap/claim", {
+            method: "POST",
+            credentials: "include",
+            headers: { accept: "application/json", "content-type": "application/json" },
+            body: JSON.stringify({ token: superAdminBootstrapToken, email: resolvedIdentifier.value }),
+          });
+          const claimBody = await claim.json().catch(() => null) as { error?: string } | null;
+          if (!claim.ok) throw new Error(claimBody?.error || copy.authFailed);
+        }
         const created = await authClient.signUp.email({
           name: displayNameFromIdentifier(resolvedIdentifier.value),
           email: resolvedIdentifier.value,
           password,
+          marketplaceRole: role === "seller" ? "seller" : "buyer",
           callbackURL: authCallbackURL(next, adminInviteToken),
           fetchOptions: options,
-        });
+        } as never);
         if (!created.error) {
+          if (superAdminBootstrapToken) {
+            const signedIn = await authClient.signIn.email({
+              email: resolvedIdentifier.value,
+              password,
+              callbackURL: authCallbackURL(next, adminInviteToken),
+              fetchOptions: options,
+            } as never);
+            if (signedIn.error) throw new Error(copy.authFailed);
+            await finishSignIn();
+            return;
+          }
+          const sent = await authClient.emailOtp.sendVerificationOtp({
+            email: resolvedIdentifier.value,
+            type: "email-verification",
+            fetchOptions: options,
+          } as never);
+          if (sent.error) throw new Error(sent.error.message || copy.emailOtpUnavailable);
           setRegistrationPending(true);
           setOtp("");
           setNotice(copy.registrationOtpSent);
@@ -339,7 +375,7 @@ export function LoginScreen() {
         ...(oauthQuery ? { oauth_query: oauthQuery } : {}),
         fetchOptions: options,
       } as never);
-      if (result.error) throw new Error(result.error.message || copy.authFailed);
+      if (result.error) throw new Error(copy.invalidCredentials);
       const oauthRedirect = oauthRedirectUrl(result.data);
       if (oauthQuery && oauthRedirect) {
         window.location.assign(oauthRedirect);
@@ -347,7 +383,7 @@ export function LoginScreen() {
       }
       await finishSignIn();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : copy.authFailed);
+      setError(!isRegistration && method === "password" ? copy.invalidCredentials : cause instanceof Error ? cause.message : copy.authFailed);
       setSubmitting(false);
     }
   };
@@ -373,27 +409,6 @@ export function LoginScreen() {
     }
   };
 
-  const startPasskeyLogin = async () => {
-    if (typeof window === "undefined" || !window.PublicKeyCredential || !navigator.credentials) {
-      setNotice(copy.passkeyUnsupported);
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await authClient.signIn.passkey({
-        autoFill: false,
-        fetchOptions: authFetchOptions(subplatform.slug),
-      });
-      if (result.error) throw new Error(result.error.message || copy.passkeyFailed);
-      await finishSignIn();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : copy.passkeyFailed);
-      setSubmitting(false);
-    }
-  };
-
   const switchMethod = (nextMethod: AuthMethod) => {
     setMethod(nextMethod);
     setOtpSent(false);
@@ -404,31 +419,22 @@ export function LoginScreen() {
     setNotice(null);
   };
 
-  const switchAuthIntent = (nextIntent: "sign-in" | "sign-up") => {
-    setAuthIntent(nextIntent);
-    setRegistrationPending(false);
-    setOtp("");
-    setError(null);
-    setNotice(null);
-  };
-
-  const selectPersona = (nextRole: LoginPersona) => {
-    if (adminInviteToken || oauthQuery) return;
+  const selectRegistrationRole = (nextRole: "buyer" | "seller") => {
     setRole(nextRole);
-    if (nextRole === "platform") setAuthIntent("sign-in");
     setNext((current) => nextPathForPersona(current, nextRole));
+    setRegistrationRoleSelected(true);
     setError(null);
     setNotice(null);
   };
 
-  const availableMethods: AuthMethod[] = [
-    "password",
-    ...(capabilities.emailOtp || capabilities.phoneOtp ? ["email-otp" as const] : []),
-    ...(capabilities.magicLink ? ["magic-link" as const] : []),
-  ];
-  const emailOnlyIdentifier = method === "password" || method === "magic-link" || registrationPending;
+  const availableMethods: AuthMethod[] = ["password"];
+  const isRegistration = authIntent === "sign-up";
+  const selectingRegistrationRole = isRegistration && !adminInviteToken && !registrationRoleSelected;
+  const emailOnlyIdentifier = isRegistration || registrationPending;
   const hasMethodTabs = availableMethods.length > 1;
   const activeMethodTabId = `${authMethodsId}-${method}-tab`;
+  const registrationHref = `/register?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`;
+  const loginHref = `/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`;
 
   return (
     <main className="login-page">
@@ -442,27 +448,16 @@ export function LoginScreen() {
         <section className="login-card" aria-labelledby="login-form-title">
           <div className="login-card-header">
             <Brand label={subplatform.brandName} homeHref="/" />
-            <h1 id="login-form-title">{copy.formTitle}</h1>
-            <p>{copy.formDescription}</p>
+            <h1 id="login-form-title">{selectingRegistrationRole ? copy.registrationRoleTitle : isRegistration ? role === "seller" ? copy.sellerRegistrationTitle : copy.buyerRegistrationTitle : copy.formTitle}</h1>
+            <p>{selectingRegistrationRole ? copy.registrationRoleDescription : isRegistration ? copy.registrationDescription : copy.formDescription}</p>
           </div>
 
-        {!adminInviteToken && !oauthQuery ? (
-          <section className="login-persona" aria-labelledby="login-persona-title">
-            <p className="login-persona-eyebrow" id="login-persona-title">{copy.personaPrompt}</p>
-            <div className="login-persona-options" role="radiogroup" aria-label={copy.personaPrompt}>
-              <button type="button" role="radio" aria-checked={role === "buyer"} className={role === "buyer" ? "is-active" : ""} onClick={() => selectPersona("buyer")}>
-                {copy.buyer}
-              </button>
-              <button type="button" role="radio" aria-checked={role === "seller"} className={role === "seller" ? "is-active" : ""} onClick={() => selectPersona("seller")}>
-                {copy.seller}
-              </button>
-              <button type="button" role="radio" aria-checked={role === "platform"} className={role === "platform" ? "is-active" : ""} onClick={() => selectPersona("platform")}>
-                {copy.admin}
-              </button>
-            </div>
-            {role === "platform" ? <p className="login-persona-hint">{copy.adminDetail}</p> : null}
+        {selectingRegistrationRole ? (
+          <section className="login-registration-role" aria-label={copy.registrationRoleTitle}>
+            <button type="button" onClick={() => selectRegistrationRole("buyer")}>{copy.buyer}</button>
+            <button type="button" onClick={() => selectRegistrationRole("seller")}>{copy.seller}</button>
           </section>
-        ) : null}
+        ) : <>
 
         {nationalIdentityEnabled ? (
           <div className="login-primary-provider">
@@ -478,13 +473,6 @@ export function LoginScreen() {
             <button id={`${authMethodsId}-password-tab`} className={method === "password" ? "is-active" : ""} type="button" role="tab" aria-controls={`${authMethodsId}-panel`} aria-selected={method === "password"} onClick={() => switchMethod("password")}>{copy.password}</button>
             {availableMethods.includes("email-otp") ? <button id={`${authMethodsId}-email-otp-tab`} className={method === "email-otp" ? "is-active" : ""} type="button" role="tab" aria-controls={`${authMethodsId}-panel`} aria-selected={method === "email-otp"} onClick={() => switchMethod("email-otp")}>{copy.emailOtp}</button> : null}
             {availableMethods.includes("magic-link") ? <button id={`${authMethodsId}-magic-link-tab`} className={method === "magic-link" ? "is-active" : ""} type="button" role="tab" aria-controls={`${authMethodsId}-panel`} aria-selected={method === "magic-link"} onClick={() => switchMethod("magic-link")}>{copy.magicLink}</button> : null}
-          </div>
-        ) : null}
-
-        {!oauthQuery && method === "password" && !registrationPending && (adminInviteToken || role !== "platform") ? (
-          <div className="login-mode-switch" role="tablist" aria-label={copy.accountFlow}>
-            <button type="button" role="tab" aria-selected={authIntent === "sign-in"} className={authIntent === "sign-in" ? "is-active" : ""} onClick={() => switchAuthIntent("sign-in")}>{copy.signIn}</button>
-            <button type="button" role="tab" aria-selected={authIntent === "sign-up"} className={authIntent === "sign-up" ? "is-active" : ""} onClick={() => switchAuthIntent("sign-up")}>{copy.signUp}</button>
           </div>
         ) : null}
 
@@ -504,11 +492,6 @@ export function LoginScreen() {
                   <Button className="login-password-visibility" variant="outline" size="icon-sm" type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={submitting} aria-label={showPassword ? copy.hidePassword : copy.showPassword} title={showPassword ? copy.hidePassword : copy.showPassword}>
                     {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
                   </Button>
-                  {capabilities.passkey ? (
-                    <Button className="login-passkey-button" variant="outline" size="icon-sm" type="button" onClick={() => void startPasskeyLogin()} disabled={submitting} aria-label={copy.passkeyLogin} title={copy.passkeyLogin}>
-                      <KeyRound size={17} aria-hidden="true" />
-                    </Button>
-                  ) : null}
                 </span>
               </span>
             </div>
@@ -524,7 +507,7 @@ export function LoginScreen() {
           </Button>
         </form>
 
-        {socialProviders.length ? (
+        {socialProviders.length && !isRegistration ? (
           <div className="social-login" aria-label={copy.socialMethods}>
             <span className="login-divider">{copy.otherMethods}</span>
             <div className="social-login-buttons">
@@ -537,6 +520,12 @@ export function LoginScreen() {
             </div>
           </div>
         ) : null}
+        {!adminInviteToken && !oauthQuery && role !== "platform" && !registrationPending ? (
+          <p className="login-registration-link">
+            {isRegistration ? <>{copy.hasAccount} <a href={loginHref}>{copy.signIn}</a></> : <>{copy.noAccount} <a href={registrationHref}>{copy.signUp}</a></>}
+          </p>
+        ) : null}
+        </>}
         </section>
       </div>
     </main>
@@ -611,9 +600,16 @@ function loginCopy(locale: "zh" | "en") {
       back: "Back",
       formTitle: "Continue with your account",
       formDescription: "Use email or another method enabled for this platform.",
-      accountFlow: "Account flow",
+      registrationTitle: "Create your account",
+      registrationDescription: "Choose your identity, then verify the email you control.",
+      registrationRoleTitle: "Choose your identity",
+      registrationRoleDescription: "Choose one to continue.",
+      buyerRegistrationTitle: "Create buyer account",
+      sellerRegistrationTitle: "Create seller account",
       signIn: "Sign in",
       signUp: "Register",
+      noAccount: "No account?",
+      hasAccount: "Already have an account?",
       personaPrompt: "How will you use MatchPlane?",
       personaHint: "Buyer and seller workspaces require sign-in. Administrator access is granted by the super administrator; choosing it never grants permission by itself.",
       buyer: "Buyer",
@@ -652,6 +648,7 @@ function loginCopy(locale: "zh" | "en") {
       magicLinkSent: "Magic link sent.",
       authFailed: "Sign-in did not complete. Try again.",
       invalidIdentifier: "Enter a valid email address or phone number.",
+      invalidCredentials: "Account does not exist or password is incorrect.",
       registrationEmailOnly: "Register with an email address. Phone registration appears after SMS is configured.",
       phonePasswordUnavailable: "Use the code method to sign in with a phone number.",
       emailOtpUnavailable: "Email codes are not configured on this platform.",
@@ -673,9 +670,16 @@ function loginCopy(locale: "zh" | "en") {
     back: "返回",
     formTitle: "继续使用你的账号",
     formDescription: "使用邮箱，或选择当前平台已启用的其他方式。",
-    accountFlow: "账号操作",
+    registrationTitle: "创建你的账号",
+    registrationDescription: "选择身份后，用你可接收验证码的邮箱完成注册。",
+    registrationRoleTitle: "选择身份",
+    registrationRoleDescription: "选择一个身份后继续。",
+    buyerRegistrationTitle: "创建买家账号",
+    sellerRegistrationTitle: "创建卖家账号",
     signIn: "登录",
     signUp: "注册",
+    noAccount: "没有账号？",
+    hasAccount: "已有账号？",
     personaPrompt: "选择你的使用身份",
     personaHint: "买家和卖家登录后进入各自工作台。管理员权限只由超级管理员授予；选择此项不会给账号自行加权。",
     buyer: "买家",
@@ -714,6 +718,7 @@ function loginCopy(locale: "zh" | "en") {
     magicLinkSent: "免密链接已发送。",
     authFailed: "登录没有完成，请再试一次。",
     invalidIdentifier: "请输入有效的邮箱或手机号。",
+    invalidCredentials: "账号不存在或密码错误。",
     registrationEmailOnly: "请使用邮箱注册；配置短信服务后才会显示手机号注册。",
     phonePasswordUnavailable: "手机号请使用验证码登录。",
     emailOtpUnavailable: "当前平台尚未配置邮箱验证码服务。",

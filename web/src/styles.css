@@ -3048,34 +3048,6 @@ main.subplatform-fullscreen-main {
   line-height: 1;
 }
 
-.login-mode-switch {
-  margin-top: 1.25rem;
-  padding: 0.24rem;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.2rem;
-  border: 1px solid var(--line);
-  border-radius: 0.95rem;
-  background: var(--paper);
-}
-
-.login-mode-switch button {
-  min-height: 2.55rem;
-  border: 0;
-  border-radius: 0.72rem;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 0.78rem;
-}
-
-.login-mode-switch button.is-active {
-  background: var(--ivory);
-  color: var(--ink);
-  box-shadow: var(--shadow-small);
-  font-weight: 680;
-}
-
 .login-role {
   color: var(--muted);
   font-size: 0.68rem;
@@ -3830,7 +3802,6 @@ main.subplatform-fullscreen-main {
   .login-qr-corner { top: 0.75rem; right: 0.75rem; min-height: 2.35rem; }
   .login-qr-corner > span:last-child { display: none; }
   .login-qr-corner-mark { width: 2.35rem; height: 2.35rem; border-radius: 0.75rem; }
-  .login-mode-switch,
   .login-methods { margin-top: 0.9rem; }
   .login-methods { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .login-methods.login-methods-count-1 { grid-template-columns: 1fr; }
@@ -4988,6 +4959,34 @@ main.subplatform-fullscreen-main {
   box-shadow: var(--shadow-small);
 }
 
+.login-registration-role {
+  margin-top: 1.6rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.login-registration-role button {
+  min-height: 7.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.92rem;
+  font-weight: 680;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.login-registration-role button:hover,
+.login-registration-role button:focus-visible {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--ivory);
+  outline: 0;
+  transform: translateY(-1px);
+}
+
 .login-card .login-form input:-webkit-autofill,
 .login-card .login-form input:-webkit-autofill:hover,
 .login-card .login-form input:-webkit-autofill:focus {
@@ -5001,6 +5000,19 @@ main.subplatform-fullscreen-main {
   color: var(--muted);
   font-size: 0.68rem;
   line-height: 1.45;
+}
+
+.login-registration-link {
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.login-registration-link a {
+  color: var(--ink);
+  font-weight: 700;
+  text-underline-offset: 0.16em;
 }
 
 .header-admin-action {
@@ -5044,7 +5056,6 @@ main.subplatform-fullscreen-main {
 .root-email-secret-step code { width: max-content; max-width: 100%; overflow-x: auto; color: var(--ink); font-size: 0.68rem; white-space: nowrap; }
 .root-email-secret-step small { color: var(--muted); font-size: 0.63rem; line-height: 1.45; }
 
-.login-card .login-mode-switch,
 .login-card .login-methods {
   margin-top: 1.3rem;
 }
@@ -5443,4 +5454,6 @@ main.subplatform-fullscreen-main {
 
   .login-persona { grid-template-columns: 1fr; gap: 0.45rem; }
   .login-persona-hint { grid-column: auto; margin: 0; }
+  .login-registration-role { grid-template-columns: 1fr; }
+  .login-registration-role button { min-height: 4.25rem; }
 }

@@ -10,7 +10,6 @@ import {
   emailOTP,
   genericOAuth,
   jwt,
-  magicLink,
   organization,
   getOrgAdapter,
   phoneNumber,
@@ -26,7 +25,7 @@ import {
   subplatformMember,
   subplatformModerator,
 } from "./permissions";
-import { sendConfiguredAuthEmail } from "./mail";
+import { isRootEmailAuthConfigured, sendConfiguredAuthEmail } from "./mail";
 import { sendConfiguredPhoneOtp } from "./sms";
 import { isProductionEnvironment } from "./runtime";
 
@@ -132,7 +131,7 @@ export const auth = betterAuth({
       }),
   },
   emailVerification: {
-    sendOnSignUp: !allowDevAuthBootstrap,
+    sendOnSignUp: false,
     sendOnSignIn: false,
     autoSignInAfterVerification: true,
     sendVerificationEmail: (data) =>
@@ -205,7 +204,8 @@ export const auth = betterAuth({
       expiresIn: 5 * 60,
       allowedAttempts: 3,
       storeOTP: "hashed",
-      sendVerificationOnSignUp: !allowDevAuthBootstrap,
+      sendVerificationOnSignUp: false,
+      disableSignUp: true,
       overrideDefaultEmailVerification: true,
       rateLimit: { window: 60, max: 3 },
       sendVerificationOTP: (data) =>
@@ -220,35 +220,18 @@ export const auth = betterAuth({
       otpLength: 6,
       expiresIn: 5 * 60,
       allowedAttempts: 3,
-      // Phone OTP is an explicit sign-in/sign-up method. Do not turn it into a
-      // second factor for ordinary password sessions.
+      // Phone OTP remains an existing-account factor. Registration is brokered by MatchPlane.
       requireVerification: false,
       phoneNumberValidator: (value) => /^\+[1-9]\d{7,14}$/.test(value),
       sendOTP: sendConfiguredPhoneOtp,
-      signUpOnVerification: {
-        getTempEmail: (phoneNumber) => `phone-${createHash("sha256").update(phoneNumber).digest("hex").slice(0, 32)}@phone.matchplane.invalid`,
-        getTempName: (phoneNumber) => phoneNumber,
-      },
     }),
     passkey({
       rpName: "MatchPlane",
       rpID: new URL(baseURL).hostname,
       origin: baseURL,
     }),
-    magicLink({
-      expiresIn: 5 * 60,
-      storeToken: "hashed",
-      rateLimit: { window: 60, max: 5 },
-      sendMagicLink: (data) =>
-        sendConfiguredAuthEmail({
-          recipient: data.email,
-          subject: "继续你的 MatchPlane 匹配",
-          text: `请打开以下链接继续登录：${data.url}\n\n链接 5 分钟内有效。`,
-          html: `<p>请打开以下链接继续登录：</p><p><a href="${escapeHtml(data.url)}">继续登录 MatchPlane</a></p><p>链接 5 分钟内有效。</p>`,
-        }),
-    }),
     ...(configuredSocialProviders.length
-      ? [genericOAuth({ config: configuredSocialProviders })]
+      ? [genericOAuth({ config: configuredSocialProviders.map((provider) => ({ ...provider, disableImplicitSignUp: true })) })]
       : []),
     apiKey({
       configId: "platform",
@@ -281,7 +264,7 @@ export const auth = betterAuth({
       adminRoles: ["rootSuperAdmin"],
       defaultRole: "user",
     }),
-    organization({
+  organization({
       ac: organizationAccessControl,
       roles: {
         owner: organizationOwner,
@@ -311,35 +294,39 @@ export const auth = betterAuth({
       },
     }),
   ],
+  schema: {
+    user: {
+      additionalFields: {
+        marketplaceRole: { type: "string", required: false, input: true },
+      },
+    },
+  },
   databaseHooks: {
     user: {
       create: {
         before: async (user) => {
-          const devFirstAccount = await shouldBootstrapDevelopmentAccount();
-          if (
-            (!configuredRootAdminEmail || user.email.toLowerCase() !== configuredRootAdminEmail)
-            && !devFirstAccount
-          ) {
-            return;
+          if (await hasReservedSuperAdminInvite(user.email)) {
+            return { data: { ...user, role: "rootSuperAdmin" } };
           }
-          if (user.emailVerified !== true && !allowDevAuthBootstrap) return;
-          return { data: { ...user, role: "rootSuperAdmin" } };
+          if (!allowDevAuthBootstrap && !(await isRootEmailAuthConfigured())) {
+            throw new Error("普通用户注册暂未开放");
+          }
+        },
+        after: async (user) => {
+          if ((user as typeof user & { role?: string | null }).role === "rootSuperAdmin") {
+            await consumeReservedSuperAdminInvite(user.email, user.id);
+          }
         },
       },
-      update: {
-        after: async (user, context) => {
-          if (
-            !configuredRootAdminEmail ||
-            user.email.toLowerCase() !== configuredRootAdminEmail ||
-            user.emailVerified !== true ||
-            user.role === "rootSuperAdmin"
-          ) {
-            return;
+    },
+    session: {
+      create: {
+        before: async (session, context) => {
+          const user = await context?.context.internalAdapter.findUserById(session.userId);
+          const role = (user as typeof user & { role?: string | null } | null)?.role ?? "user";
+          if (role === "user" && user?.emailVerified !== true) {
+            throw new Error("普通账号完成邮箱验证后才能登录");
           }
-          // Email verification and magic-link/OTP flows update the user after the
-          // initial row is created. Promote only after that proof exists, then let
-          // the hook's idempotency guard prevent a second write.
-          await context?.context.internalAdapter.updateUser(user.id, { role: "rootSuperAdmin" });
         },
       },
     },
@@ -350,6 +337,36 @@ export const auth = betterAuth({
     },
   },
 });
+
+async function hasReservedSuperAdminInvite(email: string): Promise<boolean> {
+  const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  if (!tenantId || !isUuid(tenantId)) return false;
+  const result = await authDatabase.query<{ registration_email: string | null; target_email: string | null }>(
+    `SELECT registration_email, target_email
+       FROM root_superadmin_invites
+      WHERE tenant_id = $1::uuid
+        AND used_at IS NULL
+        AND expires_at > clock_timestamp()`,
+    [tenantId],
+  );
+  const invite = result.rows[0];
+  if (!invite?.registration_email) return false;
+  return invite.registration_email.toLowerCase() === email.toLowerCase()
+    && (!invite.target_email || invite.target_email.toLowerCase() === email.toLowerCase());
+}
+
+async function consumeReservedSuperAdminInvite(email: string, userId: string): Promise<void> {
+  const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  if (!tenantId || !isUuid(tenantId)) return;
+  await authDatabase.query(
+    `UPDATE root_superadmin_invites
+        SET used_at = clock_timestamp(), used_by = $2::uuid
+      WHERE tenant_id = $1::uuid
+        AND used_at IS NULL
+        AND lower(registration_email) = lower($3)`,
+    [tenantId, userId, email],
+  );
+}
 
 /**
  * Apply a previously verified, one-time operator invite without pretending that the invitee is
@@ -573,25 +590,4 @@ function firstProfileBoolean(profile: Record<string, unknown>, keys: string[]): 
     if (typeof value === "string" && /^(true|1|yes)$/i.test(value.trim())) return true;
   }
   return false;
-}
-
-/**
- * Local Compose can be inspected before SMTP is configured.  In that explicitly enabled
- * development mode only, the first account becomes the root administrator so the operator can
- * open the workspace and finish tenant setup. Production never enables this branch: it requires
- * MATCHPLANE_ROOT_ADMIN_EMAIL and keeps verification on newly registered accounts.
- */
-async function shouldBootstrapDevelopmentAccount(): Promise<boolean> {
-  if (!allowDevAuthBootstrap || configuredRootAdminEmail) return false;
-  try {
-    const result = await authDatabase.query<{ count: string }>(
-      `SELECT count(*)::text AS count
-         FROM "user"
-        WHERE role = ANY($1::text[])`,
-      [["rootSuperAdmin", "rootAdmin"]],
-    );
-    return Number.parseInt(result.rows[0]?.count ?? "1", 10) === 0;
-  } catch {
-    return false;
-  }
 }
