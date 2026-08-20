@@ -40,6 +40,7 @@ interface SellerDashboardProps {
 }
 
 type SellerRecord = ListingSubmission | MarketplaceOffer;
+type SellerPanel = "details" | "history" | "demand" | "contacts";
 
 const sellerEnglishFallbacks: Record<string, string> = {
   supplyWorkspaceLabel: "Supply workspace",
@@ -124,6 +125,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
   const [consentingIntroductionId, setConsentingIntroductionId] = useState<string | null>(null);
   const [releasedContacts, setReleasedContacts] = useState<Record<string, MarketplaceContactResponse>>({});
   const [releasingContactId, setReleasingContactId] = useState<string | null>(null);
+  const [activePanel, setActivePanel] = useState<SellerPanel>("details");
 
   const loadSubmissions = useCallback(async () => {
     setSubmissions([]);
@@ -273,6 +275,10 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
   useEffect(() => {
     setDraftImported(false);
   }, [agentDraft?.intentId, agentDraft?.narrative]);
+
+  useEffect(() => {
+    if (usesLegacyMarketplace && activePanel === "demand") setActivePanel("details");
+  }, [activePanel, usesLegacyMarketplace]);
 
   const importAgentDraft = () => {
     if (!agentDraft) return;
@@ -433,23 +439,23 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
 
   return (
     <div className="dashboard seller-dashboard">
-      <section className="workspace-heading">
+      <div className="seller-settings-summary">
         <div>
-        <p className="eyebrow">{copy("supplyWorkspaceLabel", "供给方工作台")} · {subplatform.label || copy("currentPlatformLabel", "当前子平台")}</p>
-          <h1>{copy("supplyTitle", "由你上传真实资料，平台帮你找到合适的需求。")}</h1>
-          <p>{copy("supplyDescription", "根平台不预置任何样例内容。提交后先进入审核队列，审核通过才会进入 AI 撮合。")}</p>
+          <strong>{subplatform.label || copy("currentPlatformLabel", "当前子平台")}</strong>
+          <span>{submissions.length ? `${copy("submittedPrefix", "已提交")} ${submissions.length} ${copy("submittedSuffix", "份资料")}` : copy("noSubmissionsLabel", "还没有提交资料")}</span>
         </div>
         <span className="seller-mode-note">{copy("identityProtectionLabel", "账号和联系方式由根平台保护")}</span>
-      </section>
+      </div>
 
-      <section className="seller-status-summary" aria-label={copy("supplyStatusLabel", "供给资料状态")}>
-        <FileUp size={19} aria-hidden="true" />
-        <div><strong>{submissions.length ? `${copy("submittedPrefix", "已提交")} ${submissions.length} ${copy("submittedSuffix", "份资料")}` : copy("noSubmissionsLabel", "还没有提交资料")}</strong><small>{copy("submissionWorkflowLabel", "提交后会进入当前子平台的审核流程")}</small></div>
-      </section>
+      <nav className="seller-settings-nav" role="tablist" aria-label={copy("sellerSettingsSectionsLabel", "供给设置分区", "Supply settings sections")}>
+        <button type="button" role="tab" aria-selected={activePanel === "details"} aria-controls="seller-panel-details" className={activePanel === "details" ? "is-active" : ""} onClick={() => setActivePanel("details")}>{copy("sellerDetailsTab", "供给资料", "Offer details")}</button>
+        <button type="button" role="tab" aria-selected={activePanel === "history"} aria-controls="seller-panel-history" className={activePanel === "history" ? "is-active" : ""} onClick={() => setActivePanel("history")}>{copy("sellerHistoryTab", "提交记录", "History")}<span>{submissions.length}</span></button>
+        {!usesLegacyMarketplace ? <button type="button" role="tab" aria-selected={activePanel === "demand"} aria-controls="seller-panel-demand" className={activePanel === "demand" ? "is-active" : ""} onClick={() => setActivePanel("demand")}>{copy("sellerDemandTab", "需求匹配", "Demand")}</button> : null}
+        <button type="button" role="tab" aria-selected={activePanel === "contacts"} aria-controls="seller-panel-contacts" className={activePanel === "contacts" ? "is-active" : ""} onClick={() => setActivePanel("contacts")}>{copy("sellerContactsTab", "联系申请", "Contacts")}<span>{introductions.length}</span></button>
+      </nav>
 
-      <ContactProfileCard locale={locale} subplatform={subplatform} role="seller" onNotice={onNotice} />
-
-      <section className="surface seller-upload" aria-labelledby="seller-upload-title">
+      <div id="seller-panel-details" className="seller-settings-panel" role="tabpanel" hidden={activePanel !== "details"}>
+        <section className="surface seller-upload" aria-labelledby="seller-upload-title">
         <SectionHeading eyebrow={copy("uploadEyebrow", "资料上传")} title={copy("uploadTitle", "提交一份新的供给资料")} />
         <p className="seller-upload-intro">
           {copy("uploadDescription", "字段由当前子平台的 schema 定义。根平台只保存结构化 JSON，不会替供给方猜测或填充领域信息。")}
@@ -546,9 +552,10 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
             </motion.button>
           </div>
         </form>
-      </section>
+        </section>
+      </div>
 
-      <section className="surface seller-submissions" aria-labelledby="seller-submissions-title">
+      <section id="seller-panel-history" className="surface seller-submissions seller-settings-panel" role="tabpanel" hidden={activePanel !== "history"} aria-labelledby="seller-submissions-title">
         <SectionHeading eyebrow={copy("submissionHistoryEyebrow", "提交记录")} title={copy("submissionHistoryTitle", "当前子平台的资料")} />
         {submissionsLoading ? (
           <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>{copy("loadingSubmissionsLabel", "正在读取你的提交记录…", "Loading your submissions…")}</p></div>
@@ -569,7 +576,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       </section>
 
       {!usesLegacyMarketplace ? (
-        <section className="surface seller-submissions seller-demand-discovery" aria-labelledby="seller-demand-title">
+        <section id="seller-panel-demand" className="surface seller-submissions seller-demand-discovery seller-settings-panel" role="tabpanel" hidden={activePanel !== "demand"} aria-labelledby="seller-demand-title">
           <SectionHeading
             eyebrow={copy("demandDiscoveryEyebrow", "供需撮合")}
             title={copy("demandDiscoveryTitle", "找到已公开的需求")}
@@ -633,8 +640,10 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
         </section>
       ) : null}
 
-      <section className="surface seller-submissions" aria-labelledby="seller-introductions-title">
-        <SectionHeading eyebrow={copy("contactRequestsEyebrow", "联系申请")} title={copy("contactRequestsTitle", "需要你明确同意，才会交换联系方式")} />
+      <div id="seller-panel-contacts" className="seller-settings-panel" role="tabpanel" hidden={activePanel !== "contacts"}>
+        <ContactProfileCard locale={locale} subplatform={subplatform} role="seller" onNotice={onNotice} />
+        <section className="surface seller-submissions" aria-labelledby="seller-introductions-title">
+          <SectionHeading eyebrow={copy("contactRequestsEyebrow", "联系申请")} title={copy("contactRequestsTitle", "需要你明确同意，才会交换联系方式")} />
         {introductionsError ? (
           <div className="seller-empty-state"><p>{introductionsError}</p></div>
         ) : introductions.length ? (
@@ -669,7 +678,8 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
         ) : (
           <div className="seller-empty-state"><p>{copy("noContactRequestsLabel", "暂无待处理的联系申请。")}</p></div>
         )}
-      </section>
+        </section>
+      </div>
     </div>
   );
 }

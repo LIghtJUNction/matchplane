@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint, KeyRound, QrCode, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint, KeyRound } from "lucide-react";
 
 import {
   establishMarketplaceSession,
@@ -61,7 +61,6 @@ export function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [qrOpen, setQrOpen] = useState(false);
   const redeemingInviteRef = useRef(false);
 
   useEffect(() => {
@@ -402,24 +401,44 @@ export function LoginScreen() {
     ...(capabilities.emailOtp || capabilities.phoneOtp ? ["email-otp" as const] : []),
     ...(capabilities.magicLink ? ["magic-link" as const] : []),
   ];
+  const context = loginContextCopy(locale, role);
+  const emailOnlyIdentifier = method === "password" || method === "magic-link" || registrationPending;
 
   return (
     <main className="login-page">
       <div className="login-topbar">
         <a className="login-back" href="/" aria-label={copy.back}>
-          <ArrowLeft size={16} aria-hidden="true" /><span>{copy.back}</span>
+          <ArrowLeft size={18} aria-hidden="true" /><span>{copy.back}</span>
         </a>
         <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
       </div>
       <div className="login-layout">
-        <section className="login-card" aria-labelledby="login-title">
-          <h1 id="login-title" className="sr-only">{copy.account}</h1>
+        <section className="login-story" aria-labelledby="login-title">
+          <Brand label={subplatform.brandName} homeHref="/" />
+          <div className="login-story-copy">
+            <h1 id="login-title">{context.title}</h1>
+            <p>{context.description}</p>
+          </div>
+          <div className="login-route-map" aria-hidden="true">
+            <svg viewBox="0 0 520 210" focusable="false">
+              <path className="login-route-line login-route-line-main" d="M38 164 C132 164 122 48 252 48 C365 48 356 148 482 74" />
+              <path className="login-route-line login-route-line-branch" d="M252 48 C274 99 316 133 389 150" />
+              <circle className="login-route-node login-route-node-start" cx="38" cy="164" r="12" />
+              <circle className="login-route-node login-route-node-match" cx="252" cy="48" r="16" />
+              <circle className="login-route-node login-route-node-end" cx="482" cy="74" r="12" />
+              <circle className="login-route-node login-route-node-branch" cx="389" cy="150" r="9" />
+            </svg>
+            <span className="login-route-label login-route-label-start">{copy.routeGoal}</span>
+            <span className="login-route-label login-route-label-match">{copy.routeMatch}</span>
+            <span className="login-route-label login-route-label-end">{copy.routeConnect}</span>
+          </div>
+          <p className="login-continuity">{copy.identityContinuity}</p>
+        </section>
+
+        <section className="login-card" aria-labelledby="login-form-title">
           <div className="login-card-header">
-            <Brand homeHref="/" />
-            <button className="login-qr-entry" type="button" onClick={() => setQrOpen(true)} aria-label={copy.qrLogin}>
-              <QrCode size={17} strokeWidth={1.8} aria-hidden="true" />
-              <span>{copy.qrLogin}</span>
-            </button>
+            <h2 id="login-form-title">{copy.formTitle}</h2>
+            <p>{copy.formDescription}</p>
           </div>
 
         {nationalIdentityEnabled ? (
@@ -431,14 +450,19 @@ export function LoginScreen() {
           </div>
         ) : null}
 
-        <div className={`login-methods login-methods-count-${availableMethods.length}`} role="tablist" aria-label={copy.authMethods}>
-          <button className={method === "password" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "password"} onClick={() => switchMethod("password")}>{copy.password}</button>
-          {availableMethods.includes("email-otp") ? <button className={method === "email-otp" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "email-otp"} onClick={() => switchMethod("email-otp")}>{copy.emailOtp}</button> : null}
-          {availableMethods.includes("magic-link") ? <button className={method === "magic-link" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "magic-link"} onClick={() => switchMethod("magic-link")}>{copy.magicLink}</button> : null}
-        </div>
+        {availableMethods.length > 1 ? (
+          <div className={`login-methods login-methods-count-${availableMethods.length}`} role="tablist" aria-label={copy.authMethods}>
+            <button className={method === "password" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "password"} onClick={() => switchMethod("password")}>{copy.password}</button>
+            {availableMethods.includes("email-otp") ? <button className={method === "email-otp" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "email-otp"} onClick={() => switchMethod("email-otp")}>{copy.emailOtp}</button> : null}
+            {availableMethods.includes("magic-link") ? <button className={method === "magic-link" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "magic-link"} onClick={() => switchMethod("magic-link")}>{copy.magicLink}</button> : null}
+          </div>
+        ) : null}
 
         <form className="login-form" onSubmit={submit}>
-          <label htmlFor="login-identifier"><span>{copy.identifier}</span><input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} readOnly={registrationPending} autoComplete="username webauthn" inputMode="text" placeholder={copy.identifierPlaceholder} autoFocus /></label>
+          <label htmlFor="login-identifier">
+            <span>{emailOnlyIdentifier ? copy.email : copy.identifier}</span>
+            <input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} readOnly={registrationPending} autoComplete="username webauthn" inputMode="text" placeholder={emailOnlyIdentifier ? copy.emailPlaceholder : copy.identifierPlaceholder} autoFocus />
+          </label>
           {method === "password" && !registrationPending ? (
             <div className="login-password-field">
               <label htmlFor="login-password"><span>{copy.password}</span></label>
@@ -483,16 +507,6 @@ export function LoginScreen() {
         ) : null}
         </section>
       </div>
-      {qrOpen ? (
-        <div className="login-qr-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setQrOpen(false); }}>
-          <section className="login-qr-dialog" role="dialog" aria-modal="true" aria-labelledby="login-qr-title">
-            <button className="login-qr-close" type="button" onClick={() => setQrOpen(false)} aria-label={copy.close}><X size={17} aria-hidden="true" /></button>
-            <div className="login-qr-visual" aria-hidden="true"><QrCode size={108} strokeWidth={1.25} /></div>
-            <h2 id="login-qr-title">{copy.qrLoginTitle}</h2>
-            <p>{copy.qrLoginReserved}</p>
-          </section>
-        </div>
-      ) : null}
     </main>
   );
 }
@@ -553,17 +567,35 @@ function authErrorCallbackURL(role: BetterAuthMarketplaceRole, next: string, adm
   return `/login?${params.toString()}`;
 }
 
+function loginContextCopy(locale: "zh" | "en", role: BetterAuthMarketplaceRole) {
+  if (locale === "en") {
+    if (role === "seller") return { title: "Continue managing your offers.", description: "Sign in and we’ll return you to the platform you were using." };
+    if (role === "platform" || role === "subplatform_admin") return { title: "Continue to platform administration.", description: "Sign in and we’ll return you to the platform you were managing." };
+    return { title: "Continue your match.", description: "Sign in and we’ll return you to the request you were working on." };
+  }
+  if (role === "seller") return { title: "继续管理你的供给。", description: "登录后，我们会带你回到刚才使用的平台。" };
+  if (role === "platform" || role === "subplatform_admin") return { title: "继续管理你的平台。", description: "登录后，我们会带你回到刚才管理的平台。" };
+  return { title: "继续你的匹配。", description: "登录后，我们会带你回到刚才正在处理的需求。" };
+}
+
 function loginCopy(locale: "zh" | "en") {
   if (locale === "en") {
     return {
       back: "Back",
-      account: "MatchPlane",
+      formTitle: "Continue with your account",
+      formDescription: "Use email or another method enabled for this platform.",
+      identityContinuity: "One account across every platform node you’re authorized to use.",
+      routeGoal: "Goal",
+      routeMatch: "Match",
+      routeConnect: "Connect",
       authMethods: "Authentication methods",
       nationalIdentity: "National online identity",
       socialMethods: "Social sign-in",
       password: "Password",
       emailOtp: "Code",
       magicLink: "Magic link",
+      email: "Email",
+      emailPlaceholder: "name@example.com",
       identifier: "Email or phone",
       identifierPlaceholder: "name@example.com or +86 138…",
       passwordPlaceholder: "At least 8 characters",
@@ -593,10 +625,6 @@ function loginCopy(locale: "zh" | "en") {
       hidePassword: "Hide password",
       passkeyUnsupported: "This browser or device does not support passkeys.",
       passkeyFailed: "Passkey sign-in did not complete.",
-      qrLogin: "Scan",
-      qrLoginTitle: "Scan to sign in",
-      qrLoginReserved: "Mobile scan sign-in is reserved here and will appear after the QR authorization service is configured.",
-      close: "Close",
       socialFailedSuffix: " sign-in failed",
       socialRedirectMissing: "The sign-in provider did not return a redirect.",
       socialFailed: "Social sign-in is unavailable.",
@@ -604,13 +632,20 @@ function loginCopy(locale: "zh" | "en") {
   }
   return {
     back: "返回",
-    account: "MatchPlane",
+    formTitle: "继续使用你的账号",
+    formDescription: "使用邮箱，或选择当前平台已启用的其他方式。",
+    identityContinuity: "一个账号，通行于你已获授权的平台节点。",
+    routeGoal: "目标",
+    routeMatch: "匹配",
+    routeConnect: "连接",
     authMethods: "登录方式",
     nationalIdentity: "国家网络身份认证",
     socialMethods: "第三方登录",
     password: "密码",
     emailOtp: "验证码",
     magicLink: "免密链接",
+    email: "邮箱",
+    emailPlaceholder: "name@example.com",
     identifier: "邮箱或手机号",
     identifierPlaceholder: "name@example.com 或 138…",
     passwordPlaceholder: "至少 8 位",
@@ -640,10 +675,6 @@ function loginCopy(locale: "zh" | "en") {
     hidePassword: "隐藏密码",
     passkeyUnsupported: "当前浏览器或设备暂不支持 Passkey。",
     passkeyFailed: "Passkey 登录没有完成。",
-    qrLogin: "扫码",
-    qrLoginTitle: "扫码登录",
-    qrLoginReserved: "手机扫码登录入口已预留，配置二维码授权服务后即可使用。",
-    close: "关闭",
     socialFailedSuffix: "登录失败",
     socialRedirectMissing: "登录服务没有返回跳转地址。",
     socialFailed: "第三方登录暂时不可用。",

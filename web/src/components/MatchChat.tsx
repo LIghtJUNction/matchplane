@@ -56,8 +56,6 @@ interface ChatCopy {
   sellerPlaceholder: string;
   buyerFootnote: string;
   sellerFootnote: string;
-  buyerPending: string;
-  sellerPending: string;
   buyerSuccess: string;
   sellerSuccess: string;
 }
@@ -77,8 +75,6 @@ const defaultChatCopy: ChatCopy = {
   sellerPlaceholder: "例如：我能提供什么，交付条件和限制是……",
   buyerFootnote: "Enter 发送 · Shift + Enter 换行",
   sellerFootnote: "Enter 发送 · Shift + Enter 换行",
-  buyerPending: "我先把你的目标、限制和优先级整理成一份匹配需求。",
-  sellerPending: "我先把你的供给、条件和限制整理成一份资料。",
   buyerSuccess: "需求已发送，撮合会围绕你的真实目标展开",
   sellerSuccess: "供给描述已整理；请在下方提交资料，提交后才会写入系统",
 };
@@ -98,8 +94,6 @@ const defaultChatCopyEn: ChatCopy = {
   sellerPlaceholder: "For example: I can offer this, under these terms and constraints…",
   buyerFootnote: "Enter to send · Shift + Enter for a new line",
   sellerFootnote: "Enter to send · Shift + Enter for a new line",
-  buyerPending: "I’m organizing your goal, constraints, and priorities into a matching request.",
-  sellerPending: "I’m organizing your offer, terms, and constraints into a listing.",
   buyerSuccess: "Your request was sent; matching will follow your actual goal.",
   sellerSuccess: "Your offer is organized; submit the details below to publish it.",
 };
@@ -228,8 +222,6 @@ function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale
     sellerPlaceholder: text("sellerPlaceholder", defaults.sellerPlaceholder),
     buyerFootnote: text("buyerFootnote", defaults.buyerFootnote),
     sellerFootnote: text("sellerFootnote", defaults.sellerFootnote),
-    buyerPending: text("buyerPending", defaults.buyerPending),
-    sellerPending: text("sellerPending", defaults.sellerPending),
     buyerSuccess: text("buyerSuccess", defaults.buyerSuccess),
     sellerSuccess: text("sellerSuccess", defaults.sellerSuccess),
   };
@@ -343,18 +335,13 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       setMessages((current) => [
         ...current,
         { id: `${requestId}-user`, role: "user", text },
-        {
-          id: `${requestId}-assistant`,
-          role: "assistant",
-          text: isSeller ? copy.sellerPending : copy.buyerPending,
-        },
       ]);
 
       try {
         const live = isLiveMarketplaceEnabled();
         if (!live) {
           const message = isSeller ? runtime.unavailableSupply : runtime.unavailableDemand;
-          setMessages((current) => current.map((item) => item.id === `${requestId}-assistant` ? { ...item, text: message } : item));
+          setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: message }]);
           setMessage(text);
           onNotice(message);
           return;
@@ -387,9 +374,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           const terminals = terminalRouteHops(route.routePlan).slice(0, MAX_CHAT_TARGETS);
           if (terminals.length > 1) {
             setSellerRouteChoices(terminals);
-            setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-              ? { ...item, text: runtime.multiplePlatforms }
-              : item));
+            setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: runtime.multiplePlatforms }]);
             onNotice(runtime.choosePlatform);
             return;
           }
@@ -398,9 +383,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             await onSellerPlatformSelected(target);
           }
           const selectedName = target?.displayName || route.routePlan.at(-1)?.displayName || runtime.targetPlatform;
-          setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-            ? { ...item, text: runtime.sellerLocated(selectedName) }
-            : item));
+          setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: runtime.sellerLocated(selectedName) }]);
           onNotice(runtime.sellerSwitched(selectedName));
           return;
         }
@@ -714,24 +697,28 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         const degradedSuffix = retrievalDegraded
           ? runtime.retrievalDegraded
           : "";
-        setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-          ? { ...item, text: `${assistantText}${isSeller ? "" : degradedSuffix}` }
-          : item));
+        setMessages((current) => [...current, {
+          id: `${requestId}-assistant`,
+          role: "assistant",
+          text: `${assistantText}${isSeller ? "" : degradedSuffix}`,
+        }]);
         onNotice(retrievalDegraded
           ? runtime.retrievalDegradedNotice
           : isSeller ? copy.sellerSuccess : copy.buyerSuccess);
         if (isSeller) window.setTimeout(() => document.getElementById("seller-display-name")?.focus(), 0);
       } catch (error) {
-        setMessages((current) => current.map((item) => item.id === `${requestId}-assistant`
-          ? { ...item, text: error instanceof Error ? error.message : runtime.sendFailed }
-          : item));
+        setMessages((current) => [...current, {
+          id: `${requestId}-assistant`,
+          role: "assistant",
+          text: error instanceof Error ? error.message : runtime.sendFailed,
+        }]);
         setMessage(text);
         focusInputAfterErrorRef.current = true;
       } finally {
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.buyerPending, copy.sellerPending, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerDraft, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [copy.buyerSuccess, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerDraft, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
@@ -828,7 +815,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             </button>
           ) : null}
           <span className="sr-only" aria-live="polite">
-            {sending ? label("sendingChatStatus", "正在发送…") : signedIn ? label("signedInChatStatus", "已登录") : ""}
+            {!sending && signedIn ? label("signedInChatStatus", "已登录") : ""}
           </span>
         </div>
       </div>
@@ -838,6 +825,18 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           {messages.map((item) => (
             <p key={item.id} className={`match-chat-message is-${item.role}`}>{item.text}</p>
           ))}
+        </div>
+      ) : null}
+
+      {sending ? (
+        <div
+          className="chat-typing-indicator"
+          role="status"
+          aria-label={locale === "en" ? "Matching…" : "正在匹配…"}
+        >
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
         </div>
       ) : null}
 
