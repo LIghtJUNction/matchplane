@@ -88,7 +88,9 @@ BEGIN
     END IF;
     -- Do not turn a canonical party scope into a stale alias by editing the alias underneath it.
     -- The explicit migration/backfill path always writes parties after aliases, so this guard
-    -- affects only later direct mutations that would otherwise bypass the party trigger.
+    -- affects only later direct mutations that would otherwise bypass the party trigger.  This
+    -- function also runs while aliases are backfilled, before the migration adds party.store_id,
+    -- so the pre-existing tenant/path authority is deliberately sufficient here.
     IF TG_OP = 'UPDATE'
        AND OLD.is_canonical
        AND (NEW.tenant_id, NEW.store_id, NEW.path, NEW.is_canonical)
@@ -98,7 +100,6 @@ BEGIN
              FROM marketplace_parties party
             WHERE party.tenant_id = OLD.tenant_id
               AND party.platform_path = OLD.path
-              AND party.store_id = OLD.store_id
        ) THEN
         RAISE EXCEPTION 'cannot mutate a canonical store alias while marketplace parties use that path'
             USING ERRCODE = 'foreign_key_violation';
