@@ -2,6 +2,8 @@
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, FileUp, LoaderCircle, Trash2 } from "lucide-react";
+import { Button } from "@appica/ui-react/button";
+import { Textarea } from "@appica/ui-react/textarea";
 
 import {
   createMarketplaceIntent,
@@ -962,7 +964,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           </label>
         ) : null}
         <label className="sr-only" htmlFor="match-chat-input">{isSeller ? `${label("tellPlatformPrefix", "告诉 MatchPlane")} ${copy.sellerTitle}` : label("chatInputLabel", "告诉 MatchPlane 你的需求")}</label>
-        <textarea
+        <Textarea
           ref={inputRef}
           id="match-chat-input"
           value={message}
@@ -977,9 +979,9 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           aria-describedby="match-chat-footnote"
           disabled={sending}
         />
-        <button className="match-chat-send" type="submit" aria-label={isSeller ? label("sendSupplyLabel", "发送供给") : label("sendDemandLabel", "发送需求")} aria-busy={sending} disabled={(!message.trim() && !conversationAttachments.length) || sending}>
+        <Button className="match-chat-send" size="icon-md" type="submit" aria-label={isSeller ? label("sendSupplyLabel", "发送供给") : label("sendDemandLabel", "发送需求")} aria-busy={sending} disabled={(!message.trim() && !conversationAttachments.length) || sending}>
           {sending ? <LoaderCircle className="match-chat-spinner" size={18} aria-hidden="true" /> : <ArrowUp size={18} aria-hidden="true" />}
-        </button>
+        </Button>
       </form>
       {!isSeller ? (
         <label className="match-chat-discovery">

@@ -56,7 +56,9 @@ describe("WorkspaceSettingsDialog", () => {
     );
 
     expect(screen.getByText("Theme controls")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Close workspace settings dialog" }));
+    const backdrop = document.querySelector<HTMLElement>("[data-slot='dialog-backdrop']");
+    expect(backdrop).not.toBeNull();
+    await user.click(backdrop!);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

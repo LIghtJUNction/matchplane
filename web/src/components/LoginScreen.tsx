@@ -1,7 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint, KeyRound } from "lucide-react";
+import { Button } from "@appica/ui-react/button";
+import { Input } from "@appica/ui-react/input";
 
 import {
   establishMarketplaceSession,
@@ -62,6 +64,7 @@ export function LoginScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const redeemingInviteRef = useRef(false);
+  const authMethodsId = useId();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -403,6 +406,8 @@ export function LoginScreen() {
   ];
   const context = loginContextCopy(locale, role);
   const emailOnlyIdentifier = method === "password" || method === "magic-link" || registrationPending;
+  const hasMethodTabs = availableMethods.length > 1;
+  const activeMethodTabId = `${authMethodsId}-${method}-tab`;
 
   return (
     <main className="login-page">
@@ -443,53 +448,53 @@ export function LoginScreen() {
 
         {nationalIdentityEnabled ? (
           <div className="login-primary-provider">
-            <button type="button" disabled={submitting} onClick={() => void startSocialLogin("national_identity")}>
+            <Button type="button" disabled={submitting} onClick={() => void startSocialLogin("national_identity")}>
               <Fingerprint size={18} strokeWidth={1.7} aria-hidden="true" />
               <span>{copy.nationalIdentity}</span>
-            </button>
+            </Button>
           </div>
         ) : null}
 
-        {availableMethods.length > 1 ? (
+        {hasMethodTabs ? (
           <div className={`login-methods login-methods-count-${availableMethods.length}`} role="tablist" aria-label={copy.authMethods}>
-            <button className={method === "password" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "password"} onClick={() => switchMethod("password")}>{copy.password}</button>
-            {availableMethods.includes("email-otp") ? <button className={method === "email-otp" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "email-otp"} onClick={() => switchMethod("email-otp")}>{copy.emailOtp}</button> : null}
-            {availableMethods.includes("magic-link") ? <button className={method === "magic-link" ? "is-active" : ""} type="button" role="tab" aria-selected={method === "magic-link"} onClick={() => switchMethod("magic-link")}>{copy.magicLink}</button> : null}
+            <button id={`${authMethodsId}-password-tab`} className={method === "password" ? "is-active" : ""} type="button" role="tab" aria-controls={`${authMethodsId}-panel`} aria-selected={method === "password"} onClick={() => switchMethod("password")}>{copy.password}</button>
+            {availableMethods.includes("email-otp") ? <button id={`${authMethodsId}-email-otp-tab`} className={method === "email-otp" ? "is-active" : ""} type="button" role="tab" aria-controls={`${authMethodsId}-panel`} aria-selected={method === "email-otp"} onClick={() => switchMethod("email-otp")}>{copy.emailOtp}</button> : null}
+            {availableMethods.includes("magic-link") ? <button id={`${authMethodsId}-magic-link-tab`} className={method === "magic-link" ? "is-active" : ""} type="button" role="tab" aria-controls={`${authMethodsId}-panel`} aria-selected={method === "magic-link"} onClick={() => switchMethod("magic-link")}>{copy.magicLink}</button> : null}
           </div>
         ) : null}
 
-        <form className="login-form" onSubmit={submit}>
+        <form id={hasMethodTabs ? `${authMethodsId}-panel` : undefined} className="login-form" role={hasMethodTabs ? "tabpanel" : undefined} aria-labelledby={hasMethodTabs ? activeMethodTabId : undefined} onSubmit={submit}>
           <label htmlFor="login-identifier">
             <span>{emailOnlyIdentifier ? copy.email : copy.identifier}</span>
-            <input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} readOnly={registrationPending} autoComplete="username webauthn" inputMode="text" placeholder={emailOnlyIdentifier ? copy.emailPlaceholder : copy.identifierPlaceholder} autoFocus />
+            <Input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} readOnly={registrationPending} autoComplete="username webauthn" inputMode="text" placeholder={emailOnlyIdentifier ? copy.emailPlaceholder : copy.identifierPlaceholder} autoFocus />
           </label>
           {method === "password" && !registrationPending ? (
             <div className="login-password-field">
               <label htmlFor="login-password"><span>{copy.password}</span></label>
               <span className="login-password-control">
-                <input id="login-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password webauthn" placeholder={copy.passwordPlaceholder} />
+                <Input id="login-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password webauthn" placeholder={copy.passwordPlaceholder} />
                 <span className="login-password-actions">
-                  <button className="login-password-visibility" type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={submitting} aria-label={showPassword ? copy.hidePassword : copy.showPassword} title={showPassword ? copy.hidePassword : copy.showPassword}>
+                  <Button className="login-password-visibility" variant="outline" size="icon-sm" type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={submitting} aria-label={showPassword ? copy.hidePassword : copy.showPassword} title={showPassword ? copy.hidePassword : copy.showPassword}>
                     {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
-                  </button>
+                  </Button>
                   {capabilities.passkey ? (
-                    <button className="login-passkey-button" type="button" onClick={() => void startPasskeyLogin()} disabled={submitting} aria-label={copy.passkeyLogin} title={copy.passkeyLogin}>
+                    <Button className="login-passkey-button" variant="outline" size="icon-sm" type="button" onClick={() => void startPasskeyLogin()} disabled={submitting} aria-label={copy.passkeyLogin} title={copy.passkeyLogin}>
                       <KeyRound size={17} aria-hidden="true" />
-                    </button>
+                    </Button>
                   ) : null}
                 </span>
               </span>
             </div>
           ) : null}
           {((method === "email-otp" && otpSent) || registrationPending) ? (
-            <label htmlFor="login-otp"><span>{copy.otp}</span><input id="login-otp" inputMode="numeric" pattern="[0-9]{6}" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} autoComplete="one-time-code" placeholder={copy.otpPlaceholder} /></label>
+            <label htmlFor="login-otp"><span>{copy.otp}</span><Input id="login-otp" inputMode="numeric" pattern="[0-9]{6}" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} autoComplete="one-time-code" placeholder={copy.otpPlaceholder} /></label>
           ) : null}
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           {notice ? <p className="login-notice" role="status">{notice}</p> : null}
-          <button className="button button-dark login-submit" type="submit" disabled={submitting}>
+          <Button className="login-submit" type="submit" disabled={submitting}>
             {submitting ? copy.loading : registrationPending ? copy.verifyAndContinue : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : copy.continue}
             {!submitting ? <ArrowRight size={17} aria-hidden="true" /> : null}
-          </button>
+          </Button>
         </form>
 
         {socialProviders.length ? (
@@ -497,10 +502,10 @@ export function LoginScreen() {
             <span className="login-divider">{copy.otherMethods}</span>
             <div className="social-login-buttons">
               {socialProviders.map((provider) => (
-                <button key={provider} type="button" disabled={submitting} onClick={() => void startSocialLogin(provider)}>
+                <Button key={provider} variant="outline" type="button" disabled={submitting} onClick={() => void startSocialLogin(provider)}>
                   <span className={`social-icon social-icon-${provider}`} aria-hidden="true">{provider === "google" ? "G" : provider === "wechat" ? "微" : provider === "qq" ? "Q" : "支"}</span>
                   {socialLabels[provider][locale]}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
