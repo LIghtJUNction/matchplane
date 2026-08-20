@@ -3,17 +3,14 @@ import {
   Archive,
   BadgeCheck,
   BanknoteArrowDown,
-  CircleDollarSign,
   Clock3,
   CreditCard,
   FileCheck2,
   GitBranch,
   HandCoins,
   ReceiptText,
-  RefreshCcw,
   ShieldCheck,
   Upload,
-  WalletCards,
 } from "lucide-react";
 
 import {
@@ -59,7 +56,8 @@ import {
 import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
-import { MetricCard, SectionHeading } from "./Primitives";
+import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
+import { SectionHeading } from "./Primitives";
 
 interface PlatformDashboardProps {
   paymentMode: "test" | "production";
@@ -704,7 +702,7 @@ export function PlatformDashboard({
 
       <div className="platform-admin-shell">
         <nav className="platform-admin-nav" role="tablist" aria-label="平台管理分区">
-          <button id="platform-tab-overview" type="button" role="tab" aria-selected={activeSection === "overview"} aria-controls="platform-panel-overview" className={activeSection === "overview" ? "is-active" : ""} onClick={() => setActiveSection("overview")}><BadgeCheck size={17} aria-hidden="true" /><span>总览</span></button>
+          <button id="platform-tab-overview" type="button" role="tab" aria-selected={activeSection === "overview"} aria-controls="platform-panel-overview" className={activeSection === "overview" ? "is-active" : ""} onClick={() => setActiveSection("overview")}><BadgeCheck size={17} aria-hidden="true" /><span>初始化</span></button>
           <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>平台树</span></button>
           <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>访问与接入</span></button>
           <button id="platform-tab-payments" type="button" role="tab" aria-selected={activeSection === "payments"} aria-controls="platform-panel-payments" className={activeSection === "payments" ? "is-active" : ""} onClick={() => setActiveSection("payments")}><CreditCard size={17} aria-hidden="true" /><span>支付（可选）</span></button>
@@ -713,16 +711,9 @@ export function PlatformDashboard({
         </nav>
 
         <div className="platform-admin-content">
-          <section className="metric-grid" aria-label="平台经营指标" hidden={activeSection !== "overview"}>
-            <MetricCard icon={CircleDollarSign} label="平台服务费" value="—" detail="等待实时结算数据" tone="cactus" />
-            <MetricCard icon={HandCoins} label="完成撮合" value="—" detail="由 API 提供统计" tone="heather" />
-            <MetricCard icon={WalletCards} label="待结算" value="—" detail="等待双方确认" />
-            <MetricCard icon={RefreshCcw} label="退款率" value="—" detail="由支付服务计算" tone="clay" />
-          </section>
-
           <div className="platform-layout">
         <section id="platform-panel-overview" className="surface platform-readiness" role="tabpanel" aria-labelledby="platform-tab-overview" hidden={activeSection !== "overview"}>
-          <SectionHeading eyebrow="首启与平台树" title="先确认平台已经准备好" />
+          <SectionHeading eyebrow="首启" title="按顺序完成平台初始化" />
           <div className="readiness-grid">
             <div className={setup?.firstRun.needsRootAccount ? "readiness-item readiness-attention" : "readiness-item"}>
               <span aria-hidden="true" />
@@ -756,6 +747,7 @@ export function PlatformDashboard({
               {saving ? "初始化中…" : "初始化根平台组织"}
             </button>
           ) : null}
+          <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
         </section>
 
         <section className="surface platform-agent-config" aria-label="AI 与登录配置" hidden={activeSection !== "access"}>
@@ -773,7 +765,7 @@ export function PlatformDashboard({
             </div>
           </div>
           <div className="platform-agent-config-body">
-            <p>模型由根平台负责有限路由；子平台检索和领域 Agent 仍由各自 manifest/MCP 端点提供。管理员页面只显示状态，不保存 OAuth 或模型密钥。</p>
+            <p>模型由根平台负责有限路由；子平台检索和领域 Agent 仍由各自 manifest/MCP 端点提供。根邮箱已移到“初始化”分区提供实际配置；本区展示 AI 与 OAuth 的当前运行状态。</p>
             <div className="platform-agent-config-snippets" aria-label="服务端配置项">
               <code>MATCHPLANE_ROUTER_AI_URL=https://your-gateway.example/v1/chat/completions</code>
               <code>MATCHPLANE_ROUTER_AI_KEY=server-secret</code>

@@ -34,6 +34,7 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({ error: "只有根平台管理员可以查看运行时配置" }, { status: 403 });
   }
 
+  const emailAuth = await isRootEmailAuthConfigured();
   const endpoint = readEndpointSummary(process.env.MATCHPLANE_ROUTER_AI_URL);
   const model = process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
   const toolMode = parseToolMode(process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE);
@@ -57,9 +58,9 @@ export async function GET(request: Request): Promise<Response> {
         primary: configuredPrimaryOAuthProviderIds(),
         fallback: configuredFallbackOAuthProviderIds(),
         password: true,
-        emailOtp: isRootEmailAuthConfigured(),
+        emailOtp: emailAuth,
         phoneOtp: isPhoneOtpConfigured(),
-        magicLink: isRootEmailAuthConfigured(),
+        magicLink: emailAuth,
         passkey: true,
       },
     },

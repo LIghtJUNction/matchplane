@@ -13,8 +13,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Public capability discovery for the login screen. Secrets and provider endpoints stay server-side. */
-export function GET(): Response {
-  const emailAuth = isRootEmailAuthConfigured();
+export async function GET(): Promise<Response> {
+  const emailAuth = await isRootEmailAuthConfigured();
   const phoneAuth = isPhoneOtpConfigured();
   return NextResponse.json(
     {

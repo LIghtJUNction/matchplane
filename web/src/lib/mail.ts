@@ -5,6 +5,10 @@ import path from "node:path";
 import nodemailer from "nodemailer";
 
 import { Pool } from "pg";
+import {
+  getActiveRootEmailConfig,
+  readRootEmailCredential,
+} from "./root-email-config";
 
 const database = new Pool({
   connectionString: process.env.MATCHPLANE_DATABASE_URL ?? process.env.DATABASE_URL,
@@ -97,13 +101,28 @@ export function rootEmailRouteFromEnv(environment = process.env.MATCHPLANE_ENVIR
 }
 
 /**
+ * Prefer an administrator-managed active root route when one exists. Deployment variables remain
+ * a break-glass/bootstrap fallback, so a new installation can still send the very first login
+ * email before the control plane is available.
+ */
+export async function rootEmailRoute(): Promise<EmailRoute | null> {
+  try {
+    const managed = await managedRootEmailRoute();
+    if (managed) return managed;
+  } catch {
+    // A migration or database outage must not disable the operator's known-good bootstrap route.
+  }
+  return rootEmailRouteFromEnv();
+}
+
+/**
  * Capability discovery for the login surface. Better Auth keeps the email methods enabled so
  * an operator can turn them on without changing code, but the UI must not advertise a method
  * when its deployment-owned SMTP route is absent or invalid.
  */
-export function isRootEmailAuthConfigured(): boolean {
+export async function isRootEmailAuthConfigured(): Promise<boolean> {
   try {
-    const route = rootEmailRouteFromEnv();
+    const route = await rootEmailRoute();
     if (!route?.enabled) return false;
     // A syntactically valid secret reference is not enough for a useful button. Check only
     // presence/readability here; the sender still resolves the secret immediately before use.
@@ -112,6 +131,10 @@ export function isRootEmailAuthConfigured(): boolean {
     }
     if (route.credentialSecretRef.startsWith("file://")) {
       accessSync(route.credentialSecretRef.slice("file://".length), fsConstants.R_OK);
+      return true;
+    }
+    if (route.credentialSecretRef.startsWith("secret://root-email/")) {
+      await readRootEmailCredential(route.credentialSecretRef.slice("secret://root-email/".length));
       return true;
     }
     return false;
@@ -128,12 +151,43 @@ export function isRootEmailAuthConfigured(): boolean {
  * hint, not an authentication trust boundary.
  */
 export async function sendConfiguredAuthEmail(input: AuthEmailInput): Promise<void> {
-  const route = rootEmailRouteFromEnv();
+  const route = await rootEmailRoute();
   if (!route || !route.enabled) {
     throw new Error("根平台尚未启用邮箱发送路由");
   }
 
   await deliverEmail(route, input);
+}
+
+/** Fixed-content administrator verification for a newly saved root SMTP route. */
+export async function sendRootEmailConfigTest(recipient: string): Promise<void> {
+  const route = await managedRootEmailRoute();
+  if (!route || !route.enabled) throw new Error("请先保存、写入密钥槽并启用根邮箱路由");
+  await deliverEmail(route, {
+    recipient,
+    subject: "MatchPlane 根邮箱配置测试",
+    text: "这是一封由根平台配置中心发出的测试邮件。若你收到此邮件，根认证邮件路由可以工作。",
+    html: "<p>这是一封由根平台配置中心发出的测试邮件。</p><p>若你收到此邮件，根认证邮件路由可以工作。</p>",
+  });
+}
+
+async function managedRootEmailRoute(): Promise<EmailRoute | null> {
+  const managed = await getActiveRootEmailConfig();
+  if (!managed) return null;
+  return {
+    providerKey: managed.providerKey,
+    smtpHost: managed.smtpHost,
+    smtpPort: managed.smtpPort,
+    tlsMode: managed.tlsMode,
+    username: managed.username,
+    credentialSecretRef: `secret://root-email/${managed.credentialSlot}`,
+    fromAddress: managed.fromAddress,
+    replyTo: managed.replyTo,
+    mode: managed.mode,
+    enabled: managed.enabled,
+    tenantId: null,
+    domainId: null,
+  };
 }
 
 /**
@@ -227,6 +281,9 @@ async function resolveSecret(route: EmailRoute): Promise<string> {
 }
 
 async function resolveDeploymentSecret(reference: string): Promise<string> {
+  if (reference.startsWith("secret://root-email/")) {
+    return readRootEmailCredential(reference.slice("secret://root-email/".length));
+  }
   if (reference.startsWith("env://")) {
     const variable = reference.slice("env://".length);
     const value = process.env[variable];

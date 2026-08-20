@@ -5031,6 +5031,31 @@ main.subplatform-fullscreen-main {
 .header-admin-action:hover,
 .header-admin-action:focus-visible { border-color: var(--line-strong); color: var(--ink); outline: 0; }
 
+.root-email-config {
+  margin-top: 1rem;
+  padding: clamp(1rem, 2vw, 1.35rem);
+  background: color-mix(in srgb, var(--paper) 62%, var(--ivory));
+}
+
+.root-email-actions { align-items: center; }
+
+.root-email-secret-step {
+  margin-top: 0.85rem;
+  padding: 0.85rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  color: var(--ink-soft);
+}
+
+.root-email-secret-step > svg { margin-top: 0.08rem; color: var(--cactus-deep); }
+.root-email-secret-step div { display: grid; gap: 0.22rem; }
+.root-email-secret-step strong { font-size: 0.74rem; color: var(--ink); }
+.root-email-secret-step code { width: max-content; max-width: 100%; overflow-x: auto; color: var(--ink); font-size: 0.68rem; white-space: nowrap; }
+.root-email-secret-step small { color: var(--muted); font-size: 0.63rem; line-height: 1.45; }
+
 .login-card .login-mode-switch,
 .login-card .login-methods {
   margin-top: 1.3rem;
