@@ -74,6 +74,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [pluginFailed, setPluginFailed] = useState(false);
   // Keep the requested destination independent from the URL that hydration normalizes to the
   // safe buyer surface. Otherwise `?role=platform` can be overwritten before Better Auth
@@ -153,6 +155,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       clearPartySessionCache();
       setAuthUser(null);
       setSettingsOpen(false);
+      setAccountOpen(false);
+      setAccountMenuOpen(false);
       setRole("buyer");
       requestedRoleRef.current = "buyer";
       const url = new URL(window.location.href);
@@ -162,19 +166,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : ui.signOutFailed);
     }
-  };
-
-  const selectPublicWorkspace = (nextRole: "buyer" | "seller") => {
-    if (nextRole === "seller" && !authUser) {
-      openSignIn("seller");
-      return;
-    }
-    setRole(nextRole);
-    requestedRoleRef.current = nextRole;
-    setSettingsOpen(false);
-    const url = new URL(window.location.href);
-    url.searchParams.set("role", nextRole);
-    window.history.replaceState(null, "", url);
   };
 
   const selectSellerPlatform = useCallback(async (hop: PlatformRouteHop) => {
@@ -325,18 +316,31 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   </a>
                 ) : null}
                 {authUser ? (
-                  <motion.button
-                    className="workspace-settings-trigger"
-                    type="button"
-                    aria-expanded={settingsOpen}
-                    aria-haspopup="dialog"
-                    onClick={() => setSettingsOpen(true)}
-                    whileTap={{ scale: 0.95 }}
-                    transition={spring}
-                  >
-                    <Settings2 size={18} aria-hidden="true" />
-                    <span>{ui.settings}</span>
-                  </motion.button>
+                  <div className="account-menu-anchor">
+                    <motion.button
+                      className="profile-button"
+                      type="button"
+                      aria-expanded={accountMenuOpen}
+                      aria-haspopup="menu"
+                      aria-label={ui.accountMenu}
+                      onClick={() => setAccountMenuOpen((open) => !open)}
+                      whileTap={{ scale: 0.95 }}
+                      transition={spring}
+                    >
+                      <span><UserRound size={18} aria-hidden="true" /></span>
+                      <span className="profile-copy"><strong>{authUser.name || ui.user}</strong><small>{roleLabel(role, locale, subplatform)}</small></span>
+                    </motion.button>
+                    {accountMenuOpen ? (
+                      <div className="account-menu" role="menu" aria-label={ui.accountMenu}>
+                        <div className="account-menu-identity"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></div>
+                        <div className="account-menu-links">
+                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setAccountOpen(true); }}><UserRound size={16} aria-hidden="true" />{ui.account}</button>
+                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><Settings2 size={16} aria-hidden="true" />{ui.settings}</button>
+                        </div>
+                        <button className="account-menu-signout" type="button" role="menuitem" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
+                      </div>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -383,38 +387,31 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           backdropLabel={ui.closeSettingsDialog}
         >
           <div className="workspace-settings-overview">
-            {authUser ? (
-              <section className="workspace-settings-section workspace-account-section" aria-labelledby="workspace-account-title">
-                <div className="workspace-settings-section-heading">
-                  <h3 id="workspace-account-title">{ui.account}</h3>
-                  <span>{roleLabel(role, locale, subplatform)}</span>
-                </div>
-                <div className="workspace-account-row">
-                  <span className="workspace-account-avatar"><UserRound size={19} aria-hidden="true" /></span>
-                  <span className="workspace-account-copy"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></span>
-                  <button className="workspace-account-action" type="button" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
-                </div>
-              </section>
-            ) : null}
-
-            <section className="workspace-settings-section" aria-labelledby="workspace-switch-title">
-              <div className="workspace-settings-section-heading">
-                <h3 id="workspace-switch-title">{ui.workspace}</h3>
-              </div>
-              <div className="workspace-role-switch" role="group" aria-label={ui.workspace}>
-                <button className={role === "buyer" ? "is-active" : ""} type="button" aria-pressed={role === "buyer"} onClick={() => selectPublicWorkspace("buyer")}>{ui.buyerWorkspace}</button>
-                <button className={role === "seller" ? "is-active" : ""} type="button" aria-pressed={role === "seller"} onClick={() => selectPublicWorkspace("seller")}>{ui.sellerWorkspace}</button>
-              </div>
-              {authUser ? (
-                <div className="workspace-admin-links">
-                  {subplatform.slug !== "root" ? <a href={`${window.location.pathname}?role=subplatform_admin`}>{ui.subplatformAdmin}</a> : null}
-                  {authUser.role === "rootSuperAdmin" || authUser.role === "rootAdmin" ? <a href="/?role=platform">{ui.platformAdmin}</a> : null}
-                </div>
-              ) : null}
-            </section>
-
             {authUser && role === "buyer" ? <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} /> : null}
             {role === "seller" ? <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} agentDraft={sellerDraft} /> : null}
+          </div>
+        </WorkspaceSettingsDialog>}
+
+        {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
+          open={accountOpen}
+          onClose={() => setAccountOpen(false)}
+          title={ui.account}
+          description={ui.accountDescription}
+          closeLabel={ui.closeAccount}
+          backdropLabel={ui.closeAccountDialog}
+        >
+          <div className="workspace-settings-overview">
+            <section className="workspace-settings-section workspace-account-section" aria-labelledby="workspace-account-title">
+              <div className="workspace-settings-section-heading">
+                <h3 id="workspace-account-title">{ui.account}</h3>
+                <span>{roleLabel(role, locale, subplatform)}</span>
+              </div>
+              <div className="workspace-account-row">
+                <span className="workspace-account-avatar"><UserRound size={19} aria-hidden="true" /></span>
+                <span className="workspace-account-copy"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></span>
+                <button className="workspace-account-action" type="button" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
+              </div>
+            </section>
           </div>
         </WorkspaceSettingsDialog>}
 
@@ -608,12 +605,16 @@ function appCopy(locale: "zh" | "en") {
       rootPlatform: "Root platform",
       settings: "Settings",
       settingsTitle: "Settings",
-      settingsDescription: "Manage your account and workspace preferences.",
+      settingsDescription: "Manage settings for this workspace.",
       closeSettings: "Close settings",
       closeSettingsDialog: "Close settings dialog",
       sellerSettingsTitle: "Offer settings",
       sellerSettingsDescription: "Review your profile and publish real supply details.",
       account: "Account",
+      accountMenu: "Account menu",
+      accountDescription: "Manage your account identity and sign out.",
+      closeAccount: "Close account",
+      closeAccountDialog: "Close account dialog",
       appearance: "Display & language",
       workspace: "Workspace",
       signIn: "Sign in",
@@ -634,12 +635,16 @@ function appCopy(locale: "zh" | "en") {
     rootPlatform: "根平台",
     settings: "设置",
     settingsTitle: "设置",
-    settingsDescription: "管理账号与工作台偏好。",
+    settingsDescription: "管理当前身份下的工作台设置。",
     closeSettings: "关闭设置",
     closeSettingsDialog: "关闭设置对话框",
     sellerSettingsTitle: "供给设置",
     sellerSettingsDescription: "检查资料，并提交真实供给信息。",
     account: "账号",
+    accountMenu: "账号菜单",
+    accountDescription: "管理当前账号与登录状态。",
+    closeAccount: "关闭账号",
+    closeAccountDialog: "关闭账号对话框",
     appearance: "显示与语言",
     workspace: "工作台",
     signIn: "登录",

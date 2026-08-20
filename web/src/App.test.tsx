@@ -33,6 +33,11 @@ import { App } from "./App";
 import { clearPartySessionCache, savePartySession } from "./api";
 import { authClient } from "./lib/auth-client";
 
+async function openSettingsFromAccountMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(await screen.findByRole("button", { name: "账号菜单" }));
+  await user.click(await screen.findByRole("menuitem", { name: "设置" }));
+}
+
 beforeEach(() => {
   window.scrollTo = vi.fn();
   window.history.replaceState(null, "", "/");
@@ -104,7 +109,7 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
+    await openSettingsFromAccountMenu(user);
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("内部编号"), "seller-item");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
@@ -208,7 +213,7 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
+    await openSettingsFromAccountMenu(user);
     expect(screen.getByRole("dialog", { name: "设置" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭设置" }));
 
@@ -217,13 +222,14 @@ describe("MatchPlane workspaces", () => {
     expect(input).toHaveFocus();
   });
 
-  it("shows account controls in settings and signs out through Better Auth", async () => {
+  it("keeps account controls out of settings and signs out through Better Auth", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "设置" }));
-    expect(await screen.findByRole("dialog", { name: "设置" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "账号菜单" }));
+    await user.click(await screen.findByRole("menuitem", { name: "账号" }));
+    expect(await screen.findByRole("dialog", { name: "账号" })).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "退出登录" }));
 
     expect(authClient.signOut).toHaveBeenCalledTimes(1);
@@ -239,7 +245,7 @@ describe("MatchPlane workspaces", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
     await user.click(screen.getByRole("button", { name: "EN" }));
     expect(document.documentElement.lang).toBe("en");
-    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Account menu" })).toBeInTheDocument();
   });
 
   it("keeps a persisted dark preference during the initial hydration", async () => {

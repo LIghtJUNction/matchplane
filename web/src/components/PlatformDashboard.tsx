@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Archive,
-  BadgeCheck,
   BanknoteArrowDown,
-  Clock3,
   CreditCard,
   FileCheck2,
   GitBranch,
@@ -29,7 +27,6 @@ import {
   isLiveMarketplaceEnabled,
   activateSubplatform,
   createPlatformDomain,
-  createRootPlatformOrganization,
   discoverSubplatformSource,
   getPlatformDomains,
   getSubplatformSourceIntake,
@@ -66,7 +63,7 @@ interface PlatformDashboardProps {
   onNotice: (message: string) => void;
 }
 
-type PlatformSection = "overview" | "tree" | "access" | "payments" | "finance" | "site";
+type PlatformSection = "tree" | "access" | "payments" | "finance" | "site";
 
 export function PlatformDashboard({
   paymentMode,
@@ -75,9 +72,8 @@ export function PlatformDashboard({
   onNotice,
 }: PlatformDashboardProps) {
   const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
-  const [activeSection, setActiveSection] = useState<PlatformSection>("overview");
+  const [activeSection, setActiveSection] = useState<PlatformSection>("access");
   const [aiStatus, setAiStatus] = useState<PlatformAiStatus | null>(null);
-  const [setupError, setSetupError] = useState(false);
   const [domains, setDomains] = useState<PlatformDomainRecord[]>([]);
   const [subplatforms, setSubplatforms] = useState<SubplatformOrganizationRecord[]>([]);
   const [gateways, setGateways] = useState<PaymentGatewayRecord[]>([]);
@@ -161,9 +157,6 @@ export function PlatformDashboard({
         if (!mounted) return;
         if (statusResult.status === "fulfilled") {
           setSetup(statusResult.value);
-          setSetupError(false);
-        } else {
-          setSetupError(true);
         }
         // A fresh deployment can report its bounded setup state before a root tenant exists.
         // Keep that useful state visible instead of turning the whole admin panel into a generic
@@ -276,19 +269,6 @@ export function PlatformDashboard({
     const [status, records] = await Promise.all([getPlatformSetupStatus(), getPlatformDomains()]);
     setSetup(status);
     setDomains(records);
-  };
-
-  const initializeRootOrganization = async () => {
-    setSaving(true);
-    try {
-      await createRootPlatformOrganization();
-      await refreshDomains();
-      onNotice("根平台组织已初始化；统一成员、API Key 和 Agent 接入现在可用");
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "根平台组织初始化失败");
-    } finally {
-      setSaving(false);
-    }
   };
 
   const submitDomain = async () => {
@@ -652,36 +632,6 @@ export function PlatformDashboard({
     }
   };
 
-  const identityStatus = setupError
-    ? "状态接口不可用"
-    : setup?.firstRun.needsRootAccount
-      ? "等待根管理员账号"
-      : setup && !setup.root.tenantConfigured
-        ? "等待 root tenant 配置"
-        : setup && !setup.root.tenantExists
-          ? "等待 root tenant 初始化"
-          : setup && !setup.root.organization
-            ? "等待根平台组织"
-      : setup
-        ? "身份已初始化"
-        : "读取部署状态";
-  const routingStatus = setupError
-      ? "状态接口不可用"
-        : setup
-          ? setup.routing.ready ? `${setup.routing.activeChildren} 个子平台已激活` : "等待子平台激活"
-          : "读取部署状态";
-  const hostedAgentStatus = setupError
-    ? "状态接口不可用"
-    : setup?.hostedAgent.configured
-      ? "平台 Agent 已连接"
-      : "平台 Agent 使用受控降级";
-  const builderStatus = setupError
-    ? "构建器状态不可用"
-    : setup?.builder?.status === "ready"
-      ? "子平台构建器已就绪"
-      : setup?.builder?.status === "degraded"
-        ? "子平台构建器待补运行时"
-        : "子平台构建器未配置";
   const subplatformStateLabel: Record<string, string> = {
     active: "已激活",
     ready: "构建完成",
@@ -702,7 +652,6 @@ export function PlatformDashboard({
 
       <div className="platform-admin-shell">
         <nav className="platform-admin-nav" role="tablist" aria-label="平台管理分区">
-          <button id="platform-tab-overview" type="button" role="tab" aria-selected={activeSection === "overview"} aria-controls="platform-panel-overview" className={activeSection === "overview" ? "is-active" : ""} onClick={() => setActiveSection("overview")}><BadgeCheck size={17} aria-hidden="true" /><span>初始化</span></button>
           <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>平台树</span></button>
           <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>访问与接入</span></button>
           <button id="platform-tab-payments" type="button" role="tab" aria-selected={activeSection === "payments"} aria-controls="platform-panel-payments" className={activeSection === "payments" ? "is-active" : ""} onClick={() => setActiveSection("payments")}><CreditCard size={17} aria-hidden="true" /><span>支付（可选）</span></button>
@@ -712,44 +661,6 @@ export function PlatformDashboard({
 
         <div className="platform-admin-content">
           <div className="platform-layout">
-        <section id="platform-panel-overview" className="surface platform-readiness" role="tabpanel" aria-labelledby="platform-tab-overview" hidden={activeSection !== "overview"}>
-          <SectionHeading eyebrow="首启" title="按顺序完成平台初始化" />
-          <div className="readiness-grid">
-            <div className={setup?.firstRun.needsRootAccount ? "readiness-item readiness-attention" : "readiness-item"}>
-              <span aria-hidden="true" />
-              <strong>{identityStatus}</strong>
-              <small>根管理员验证后才可注册和激活子平台</small>
-            </div>
-            <div className={setup?.routing.ready ? "readiness-item" : "readiness-item readiness-attention"}>
-              <span aria-hidden="true" />
-              <strong>{routingStatus}</strong>
-              <small>{setup ? `${setup.domains.length} 个可用 domain` : "domain 与注册状态由 API 返回"}</small>
-            </div>
-            <div className={setup?.hostedAgent.configured ? "readiness-item" : "readiness-item readiness-attention"}>
-              <span aria-hidden="true" />
-              <strong>{hostedAgentStatus}</strong>
-              <small>{setup?.hostedAgent.configured ? "托管模型负责没有自有 Agent 的买家和卖家" : "配置 MATCHPLANE_ROUTER_AI_URL、KEY、MODEL 后启用"}</small>
-            </div>
-            <div className={setup?.builder?.status === "ready" ? "readiness-item" : "readiness-item readiness-attention"}>
-              <span aria-hidden="true" />
-              <strong>{builderStatus}</strong>
-              <small>{setup?.builder?.status === "ready" ? "Git/归档包会在隔离构建器中生成 immutable artifact" : "配置 builder token、工作目录与 bubblewrap 后再激活新包"}</small>
-            </div>
-          </div>
-          {setup?.firstRun.needsRootAccount ? (
-            <a className="button button-dark readiness-action" href="/login?role=platform&next=%2F%3Frole%3Dplatform">去创建或登录根管理员</a>
-          ) : null}
-          {setup && !setup.root.tenantConfigured ? (
-            <p className="readiness-note">请先在服务端运行 <code>matchplane provision-root</code> 配置 root tenant；登录本身不替代租户初始化。</p>
-          ) : null}
-          {setup?.root.tenantExists && !setup.root.organization ? (
-            <button className="button button-light readiness-action" type="button" disabled={saving} onClick={() => void initializeRootOrganization()}>
-              {saving ? "初始化中…" : "初始化根平台组织"}
-            </button>
-          ) : null}
-          <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
-        </section>
-
         <section className="surface platform-agent-config" aria-label="AI 与登录配置" hidden={activeSection !== "access"}>
           <SectionHeading eyebrow="AI 与登录" title="把真实服务接到这一个管理员入口" />
           <div className="readiness-grid">
@@ -765,7 +676,7 @@ export function PlatformDashboard({
             </div>
           </div>
           <div className="platform-agent-config-body">
-            <p>模型由根平台负责有限路由；子平台检索和领域 Agent 仍由各自 manifest/MCP 端点提供。根邮箱已移到“初始化”分区提供实际配置；本区展示 AI 与 OAuth 的当前运行状态。</p>
+            <p>模型由根平台负责有限路由；子平台检索和领域 Agent 仍由各自 manifest/MCP 端点提供。本区展示 AI 与 OAuth 的当前运行状态。</p>
             <div className="platform-agent-config-snippets" aria-label="服务端配置项">
               <code>MATCHPLANE_ROUTER_AI_URL=https://your-gateway.example/v1/chat/completions</code>
               <code>MATCHPLANE_ROUTER_AI_KEY=server-secret</code>
@@ -781,6 +692,7 @@ export function PlatformDashboard({
               <span>{aiStatus?.router.configured ? `每小时上限 ${aiStatus.router.globalRequestsPerHour} 次 · 单次最长 ${Math.round(aiStatus.router.totalTimeoutMs / 1000)} 秒` : "配置后刷新此页，再用买方对话发送一句真实需求"}</span>
             </div>
           </div>
+          <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
         </section>
 
         <section id="platform-panel-tree" className="surface domain-panel" role="tabpanel" aria-labelledby="platform-tab-tree" hidden={activeSection !== "tree"}>
@@ -1070,11 +982,6 @@ export function PlatformDashboard({
           ) : null}
         </section>
 
-        <section className="operations-strip" aria-label="支付运营状态" hidden={activeSection !== "overview"}>
-          <div><span><BadgeCheck aria-hidden="true" /></span><p><strong>网关健康</strong><small>等待配置数据</small></p></div>
-          <div><span><Clock3 aria-hidden="true" /></span><p><strong>主动对账</strong><small>由支付服务报告</small></p></div>
-          <div><span><FileCheck2 aria-hidden="true" /></span><p><strong>审计记录</strong><small>由根平台审计流报告</small></p></div>
-        </section>
           </div>
         </div>
       </div>
