@@ -122,10 +122,10 @@ export function RootEmailConfigPanel({
         <div className="seller-upload-actions seller-upload-wide root-email-actions">
           <p><ShieldCheck size={17} aria-hidden="true" /> {config?.credentialConfigured ? "密钥槽已就绪" : "密钥槽尚未写入"}</p>
           {canEdit ? <Button type="submit" disabled={saving || loading}><Save size={17} aria-hidden="true" />{saving ? "保存中…" : "保存根邮箱配置"}</Button> : null}
-          <Button type="button" variant="outline" disabled={testing || !config?.credentialConfigured || !config.enabled} onClick={() => void test()}><Send size={17} aria-hidden="true" />{testing ? "发送中…" : "发送测试邮件"}</Button>
+          <Button type="button" variant="outline" disabled={!canEdit || testing || !config?.credentialConfigured || !config.enabled} onClick={() => void test()}><Send size={17} aria-hidden="true" />{testing ? "发送中…" : "发送测试邮件"}</Button>
         </div>
       </form>
-      {canEdit ? <div className="root-email-secret-step"><MailCheck size={18} aria-hidden="true" /><div><strong>写入密钥后即可生效</strong><code>{secretCommand}</code><small>命令会隐藏输入内容，原子写入服务器受保护目录；无需编辑环境变量或重启服务。</small></div></div> : null}
+      {canEdit ? <div className="root-email-secret-step"><MailCheck size={18} aria-hidden="true" /><div><strong>写入密钥后即可生效</strong><code>{secretCommand}</code><small>命令会隐藏输入内容，原子写入服务器受保护目录；无需编辑环境变量或重启服务。</small></div></div> : <p className="subplatform-intro">根管理员可以查看状态；保存配置和发送测试邮件只由超级管理员执行。</p>}
     </section>
   );
 }
