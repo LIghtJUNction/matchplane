@@ -21,6 +21,7 @@ import { SellerDashboard } from "./components/SellerDashboard";
 import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
 import { PluginHost } from "./components/PluginHost";
 import { MatchChat } from "./components/MatchChat";
+import { IdentityBindingsPanel } from "./components/IdentityBindingsPanel";
 import { PasskeyPanel } from "./components/PasskeyPanel";
 import { SessionPanel } from "./components/SessionPanel";
 import { PlatformFooter } from "./components/PlatformFooter";
@@ -91,6 +92,13 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   useEffect(() => {
     const requestedPath = window.location.pathname;
+    const accountTarget = new URL(window.location.href).searchParams.get("account");
+    if (accountTarget === "identity") {
+      setAccountOpen(true);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("account");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    }
     setSubplatform(resolveSubplatform(requestedPath));
     void loadSubplatform(requestedPath).then(setSubplatform);
     const requestedRole = roleFromLocation();
@@ -392,6 +400,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               </div>
             </section>
             <PasskeyPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
+            <IdentityBindingsPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
             <SessionPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
           </div>
         </WorkspaceSettingsDialog>}

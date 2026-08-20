@@ -113,6 +113,18 @@ export const auth = betterAuth({
   // would turn CSRF protection into an allow-any-origin policy. Operators may explicitly add
   // known front-end origins through BETTER_AUTH_TRUSTED_ORIGINS.
   trustedOrigins,
+  account: {
+    accountLinking: {
+      enabled: true,
+      // A user must explicitly start the link flow from their authenticated account page.
+      disableImplicitLinking: true,
+      updateUserInfoOnLink: false,
+      // WeChat commonly has no verified email. Its OAuth proof is accepted only inside the
+      // explicit authenticated link flow; it never becomes an implicit email-account match.
+      trustedProviders: ["wechat"],
+      allowDifferentEmails: true,
+    },
+  },
   emailAndPassword: {
     enabled: true,
     // Verification is a registration trust step, not a second factor for an existing

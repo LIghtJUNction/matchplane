@@ -37,6 +37,9 @@ interface MarketplaceIdentity {
     id: string;
     name: string;
     email: string;
+    emailVerified?: boolean;
+    phoneNumber?: string | null;
+    phoneNumberVerified?: boolean;
     role?: string | null;
   };
   federated: boolean;
@@ -167,10 +170,16 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // Authentication email is an identity attribute, not an implicit marketplace contact
-  // channel.  A platform or mounted package must explicitly configure and collect any channel
-  // it wants to release after a match.
-  const contact = normalizeContactInput(input.contact ?? {});
+  // Verified first-party login methods are trustworthy identity channels. They are stored
+  // encrypted and still released only after the existing two-party consent transition; an
+  // OAuth subject (for example a WeChat openid) is deliberately never presented as a WeChat ID.
+  const suppliedContact = input.contact && typeof input.contact === "object" && !Array.isArray(input.contact)
+    ? input.contact
+    : input.contact ?? {};
+  const contact = normalizeContactInput({
+    ...(suppliedContact as Record<string, unknown>),
+    ...verifiedIdentityContacts(identity.user),
+  });
   if (!contact.ok) return NextResponse.json({ error: contact.error }, { status: 400 });
   let gatewayResponse: Response;
   try {
@@ -290,14 +299,24 @@ async function resolveMarketplaceIdentity(
     };
   }
   if (session) {
+    const sessionUser = session.user as typeof session.user & {
+      role?: string | null;
+      phoneNumber?: unknown;
+      phoneNumberVerified?: unknown;
+    };
     return {
       ok: true,
       identity: {
         user: {
-          id: session.user.id,
-          name: session.user.name,
-          email: session.user.email,
-          role: (session.user as { role?: string | null }).role,
+          id: sessionUser.id,
+          name: sessionUser.name,
+          email: sessionUser.email,
+          emailVerified: sessionUser.emailVerified === true,
+          phoneNumber: typeof sessionUser.phoneNumber === "string"
+            ? sessionUser.phoneNumber
+            : null,
+          phoneNumberVerified: sessionUser.phoneNumberVerified === true,
+          role: sessionUser.role,
         },
         federated: false,
       },
@@ -375,7 +394,7 @@ async function resolveMarketplaceIdentity(
   }
 
   const userResult = await authDatabase.query<MarketplaceIdentity["user"]>(
-    `SELECT id::text, name, email, role
+    `SELECT id::text, name, email, "emailVerified", "phoneNumber", "phoneNumberVerified", role
        FROM "user"
       WHERE id = $1::uuid
         AND banned IS NOT TRUE
@@ -432,6 +451,13 @@ async function introspectRootAccessToken(
 
 function boundedString(value: unknown, maxLength: number): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength ? value : undefined;
+}
+
+function verifiedIdentityContacts(user: MarketplaceIdentity["user"]): Record<string, string> {
+  const contact: Record<string, string> = {};
+  if (user.emailVerified && user.email) contact.email = user.email;
+  if (user.phoneNumberVerified && user.phoneNumber) contact.phone = user.phoneNumber;
+  return contact;
 }
 
 function normalizeContactInput(value: unknown):
