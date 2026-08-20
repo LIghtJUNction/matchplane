@@ -1,4 +1,10 @@
-use std::{env, io, path::Path, process::Command as ProcessCommand, time::Duration};
+use std::{
+    env,
+    io::{self, IsTerminal, Write},
+    path::Path,
+    process::Command as ProcessCommand,
+    time::Duration,
+};
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -149,11 +155,13 @@ enum AdminInviteRole {
 
 #[derive(Debug, Subcommand)]
 enum AuthCommand {
-    /// Reset a root administrator's password and revoke all of that account's sessions.
-    ResetPassword {
-        /// Existing root administrator email address.
-        #[arg(long)]
-        email: String,
+    /// Change a root administrator password and revoke all of that account's sessions.
+    #[command(visible_alias = "reset-password")]
+    Passwd {
+        /// Root administrator email. Defaults to MATCHPLANE_ROOT_ADMIN_EMAIL; a TTY prompt is
+        /// used only when neither is available.
+        #[arg(long, env = "MATCHPLANE_ROOT_ADMIN_EMAIL")]
+        email: Option<String>,
         /// Read one new password line from stdin instead of opening hidden TTY prompts.
         /// This is intended for a secret manager pipe; the password is never a CLI argument.
         #[arg(long)]
@@ -200,7 +208,7 @@ async fn main() -> Result<()> {
         } => create_admin_invite(role, organization_id, expires_hours, base_url).await,
         Command::Auth {
             command:
-                AuthCommand::ResetPassword {
+                AuthCommand::Passwd {
                     email,
                     password_stdin,
                 },
@@ -419,9 +427,8 @@ async fn create_admin_invite(
     Ok(())
 }
 
-async fn reset_root_admin_password(email: String, password_stdin: bool) -> Result<()> {
-    let email = email.trim().to_lowercase();
-    validate_operator_email(&email)?;
+async fn reset_root_admin_password(email: Option<String>, password_stdin: bool) -> Result<()> {
+    let email = resolve_root_admin_email(email)?;
 
     let config = AppConfig::load().context("password reset configuration is invalid")?;
     let store = PgStore::connect(&config.database_url, 2)
@@ -533,17 +540,42 @@ async fn reset_root_admin_password(email: String, password_stdin: bool) -> Resul
         .await
         .context("password reset transaction commit failed")?;
 
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&json!({
-            "passwordReset": true,
-            "email": email,
-            "role": locked_role,
-            "sessionsRevoked": sessions_revoked,
-        }))
-        .context("password reset output failed")?
-    );
+    println!("Password updated. Revoked {sessions_revoked} session(s).");
     Ok(())
+}
+
+fn resolve_root_admin_email(email: Option<String>) -> Result<String> {
+    let email = select_root_admin_email(email, env::var("MATCHPLANE_ROOT_ADMIN_EMAIL").ok())
+        .map_or_else(prompt_root_admin_email, Ok)?;
+    let email = email.trim().to_lowercase();
+    validate_operator_email(&email)
+        .map_err(|_| anyhow!("--email must be an operator-owned email address"))?;
+    Ok(email)
+}
+
+fn select_root_admin_email(explicit: Option<String>, configured: Option<String>) -> Option<String> {
+    explicit
+        .or(configured)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn prompt_root_admin_email() -> Result<String> {
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        bail!(
+            "--email or MATCHPLANE_ROOT_ADMIN_EMAIL is required when standard input is not a terminal"
+        )
+    }
+    let mut stderr = io::stderr().lock();
+    write!(stderr, "Administrator email: ")
+        .context("could not prompt for the administrator email")?;
+    stderr
+        .flush()
+        .context("could not flush the administrator email prompt")?;
+    let mut email = String::new();
+    io::stdin()
+        .read_line(&mut email)
+        .context("could not read the administrator email")?;
+    Ok(email)
 }
 
 fn read_new_password(from_stdin: bool) -> Result<SecretString> {
@@ -554,6 +586,9 @@ fn read_new_password(from_stdin: bool) -> Result<SecretString> {
             .context("could not read the password from stdin")?;
         value.trim_end_matches(['\r', '\n']).to_owned()
     } else {
+        if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+            bail!("interactive password entry requires a terminal; use --password-stdin")
+        }
         let first = prompt_password("New password: ").context("could not read the new password")?;
         let confirmation = prompt_password("Confirm new password: ")
             .context("could not read the password confirmation")?;
@@ -1309,11 +1344,12 @@ impl JsonRpcResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdminInviteRole, Service, admin_invite_role_value, better_auth_derived_key,
-        hosted_agent_report_from_values, normalize_admin_base_url, resolve_web_node_with,
-        safe_endpoint_origin, service_command, sha256, validate_operator_email,
-        validate_operator_uuid,
+        AdminInviteRole, AuthCommand, Cli, Command, Service, admin_invite_role_value,
+        better_auth_derived_key, hosted_agent_report_from_values, normalize_admin_base_url,
+        resolve_web_node_with, safe_endpoint_origin, select_root_admin_email, service_command,
+        sha256, validate_operator_email, validate_operator_uuid,
     };
+    use clap::Parser;
     use uuid::Uuid;
 
     #[test]
@@ -1405,6 +1441,61 @@ mod tests {
             better_auth_derived_key("MatchPlane-CLI-Test-2026!", salt).unwrap(),
             expected_key
         );
+    }
+
+    #[test]
+    fn auth_passwd_should_accept_the_legacy_reset_password_alias() {
+        let cli = Cli::try_parse_from([
+            "matchplane",
+            "auth",
+            "reset-password",
+            "--email",
+            "admin@matx.tech",
+            "--password-stdin",
+        ])
+        .unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Command::Auth {
+                command: AuthCommand::Passwd {
+                    email: Some(_),
+                    password_stdin: true,
+                },
+            }
+        ));
+    }
+
+    #[test]
+    fn auth_passwd_should_not_require_an_email_argument() {
+        let cli =
+            Cli::try_parse_from(["matchplane", "auth", "passwd", "--password-stdin"]).unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Command::Auth {
+                command: AuthCommand::Passwd {
+                    email: None,
+                    password_stdin: true,
+                },
+            }
+        ));
+    }
+
+    #[test]
+    fn select_root_admin_email_should_prefer_an_explicit_value() {
+        assert_eq!(
+            select_root_admin_email(
+                Some("operator@matx.tech".to_owned()),
+                Some("configured@matx.tech".to_owned()),
+            ),
+            Some("operator@matx.tech".to_owned())
+        );
+    }
+
+    #[test]
+    fn select_root_admin_email_should_ignore_an_empty_configured_value() {
+        assert_eq!(select_root_admin_email(None, Some("  ".to_owned())), None);
     }
 
     #[test]

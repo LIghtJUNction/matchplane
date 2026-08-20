@@ -71,12 +71,12 @@ cargo run --locked -p xtask -- provision-root \
 cargo run --locked -p xtask -- admin-invite --role root-admin
 ```
 
-如果需要在服务器上重置根管理员密码，使用仅供运营方使用的 CLI 命令。命令默认通过隐藏输入读取密码，
-也可以使用 `--password-stdin` 从 secret manager 接收一行密码；密码不会出现在命令参数中，执行成功后会
-撤销该账号已有的全部会话：
+如果需要在服务器上修改根管理员密码，使用仅供运营方使用的 CLI 命令。命令默认使用
+`MATCHPLANE_ROOT_ADMIN_EMAIL`，并通过隐藏输入读取密码；也可以使用 `--password-stdin` 从 secret manager
+接收一行密码。密码不会出现在命令参数中，执行成功后会撤销该账号已有的全部会话：
 
 ```sh
-sudo bash -lc 'set -a; . /etc/matchplane/matchplane.env; . /etc/matchplane/services/web.env; set +a; exec /usr/bin/matchplane auth reset-password --email <root-admin-email>'
+sudo bash -lc 'set -a; . /etc/matchplane/matchplane.env; . /etc/matchplane/services/web.env; set +a; exec /usr/bin/matchplane auth passwd'
 ```
 
 打开返回的 `/admin/register?token=...&next=...` 链接。它使用与其他账号相同的登录/注册页面，验证 Better

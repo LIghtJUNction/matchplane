@@ -8,7 +8,7 @@ matchplane status --json
 matchplane migrate
 matchplane provision-root --tenant-slug <slug> --tenant-name <name> --admin-email <operator-email>
 matchplane admin-invite --role root-admin
-matchplane auth reset-password --email <root-admin-email>
+matchplane auth passwd
 matchplane admin-invite --role subplatform-admin --organization-id <organization-uuid>
 matchplane federation-invite --domain-id <domain-uuid>
 matchplane serve gateway
@@ -20,13 +20,13 @@ matchplane mcp serve
 
 `admin-invite` 是唯一的管理员入驻入口。它在数据库中只保存 SHA-256 token 摘要，默认 24 小时过期且最多 7 天，只能兑换一次；原始 token 只出现在 CLI 输出的注册 URL 中。首次部署必须先由已验证的 `MATCHPLANE_ROOT_ADMIN_EMAIL` 登录并在 Web 初始化 Better Auth 根组织，之后 `root-admin` 才能自动定位该根组织；`subplatform-admin` 必须显式指定目标组织 UUID。CLI URL 自带 `next` 回跳参数。管理员和普通用户使用同一个 `/login` 表单，Better Auth 建立并验证会话后服务端才兑换邀请并授予 root 角色或组织 admin 成员关系。不要把 URL 写入日志、工单或 shell 历史；如果泄露，请删除对应邀请或等待过期后重新签发。
 
-`auth reset-password` 是服务器上的根管理员维护命令。它只接受 `rootSuperAdmin` 或 `rootAdmin` 账号，默认通过隐藏的 TTY 两次读取新密码；`--password-stdin` 可用于从 secret manager 传入一行密码。密码不会出现在命令参数、日志或 JSON 输出中，成功后会撤销目标账号的全部 Better Auth 会话：
+`auth passwd` 是服务器上的根管理员维护命令。它只接受 `rootSuperAdmin` 或 `rootAdmin` 账号，优先使用 `MATCHPLANE_ROOT_ADMIN_EMAIL`，因此常规维护只需一个命令；未配置时才在 TTY 中询问邮箱。新密码默认通过隐藏的 TTY 两次读取；`--password-stdin` 可用于从 secret manager 传入一行密码。密码不会出现在命令参数或日志中，成功后会撤销目标账号的全部 Better Auth 会话：
 
 ```sh
-sudo bash -lc 'set -a; . /etc/matchplane/matchplane.env; . /etc/matchplane/services/web.env; set +a; exec /usr/bin/matchplane auth reset-password --email admin@matx.tech'
+sudo bash -lc 'set -a; . /etc/matchplane/matchplane.env; . /etc/matchplane/services/web.env; set +a; exec /usr/bin/matchplane auth passwd'
 ```
 
-命令依赖 `MATCHPLANE_DATABASE_URL`，生产机需要同时加载共享环境和 Web 工作负载环境。使用 `--password-stdin` 时，请让 secret manager 直接提供密码，不要把密码写进 shell 历史或命令参数。
+命令依赖 `MATCHPLANE_DATABASE_URL`，生产机需要同时加载共享环境和 Web 工作负载环境。若需覆盖默认管理员，使用 `--email admin@matx.tech`；旧的 `auth reset-password` 仍是兼容别名。非 TTY 自动化必须显式使用 `--password-stdin`，并让 secret manager 直接提供密码，不要把密码写进 shell 历史或命令参数。
 
 根作用域的 Better Auth API key 要求运营者通过 `MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID` 提供对应的组织 UUID；web 服务不会从子平台或 marketplace 记录中推断。
 
