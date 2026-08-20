@@ -26,6 +26,9 @@ install -d "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" "$root/usr/shar
 install -d "$root/usr/share/licenses/matchplane"
 install -d "$root/usr/share/matchplane/web"
 install -d "$root/usr/share/matchplane/skills"
+# A caller can use `mktemp -d` for the staging root. Make the packaged release
+# traversable by service users after it is moved below the releases directory.
+chmod 0755 "$root"
 standalone_root="$repository_root/web/.next/standalone"
 if [[ -f "$standalone_root/server.js" ]]; then
   standalone_web_root="$standalone_root"
