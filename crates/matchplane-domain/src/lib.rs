@@ -10,6 +10,7 @@ mod marketplace;
 mod matching;
 mod models;
 mod numeric;
+mod provider;
 
 pub use envelope::{EventEnvelope, PayloadHash, StreamKind};
 pub use ids::{
@@ -31,3 +32,4 @@ pub use models::{
     Trade,
 };
 pub use numeric::{Amount, NumericError, Price, Quantity, Scale};
+pub use provider::{ProviderCapability, ProviderDescriptor};
