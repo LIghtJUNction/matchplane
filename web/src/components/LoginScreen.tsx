@@ -20,6 +20,7 @@ import { PreferenceControls } from "./PreferenceControls";
 type AuthMethod = "password" | "email-otp" | "magic-link";
 type SocialProvider = "google" | "wechat" | "qq" | "alipay";
 type OAuthProvider = SocialProvider | "national_identity";
+type LoginPersona = BetterAuthMarketplaceRole;
 
 interface AuthCapabilities {
   emailOtp: boolean;
@@ -399,6 +400,14 @@ export function LoginScreen() {
     setNotice(null);
   };
 
+  const selectPersona = (nextRole: LoginPersona) => {
+    if (adminInviteToken || oauthQuery) return;
+    setRole(nextRole);
+    setNext((current) => nextPathForPersona(current, nextRole));
+    setError(null);
+    setNotice(null);
+  };
+
   const availableMethods: AuthMethod[] = [
     "password",
     ...(capabilities.emailOtp || capabilities.phoneOtp ? ["email-otp" as const] : []),
@@ -423,6 +432,26 @@ export function LoginScreen() {
             <h1 id="login-form-title">{copy.formTitle}</h1>
             <p>{copy.formDescription}</p>
           </div>
+
+        {!adminInviteToken && !oauthQuery ? (
+          <section className="login-persona" aria-labelledby="login-persona-title">
+            <div>
+              <p className="login-persona-eyebrow" id="login-persona-title">{copy.personaPrompt}</p>
+              <p className="login-persona-hint">{copy.personaHint}</p>
+            </div>
+            <div className="login-persona-options" role="radiogroup" aria-label={copy.personaPrompt}>
+              <button type="button" role="radio" aria-checked={role === "buyer"} className={role === "buyer" ? "is-active" : ""} onClick={() => selectPersona("buyer")}>
+                <strong>{copy.buyer}</strong><span>{copy.buyerDetail}</span>
+              </button>
+              <button type="button" role="radio" aria-checked={role === "seller"} className={role === "seller" ? "is-active" : ""} onClick={() => selectPersona("seller")}>
+                <strong>{copy.seller}</strong><span>{copy.sellerDetail}</span>
+              </button>
+              <button type="button" role="radio" aria-checked={role === "platform"} className={role === "platform" ? "is-active" : ""} onClick={() => selectPersona("platform")}>
+                <strong>{copy.admin}</strong><span>{copy.adminDetail}</span>
+              </button>
+            </div>
+          </section>
+        ) : null}
 
         {nationalIdentityEnabled ? (
           <div className="login-primary-provider">
@@ -535,6 +564,12 @@ function safeNext(value: string | null): string {
   }
 }
 
+function nextPathForPersona(current: string, role: LoginPersona): string {
+  const url = new URL(current, window.location.origin);
+  url.searchParams.set("role", role);
+  return `${url.pathname}${url.search}`;
+}
+
 function authCallbackURL(next: string, adminInviteToken: string | null): string {
   if (!adminInviteToken) return next;
   // Better Auth may redirect directly to the callback after a magic-link or social
@@ -556,6 +591,14 @@ function loginCopy(locale: "zh" | "en") {
       back: "Back",
       formTitle: "Continue with your account",
       formDescription: "Use email or another method enabled for this platform.",
+      personaPrompt: "How will you use MatchPlane?",
+      personaHint: "Buyer and seller workspaces require sign-in. Administrator access is granted by the super administrator; choosing it never grants permission by itself.",
+      buyer: "Buyer",
+      buyerDetail: "Describe a need and receive matches",
+      seller: "Seller",
+      sellerDetail: "Submit and manage real offers",
+      admin: "Administrator",
+      adminDetail: "Invited platform management only",
       authMethods: "Authentication methods",
       nationalIdentity: "National online identity",
       socialMethods: "Social sign-in",
@@ -602,6 +645,14 @@ function loginCopy(locale: "zh" | "en") {
     back: "返回",
     formTitle: "继续使用你的账号",
     formDescription: "使用邮箱，或选择当前平台已启用的其他方式。",
+    personaPrompt: "选择你的使用身份",
+    personaHint: "买家和卖家登录后进入各自工作台。管理员权限只由超级管理员授予；选择此项不会给账号自行加权。",
+    buyer: "买家",
+    buyerDetail: "发布需求并查看匹配结果",
+    seller: "卖家",
+    sellerDetail: "提交并管理真实供给",
+    admin: "管理员",
+    adminDetail: "仅限受邀的平台管理",
     authMethods: "登录方式",
     nationalIdentity: "国家网络身份认证",
     socialMethods: "第三方登录",

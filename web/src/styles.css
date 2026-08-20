@@ -4953,6 +4953,84 @@ main.subplatform-fullscreen-main {
   line-height: 1.55;
 }
 
+.login-persona {
+  margin-top: 1.35rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.95rem;
+  background: color-mix(in srgb, var(--paper) 72%, transparent);
+}
+
+.login-persona-eyebrow {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.login-persona-hint {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.66rem;
+  line-height: 1.5;
+}
+
+.login-persona-options {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.38rem;
+}
+
+.login-persona-options button {
+  min-width: 0;
+  min-height: 4.85rem;
+  padding: 0.62rem 0.5rem;
+  display: grid;
+  align-content: start;
+  gap: 0.26rem;
+  border: 1px solid var(--line);
+  border-radius: 0.72rem;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.login-persona-options button:hover,
+.login-persona-options button:focus-visible {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  outline: 0;
+  transform: translateY(-1px);
+}
+
+.login-persona-options button.is-active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--ivory);
+}
+
+.login-persona-options strong { font-size: 0.74rem; font-weight: 700; }
+.login-persona-options span { font-size: 0.59rem; line-height: 1.35; opacity: 0.76; }
+
+.header-admin-action {
+  min-height: 2.35rem;
+  padding: 0 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  text-decoration: none;
+}
+
+.header-admin-action:hover,
+.header-admin-action:focus-visible { border-color: var(--line-strong); color: var(--ink); outline: 0; }
+
 .login-card .login-mode-switch,
 .login-card .login-methods {
   margin-top: 1.3rem;
@@ -5349,4 +5427,7 @@ main.subplatform-fullscreen-main {
   .login-card-header .brand {
     margin-bottom: 1.7rem;
   }
+
+  .login-persona-options { grid-template-columns: 1fr; }
+  .login-persona-options button { min-height: 3.65rem; grid-template-columns: 4rem 1fr; align-items: center; }
 }

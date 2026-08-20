@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ChevronLeft,
@@ -75,6 +75,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginFailed, setPluginFailed] = useState(false);
+  // Keep the requested destination independent from the URL that hydration normalizes to the
+  // safe buyer surface. Otherwise `?role=platform` can be overwritten before Better Auth
+  // resolves, which silently strands a valid administrator in the buyer workspace.
+  const requestedRoleRef = useRef<WorkspaceRole>(roleFromLocation());
 
   useEffect(() => {
     if (role !== "seller") setSellerDraft(null);
@@ -97,7 +101,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     const requestedPath = window.location.pathname;
     setSubplatform(resolveSubplatform(requestedPath));
     void loadSubplatform(requestedPath).then(setSubplatform);
-    setRole(roleFromLocation());
+    const requestedRole = roleFromLocation();
+    requestedRoleRef.current = requestedRole;
+    // Never render a privileged or supply workspace while the Better Auth
+    // session check is still pending. The authenticated effect below restores
+    // the requested role only after a real session is available.
+    setRole(requiresAuthenticatedWorkspace(requestedRole) ? "buyer" : requestedRole);
     setListing(listingFromLocation());
     setHydrated(true);
   }, []);
@@ -108,34 +117,33 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       .then(({ data }) => {
         const user = data?.user as AuthenticatedUser | undefined;
         setAuthUser(user?.id ? user : null);
-        const requestedRole = roleFromLocation();
+        const requestedRole = requestedRoleRef.current;
         const userRole = user?.role;
         const isRootManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
-        if ((requestedRole === "platform" || requestedRole === "subplatform_admin") && !user) {
-          const next = `${window.location.pathname}?role=${requestedRole}`;
-          window.location.assign(`/login?role=${requestedRole}&next=${encodeURIComponent(next)}`);
+        if (requiresAuthenticatedWorkspace(requestedRole) && !user) {
+          setRole("buyer");
+          window.location.assign(loginHref(requestedRole));
           return;
         }
         if (requestedRole === "platform" && !isRootManager) {
           setRole("buyer");
           setNotice("当前账号没有根平台管理员权限");
+          return;
         }
+        if (user && requiresAuthenticatedWorkspace(requestedRole)) setRole(requestedRole);
       })
       .catch(() => {
         setAuthUser(null);
-        const requestedRole = roleFromLocation();
-        if (requestedRole === "platform" || requestedRole === "subplatform_admin") {
-          const next = `${window.location.pathname}?role=${requestedRole}`;
-          window.location.assign(`/login?role=${requestedRole}&next=${encodeURIComponent(next)}`);
+        const requestedRole = requestedRoleRef.current;
+        if (requiresAuthenticatedWorkspace(requestedRole)) {
+          setRole("buyer");
+          window.location.assign(loginHref(requestedRole));
         }
       });
   }, [subplatform.slug]);
 
-  const openSignIn = () => {
-    const nextUrl = new URL(window.location.href);
-    nextUrl.searchParams.set("role", role);
-    const next = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
-    window.location.assign(`/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`);
+  const openSignIn = (targetRole: WorkspaceRole = role) => {
+    window.location.assign(loginHref(targetRole));
   };
 
   const signOut = async () => {
@@ -145,6 +153,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       clearPartySessionCache();
       setAuthUser(null);
       setSettingsOpen(false);
+      setRole("buyer");
+      requestedRoleRef.current = "buyer";
+      const url = new URL(window.location.href);
+      url.searchParams.set("role", "buyer");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
       setNotice(ui.signedOut);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : ui.signOutFailed);
@@ -152,7 +165,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   };
 
   const selectPublicWorkspace = (nextRole: "buyer" | "seller") => {
+    if (nextRole === "seller" && !authUser) {
+      openSignIn("seller");
+      return;
+    }
     setRole(nextRole);
+    requestedRoleRef.current = nextRole;
     setSettingsOpen(false);
     const url = new URL(window.location.href);
     url.searchParams.set("role", nextRole);
@@ -160,6 +178,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   };
 
   const selectSellerPlatform = useCallback(async (hop: PlatformRouteHop) => {
+    if (!authUser) {
+      openSignIn("seller");
+      return;
+    }
     const loaded = await loadSubplatform(hop.path);
     // The route decision owns the target identity; the package only fills in its UI/schema.
     // Keep the browser in one process and update the URL so refresh/back links remain scoped.
@@ -170,11 +192,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       tenantId: hop.tenantId,
       domainId: hop.domainId,
     });
+    requestedRoleRef.current = "seller";
     const url = new URL(window.location.href);
     url.pathname = hop.path;
     url.searchParams.set("role", "seller");
     window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
-  }, []);
+  }, [authUser]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -287,7 +310,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   <motion.button
                     className="header-signin-action"
                     type="button"
-                    onClick={openSignIn}
+                    onClick={() => openSignIn()}
                     whileTap={{ scale: 0.97 }}
                     transition={spring}
                   >
@@ -295,18 +318,26 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     <span>{ui.signIn}</span>
                   </motion.button>
                 ) : null}
-                <motion.button
-                  className="workspace-settings-trigger"
-                  type="button"
-                  aria-expanded={settingsOpen}
-                  aria-haspopup="dialog"
-                  onClick={() => setSettingsOpen(true)}
-                  whileTap={{ scale: 0.95 }}
-                  transition={spring}
-                >
-                  <Settings2 size={18} aria-hidden="true" />
-                  <span>{ui.settings}</span>
-                </motion.button>
+                {authUser?.role === "rootSuperAdmin" || authUser?.role === "rootAdmin" ? (
+                  <a className="header-admin-action" href="/?role=platform">
+                    <UserRound size={17} aria-hidden="true" />
+                    <span>{ui.platformAdmin}</span>
+                  </a>
+                ) : null}
+                {authUser ? (
+                  <motion.button
+                    className="workspace-settings-trigger"
+                    type="button"
+                    aria-expanded={settingsOpen}
+                    aria-haspopup="dialog"
+                    onClick={() => setSettingsOpen(true)}
+                    whileTap={{ scale: 0.95 }}
+                    transition={spring}
+                  >
+                    <Settings2 size={18} aria-hidden="true" />
+                    <span>{ui.settings}</span>
+                  </motion.button>
+                ) : null}
               </div>
             </div>
           </header>
@@ -342,7 +373,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         </main>
         {fullscreenPlugin ? null : <PlatformFooter subplatform={subplatform} />}
 
-        {fullscreenPlugin ? null : <WorkspaceSettingsDialog
+        {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           title={role === "seller" ? ui.sellerSettingsTitle : ui.settingsTitle}
@@ -528,6 +559,20 @@ function roleFromLocation(): WorkspaceRole {
   if (typeof window === "undefined") return "buyer";
   const requested = new URLSearchParams(window.location.search).get("role");
   return requested === "seller" || requested === "platform" || requested === "subplatform_admin" ? requested : "buyer";
+}
+
+/** Supply and administration are authenticated workspaces, never public destinations. */
+function requiresAuthenticatedWorkspace(role: WorkspaceRole): boolean {
+  return role === "seller" || role === "platform" || role === "subplatform_admin";
+}
+
+/** Keep the intended workspace through Better Auth without trusting an external redirect. */
+function loginHref(role: WorkspaceRole): string {
+  if (typeof window === "undefined") return `/login?role=${encodeURIComponent(role)}`;
+  const current = new URL(window.location.href);
+  current.searchParams.set("role", role);
+  const next = `${current.pathname}${current.search}${current.hash}`;
+  return `/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`;
 }
 
 function parentPlatformHref(path: string, role: WorkspaceRole): string {
