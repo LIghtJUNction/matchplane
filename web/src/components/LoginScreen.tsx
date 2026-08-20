@@ -404,7 +404,6 @@ export function LoginScreen() {
     ...(capabilities.emailOtp || capabilities.phoneOtp ? ["email-otp" as const] : []),
     ...(capabilities.magicLink ? ["magic-link" as const] : []),
   ];
-  const context = loginContextCopy(locale, role);
   const emailOnlyIdentifier = method === "password" || method === "magic-link" || registrationPending;
   const hasMethodTabs = availableMethods.length > 1;
   const activeMethodTabId = `${authMethodsId}-${method}-tab`;
@@ -418,31 +417,10 @@ export function LoginScreen() {
         <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
       </div>
       <div className="login-layout">
-        <section className="login-story" aria-labelledby="login-title">
-          <Brand label={subplatform.brandName} homeHref="/" />
-          <div className="login-story-copy">
-            <h1 id="login-title">{context.title}</h1>
-            <p>{context.description}</p>
-          </div>
-          <div className="login-route-map" aria-hidden="true">
-            <svg viewBox="0 0 520 210" focusable="false">
-              <path className="login-route-line login-route-line-main" d="M38 164 C132 164 122 48 252 48 C365 48 356 148 482 74" />
-              <path className="login-route-line login-route-line-branch" d="M252 48 C274 99 316 133 389 150" />
-              <circle className="login-route-node login-route-node-start" cx="38" cy="164" r="12" />
-              <circle className="login-route-node login-route-node-match" cx="252" cy="48" r="16" />
-              <circle className="login-route-node login-route-node-end" cx="482" cy="74" r="12" />
-              <circle className="login-route-node login-route-node-branch" cx="389" cy="150" r="9" />
-            </svg>
-            <span className="login-route-label login-route-label-start">{copy.routeGoal}</span>
-            <span className="login-route-label login-route-label-match">{copy.routeMatch}</span>
-            <span className="login-route-label login-route-label-end">{copy.routeConnect}</span>
-          </div>
-          <p className="login-continuity">{copy.identityContinuity}</p>
-        </section>
-
         <section className="login-card" aria-labelledby="login-form-title">
           <div className="login-card-header">
-            <h2 id="login-form-title">{copy.formTitle}</h2>
+            <Brand label={subplatform.brandName} homeHref="/" />
+            <h1 id="login-form-title">{copy.formTitle}</h1>
             <p>{copy.formDescription}</p>
           </div>
 
@@ -572,27 +550,12 @@ function authErrorCallbackURL(role: BetterAuthMarketplaceRole, next: string, adm
   return `/login?${params.toString()}`;
 }
 
-function loginContextCopy(locale: "zh" | "en", role: BetterAuthMarketplaceRole) {
-  if (locale === "en") {
-    if (role === "seller") return { title: "Continue managing your offers.", description: "Sign in and we’ll return you to the platform you were using." };
-    if (role === "platform" || role === "subplatform_admin") return { title: "Continue to platform administration.", description: "Sign in and we’ll return you to the platform you were managing." };
-    return { title: "Continue your match.", description: "Sign in and we’ll return you to the request you were working on." };
-  }
-  if (role === "seller") return { title: "继续管理你的供给。", description: "登录后，我们会带你回到刚才使用的平台。" };
-  if (role === "platform" || role === "subplatform_admin") return { title: "继续管理你的平台。", description: "登录后，我们会带你回到刚才管理的平台。" };
-  return { title: "继续你的匹配。", description: "登录后，我们会带你回到刚才正在处理的需求。" };
-}
-
 function loginCopy(locale: "zh" | "en") {
   if (locale === "en") {
     return {
       back: "Back",
       formTitle: "Continue with your account",
       formDescription: "Use email or another method enabled for this platform.",
-      identityContinuity: "One account across every platform node you’re authorized to use.",
-      routeGoal: "Goal",
-      routeMatch: "Match",
-      routeConnect: "Connect",
       authMethods: "Authentication methods",
       nationalIdentity: "National online identity",
       socialMethods: "Social sign-in",
@@ -639,10 +602,6 @@ function loginCopy(locale: "zh" | "en") {
     back: "返回",
     formTitle: "继续使用你的账号",
     formDescription: "使用邮箱，或选择当前平台已启用的其他方式。",
-    identityContinuity: "一个账号，通行于你已获授权的平台节点。",
-    routeGoal: "目标",
-    routeMatch: "匹配",
-    routeConnect: "连接",
     authMethods: "登录方式",
     nationalIdentity: "国家网络身份认证",
     socialMethods: "第三方登录",
