@@ -48,7 +48,7 @@ afterEach(() => {
 });
 
 describe("MatchPlane workspaces", () => {
-  it("keeps the root entry focused on one chat and one settings entry", async () => {
+  it("keeps the root entry focused on one public buyer chat and a visible sign-in entry", async () => {
     render(<App />);
 
     expect(screen.getByRole("heading", { name: "先说说你想解决什么。" })).toBeInTheDocument();
@@ -59,7 +59,7 @@ describe("MatchPlane workspaces", () => {
     expect(screen.queryByText("其他入口")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "切换到暗色" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "设置" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("供给名称")).not.toBeInTheDocument();
   });
 
@@ -88,17 +88,14 @@ describe("MatchPlane workspaces", () => {
     expect(screen.queryByText("独立打开")).not.toBeInTheDocument();
   });
 
-  it("requires a seller session before accepting supply uploads", async () => {
-    const user = userEvent.setup();
+  it("never renders the seller workspace or settings for an anonymous seller route", async () => {
     window.history.replaceState(null, "", "/?role=seller");
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "设置" }));
-    await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
-    await user.type(screen.getByLabelText("内部编号"), "seller-item");
-    await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
-
-    expect(window.location.assign).toBeDefined();
+    await waitFor(() => expect(authClient.getSession).toHaveBeenCalled());
+    expect(screen.queryByLabelText("供给名称")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 
   it("does not fabricate a seller submission when the marketplace API is disabled", async () => {
@@ -107,7 +104,7 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(await screen.findByRole("button", { name: "设置" }));
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("内部编号"), "seller-item");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
@@ -208,9 +205,10 @@ describe("MatchPlane workspaces", () => {
 
   it("keeps visible controls actionable instead of leaving placeholder buttons", async () => {
     const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(await screen.findByRole("button", { name: "设置" }));
     expect(screen.getByRole("dialog", { name: "设置" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭设置" }));
 
@@ -224,7 +222,7 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "设置" }));
+    await user.click(await screen.findByRole("button", { name: "设置" }));
     expect(await screen.findByRole("dialog", { name: "设置" })).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "退出登录" }));
 
@@ -264,13 +262,11 @@ describe("MatchPlane workspaces", () => {
   });
 
   it("does not expose contact settings before a user signs in", async () => {
-    const user = userEvent.setup();
     render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "设置" }));
 
     expect(screen.queryByLabelText("手机号")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("微信号")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "登录" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
   });
 });
