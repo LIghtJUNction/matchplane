@@ -44,6 +44,7 @@ export function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState("");
   const [method, setMethod] = useState<AuthMethod>("password");
+  const [authIntent, setAuthIntent] = useState<"sign-in" | "sign-up">("sign-in");
   const [next, setNext] = useState("/");
   const [oauthQuery, setOauthQuery] = useState<string | null>(null);
   const [adminInviteToken, setAdminInviteToken] = useState<string | null>(null);
@@ -199,6 +200,10 @@ export function LoginScreen() {
       setError(copy.invalidIdentifier);
       return;
     }
+    if (authIntent === "sign-up" && method === "password" && resolvedIdentifier.kind !== "email") {
+      setError(copy.registrationEmailOnly);
+      return;
+    }
     if (method === "password" && resolvedIdentifier.kind === "phone") {
       setError(copy.phonePasswordUnavailable);
       return;
@@ -307,19 +312,9 @@ export function LoginScreen() {
         return;
       }
 
-      const result = await authClient.signIn.email({
-        email: resolvedIdentifier.value,
-        password,
-        callbackURL: authCallbackURL(next, adminInviteToken),
-        ...(oauthQuery ? { oauth_query: oauthQuery } : {}),
-        fetchOptions: options,
-      } as never);
-      if (result.error) {
-        if (oauthQuery) throw new Error(copy.authFailed);
-        // The password form also acts as the registration entry point, but only when the
-        // deployment has an email route that can deliver the verification code. Without it,
-        // never turn a failed login into a misleading "check your email" state.
-        if (!capabilities.emailOtp && !capabilities.magicLink) throw new Error(copy.authFailed);
+      if (authIntent === "sign-up") {
+        if (resolvedIdentifier.kind !== "email") throw new Error(copy.registrationEmailOnly);
+        if (!capabilities.emailOtp && !capabilities.magicLink) throw new Error(copy.emailOtpUnavailable);
         const created = await authClient.signUp.email({
           name: displayNameFromIdentifier(resolvedIdentifier.value),
           email: resolvedIdentifier.value,
@@ -330,12 +325,20 @@ export function LoginScreen() {
         if (!created.error) {
           setRegistrationPending(true);
           setOtp("");
-          setNotice(copy.otpSent);
+          setNotice(copy.registrationOtpSent);
           setSubmitting(false);
           return;
         }
-        throw new Error(copy.authFailed);
+        throw new Error(created.error.message || copy.authFailed);
       }
+      const result = await authClient.signIn.email({
+        email: resolvedIdentifier.value,
+        password,
+        callbackURL: authCallbackURL(next, adminInviteToken),
+        ...(oauthQuery ? { oauth_query: oauthQuery } : {}),
+        fetchOptions: options,
+      } as never);
+      if (result.error) throw new Error(result.error.message || copy.authFailed);
       const oauthRedirect = oauthRedirectUrl(result.data);
       if (oauthQuery && oauthRedirect) {
         window.location.assign(oauthRedirect);
@@ -400,6 +403,14 @@ export function LoginScreen() {
     setNotice(null);
   };
 
+  const switchAuthIntent = (nextIntent: "sign-in" | "sign-up") => {
+    setAuthIntent(nextIntent);
+    setRegistrationPending(false);
+    setOtp("");
+    setError(null);
+    setNotice(null);
+  };
+
   const selectPersona = (nextRole: LoginPersona) => {
     if (adminInviteToken || oauthQuery) return;
     setRole(nextRole);
@@ -435,21 +446,19 @@ export function LoginScreen() {
 
         {!adminInviteToken && !oauthQuery ? (
           <section className="login-persona" aria-labelledby="login-persona-title">
-            <div>
-              <p className="login-persona-eyebrow" id="login-persona-title">{copy.personaPrompt}</p>
-              <p className="login-persona-hint">{copy.personaHint}</p>
-            </div>
+            <p className="login-persona-eyebrow" id="login-persona-title">{copy.personaPrompt}</p>
             <div className="login-persona-options" role="radiogroup" aria-label={copy.personaPrompt}>
               <button type="button" role="radio" aria-checked={role === "buyer"} className={role === "buyer" ? "is-active" : ""} onClick={() => selectPersona("buyer")}>
-                <strong>{copy.buyer}</strong><span>{copy.buyerDetail}</span>
+                {copy.buyer}
               </button>
               <button type="button" role="radio" aria-checked={role === "seller"} className={role === "seller" ? "is-active" : ""} onClick={() => selectPersona("seller")}>
-                <strong>{copy.seller}</strong><span>{copy.sellerDetail}</span>
+                {copy.seller}
               </button>
               <button type="button" role="radio" aria-checked={role === "platform"} className={role === "platform" ? "is-active" : ""} onClick={() => selectPersona("platform")}>
-                <strong>{copy.admin}</strong><span>{copy.adminDetail}</span>
+                {copy.admin}
               </button>
             </div>
+            {role === "platform" ? <p className="login-persona-hint">{copy.adminDetail}</p> : null}
           </section>
         ) : null}
 
@@ -470,6 +479,13 @@ export function LoginScreen() {
           </div>
         ) : null}
 
+        {!adminInviteToken && !oauthQuery && method === "password" && !registrationPending ? (
+          <div className="login-mode-switch" role="tablist" aria-label={copy.accountFlow}>
+            <button type="button" role="tab" aria-selected={authIntent === "sign-in"} className={authIntent === "sign-in" ? "is-active" : ""} onClick={() => switchAuthIntent("sign-in")}>{copy.signIn}</button>
+            <button type="button" role="tab" aria-selected={authIntent === "sign-up"} className={authIntent === "sign-up" ? "is-active" : ""} onClick={() => switchAuthIntent("sign-up")}>{copy.signUp}</button>
+          </div>
+        ) : null}
+
         <form id={hasMethodTabs ? `${authMethodsId}-panel` : undefined} className="login-form" role={hasMethodTabs ? "tabpanel" : undefined} aria-labelledby={hasMethodTabs ? activeMethodTabId : undefined} onSubmit={submit}>
           <label htmlFor="login-identifier">
             <span>{emailOnlyIdentifier ? copy.email : copy.identifier}</span>
@@ -479,7 +495,7 @@ export function LoginScreen() {
             <div className="login-password-field">
               <label htmlFor="login-password"><span>{copy.password}</span></label>
               <span className="login-password-control">
-                <Input id="login-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password webauthn" placeholder={copy.passwordPlaceholder} />
+                <Input id="login-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={authIntent === "sign-up" ? "new-password" : "current-password webauthn"} placeholder={copy.passwordPlaceholder} />
                 <span className="login-password-actions">
                   <Button className="login-password-visibility" variant="outline" size="icon-sm" type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={submitting} aria-label={showPassword ? copy.hidePassword : copy.showPassword} title={showPassword ? copy.hidePassword : copy.showPassword}>
                     {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
@@ -499,7 +515,7 @@ export function LoginScreen() {
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           {notice ? <p className="login-notice" role="status">{notice}</p> : null}
           <Button className="login-submit" type="submit" disabled={submitting}>
-            {submitting ? copy.loading : registrationPending ? copy.verifyAndContinue : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : copy.continue}
+            {submitting ? copy.loading : registrationPending ? copy.verifyAndCreate : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : authIntent === "sign-up" ? copy.sendRegistrationOtp : copy.continue}
             {!submitting ? <ArrowRight size={17} aria-hidden="true" /> : null}
           </Button>
         </form>
@@ -591,6 +607,9 @@ function loginCopy(locale: "zh" | "en") {
       back: "Back",
       formTitle: "Continue with your account",
       formDescription: "Use email or another method enabled for this platform.",
+      accountFlow: "Account flow",
+      signIn: "Sign in",
+      signUp: "Register",
       personaPrompt: "How will you use MatchPlane?",
       personaHint: "Buyer and seller workspaces require sign-in. Administrator access is granted by the super administrator; choosing it never grants permission by itself.",
       buyer: "Buyer",
@@ -614,6 +633,8 @@ function loginCopy(locale: "zh" | "en") {
       otpPlaceholder: "6-digit code",
       loading: "Signing in…",
       verifyAndContinue: "Verify and continue",
+      verifyAndCreate: "Verify and create account",
+      sendRegistrationOtp: "Send verification code",
       sendOtp: "Send code",
       sendMagicLink: "Send magic link",
       continue: "Continue",
@@ -622,9 +643,11 @@ function loginCopy(locale: "zh" | "en") {
       invalidOtp: "Enter the 6-digit code.",
       oauthMagicLinkBlocked: "Use a password or email code for platform authorization.",
       otpSent: "Code sent.",
+      registrationOtpSent: "A verification code was sent to your email.",
       magicLinkSent: "Magic link sent.",
       authFailed: "Sign-in did not complete. Try again.",
       invalidIdentifier: "Enter a valid email address or phone number.",
+      registrationEmailOnly: "Register with an email address. Phone registration appears after SMS is configured.",
       phonePasswordUnavailable: "Use the code method to sign in with a phone number.",
       emailOtpUnavailable: "Email codes are not configured on this platform.",
       phoneOtpUnavailable: "Phone codes are not configured on this platform.",
@@ -645,6 +668,9 @@ function loginCopy(locale: "zh" | "en") {
     back: "返回",
     formTitle: "继续使用你的账号",
     formDescription: "使用邮箱，或选择当前平台已启用的其他方式。",
+    accountFlow: "账号操作",
+    signIn: "登录",
+    signUp: "注册",
     personaPrompt: "选择你的使用身份",
     personaHint: "买家和卖家登录后进入各自工作台。管理员权限只由超级管理员授予；选择此项不会给账号自行加权。",
     buyer: "买家",
@@ -668,6 +694,8 @@ function loginCopy(locale: "zh" | "en") {
     otpPlaceholder: "6 位验证码",
     loading: "正在登录…",
     verifyAndContinue: "验证并继续",
+    verifyAndCreate: "验证并创建账号",
+    sendRegistrationOtp: "发送验证码",
     sendOtp: "发送验证码",
     sendMagicLink: "发送免密链接",
     continue: "继续",
@@ -676,9 +704,11 @@ function loginCopy(locale: "zh" | "en") {
     invalidOtp: "请输入 6 位验证码。",
     oauthMagicLinkBlocked: "平台授权请使用密码或邮箱验证码。",
     otpSent: "验证码已发送。",
+    registrationOtpSent: "验证码已发送至你的邮箱。",
     magicLinkSent: "免密链接已发送。",
     authFailed: "登录没有完成，请再试一次。",
     invalidIdentifier: "请输入有效的邮箱或手机号。",
+    registrationEmailOnly: "请使用邮箱注册；配置短信服务后才会显示手机号注册。",
     phonePasswordUnavailable: "手机号请使用验证码登录。",
     emailOtpUnavailable: "当前平台尚未配置邮箱验证码服务。",
     phoneOtpUnavailable: "当前平台尚未配置手机验证码服务。",
