@@ -652,7 +652,7 @@ export function PlatformDashboard({
 
       <div className="platform-admin-shell">
         <nav className="platform-admin-nav" role="tablist" aria-label="平台管理分区">
-          <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>平台树</span></button>
+          <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>嵌入子平台</span></button>
           <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>访问与接入</span></button>
           <button id="platform-tab-payments" type="button" role="tab" aria-selected={activeSection === "payments"} aria-controls="platform-panel-payments" className={activeSection === "payments" ? "is-active" : ""} onClick={() => setActiveSection("payments")}><CreditCard size={17} aria-hidden="true" /><span>支付（可选）</span></button>
           <button id="platform-tab-finance" type="button" role="tab" aria-selected={activeSection === "finance"} aria-controls="platform-panel-finance" className={activeSection === "finance" ? "is-active" : ""} onClick={() => setActiveSection("finance")}><ReceiptText size={17} aria-hidden="true" /><span>财务与退款</span></button>
@@ -695,39 +695,6 @@ export function PlatformDashboard({
           <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
         </section>
 
-        <section id="platform-panel-tree" className="surface domain-panel" role="tabpanel" aria-labelledby="platform-tab-tree" hidden={activeSection !== "tree"}>
-          <SectionHeading
-            eyebrow="平台范围"
-            title="管理 domain"
-            action={setup?.root.tenantConfigured ? (domainEditorOpen ? "关闭" : "新增 domain") : undefined}
-            onAction={() => setDomainEditorOpen((open) => !open)}
-          />
-          {!setup?.root.tenantConfigured ? <p className="subplatform-intro">root tenant 尚未配置，domain 创建入口会在服务端初始化后出现。</p> : null}
-          <p className="subplatform-intro">domain 是平台树挂载和权限隔离的稳定范围；创建后才能把子平台注册到对应路径。</p>
-          {domains.length ? (
-            <div className="subplatform-list" aria-label="根平台 domain 列表">
-              {domains.map((domain) => (
-                <div className="subplatform-row" key={domain.id}>
-                  <span className="subplatform-row-icon" aria-hidden="true"><GitBranch size={18} /></span>
-                  <span className="subplatform-row-copy"><strong>{domain.name}</strong><small>{domain.slug} · v{domain.version}</small></span>
-                  <span className={`subplatform-state state-${domain.status}`}>{domain.status === "active" ? "启用" : "停用"}</span>
-                  <button className="button button-light subplatform-activate" type="button" disabled={saving} onClick={() => void toggleDomain(domain)}>{domain.status === "active" ? "停用" : "启用"}</button>
-                </div>
-              ))}
-            </div>
-          ) : <div className="subplatform-empty"><GitBranch size={22} aria-hidden="true" /><p>还没有 domain；先创建一个平台范围。</p></div>}
-          {domainEditorOpen ? (
-            <div className="admin-editor" aria-label="新增 domain">
-              <div className="admin-editor-heading"><strong>新增平台 domain</strong><button type="button" onClick={() => setDomainEditorOpen(false)}>关闭</button></div>
-              <div className="subplatform-form-grid">
-                <label><span>slug</span><input value={domainSlug} onChange={(event) => setDomainSlug(event.target.value)} placeholder="例如 marketplace" autoComplete="off" /></label>
-                <label><span>名称</span><input value={domainName} onChange={(event) => setDomainName(event.target.value)} placeholder="平台范围名称" /></label>
-              </div>
-              <button className="button button-dark" type="button" disabled={saving} onClick={() => void submitDomain()}>{saving ? "保存中…" : "创建 domain"}</button>
-            </div>
-          ) : null}
-        </section>
-
         <div id="platform-panel-site" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-site" hidden={activeSection !== "site"}>
           <PlatformSiteSettingsPanel
             organizationId={setup?.root.organization?.id}
@@ -737,21 +704,21 @@ export function PlatformDashboard({
           />
         </div>
 
-        <section className="surface subplatform-panel" aria-labelledby="subplatform-title" hidden={activeSection !== "tree"}>
+        <section id="platform-panel-tree" className="surface subplatform-panel" role="tabpanel" aria-labelledby="platform-tab-tree" hidden={activeSection !== "tree"}>
           <div className="subplatform-header">
             <div>
-              <p className="eyebrow">递归平台树</p>
-              <h2 id="subplatform-title">把任意市场接入同一个根平台。</h2>
-              <p className="subplatform-intro">子平台只提交自己的 manifest、不可变来源和能力声明。根平台负责身份、路由与审计；领域数据、Agent 和检索实现仍由子平台拥有。</p>
+              <p className="eyebrow">子平台</p>
+              <h2 id="subplatform-title">嵌入一个子平台。</h2>
+              <p className="subplatform-intro">选择一个来源并嵌入当前平台。子平台负责自己的页面、Agent 与领域资料。</p>
             </div>
             <button
               className="button button-dark"
               type="button"
               disabled={saving || !setup?.root.organization?.id || !setup.domains.length}
-              title={!setup?.root.organization?.id ? "请先初始化根平台组织" : !setup.domains.length ? "请先创建 active domain" : undefined}
+              title={!setup?.root.organization?.id ? "根平台组织尚未就绪" : !setup.domains.length ? "当前平台还没有可用范围" : undefined}
               onClick={() => setSubplatformEditorOpen((open) => !open)}
             >
-              {subplatformEditorOpen ? "关闭登记" : "添加子平台"}
+              {subplatformEditorOpen ? "关闭" : "嵌入子平台"}
             </button>
           </div>
           {subplatforms.length ? (
@@ -761,7 +728,7 @@ export function PlatformDashboard({
                   <span className="subplatform-row-icon" aria-hidden="true"><Archive size={18} /></span>
                   <span className="subplatform-row-copy">
                     <strong>{organization.name}</strong>
-                    <small>/{organization.slug} · {organization.sourceRepository || "来源待构建器解析"}</small>
+                    <small>嵌入路径 /{organization.slug}</small>
                   </span>
                   <span className={`subplatform-state state-${organization.registrationState || "unknown"}`}>
                     {subplatformStateLabel[organization.registrationState || ""] || "未登记"}
@@ -778,18 +745,17 @@ export function PlatformDashboard({
           ) : (
             <div className="subplatform-empty">
               <GitBranch size={22} aria-hidden="true" />
-              <p>还没有子平台。登记后会先进入隔离构建，再由管理员显式激活。</p>
+              <p>还没有嵌入的子平台。</p>
             </div>
           )}
           {subplatformEditorOpen ? (
-            <div className="admin-editor subplatform-editor" aria-label="登记子平台">
+            <div className="admin-editor subplatform-editor" aria-label="嵌入子平台">
               <div className="admin-editor-heading">
-                <div><strong>登记一个平台节点</strong><small>填 Git 地址或上传压缩包，隔离构建器会自动读取 manifest。</small></div>
+                <div><strong>嵌入子平台</strong><small>填 Git 地址或上传压缩包，系统会读取子平台自身的配置。</small></div>
                 <button type="button" onClick={() => setSubplatformEditorOpen(false)}>关闭</button>
               </div>
               <div className="subplatform-form-grid">
-                <label><span>挂载到</span><select value={subplatformParentId} onChange={(event) => setSubplatformParentId(event.target.value)}><option value="">根平台</option>{subplatforms.map((organization) => <option key={organization.id} value={organization.id}>/{organization.slug} · {organization.name}</option>)}</select></label>
-                <label><span>所属 domain</span><select value={subplatformDomainId} onChange={(event) => setSubplatformDomainId(event.target.value)}><option value="">选择 active domain</option>{setup?.domains.map((domain) => <option key={domain.id} value={domain.id}>{domain.name} · {domain.slug}</option>)}</select></label>
+                <label><span>嵌入位置</span><select value={subplatformParentId} onChange={(event) => setSubplatformParentId(event.target.value)}><option value="">当前根平台</option>{subplatforms.map((organization) => <option key={organization.id} value={organization.id}>/{organization.slug} · {organization.name}</option>)}</select></label>
               </div>
               <div className="subplatform-source-switch" role="group" aria-label="子平台来源类型">
                 <button type="button" className={subplatformSourceKind === "git" ? "is-selected" : ""} aria-pressed={subplatformSourceKind === "git"} onClick={() => setSubplatformSourceKind("git")}><GitBranch size={16} aria-hidden="true" />Git 仓库</button>
@@ -805,24 +771,10 @@ export function PlatformDashboard({
                   <p>{subplatformUpload ? `已上传 ${subplatformUpload.originalName} · ${(subplatformUpload.size / 1024 / 1024).toFixed(1)} MiB · digest ${subplatformUpload.sourceDigest.slice(0, 12)}…` : "限制 64 MiB；服务端只保存随机 locator，隔离构建器负责解包与验证。"}</p>
                 </div>
               )}
-              <div className="subplatform-form-grid">
-                <label><span>请求 scopes（逗号分隔）</span><input value={subplatformScopes} onChange={(event) => setSubplatformScopes(event.target.value)} placeholder="marketplace:read,retrieval:query" /></label>
-                <label><span>成员加入策略</span><select value={subplatformMembershipPolicy} onChange={(event) => setSubplatformMembershipPolicy(event.target.value as "public" | "invite")}><option value="public">公开映射</option><option value="invite">邀请加入</option></select></label>
-              </div>
-              <details className="subplatform-advanced-fields">
-                <summary>高级：已有构建器验证信息（通常无需填写）</summary>
-                <div className="subplatform-form-grid">
-                  <label><span>package id</span><input value={subplatformPackageId} onChange={(event) => setSubplatformPackageId(event.target.value)} placeholder="manifest 中的 id" autoComplete="off" /></label>
-                  <label><span>slug / 路径</span><input value={subplatformSlug} onChange={(event) => setSubplatformSlug(event.target.value)} placeholder="manifest 中的 slug" autoComplete="off" /></label>
-                  <label><span>pinned revision</span><input value={subplatformPinnedRevision} onChange={(event) => setSubplatformPinnedRevision(event.target.value)} placeholder="commit SHA 或 archive digest" spellCheck={false} /></label>
-                  <label><span>来源 SHA-256</span><input value={subplatformSourceDigest} onChange={(event) => setSubplatformSourceDigest(event.target.value)} placeholder="构建器验证的 64 位 digest" spellCheck={false} /></label>
-                </div>
-                <label><span>manifest JSON</span><textarea value={subplatformManifest} onChange={(event) => setSubplatformManifest(event.target.value)} rows={8} spellCheck={false} placeholder="已有完整 manifest 时再粘贴；留空则由隔离构建器从来源读取。" /></label>
-              </details>
               <div className="subplatform-editor-footer">
-                <p><ShieldCheck size={16} aria-hidden="true" />源码会在隔离构建器中读取和校验；登记不会立即进入路由，需管理员在构建完成后激活。</p>
+                <p><ShieldCheck size={16} aria-hidden="true" />子平台会先完成构建与校验，准备好后再由你激活。</p>
                 {subplatformDiscoveryState ? <small className="subplatform-discovery-state" role="status">{subplatformDiscoveryState}</small> : null}
-                <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup.root.organization?.id || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "提交中…" : "登记并进入构建"}</button>
+                <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup.root.organization?.id || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "嵌入中…" : "嵌入并构建"}</button>
               </div>
             </div>
           ) : null}
