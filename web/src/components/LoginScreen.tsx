@@ -323,7 +323,6 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
 
       if (authIntent === "sign-up") {
         if (resolvedIdentifier.kind !== "email") throw new Error(copy.registrationEmailOnly);
-        if (!superAdminBootstrapToken && !capabilities.emailOtp && !capabilities.magicLink) throw new Error(copy.emailOtpUnavailable);
         if (superAdminBootstrapToken) {
           const claim = await fetch("/api/super-admin-bootstrap/claim", {
             method: "POST",
@@ -333,6 +332,40 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
           });
           const claimBody = await claim.json().catch(() => null) as { error?: string } | null;
           if (!claim.ok) throw new Error(claimBody?.error || copy.authFailed);
+        }
+        if (!superAdminBootstrapToken) {
+          const registrationState = await readRegistrationIdentity(resolvedIdentifier.value);
+          if (registrationState === "pending_verification") {
+            if (!capabilities.emailOtp) throw new Error(copy.emailOtpUnavailable);
+            const resent = await authClient.emailOtp.sendVerificationOtp({
+              email: resolvedIdentifier.value,
+              type: "email-verification",
+              fetchOptions: options,
+            } as never);
+            if (resent.error) throw new Error(resent.error.message || copy.emailOtpUnavailable);
+            setRegistrationPending(true);
+            setOtp("");
+            setNotice(copy.registrationOtpResent);
+            setSubmitting(false);
+            return;
+          }
+          if (registrationState === "existing") {
+            // One Better Auth account can participate in more than one platform
+            // and on either marketplace side.  Prove ownership of that account,
+            // then let finishSignIn create or reuse only the requested scoped
+            // marketplace capability.  This keeps the operation idempotent for
+            // an already registered side on the current platform.
+            const signedIn = await authClient.signIn.email({
+              email: resolvedIdentifier.value,
+              password,
+              callbackURL: authCallbackURL(next, adminInviteToken),
+              fetchOptions: options,
+            } as never);
+            if (signedIn.error) throw new Error(copy.invalidCredentials);
+            await finishSignIn();
+            return;
+          }
+          if (!capabilities.emailOtp && !capabilities.magicLink) throw new Error(copy.emailOtpUnavailable);
         }
         const created = await authClient.signUp.email({
           name: displayNameFromIdentifier(resolvedIdentifier.value),
@@ -560,6 +593,22 @@ function displayNameFromIdentifier(value: string): string {
   return localPart.trim().slice(0, 80) || "MatchPlane 用户";
 }
 
+type RegistrationIdentityState = "new" | "existing" | "pending_verification";
+
+async function readRegistrationIdentity(email: string): Promise<RegistrationIdentityState> {
+  const response = await fetch("/api/registration/identity", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  const body = await response.json().catch(() => null) as { state?: unknown; error?: unknown } | null;
+  if (!response.ok) throw new Error(typeof body?.error === "string" ? body.error : "注册状态暂时不可用");
+  const state = body?.state;
+  if (state === "new" || state === "existing" || state === "pending_verification") return state;
+  throw new Error("注册状态暂时不可用");
+}
+
 function safeNext(value: string | null): string {
   if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\u0000-\u001f\u007f]/.test(value)) return "/";
   try {
@@ -645,6 +694,7 @@ function loginCopy(locale: "zh" | "en") {
       oauthMagicLinkBlocked: "Use a password or email code for platform authorization.",
       otpSent: "Code sent.",
       registrationOtpSent: "A verification code was sent to your email.",
+      registrationOtpResent: "This email has a pending registration. A new verification code was sent.",
       magicLinkSent: "Magic link sent.",
       authFailed: "Sign-in did not complete. Try again.",
       invalidIdentifier: "Enter a valid email address or phone number.",
@@ -715,6 +765,7 @@ function loginCopy(locale: "zh" | "en") {
     oauthMagicLinkBlocked: "平台授权请使用密码或邮箱验证码。",
     otpSent: "验证码已发送。",
     registrationOtpSent: "验证码已发送至你的邮箱。",
+    registrationOtpResent: "该邮箱的注册尚待验证，新的验证码已发送。",
     magicLinkSent: "免密链接已发送。",
     authFailed: "登录没有完成，请再试一次。",
     invalidIdentifier: "请输入有效的邮箱或手机号。",
