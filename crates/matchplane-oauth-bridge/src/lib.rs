@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! A one-time OAuth authorization-code bridge backed by `oauth-axum`.
+//! A one-time OAuth authorization-code bridge backed by `oauth2`.
 //!
 //! The bridge owns provider PKCE state and token exchange, but deliberately
 //! does not create a MatchPlane browser session. The web authentication layer
@@ -12,7 +12,11 @@ pub mod provider;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use oauth_axum::{OAuthClient, StateAuth, providers::google::GoogleProvider};
+use oauth2::{
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
+    basic::BasicClient,
+};
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
 use time::{Duration, OffsetDateTime};
@@ -104,7 +108,7 @@ pub struct OAuthAccessToken {
     pub access_token: SecretString,
 }
 
-/// Runs Google OAuth PKCE through `oauth-axum` with a caller-supplied durable state store.
+/// Runs Google OAuth PKCE through `oauth2` with a caller-supplied durable state store.
 pub struct GoogleOAuthBridge {
     config: GoogleOAuthConfig,
     state_store: Arc<dyn OAuthStateStore>,
@@ -136,25 +140,29 @@ impl GoogleOAuthBridge {
     ///
     /// # Errors
     ///
-    /// Returns [`OAuthBridgeError`] when `oauth-axum` cannot build the provider URL
+    /// Returns [`OAuthBridgeError`] when `oauth2` cannot build the provider URL
     /// or the deployment state store rejects the pending state.
     pub async fn begin(&self, now: OffsetDateTime) -> Result<OAuthAuthorization, OAuthBridgeError> {
-        let provider = self.provider();
-        let generated = provider
-            .generate_url(self.config.scopes.clone(), |_| async {})
-            .await
-            .map_err(|_| OAuthBridgeError::AuthorizationUrlGenerationFailed)?;
-        let state = generated
-            .get_state()
-            .ok_or(OAuthBridgeError::MissingGeneratedState)?;
+        let client = self.client()?;
+        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+        let (url, csrf_state) = client
+            .authorize_url(CsrfToken::new_random)
+            .add_scopes(self.config.scopes.iter().cloned().map(Scope::new))
+            .set_pkce_challenge(pkce_challenge)
+            .url();
         let expires_at = now + self.state_ttl;
         self.state_store
-            .put(pending_state(&state, expires_at))
+            .put(PendingOAuthState {
+                provider: "google",
+                state: csrf_state.secret().to_owned(),
+                verifier: SecretString::from(pkce_verifier.secret().to_owned()),
+                expires_at,
+            })
             .await?;
-        let url = state
-            .url_generated
-            .ok_or(OAuthBridgeError::MissingGeneratedState)?;
-        Ok(OAuthAuthorization { url, expires_at })
+        Ok(OAuthAuthorization {
+            url: url.to_string(),
+            expires_at,
+        })
     }
 
     /// Consumes a callback state once and exchanges an authorization code for a provider token.
@@ -182,25 +190,47 @@ impl GoogleOAuthBridge {
         if now > pending.expires_at {
             return Err(OAuthBridgeError::StateExpired);
         }
+        let http_client = oauth2::reqwest::ClientBuilder::new()
+            // The token client must not follow a provider-controlled redirect.
+            .redirect(oauth2::reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| OAuthBridgeError::HttpClientBuildFailed)?;
         let token = self
-            .provider()
-            .generate_token(
-                authorization_code.to_owned(),
+            .client()?
+            .exchange_code(AuthorizationCode::new(authorization_code.to_owned()))
+            .set_pkce_verifier(PkceCodeVerifier::new(
                 pending.verifier.expose_secret().to_owned(),
-            )
+            ))
+            .request_async(&http_client)
             .await
             .map_err(|_| OAuthBridgeError::TokenExchangeFailed)?;
         Ok(OAuthAccessToken {
             provider: "google",
-            access_token: SecretString::from(token),
+            access_token: SecretString::from(token.access_token().secret().to_owned()),
         })
     }
 
-    fn provider(&self) -> oauth_axum::CustomProvider {
-        GoogleProvider::new(
-            self.config.client_id.clone(),
-            self.config.client_secret.expose_secret().to_owned(),
-            self.config.redirect_url.clone(),
+    fn client(
+        &self,
+    ) -> Result<
+        BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>,
+        OAuthBridgeError,
+    > {
+        let authorization_url =
+            AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_owned())
+                .map_err(|_| OAuthBridgeError::InvalidProviderEndpoint)?;
+        let token_url = TokenUrl::new("https://oauth2.googleapis.com/token".to_owned())
+            .map_err(|_| OAuthBridgeError::InvalidProviderEndpoint)?;
+        let redirect_url = RedirectUrl::new(self.config.redirect_url.clone())
+            .map_err(|_| OAuthBridgeError::InvalidRedirectUrl)?;
+        Ok(
+            BasicClient::new(ClientId::new(self.config.client_id.clone()))
+                .set_client_secret(ClientSecret::new(
+                    self.config.client_secret.expose_secret().to_owned(),
+                ))
+                .set_auth_uri(authorization_url)
+                .set_token_uri(token_url)
+                .set_redirect_uri(redirect_url),
         )
     }
 }
@@ -220,9 +250,12 @@ pub enum OAuthBridgeError {
     /// The provider library did not return the expected state or authorization URL.
     #[error("OAuth authorization URL could not be generated")]
     AuthorizationUrlGenerationFailed,
-    /// The provider library generated an incomplete state object.
-    #[error("OAuth generated state is incomplete")]
-    MissingGeneratedState,
+    /// The OAuth HTTP client could not be initialized without redirects.
+    #[error("OAuth HTTP client could not be initialized")]
+    HttpClientBuildFailed,
+    /// The fixed provider endpoint is malformed.
+    #[error("OAuth provider endpoint is invalid")]
+    InvalidProviderEndpoint,
     /// Durable state storage returned an internal failure.
     #[error("OAuth state storage failed")]
     StateStorageFailed,
@@ -238,15 +271,6 @@ pub enum OAuthBridgeError {
     /// The upstream provider rejected the authorization code exchange.
     #[error("OAuth provider token exchange failed")]
     TokenExchangeFailed,
-}
-
-fn pending_state(state: &StateAuth, expires_at: OffsetDateTime) -> PendingOAuthState {
-    PendingOAuthState {
-        provider: "google",
-        state: state.state.clone(),
-        verifier: SecretString::from(state.verifier.clone()),
-        expires_at,
-    }
 }
 
 fn is_https_url(value: &str) -> bool {
