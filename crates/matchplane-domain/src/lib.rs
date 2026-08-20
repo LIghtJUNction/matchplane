@@ -11,6 +11,7 @@ mod matching;
 mod models;
 mod numeric;
 mod provider;
+mod provider_policy;
 
 pub use envelope::{EventEnvelope, PayloadHash, StreamKind};
 pub use ids::{
@@ -33,3 +34,4 @@ pub use models::{
 };
 pub use numeric::{Amount, NumericError, Price, Quantity, Scale};
 pub use provider::{ProviderCapability, ProviderDescriptor};
+pub use provider_policy::{ProviderAvailability, ProviderPolicy};
