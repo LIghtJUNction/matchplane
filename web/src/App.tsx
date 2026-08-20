@@ -21,6 +21,7 @@ import { SellerDashboard } from "./components/SellerDashboard";
 import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
 import { PluginHost } from "./components/PluginHost";
 import { MatchChat } from "./components/MatchChat";
+import { PasskeyPanel } from "./components/PasskeyPanel";
 import { PlatformFooter } from "./components/PlatformFooter";
 import { PlatformMenu } from "./components/PlatformMenu";
 import { WorkspaceSettingsDialog } from "./components/WorkspaceSettingsDialog";
@@ -389,6 +390,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 <button className="workspace-account-action" type="button" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
               </div>
             </section>
+            <PasskeyPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
           </div>
         </WorkspaceSettingsDialog>}
 

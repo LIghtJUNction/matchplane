@@ -5034,6 +5034,19 @@ main.subplatform-fullscreen-main {
   border-radius: 0.15rem;
 }
 
+.passkey-panel .workspace-settings-section-heading > div { display: grid; gap: 0.28rem; }
+.passkey-panel .workspace-settings-section-heading > svg { color: var(--cactus-deep); }
+.passkey-panel .workspace-settings-section-heading p,
+.passkey-empty,
+.passkey-panel-actions small,
+.passkey-list small { margin: 0; color: var(--muted); font-size: 0.72rem; line-height: 1.45; }
+.passkey-panel-actions { display: grid; justify-items: start; gap: 0.55rem; margin-top: 0.8rem; }
+.passkey-list { display: grid; gap: 0.45rem; margin: 0.9rem 0 0; padding: 0; list-style: none; }
+.passkey-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.65rem 0.72rem; border: 1px solid var(--line); border-radius: 0.7rem; background: var(--paper); }
+.passkey-list li > span { display: grid; gap: 0.14rem; min-width: 0; }
+.passkey-list strong { color: var(--ink); font-size: 0.78rem; }
+.passkey-empty { margin-top: 0.85rem; }
+
 .header-admin-action {
   min-height: 2.35rem;
   padding: 0 0.72rem;

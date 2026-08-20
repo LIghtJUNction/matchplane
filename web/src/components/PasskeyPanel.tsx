@@ -1,0 +1,174 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { Fingerprint, Trash2 } from "lucide-react";
+import { Button } from "@appica/ui-react/button";
+
+import { authClient, authFetchOptions } from "../lib/auth-client";
+import type { InterfaceLocale } from "../lib/preferences";
+import type { SubplatformConfig } from "../subplatform";
+
+interface PasskeyRecord {
+  id: string;
+  name: string | null;
+  createdAt: string | null;
+}
+
+interface PasskeyPanelProps {
+  locale: InterfaceLocale;
+  subplatform: SubplatformConfig;
+  onNotice: (message: string) => void;
+}
+
+/** Account-owned WebAuthn credentials. Better Auth remains the sole credential authority. */
+export function PasskeyPanel({ locale, subplatform, onNotice }: PasskeyPanelProps) {
+  const [passkeys, setPasskeys] = useState<PasskeyRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [binding, setBinding] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [unsupported, setUnsupported] = useState(false);
+  const copy = passkeyCopy(locale);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/auth/passkey/list-user-passkeys", {
+        credentials: "include",
+        headers: { accept: "application/json", ...authFetchOptions(subplatform.slug).headers },
+      });
+      if (!response.ok) throw new Error("list passkeys failed");
+      const body = await response.json() as unknown;
+      setPasskeys(Array.isArray(body) ? body.flatMap((item): PasskeyRecord[] => {
+        if (!item || typeof item !== "object") return [];
+        const record = item as { id?: unknown; name?: unknown; createdAt?: unknown };
+        if (typeof record.id !== "string" || !record.id) return [];
+        return [{
+          id: record.id,
+          name: typeof record.name === "string" && record.name.trim() ? record.name.trim() : null,
+          createdAt: typeof record.createdAt === "string" ? record.createdAt : null,
+        }];
+      }) : []);
+    } catch {
+      onNotice(copy.loadFailed);
+    } finally {
+      setLoading(false);
+    }
+  }, [copy.loadFailed, onNotice, subplatform.slug]);
+
+  useEffect(() => {
+    setUnsupported(typeof window === "undefined" || !window.PublicKeyCredential);
+    void load();
+  }, [load]);
+
+  const bind = async () => {
+    if (unsupported || binding) return;
+    setBinding(true);
+    try {
+      const result = await authClient.passkey.addPasskey({
+        name: copy.thisDevice,
+        authenticatorAttachment: "platform",
+        fetchOptions: authFetchOptions(subplatform.slug),
+      });
+      if (result.error) throw new Error(result.error.message || copy.bindFailed);
+      await load();
+      onNotice(copy.bound);
+    } catch (error) {
+      onNotice(error instanceof Error && error.message ? error.message : copy.bindFailed);
+    } finally {
+      setBinding(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    if (removing) return;
+    setRemoving(id);
+    try {
+      const response = await fetch("/api/auth/passkey/delete-passkey", {
+        method: "POST",
+        credentials: "include",
+        headers: { accept: "application/json", "content-type": "application/json", ...authFetchOptions(subplatform.slug).headers },
+        body: JSON.stringify({ id }),
+      });
+      if (!response.ok) throw new Error(copy.removeFailed);
+      await load();
+      onNotice(copy.removed);
+    } catch (error) {
+      onNotice(error instanceof Error && error.message ? error.message : copy.removeFailed);
+    } finally {
+      setRemoving(null);
+    }
+  };
+
+  return (
+    <section className="workspace-settings-section passkey-panel" aria-labelledby="passkey-panel-title">
+      <div className="workspace-settings-section-heading">
+        <div>
+          <h3 id="passkey-panel-title">{copy.title}</h3>
+          <p>{copy.description}</p>
+        </div>
+        <Fingerprint size={20} aria-hidden="true" />
+      </div>
+      <div className="passkey-panel-actions">
+        <Button type="button" variant="outline" onClick={() => void bind()} disabled={binding || loading || unsupported}>
+          <Fingerprint size={16} aria-hidden="true" />
+          {binding ? copy.binding : copy.bind}
+        </Button>
+        {unsupported ? <small>{copy.unsupported}</small> : null}
+      </div>
+      {passkeys.length ? (
+        <ul className="passkey-list" aria-label={copy.title}>
+          {passkeys.map((passkey) => (
+            <li key={passkey.id}>
+              <span><strong>{passkey.name || copy.unnamed}</strong><small>{passkey.createdAt ? formatDate(passkey.createdAt, locale) : copy.boundCredential}</small></span>
+              <Button type="button" variant="outline" size="icon-sm" aria-label={`${copy.remove} ${passkey.name || copy.unnamed}`} disabled={removing === passkey.id} onClick={() => void remove(passkey.id)}>
+                <Trash2 size={16} aria-hidden="true" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : !loading ? <p className="passkey-empty">{copy.empty}</p> : null}
+    </section>
+  );
+}
+
+function formatDate(value: string, locale: InterfaceLocale): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en", { dateStyle: "medium" }).format(date);
+}
+
+function passkeyCopy(locale: InterfaceLocale) {
+  return locale === "zh" ? {
+    title: "Passkey",
+    description: "用当前设备的指纹、面容或系统解锁方式登录。",
+    bind: "绑定当前设备",
+    binding: "正在绑定…",
+    thisDevice: "当前设备",
+    unsupported: "当前浏览器不支持 Passkey。",
+    empty: "尚未绑定 Passkey。",
+    unnamed: "未命名设备",
+    boundCredential: "已绑定的登录凭据",
+    remove: "移除",
+    bound: "Passkey 已绑定。",
+    removed: "Passkey 已移除。",
+    loadFailed: "Passkey 状态暂时无法读取。",
+    bindFailed: "Passkey 绑定没有完成，请再试一次。",
+    removeFailed: "Passkey 移除失败，请稍后重试。",
+  } : {
+    title: "Passkey",
+    description: "Use this device's fingerprint, face, or system unlock to sign in.",
+    bind: "Bind this device",
+    binding: "Binding…",
+    thisDevice: "This device",
+    unsupported: "This browser does not support passkeys.",
+    empty: "No passkey is bound yet.",
+    unnamed: "Unnamed device",
+    boundCredential: "Bound sign-in credential",
+    remove: "Remove",
+    bound: "Passkey bound.",
+    removed: "Passkey removed.",
+    loadFailed: "Passkey status is temporarily unavailable.",
+    bindFailed: "Passkey binding did not complete. Try again.",
+    removeFailed: "Could not remove the passkey. Try again later.",
+  };
+}
