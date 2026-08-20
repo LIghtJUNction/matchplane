@@ -1,4 +1,5 @@
-import { access, readFile } from "node:fs/promises";
+import { access, chmod, open, readFile, rename, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { Pool } from "pg";
@@ -12,6 +13,7 @@ const slotPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const providerKeyPattern = /^[a-z0-9][a-z0-9._-]{1,99}$/;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ROOT_EMAIL_SECRET_ROOT = "/etc/matchplane/secrets/root-email";
+const ROOT_EMAIL_CREDENTIAL_SLOT = "smtp-password";
 
 export type RootEmailTlsMode = "starttls" | "tls" | "plain";
 export type RootEmailMode = "test" | "production";
@@ -22,7 +24,6 @@ export interface RootEmailConfig {
   smtpPort: number;
   tlsMode: RootEmailTlsMode;
   username: string;
-  credentialSlot: string;
   credentialConfigured: boolean;
   fromAddress: string;
   replyTo: string | null;
@@ -40,7 +41,7 @@ export interface RootEmailConfigInput {
   smtpPort: number;
   tlsMode: RootEmailTlsMode;
   username: string;
-  credentialSlot: string;
+  smtpPassword?: string;
   fromAddress: string;
   replyTo?: string | null;
   mode: RootEmailMode;
@@ -77,7 +78,7 @@ export async function getRootEmailConfig(): Promise<RootEmailConfig | null> {
   const row = result.rows[0];
   if (!row) return null;
   const config = toPublicConfig(row);
-  return { ...config, credentialConfigured: await isRootEmailCredentialConfigured(config.credentialSlot) };
+  return { ...config, credentialConfigured: await isRootEmailCredentialConfigured(ROOT_EMAIL_CREDENTIAL_SLOT) };
 }
 
 /** Returns a validated active record to the server mailer. */
@@ -87,11 +88,16 @@ export async function getActiveRootEmailConfig(): Promise<RootEmailConfig | null
 }
 
 /**
- * Stores metadata only. The credential slot must be provisioned by `matchplane secret put`,
- * keeping passwords and OAuth/SMTP secrets out of browser payloads and PostgreSQL.
+ * Stores SMTP metadata and writes a supplied password only to the protected host secret file.
+ * Neither PostgreSQL nor a response ever contains the password.
  */
 export async function saveRootEmailConfig(input: RootEmailConfigInput): Promise<RootEmailConfig> {
   validateInput(input);
+  if (input.smtpPassword) {
+    await writeRootEmailCredential(input.smtpPassword);
+  } else if (!(await isRootEmailCredentialConfigured(ROOT_EMAIL_CREDENTIAL_SLOT))) {
+    throw new Error("请输入 SMTP 密码后再保存");
+  }
   const client = await database.connect();
   try {
     await client.query("BEGIN");
@@ -132,7 +138,7 @@ export async function saveRootEmailConfig(input: RootEmailConfigInput): Promise<
       [saved.version, input.actorUserId, currentVersion === undefined ? "created" : "updated", JSON.stringify(auditDetails(saved))],
     );
     await client.query("COMMIT");
-    return { ...saved, credentialConfigured: await isRootEmailCredentialConfigured(saved.credentialSlot) };
+    return { ...saved, credentialConfigured: await isRootEmailCredentialConfigured(ROOT_EMAIL_CREDENTIAL_SLOT) };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     throw error;
@@ -171,6 +177,27 @@ export async function readRootEmailCredential(slot: string): Promise<string> {
   }
 }
 
+async function writeRootEmailCredential(value: string): Promise<void> {
+  const password = value.trim();
+  if (!password || password.length > 16_384) throw new Error("SMTP 密码必须为 1..=16384 字节");
+  const destination = path.join(ROOT_EMAIL_SECRET_ROOT, ROOT_EMAIL_CREDENTIAL_SLOT);
+  const temporary = path.join(ROOT_EMAIL_SECRET_ROOT, `.${ROOT_EMAIL_CREDENTIAL_SLOT}.${randomUUID()}.tmp`);
+  try {
+    const file = await open(temporary, "wx", 0o640);
+    try {
+      await file.writeFile(`${password}\n`, "utf8");
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    await rename(temporary, destination);
+    await chmod(destination, 0o640);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error instanceof Error ? new Error("SMTP 密码无法写入受保护存储", { cause: error }) : new Error("SMTP 密码无法写入受保护存储");
+  }
+}
+
 /** Check availability without disclosing the secret or its path. */
 export async function isRootEmailCredentialConfigured(slot: string): Promise<boolean> {
   try {
@@ -194,7 +221,7 @@ function values(input: RootEmailConfigInput): unknown[] {
     input.smtpPort,
     input.tlsMode,
     input.username.trim(),
-    input.credentialSlot.trim(),
+    ROOT_EMAIL_CREDENTIAL_SLOT,
     input.fromAddress.trim().toLowerCase(),
     input.replyTo?.trim().toLowerCase() || null,
     input.mode,
@@ -209,7 +236,6 @@ function validateInput(input: RootEmailConfigInput): void {
   if (!Number.isInteger(input.smtpPort) || input.smtpPort < 1 || input.smtpPort > 65_535) throw new Error("SMTP 端口必须在 1 到 65535 之间");
   if (input.tlsMode !== "starttls" && input.tlsMode !== "tls" && input.tlsMode !== "plain") throw new Error("TLS 模式无效");
   if (!input.username.trim() || input.username.length > 320) throw new Error("SMTP 用户名无效");
-  if (!slotPattern.test(input.credentialSlot.trim())) throw new Error("密钥槽只能包含字母、数字、点、下划线或连字符");
   if (!isEmail(input.fromAddress) || (input.replyTo && !isEmail(input.replyTo))) throw new Error("发件人或回复地址无效");
   if (input.mode !== "test" && input.mode !== "production") throw new Error("发送模式无效");
   if (!isUuid(input.actorUserId)) throw new Error("管理员身份无效");
@@ -222,7 +248,6 @@ function toPublicConfig(row: RootEmailConfigRow): RootEmailConfig {
     smtpPort: row.smtp_port,
     tlsMode: row.tls_mode,
     username: row.username,
-    credentialSlot: row.credential_slot,
     credentialConfigured: false,
     fromAddress: row.from_address,
     replyTo: row.reply_to,
@@ -241,7 +266,6 @@ function auditDetails(config: RootEmailConfig): Record<string, unknown> {
     smtp_host: config.smtpHost,
     smtp_port: config.smtpPort,
     tls_mode: config.tlsMode,
-    credential_slot: config.credentialSlot,
     mode: config.mode,
     enabled: config.enabled,
   };

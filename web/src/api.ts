@@ -719,7 +719,6 @@ export interface RootEmailConfig {
   smtpPort: number;
   tlsMode: "starttls" | "tls" | "plain";
   username: string;
-  credentialSlot: string;
   credentialConfigured: boolean;
   fromAddress: string;
   replyTo: string | null;
@@ -1142,7 +1141,7 @@ export async function getRootEmailConfig(): Promise<RootEmailConfig | null> {
   return body?.config ?? null;
 }
 
-export async function saveRootEmailConfig(input: Omit<RootEmailConfig, "credentialConfigured" | "version" | "updatedBy" | "createdAt" | "updatedAt"> & { expectedVersion?: number }): Promise<RootEmailConfig> {
+export async function saveRootEmailConfig(input: Omit<RootEmailConfig, "credentialConfigured" | "version" | "updatedBy" | "createdAt" | "updatedAt"> & { smtpPassword?: string; expectedVersion?: number }): Promise<RootEmailConfig> {
   const response = await fetch("/api/platform/email-config", {
     method: "PATCH",
     credentials: "include",
