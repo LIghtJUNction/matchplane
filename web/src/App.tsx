@@ -35,6 +35,7 @@ import {
   clearPartySessionCache,
   getPaymentSetting,
   type RecommendedBackendListing,
+  type MarketplaceAttachment,
   type PlatformRouteHop,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
@@ -63,6 +64,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     intentId?: string;
     attributes: Record<string, unknown>;
     terms: Record<string, unknown>;
+    attachments?: MarketplaceAttachment[];
   } | null>(null);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -72,10 +74,15 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pluginFailed, setPluginFailed] = useState(false);
 
   useEffect(() => {
     if (role !== "seller") setSellerDraft(null);
   }, [role, subplatform.path]);
+
+  useEffect(() => {
+    setPluginFailed(false);
+  }, [subplatform.path, subplatform.pluginArtifact?.url]);
 
   const closeListing = useCallback(() => setListing(null), []);
   const closeModeDialog = useCallback(() => setModeDialogOpen(false), []);
@@ -230,10 +237,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   );
   const fullscreenPlugin = subplatform.slug !== "root"
     && Boolean(subplatform.pluginArtifact)
+    && !pluginFailed
     && (role === "buyer" || role === "seller");
   const pluginWorkspace = subplatform.pluginArtifact ? (
     <PluginHost
       fullscreen={fullscreenPlugin}
+      onFailure={() => setPluginFailed(true)}
       role={role}
       theme={theme}
       locale={locale}
@@ -267,7 +276,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               <div className="brand-cluster">
                 <Brand
                   label={subplatform.brandName}
-                  homeHref={subplatform.slug === "root" ? "#top" : `/${subplatform.slug}`}
+                  homeHref={subplatform.slug === "root" ? "#top" : subplatform.path}
                 />
                 {subplatform.slug === "root" ? <PlatformMenu locale={locale} platformPath={subplatform.path} /> : null}
                 {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">{ui.rootPlatform}</a> : null}

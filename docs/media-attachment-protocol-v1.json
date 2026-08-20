@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matchplane.dev/schemas/media-attachment/v1.json",
+  "title": "MatchPlane media attachment ABI v1",
+  "description": "A bounded, domain-neutral handoff for seller or buyer files. The root validates and forwards the envelope; the child owns scanning, storage and image interpretation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "request_id", "scope", "attachment"],
+  "properties": {
+    "protocol": { "const": "matchplane.media/v1" },
+    "request_id": { "type": "string", "format": "uuid" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "domain_id", "platform_path"],
+      "properties": {
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "domain_id": { "type": "string", "format": "uuid" },
+        "platform_path": { "type": "string", "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)$", "maxLength": 512 }
+      }
+    },
+    "intent_id": { "type": ["string", "null"], "format": "uuid" },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "file_name", "media_type", "size_bytes", "data_base64"],
+      "properties": {
+        "kind": { "enum": ["image", "document", "video", "audio", "file"] },
+        "file_name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "media_type": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+*-]{0,126}$" },
+        "size_bytes": { "type": "integer", "minimum": 1, "maximum": 268435456 },
+        "data_base64": { "type": "string", "minLength": 4, "contentEncoding": "base64" }
+      }
+    }
+  }
+}

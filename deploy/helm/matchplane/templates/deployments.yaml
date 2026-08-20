@@ -207,6 +207,8 @@ spec:
               value: {{ $root.Values.web.artifactRoot | quote }}
             - name: MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT
               value: {{ $root.Values.web.uploadRoot | quote }}
+            - name: MATCHPLANE_MEDIA_MAX_BYTES
+              value: {{ $root.Values.web.mediaMaxBytes | quote }}
             - name: MATCHPLANE_SUBPLATFORM_SECRET_ROOT
               value: {{ $root.Values.web.secretRoot | quote }}
             - name: MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID
