@@ -77,6 +77,7 @@ export function LoginScreen() {
     const invite = params.get("token") || params.get("admin_invite");
     const inviteToken = invite && /^mpa_[0-9a-f]{64}$/.test(invite) ? invite : null;
     setAdminInviteToken(inviteToken);
+    if (inviteToken) setAuthIntent("sign-up");
     const requestedRole = params.get("role");
     setRole(
       inviteToken
@@ -414,6 +415,7 @@ export function LoginScreen() {
   const selectPersona = (nextRole: LoginPersona) => {
     if (adminInviteToken || oauthQuery) return;
     setRole(nextRole);
+    if (nextRole === "platform") setAuthIntent("sign-in");
     setNext((current) => nextPathForPersona(current, nextRole));
     setError(null);
     setNotice(null);
@@ -479,12 +481,14 @@ export function LoginScreen() {
           </div>
         ) : null}
 
-        {!adminInviteToken && !oauthQuery && method === "password" && !registrationPending ? (
+        {!oauthQuery && method === "password" && !registrationPending && (adminInviteToken || role !== "platform") ? (
           <div className="login-mode-switch" role="tablist" aria-label={copy.accountFlow}>
             <button type="button" role="tab" aria-selected={authIntent === "sign-in"} className={authIntent === "sign-in" ? "is-active" : ""} onClick={() => switchAuthIntent("sign-in")}>{copy.signIn}</button>
             <button type="button" role="tab" aria-selected={authIntent === "sign-up"} className={authIntent === "sign-up" ? "is-active" : ""} onClick={() => switchAuthIntent("sign-up")}>{copy.signUp}</button>
           </div>
         ) : null}
+
+        {!adminInviteToken && !oauthQuery && role === "platform" ? <p className="login-admin-invite-note">{copy.adminInviteRequired}</p> : null}
 
         <form id={hasMethodTabs ? `${authMethodsId}-panel` : undefined} className="login-form" role={hasMethodTabs ? "tabpanel" : undefined} aria-labelledby={hasMethodTabs ? activeMethodTabId : undefined} onSubmit={submit}>
           <label htmlFor="login-identifier">
@@ -618,6 +622,7 @@ function loginCopy(locale: "zh" | "en") {
       sellerDetail: "Submit and manage real offers",
       admin: "Administrator",
       adminDetail: "Invited platform management only",
+      adminInviteRequired: "Administrator registration is available only from a verified invitation link.",
       authMethods: "Authentication methods",
       nationalIdentity: "National online identity",
       socialMethods: "Social sign-in",
@@ -679,6 +684,7 @@ function loginCopy(locale: "zh" | "en") {
     sellerDetail: "提交并管理真实供给",
     admin: "管理员",
     adminDetail: "仅限受邀的平台管理",
+    adminInviteRequired: "管理员注册仅能通过超级管理员发出的邀请链接进行。",
     authMethods: "登录方式",
     nationalIdentity: "国家网络身份认证",
     socialMethods: "第三方登录",

@@ -4996,6 +4996,13 @@ main.subplatform-fullscreen-main {
   caret-color: var(--ink);
 }
 
+.login-admin-invite-note {
+  margin: 0.8rem 0 -0.3rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
 .header-admin-action {
   min-height: 2.35rem;
   padding: 0 0.72rem;
