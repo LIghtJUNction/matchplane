@@ -399,7 +399,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 <button className="workspace-account-action" type="button" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
               </div>
             </section>
-            <PasskeyPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
+            <PasskeyPanel locale={locale} subplatform={subplatform} accountLabel={authUser.email} onNotice={setNotice} />
             <IdentityBindingsPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
             <SessionPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
           </div>
