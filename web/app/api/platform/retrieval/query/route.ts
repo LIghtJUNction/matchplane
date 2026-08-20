@@ -107,6 +107,7 @@ function toWireResult(result: RetrievalResult): Record<string, unknown> {
       ...(candidate.terms === undefined ? {} : { terms: candidate.terms }),
       score: candidate.score,
       reasons: candidate.reasons,
+      ...(candidate.risks === undefined ? {} : { risks: candidate.risks }),
       ...(candidate.metadata === undefined ? {} : { metadata: candidate.metadata }),
     })),
     degraded: result.degraded,

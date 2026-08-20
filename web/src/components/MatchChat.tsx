@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, LoaderCircle, Trash2 } from "lucide-react";
+import { ArrowUp, FileUp, LoaderCircle, Trash2 } from "lucide-react";
 
 import {
   createMarketplaceIntent,
@@ -9,6 +9,7 @@ import {
   getMarketplaceOfferMatches,
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
+  uploadMarketplaceAttachment,
   querySubplatformRetrieval,
   updateMarketplaceIntent,
   upsertMarketplaceProfile,
@@ -16,6 +17,7 @@ import {
   routePlatformIntent,
   type PlatformRouteHop,
   type PartySession,
+  type MarketplaceAttachment,
   updateMarketplaceDemandDiscovery,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
@@ -34,6 +36,7 @@ interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
+  attachments?: MarketplaceAttachment[];
 }
 
 interface PendingChat {
@@ -234,7 +237,7 @@ interface MatchChatProps {
   role?: "buyer" | "seller";
   onRecommendations?: (recommendations: RecommendedBackendListing[]) => void;
   /** Pass the seller's conversational draft into the schema-driven editor. */
-  onSellerDraft?: (draft: { narrative: string; intentId?: string; attributes: Record<string, unknown>; terms: Record<string, unknown> }) => void;
+  onSellerDraft?: (draft: { narrative: string; intentId?: string; attributes: Record<string, unknown>; terms: Record<string, unknown>; attachments?: MarketplaceAttachment[] }) => void;
   /** Move a seller into the selected terminal platform before showing its supply form. */
   onSellerPlatformSelected?: (hop: PlatformRouteHop) => void | Promise<void>;
 }
@@ -246,6 +249,8 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const [conversationAttachments, setConversationAttachments] = useState<MarketplaceAttachment[]>([]);
+  const [mediaUploading, setMediaUploading] = useState(false);
   const [supplyDiscoveryEnabled, setSupplyDiscoveryEnabled] = useState(copy.buyerDiscoveryDefault);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -255,6 +260,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   const [sellerRouteChoices, setSellerRouteChoices] = useState<PlatformRouteHop[]>([]);
   const isRoot = subplatform.slug === "root";
   const isSeller = role === "seller";
+  const mediaUploadEnabled = subplatform.agentMcpTools?.includes("media.upload") === true;
   const label = (key: string, fallback: string) => subplatformCopy(subplatform, key, locale === "en" ? (englishChatLabels[key] ?? fallback) : fallback);
   // Keep the primary action visually stable. A changing/typewriter headline delays
   // scanning and makes a marketplace feel like a demo; merchants may still
@@ -296,6 +302,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     // conversation identifier or transcript into another node or role by accident.
     setMessages([]);
     setSellerRouteChoices([]);
+    setConversationAttachments([]);
     setSupplyDiscoveryEnabled(copy.buyerDiscoveryDefault);
     conversationIdRef.current = null;
     intentByTargetRef.current.clear();
@@ -319,13 +326,59 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     }
   }, [locale, onNotice, onSellerPlatformSelected, sending]);
 
+  const uploadFiles = useCallback(async (files: FileList | null) => {
+    if (!files || !files.length || mediaUploading) return;
+    if (!mediaUploadEnabled) return;
+    if (!subplatform.tenantId || !subplatform.domainId) {
+      onNotice(locale === "en" ? "This platform is not ready to receive attachments." : "当前平台尚未完成资料上传配置");
+      return;
+    }
+    const session = await getMarketplaceSession({
+      subplatform: subplatform.slug,
+      platformPath: subplatform.path,
+      tenantId: subplatform.tenantId,
+      domainId: subplatform.domainId,
+      role,
+    });
+    if (!session) {
+      const next = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`);
+      return;
+    }
+    const remaining = Math.max(0, 8 - conversationAttachments.length);
+    if (!remaining) {
+      onNotice(locale === "en" ? "You can add up to 8 attachments." : "最多添加 8 个附件");
+      return;
+    }
+    setMediaUploading(true);
+    try {
+      const uploaded: MarketplaceAttachment[] = [];
+      for (const file of Array.from(files).slice(0, remaining)) {
+        uploaded.push(await uploadMarketplaceAttachment({
+          platformPath: subplatform.path,
+          tenantId: subplatform.tenantId,
+          domainId: subplatform.domainId,
+          file,
+        }));
+      }
+      setConversationAttachments((current) => [...current, ...uploaded].slice(0, 8));
+      if (files.length > remaining) onNotice(locale === "en" ? "Only the first 8 attachments were kept." : "最多保留 8 个附件");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : locale === "en" ? "Could not upload the attachment." : "附件上传失败，请稍后重试");
+    } finally {
+      setMediaUploading(false);
+    }
+  }, [conversationAttachments.length, locale, mediaUploadEnabled, mediaUploading, onNotice, role, subplatform.domainId, subplatform.path, subplatform.slug, subplatform.tenantId]);
+
   const submitMessage = useCallback(
     async (rawText: string, session?: PartySession) => {
       const text = rawText.trim();
-      if (!text || sending) return;
+      if ((!text && !conversationAttachments.length) || sending) return;
 
       setSending(true);
       setMessage("");
+      const submittedAttachments = conversationAttachments;
+      setConversationAttachments([]);
       const requestId = crypto.randomUUID();
       const conversationId = conversationIdRef.current ?? (conversationIdRef.current = crypto.randomUUID());
       const narrative = buildConversationNarrative(
@@ -334,7 +387,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       );
       setMessages((current) => [
         ...current,
-        { id: `${requestId}-user`, role: "user", text },
+        { id: `${requestId}-user`, role: "user", text, ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}) },
       ]);
 
       try {
@@ -364,8 +417,10 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
               source: "conversation",
               conversation_id: conversationId,
               routed_from: platformPath(subplatform),
+              ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
             },
             terms: { pricing_mode: pricingFor(subplatform).mode },
+            ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}),
           });
           // A seller must publish into the node selected by the platform Agent. The old flow
           // wrote supply intents into every hop and left the form mounted at the root path,
@@ -446,6 +501,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                       conversation_id: conversationId,
                       latest_turn: text,
                       platform_path: target.path,
+                      ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
                     },
                     terms: {
                       pricing_mode: targetPricing.mode,
@@ -466,6 +522,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                       delegated_route_count: route?.routePlan.length ?? 0,
                       routing_source: route?.routing.source ?? null,
                       routing_degraded: route?.routing.degraded ?? false,
+                      ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
                     },
                     terms: {
                       pricing_mode: targetPricing.mode,
@@ -495,8 +552,9 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
               onSellerDraft?.({
                 narrative,
                 intentId: typeof supplyIntent.intent_id === "string" ? supplyIntent.intent_id : undefined,
-                attributes: { source: "conversation", conversation_id: conversationId, narrative },
+                attributes: { source: "conversation", conversation_id: conversationId, narrative, ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}) },
                 terms: { pricing_mode: targetPricing.mode },
+                ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}),
               });
             } else if (targetUsesLegacy) {
               if (!targetPricing.currency) throw new Error(`${target.label || target.slug} 尚未配置结算币种，暂时不能生成真实推荐`);
@@ -511,6 +569,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                   delegated_route_count: route?.routePlan.length ?? 0,
                   routing_source: route?.routing.source ?? null,
                   routing_degraded: route?.routing.degraded ?? false,
+                  ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
                 },
                 currency: targetPricing.currency,
                 currencyScale: targetPricing.currencyScale ?? 0,
@@ -538,6 +597,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                       source: "conversation",
                       conversation_id: conversationId,
                       latest_turn: text,
+                      ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
                     },
                     terms: {
                       pricing_mode: targetPricing.mode,
@@ -554,6 +614,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
                     attributes: {
                       source: "conversation",
                       conversation_id: conversationId,
+                      ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
                     },
                     terms: {
                       pricing_mode: targetPricing.mode,
@@ -718,7 +779,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         setSending(false);
       }
     },
-    [copy.buyerSuccess, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerDraft, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [conversationAttachments, copy.buyerSuccess, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerDraft, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
   useEffect(() => {
@@ -761,7 +822,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   const send = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const text = message.trim();
-    if (!text || sending) return;
+    if ((!text && !conversationAttachments.length) || sending) return;
 
     void (async () => {
       const scopedMarketplace = subplatform.slug !== "root" && Boolean(subplatform.domainId);
@@ -797,6 +858,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   const clearConversation = () => {
     if (sending) return;
     setMessages([]);
+    setConversationAttachments([]);
     conversationIdRef.current = null;
   };
 
@@ -823,7 +885,14 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       {messages.length ? (
         <div ref={threadRef} className="match-chat-thread" role="log" aria-live="polite" aria-relevant="additions text" aria-label={label("chatThreadLabel", "对话记录")}>
           {messages.map((item) => (
-            <p key={item.id} className={`match-chat-message is-${item.role}`}>{item.text}</p>
+            <div key={item.id} className={`match-chat-message-group is-${item.role}`}>
+              <p className={`match-chat-message is-${item.role}`}>{item.text}</p>
+              {item.attachments?.length ? (
+                <ul className="match-chat-attachments" aria-label={locale === "en" ? "Attachments" : "附件"}>
+                  {item.attachments.map((attachment) => <li key={attachment.attachment_ref}>{attachment.file_name}</li>)}
+                </ul>
+              ) : null}
+            </div>
           ))}
         </div>
       ) : null}
@@ -857,7 +926,41 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         </div>
       ) : null}
 
+      {mediaUploadEnabled && conversationAttachments.length ? (
+        <ul className="match-chat-compose-attachments" aria-label={locale === "en" ? "Attachments to send" : "待发送附件"}>
+          {conversationAttachments.map((attachment) => (
+            <li key={attachment.attachment_ref}>
+              <span title={attachment.file_name}>{attachment.file_name}</span>
+              <button
+                type="button"
+                aria-label={`${locale === "en" ? "Remove" : "移除"} ${attachment.file_name}`}
+                onClick={() => setConversationAttachments((current) => current.filter((item) => item.attachment_ref !== attachment.attachment_ref))}
+                disabled={sending || mediaUploading}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <form className="match-chat-form" onSubmit={send}>
+        {mediaUploadEnabled ? (
+          <label className="match-chat-attach" htmlFor="match-chat-attachment-input">
+            <FileUp size={17} aria-hidden="true" />
+            <span className="sr-only">{locale === "en" ? "Add attachment" : "添加附件"}</span>
+            <input
+              id="match-chat-attachment-input"
+              type="file"
+              accept="image/*,application/pdf,text/plain,application/json"
+              multiple
+              onChange={(event) => {
+                void uploadFiles(event.currentTarget.files);
+                event.currentTarget.value = "";
+              }}
+              disabled={sending || mediaUploading}
+            />
+          </label>
+        ) : null}
         <label className="sr-only" htmlFor="match-chat-input">{isSeller ? `${label("tellPlatformPrefix", "告诉 MatchPlane")} ${copy.sellerTitle}` : label("chatInputLabel", "告诉 MatchPlane 你的需求")}</label>
         <textarea
           ref={inputRef}
@@ -874,7 +977,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           aria-describedby="match-chat-footnote"
           disabled={sending}
         />
-        <button className="match-chat-send" type="submit" aria-label={isSeller ? label("sendSupplyLabel", "发送供给") : label("sendDemandLabel", "发送需求")} aria-busy={sending} disabled={!message.trim() || sending}>
+        <button className="match-chat-send" type="submit" aria-label={isSeller ? label("sendSupplyLabel", "发送供给") : label("sendDemandLabel", "发送需求")} aria-busy={sending} disabled={(!message.trim() && !conversationAttachments.length) || sending}>
           {sending ? <LoaderCircle className="match-chat-spinner" size={18} aria-hidden="true" /> : <ArrowUp size={18} aria-hidden="true" />}
         </button>
       </form>
@@ -901,6 +1004,21 @@ function fieldLabelsFor(subplatform: SubplatformConfig, attributes: Record<strin
       labels[key] = subplatformFieldLabel(subplatform, key);
       return labels;
     }, {});
+}
+
+function publicAttachment(attachment: MarketplaceAttachment): Record<string, unknown> {
+  return {
+    attachment_ref: attachment.attachment_ref,
+    kind: attachment.kind,
+    file_name: attachment.file_name,
+    media_type: attachment.media_type,
+    size_bytes: attachment.size_bytes,
+    sha256: attachment.sha256,
+    ...(attachment.width === undefined ? {} : { width: attachment.width }),
+    ...(attachment.height === undefined ? {} : { height: attachment.height }),
+    ...(attachment.duration_ms === undefined ? {} : { duration_ms: attachment.duration_ms }),
+    ...(attachment.metadata === undefined ? {} : { metadata: attachment.metadata }),
+  };
 }
 
 /** Keep follow-up requests useful without sending an unbounded transcript to the router/model. */

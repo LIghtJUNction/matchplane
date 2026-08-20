@@ -133,6 +133,95 @@ describe("MatchPlane external Agent client", () => {
     expect(result.candidates[0]?.risks).toEqual(["需确认档期"]);
   });
 
+  it("upserts a generic child catalogue offer through the scoped MCP bridge", async () => {
+    const requestId = "123e4567-e89b-12d3-a456-426614174004";
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(url), init });
+      const body = JSON.parse(String(init?.body)) as { params?: { name?: string; arguments?: Record<string, unknown> } };
+      expect(body.params?.name).toBe("platform.child.tool");
+      const argumentsValue = body.params?.arguments;
+      expect(argumentsValue?.tool_name).toBe("catalog.upsert");
+      const envelope = argumentsValue?.arguments as { protocol?: string; scope?: { platform_path?: string }; offer?: { offer_id?: string } };
+      expect(envelope.protocol).toBe("matchplane.catalog/v1");
+      expect(envelope.scope?.platform_path).toBe("/services");
+      expect(envelope.offer?.offer_id).toBe("123e4567-e89b-12d3-a456-426614174003");
+      return new Response(JSON.stringify({
+        jsonrpc: "2.0",
+        id: "1",
+        result: {
+          structuredContent: {
+            protocol: "matchplane.catalog/v1",
+            request_id: requestId,
+            scope: {
+              tenant_id: "123e4567-e89b-12d3-a456-426614174000",
+              domain_id: "123e4567-e89b-12d3-a456-426614174001",
+              platform_path: "/services",
+            },
+            offer_id: "123e4567-e89b-12d3-a456-426614174003",
+            status: "active",
+            indexed: true,
+          },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl });
+    const result = await client.upsertCatalogOffer({
+      tenant_id: "123e4567-e89b-12d3-a456-426614174000",
+      domain_id: "123e4567-e89b-12d3-a456-426614174001",
+      platform_path: "/services",
+      request_id: requestId,
+      offer: {
+        offer_id: "123e4567-e89b-12d3-a456-426614174003",
+        external_key: "service-1",
+        display_name: "咨询服务",
+        attributes: { mode: "online" },
+        terms: { currency: "CNY" },
+        status: "active",
+      },
+    });
+    expect(result.indexed).toBe(true);
+    expect(new Headers(calls[0]?.init?.headers).get("x-matchplane-api-key")).toBe("mpk_test");
+  });
+
+  it("uploads a bounded media attachment through the root facade", async () => {
+    const requestId = "123e4567-e89b-12d3-a456-426614174004";
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      expect(String(url)).toBe("https://matx.tech/api/platform/media/upload");
+      const body = JSON.parse(String(init?.body)) as { protocol?: string; scope?: { platform_path?: string }; attachment?: { size_bytes?: number; data_base64?: string } };
+      expect(body.protocol).toBe("matchplane.media/v1");
+      expect(body.scope?.platform_path).toBe("/services");
+      expect(body.attachment?.size_bytes).toBe(5);
+      expect(body.attachment?.data_base64).toBe("aGVsbG8=");
+      return new Response(JSON.stringify({
+        protocol: "matchplane.media/v1",
+        request_id: requestId,
+        attachment: {
+          attachment_ref: "media://services/abc",
+          kind: "document",
+          file_name: "hello.txt",
+          media_type: "text/plain",
+          size_bytes: 5,
+          sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl });
+    const result = await client.uploadMedia({
+      tenant_id: "123e4567-e89b-12d3-a456-426614174000",
+      domain_id: "123e4567-e89b-12d3-a456-426614174001",
+      platform_path: "/services",
+      request_id: requestId,
+      kind: "document",
+      file_name: "hello.txt",
+      media_type: "text/plain",
+      size_bytes: 5,
+      data_base64: "aGVsbG8=",
+    });
+    expect(result.attachment.attachment_ref).toBe("media://services/abc");
+    expect(result.attachment.sha256).toBe("a".repeat(64));
+  });
+
   it("rejects invalid child retrieval scope before contacting the gateway", async () => {
     const fake = fakeFetch();
     const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });

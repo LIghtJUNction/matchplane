@@ -441,6 +441,70 @@ export interface RetrievalResult {
   generated_at?: string | null;
 }
 
+export type CatalogOfferStatus = "draft" | "active" | "reserved" | "sold" | "withdrawn" | "expired";
+
+/** The child-owned public projection written to a package catalogue. */
+export interface CatalogOfferInput {
+  offer_id: string;
+  external_key: string;
+  display_name: string;
+  attributes?: Record<string, unknown>;
+  terms?: Record<string, unknown>;
+  status: CatalogOfferStatus;
+  attachments?: string[];
+}
+
+export interface CatalogUpsertInput {
+  tenant_id: string;
+  domain_id: string;
+  platform_path: string;
+  offer: CatalogOfferInput;
+  request_id?: string;
+}
+
+export interface CatalogUpsertResult {
+  protocol: "matchplane.catalog/v1";
+  request_id: string;
+  scope: { tenant_id: string; domain_id: string; platform_path: string };
+  offer_id: string;
+  status: CatalogOfferStatus;
+  indexed: boolean;
+}
+
+export type MediaUploadKind = "image" | "document" | "video" | "audio" | "file";
+
+export interface MediaUploadInput {
+  tenant_id: string;
+  domain_id: string;
+  platform_path: string;
+  kind: MediaUploadKind;
+  file_name: string;
+  media_type: string;
+  size_bytes: number;
+  data_base64: string;
+  intent_id?: string | null;
+  request_id?: string;
+}
+
+export interface MediaAttachment {
+  attachment_ref: string;
+  kind: MediaUploadKind;
+  file_name: string;
+  media_type: string;
+  size_bytes: number;
+  sha256: string;
+  width?: number;
+  height?: number;
+  duration_ms?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MediaUploadResult {
+  protocol: "matchplane.media/v1";
+  request_id: string;
+  attachment: MediaAttachment;
+}
+
 export class MatchPlaneMcpError extends Error {
   readonly code: number;
   readonly details: unknown;
@@ -556,6 +620,72 @@ export class MatchPlaneAgentClient {
       throw new MatchPlaneMcpError(response.status || 502, "MatchPlane retrieval request failed", raw);
     }
     return parseRetrievalResult(raw, requestId, input.limit ?? 20);
+  }
+
+  /** Write a canonical, opaque offer projection to the active child catalogue. */
+  async upsertCatalogOffer(input: CatalogUpsertInput): Promise<CatalogUpsertResult> {
+    const requestId = input.request_id ?? crypto.randomUUID();
+    validateCatalogUpsertInput(input, requestId);
+    const raw = await this.callChildTool({
+      platform_path: input.platform_path,
+      tool_name: "catalog.upsert",
+      request_id: requestId,
+      arguments: {
+        protocol: "matchplane.catalog/v1",
+        request_id: requestId,
+        scope: {
+          tenant_id: input.tenant_id,
+          domain_id: input.domain_id,
+          platform_path: input.platform_path,
+        },
+        offer: {
+          offer_id: input.offer.offer_id,
+          external_key: input.offer.external_key,
+          display_name: input.offer.display_name,
+          attributes: input.offer.attributes ?? {},
+          terms: input.offer.terms ?? {},
+          status: input.offer.status,
+          ...(input.offer.attachments === undefined ? {} : { attachments: input.offer.attachments }),
+        },
+      },
+    });
+    return parseCatalogUpsertResult(raw, requestId, input);
+  }
+
+  /** Upload media through the root-scoped facade; bytes remain owned by the child adapter. */
+  async uploadMedia(input: MediaUploadInput): Promise<MediaUploadResult> {
+    const requestId = input.request_id ?? crypto.randomUUID();
+    validateMediaUploadInput(input, requestId);
+    const response = await this.fetchWithDeadline(`${this.baseUrl}/api/platform/media/upload`, {
+      method: "POST",
+      headers: new Headers({
+        accept: "application/json",
+        "content-type": "application/json",
+        "x-matchplane-api-key": this.apiKey,
+      }),
+      body: JSON.stringify({
+        protocol: "matchplane.media/v1",
+        request_id: requestId,
+        scope: {
+          tenant_id: input.tenant_id,
+          domain_id: input.domain_id,
+          platform_path: input.platform_path,
+        },
+        ...(input.intent_id === undefined ? {} : { intent_id: input.intent_id }),
+        attachment: {
+          kind: input.kind,
+          file_name: input.file_name,
+          media_type: input.media_type.toLowerCase(),
+          size_bytes: input.size_bytes,
+          data_base64: input.data_base64,
+        },
+      }),
+    });
+    const raw = await readBoundedJson(response);
+    if (!response.ok || !isRecord(raw)) {
+      throw new MatchPlaneMcpError(response.status || 502, "MatchPlane media upload failed", raw);
+    }
+    return parseMediaUploadResult(raw, requestId);
   }
 
   async openMarketplaceSession(input: {
@@ -901,6 +1031,178 @@ function isChildPlatformPath(value: unknown): value is string {
 
 function isBoundedString(value: unknown, maximum: number): value is string {
   return typeof value === "string" && value.length >= 1 && value.length <= maximum;
+}
+
+function validateCatalogUpsertInput(input: CatalogUpsertInput, requestId: string): void {
+  if (!isUuid(input.tenant_id) || !isUuid(input.domain_id)) {
+    throw new Error("catalog scope tenant_id and domain_id must be UUIDs");
+  }
+  if (!isChildPlatformPath(input.platform_path)) {
+    throw new Error("catalog platform_path must identify a child platform");
+  }
+  if (!isUuid(requestId)) throw new Error("catalog request_id must be a UUID");
+  if (!isRecord(input.offer)) throw new Error("catalog offer is required");
+  if (!isUuid(input.offer.offer_id)) throw new Error("catalog offer_id must be a UUID");
+  if (!isBoundedString(input.offer.external_key, 256)) throw new Error("catalog external_key is required");
+  if (!isBoundedString(input.offer.display_name, 500)) throw new Error("catalog display_name is required");
+  if (!isCatalogOfferStatus(input.offer.status)) throw new Error("catalog status is invalid");
+  for (const [name, value] of [["attributes", input.offer.attributes], ["terms", input.offer.terms]] as const) {
+    if (value !== undefined && (!isRecord(value) || serializedBytes(value) > 256 * 1024)) {
+      throw new Error(`catalog ${name} must be a bounded object`);
+    }
+  }
+  if (input.offer.attachments !== undefined) {
+    if (!Array.isArray(input.offer.attachments) || input.offer.attachments.length > 64
+      || input.offer.attachments.some((value) => typeof value !== "string" || !/^media:\/\/[a-z0-9][a-z0-9._:/-]{1,511}$/i.test(value))) {
+      throw new Error("catalog attachments are invalid");
+    }
+  }
+}
+
+function parseCatalogUpsertResult(raw: unknown, requestId: string, input: CatalogUpsertInput): CatalogUpsertResult {
+  const value = extractStructuredPayload(raw);
+  if (!isRecord(value) || value.protocol !== "matchplane.catalog/v1" || value.request_id !== requestId) {
+    throw new Error("catalog adapter returned an invalid protocol envelope");
+  }
+  const scope = value.scope;
+  if (!isRecord(scope) || scope.tenant_id !== input.tenant_id || scope.domain_id !== input.domain_id
+    || scope.platform_path !== input.platform_path) {
+    throw new Error("catalog adapter returned an invalid scope");
+  }
+  if (!isUuid(value.offer_id) || value.offer_id !== input.offer.offer_id) {
+    throw new Error("catalog adapter returned an invalid offer_id");
+  }
+  if (!isCatalogOfferStatus(value.status) || typeof value.indexed !== "boolean") {
+    throw new Error("catalog adapter returned an invalid status");
+  }
+  return {
+    protocol: "matchplane.catalog/v1",
+    request_id: requestId,
+    scope: {
+      tenant_id: input.tenant_id,
+      domain_id: input.domain_id,
+      platform_path: input.platform_path,
+    },
+    offer_id: value.offer_id,
+    status: value.status,
+    indexed: value.indexed,
+  };
+}
+
+function validateMediaUploadInput(input: MediaUploadInput, requestId: string): void {
+  if (!isUuid(input.tenant_id) || !isUuid(input.domain_id)) {
+    throw new Error("media scope tenant_id and domain_id must be UUIDs");
+  }
+  if (!isChildPlatformPath(input.platform_path)) {
+    throw new Error("media platform_path must identify a child platform");
+  }
+  if (!isUuid(requestId)) throw new Error("media request_id must be a UUID");
+  if (!isMediaUploadKind(input.kind)) throw new Error("media kind is invalid");
+  if (!isBoundedString(input.file_name, 255) || !isSafeMediaFileName(input.file_name)) {
+    throw new Error("media file_name is invalid");
+  }
+  if (!isBoundedString(input.media_type, 200) || !MEDIA_MIME_PATTERN.test(input.media_type)) {
+    throw new Error("media media_type is invalid");
+  }
+  if (!mediaKindMatchesType(input.kind, input.media_type)) throw new Error("media kind does not match media_type");
+  if (!isSafeInteger(input.size_bytes) || input.size_bytes < 1 || input.size_bytes > MAX_MEDIA_UPLOAD_BYTES) {
+    throw new Error("media size_bytes is outside the bounded limit");
+  }
+  if (!isBoundedString(input.data_base64, Math.ceil(MAX_MEDIA_UPLOAD_BYTES * 4 / 3) + 4)
+    || !BASE64_MEDIA_PATTERN.test(input.data_base64)
+    || decodedMediaBytes(input.data_base64) !== input.size_bytes) {
+    throw new Error("media data_base64 does not match size_bytes");
+  }
+  if (input.intent_id !== undefined && input.intent_id !== null && !isUuid(input.intent_id)) {
+    throw new Error("media intent_id must be a UUID or null");
+  }
+}
+
+function parseMediaUploadResult(raw: unknown, requestId: string): MediaUploadResult {
+  const value = extractStructuredPayload(raw);
+  if (!isRecord(value) || value.protocol !== "matchplane.media/v1" || value.request_id !== requestId
+    || !isRecord(value.attachment)) {
+    throw new Error("media adapter returned an invalid protocol envelope");
+  }
+  const attachment = value.attachment;
+  if (!isMediaUploadKind(attachment.kind) || !isBoundedString(attachment.attachment_ref, 512)
+    || !/^media:\/\/[a-z0-9][a-z0-9._:/-]{1,511}$/i.test(attachment.attachment_ref)
+    || !isBoundedString(attachment.file_name, 255) || !isSafeMediaFileName(attachment.file_name)
+    || !isBoundedString(attachment.media_type, 200) || !MEDIA_MIME_PATTERN.test(attachment.media_type)
+    || !mediaKindMatchesType(attachment.kind, attachment.media_type)
+    || !isSafeInteger(attachment.size_bytes) || attachment.size_bytes < 1 || attachment.size_bytes > MAX_MEDIA_UPLOAD_BYTES
+    || typeof attachment.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(attachment.sha256)) {
+    throw new Error("media adapter returned an invalid attachment");
+  }
+  const parsed: MediaAttachment = {
+    attachment_ref: attachment.attachment_ref,
+    kind: attachment.kind,
+    file_name: attachment.file_name,
+    media_type: attachment.media_type.toLowerCase(),
+    size_bytes: attachment.size_bytes,
+    sha256: attachment.sha256.toLowerCase(),
+  };
+  for (const field of ["width", "height", "duration_ms"] as const) {
+    const fieldValue = attachment[field];
+    if (fieldValue !== undefined) {
+      if (!isSafeInteger(fieldValue) || fieldValue < 0 || fieldValue > 2_000_000_000) throw new Error(`media adapter ${field} is invalid`);
+      parsed[field] = fieldValue;
+    }
+  }
+  if (attachment.metadata !== undefined) {
+    if (!isRecord(attachment.metadata) || serializedBytes(attachment.metadata) > 16 * 1024) throw new Error("media adapter metadata is invalid");
+    parsed.metadata = attachment.metadata;
+  }
+  return { protocol: "matchplane.media/v1", request_id: requestId, attachment: parsed };
+}
+
+function extractStructuredPayload(raw: unknown): unknown {
+  if (!isRecord(raw)) return raw;
+  const result = isRecord(raw.result) ? raw.result : raw;
+  if (isRecord(result.structuredContent)) return result.structuredContent;
+  if (Array.isArray(result.content)) {
+    for (const item of result.content) {
+      if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
+      try {
+        const parsed = JSON.parse(item.text) as unknown;
+        if (isRecord(parsed)) return parsed;
+      } catch {
+        // Continue through human-readable MCP content blocks.
+      }
+    }
+  }
+  return raw;
+}
+
+const MAX_MEDIA_UPLOAD_BYTES = 256 * 1024 * 1024;
+const MEDIA_MIME_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+*-]{0,126}$/i;
+const BASE64_MEDIA_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+function isCatalogOfferStatus(value: unknown): value is CatalogOfferStatus {
+  return value === "draft" || value === "active" || value === "reserved" || value === "sold"
+    || value === "withdrawn" || value === "expired";
+}
+
+function isMediaUploadKind(value: unknown): value is MediaUploadKind {
+  return value === "image" || value === "document" || value === "video" || value === "audio" || value === "file";
+}
+
+function isSafeMediaFileName(value: string): boolean {
+  return value !== "." && value !== ".." && !value.includes("/") && !value.includes("\\") && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function mediaKindMatchesType(kind: MediaUploadKind, mediaType: string): boolean {
+  const normalized = mediaType.toLowerCase();
+  if (kind === "file") return true;
+  if (kind === "image") return /^image\/(?:avif|gif|heic|heif|jpeg|png|webp)$/.test(normalized);
+  if (kind === "video") return /^video\/(?:mp4|quicktime|webm)$/.test(normalized);
+  if (kind === "audio") return /^audio\/(?:mpeg|mp4|ogg|wav|webm)$/.test(normalized);
+  return normalized === "application/json" || normalized === "application/pdf" || normalized === "application/zip" || normalized === "text/plain";
+}
+
+function decodedMediaBytes(value: string): number {
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return (value.length / 4) * 3 - padding;
 }
 
 function validateRetrievalQueryInput(input: RetrievalQueryInput, requestId: string): void {

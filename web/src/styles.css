@@ -1299,6 +1299,18 @@ main {
   line-height: 1.4;
 }
 
+.offer-review-panel { grid-column: 1 / -1; }
+.offer-review-list { margin-top: 1rem; display: grid; gap: 0.5rem; }
+.offer-review-row { min-width: 0; padding: 0.75rem; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.8rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--paper); }
+.offer-review-copy { min-width: 0; display: grid; gap: 0.22rem; }
+.offer-review-copy strong { overflow: hidden; font-size: 0.76rem; text-overflow: ellipsis; white-space: nowrap; }
+.offer-review-copy small { overflow: hidden; color: var(--muted); font-size: 0.63rem; text-overflow: ellipsis; white-space: nowrap; }
+.offer-review-copy details { margin-top: 0.35rem; }
+.offer-review-copy summary { width: fit-content; color: var(--ink-soft); cursor: pointer; font-size: 0.64rem; }
+.offer-review-copy pre { max-height: 12rem; margin: 0.5rem 0 0; overflow: auto; padding: 0.65rem; border-radius: 0.65rem; background: var(--ivory); color: var(--ink-soft); font: 0.62rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.offer-review-row > .button { min-height: 2.4rem; white-space: nowrap; }
+.offer-review-empty { margin-top: 1rem; padding: 1rem; border: 1px dashed var(--line-strong); border-radius: 1rem; color: var(--muted); font-size: 0.7rem; text-align: center; }
+
 .site-settings-panel {
   grid-column: 1 / -1;
   background: color-mix(in srgb, var(--ivory) 78%, transparent);
@@ -2212,6 +2224,8 @@ main {
   .mode-summary { width: 100%; }
   .platform-agent-config-actions { align-items: stretch; flex-direction: column; }
   .platform-agent-config-actions .button { width: 100%; justify-content: center; }
+  .offer-review-row { grid-template-columns: 1fr; }
+  .offer-review-row > .button { width: 100%; }
   .subplatform-header { align-items: stretch; flex-direction: column; }
   .subplatform-header > .button { width: 100%; }
   .subplatform-row { grid-template-columns: 2.5rem minmax(0, 1fr) auto; }
@@ -2732,6 +2746,19 @@ main.subplatform-fullscreen-main {
   line-height: 1.55;
 }
 
+.match-chat-message-group { width: fit-content; max-width: min(90%, 42rem); }
+.match-chat-message-group.is-user { justify-self: end; }
+.match-chat-message-group .match-chat-message { max-width: 100%; }
+.match-chat-attachments,
+.match-chat-compose-attachments { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.35rem 0 0; padding: 0; list-style: none; }
+.match-chat-attachments li,
+.match-chat-compose-attachments li { max-width: 14rem; overflow: hidden; padding: 0.28rem 0.5rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 0.64rem; text-overflow: ellipsis; white-space: nowrap; }
+.match-chat-compose-attachments { margin-top: 0.8rem; }
+.match-chat-compose-attachments li { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--paper); }
+.match-chat-compose-attachments li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.match-chat-compose-attachments li button { display: grid; place-items: center; width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.match-chat-compose-attachments li button:hover { color: var(--ink); background: var(--mist); }
+
 .match-chat-message.is-user {
   justify-self: end;
   border-radius: 1rem 1rem 0.35rem 1rem;
@@ -2774,7 +2801,7 @@ main.subplatform-fullscreen-main {
   width: 100%;
   min-height: 5.1rem;
   max-height: 15rem;
-  padding: 0.9rem 3.65rem 0.9rem 1rem;
+  padding: 0.9rem 3.65rem 0.9rem 3.7rem;
   resize: none;
   overflow-y: auto;
   border: 0;
@@ -2786,6 +2813,23 @@ main.subplatform-fullscreen-main {
   line-height: 1.55;
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
+
+.match-chat-attach {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 0.75rem;
+  z-index: 1;
+  width: 2.8rem;
+  height: 2.8rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.95rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+.match-chat-attach:hover { color: var(--ink); background: color-mix(in srgb, var(--mist) 70%, transparent); }
+.match-chat-attach input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 
 .match-chat-form textarea:focus { box-shadow: none; }
 
@@ -3665,6 +3709,19 @@ main.subplatform-fullscreen-main {
 .seller-agent-draft { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin: -0.2rem 0 1.2rem; padding: 0.9rem 1rem; border: 1px solid var(--line); border-radius: 1rem; background: color-mix(in srgb, var(--heather) 54%, var(--paper)); }
 .seller-agent-draft strong { display: block; color: var(--ink); font-size: 0.8rem; }
 .seller-agent-draft p { max-width: 50rem; margin: 0.3rem 0 0; color: var(--muted); font-size: 0.74rem; line-height: 1.5; }
+.seller-media-uploader { display: grid; gap: 0.8rem; margin: -0.1rem 0 1.05rem; padding: 0.85rem 0.95rem; border: 1px solid var(--line); border-radius: 1rem; background: color-mix(in srgb, var(--mist) 48%, var(--paper)); }
+.seller-media-uploader-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.seller-media-uploader-heading > div { display: grid; gap: 0.22rem; }
+.seller-media-uploader-heading strong { color: var(--ink); font-size: 0.8rem; }
+.seller-media-uploader-heading small { color: var(--muted); font-size: 0.7rem; line-height: 1.45; }
+.seller-media-picker { position: relative; display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.seller-media-picker input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.seller-media-list { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0; padding: 0; list-style: none; }
+.seller-media-list li { display: inline-flex; align-items: center; gap: 0.38rem; max-width: min(100%, 20rem); padding: 0.36rem 0.45rem 0.36rem 0.62rem; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--ink-soft); font-size: 0.7rem; }
+.seller-media-list li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seller-media-list li small { color: var(--muted); white-space: nowrap; }
+.seller-media-list li button { display: grid; place-items: center; width: 1.45rem; height: 1.45rem; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.seller-media-list li button:hover { background: var(--mist); color: var(--ink); }
 .seller-upload-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.95rem; }
 .seller-upload-form label { display: grid; gap: 0.42rem; }
 .seller-upload-form label > span { color: var(--ink-soft); font-size: 0.73rem; font-weight: 650; }

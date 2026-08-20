@@ -10,6 +10,7 @@ const MAX_KEY_TTL_SECONDS = 365 * 24 * 60 * 60;
 const allowedPermissions: Record<string, readonly string[]> = {
   platform: ["read", "configure", "manage_children", "manage_api_keys"],
   retrieval: ["query", "write"],
+  media: ["upload"],
   marketplace: ["read", "write", "moderate", "publish"],
   agent: ["handoff", "tool"],
 };

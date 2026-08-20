@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { POST as establishAgentSession } from "../marketplace/agent-session/route";
 import { POST as matchPlatform } from "../platform/match/route";
 import { POST as handoffAgent } from "../platform/agent/handoff/route";
+import { POST as queryRetrieval } from "../platform/retrieval/query/route";
 import { hasTrustedBrowserOrigin } from "../../../src/lib/request-origin";
 import { readJsonBody, readJsonResponseBody, RequestBodyTooLargeError } from "../../../src/lib/body-limit";
 import { validateMcpToolArguments } from "../../../src/mcp-contract";
@@ -11,6 +12,7 @@ import { executeAuthenticatedChildTool } from "../../../src/platform-child-tool"
 export const runtime = "nodejs";
 
 const MAX_UPSTREAM_RESPONSE_BYTES = 256 * 1024;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // Marketplace actions cross the Next/Rust boundary. Keep a hard server-side deadline so a
 // stalled gateway cannot retain an MCP request forever or exhaust the web worker pool.
 const MARKETPLACE_GATEWAY_TIMEOUT_MS = 20_000;
@@ -66,6 +68,7 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
   if (argumentError) return rpcError(id, -32602, argumentError);
   const isHandoff = params.name === "platform.agent.handoff";
   if (params.name === "platform.child.tool") return callChildTool(request, id, args);
+  if (params.name === "platform.retrieval.query") return callRetrievalQuery(request, id, args);
   if (params.name.startsWith("marketplace.")) return callMarketplaceTool(request, id, params.name, args);
   const forwarded = new Request(new URL(isHandoff ? "/api/platform/agent/handoff" : "/api/platform/match", request.url), {
     method: "POST",
@@ -91,6 +94,29 @@ async function callTool(request: Request, id: JsonRpcId, params: unknown): Promi
 }
 
 /**
+ * Expose the versioned retrieval ABI as a first-class MCP tool. The specialized HTTP facade
+ * remains the single authorization implementation: it enforces retrieval:query, tenant/domain
+ * scope, active manifest allowlisting and the bounded child transport before forwarding.
+ */
+async function callRetrievalQuery(
+  request: Request,
+  id: JsonRpcId,
+  args: Record<string, unknown>,
+): Promise<Response> {
+  const headers = new Headers(request.headers);
+  headers.set("content-type", "application/json");
+  headers.delete("content-length");
+  const forwarded = new Request(new URL("/api/platform/retrieval/query", request.url), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(args),
+  });
+  const result = await queryRetrieval(forwarded);
+  const payload = await readUpstreamJson(result, "retrieval tool returned invalid JSON");
+  return rpcToolResponse(id, payload, !result.ok, result.status);
+}
+
+/**
  * Invoke a tool owned by one active child node. The root only performs authorization, allowlist
  * checking and bounded transport; the child MCP server owns retrieval/catalog semantics.
  */
@@ -102,12 +128,15 @@ async function callChildTool(
   const platformPath = typeof args.platform_path === "string" ? args.platform_path : "";
   const toolName = typeof args.tool_name === "string" ? args.tool_name : "";
   const toolArguments = isRecord(args.arguments) ? args.arguments : {};
+  const scopedEnvelope = readScopedChildEnvelope(toolName, platformPath, toolArguments);
+  if (scopedEnvelope.error) return rpcError(id, -32602, scopedEnvelope.error);
   const result = await executeAuthenticatedChildTool({
     request,
     platformPath,
     toolName,
     arguments: toolArguments,
     requestId: typeof args.request_id === "string" ? args.request_id : undefined,
+    ...(scopedEnvelope.scope ? { tenantId: scopedEnvelope.scope.tenantId, domainId: scopedEnvelope.scope.domainId } : {}),
     allowSession: false,
   });
   if (result.status === 401) {
@@ -117,6 +146,28 @@ async function callChildTool(
     return rpcError(id, -32002, message);
   }
   return rpcToolResponse(id, result.payload, !result.ok, result.status);
+}
+
+/**
+ * Stable child protocols carry their own tenant/domain scope. Bind that envelope to the active
+ * registration before forwarding it, while leaving package-specific tools free to define their
+ * own argument shape. This prevents a generic MCP caller from using a valid child path with a
+ * different tenant/domain inside catalog, retrieval, or media payloads.
+ */
+function readScopedChildEnvelope(
+  toolName: string,
+  platformPath: string,
+  argumentsValue: Record<string, unknown>,
+): { scope?: { tenantId: string; domainId: string }; error?: string } {
+  const requiresScope = toolName === "catalog.upsert" || toolName === "retrieval.query" || toolName === "media.upload";
+  if (!requiresScope) return {};
+  const scope = isRecord(argumentsValue.scope) ? argumentsValue.scope : null;
+  if (!scope || typeof scope.tenant_id !== "string" || !UUID_PATTERN.test(scope.tenant_id)
+    || typeof scope.domain_id !== "string" || !UUID_PATTERN.test(scope.domain_id)
+    || scope.platform_path !== platformPath) {
+    return { error: `${toolName} requires a tenant/domain scope bound to platform_path` };
+  }
+  return { scope: { tenantId: scope.tenant_id, domainId: scope.domain_id } };
 }
 
 /**
@@ -281,6 +332,7 @@ async function callMarketplaceTool(
 function supportedTool(name: unknown): name is string {
   return name === "platform.match"
     || name === "platform.agent.handoff"
+    || name === "platform.retrieval.query"
     || name === "platform.child.tool"
     || name === "marketplace.agent.session"
     || name === "marketplace.intent.create"
@@ -404,6 +456,10 @@ function toolList(): Record<string, unknown> {
           selected_refs: { type: "array", maxItems: 100, items: { type: "string", maxLength: 256 } },
         },
       },
+    }, {
+      name: "platform.retrieval.query",
+      description: "Query the active child platform's versioned retrieval ABI with a tenant/domain/path scope.",
+      inputSchema: retrievalQuerySchema(),
     }, {
       name: "platform.child.tool",
       description: "Call one MCP tool declared by an active child platform through its operator-configured endpoint.",
@@ -582,6 +638,43 @@ function contactActionSchema(): Record<string, unknown> {
       participant_id: { type: "string", format: "uuid" },
       introduction_id: { type: "string", format: "uuid" },
       idempotency_key: { type: "string", minLength: 1, maxLength: 240 },
+    },
+  };
+}
+
+function retrievalQuerySchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["protocol", "request_id", "scope", "input", "limit"],
+    properties: {
+      protocol: { const: "matchplane.retrieval/v1" },
+      request_id: { type: "string", format: "uuid" },
+      scope: {
+        type: "object",
+        additionalProperties: false,
+        required: ["tenant_id", "domain_id", "platform_path"],
+        properties: {
+          tenant_id: { type: "string", format: "uuid" },
+          domain_id: { type: "string", format: "uuid" },
+          platform_path: { type: "string", pattern: "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)$", maxLength: 512 },
+        },
+      },
+      input: {
+        type: "object",
+        additionalProperties: false,
+        required: ["narrative", "requirements"],
+        properties: {
+          narrative: { type: "string", minLength: 1, maxLength: 10000 },
+          requirements: { type: "object", maxProperties: 256 },
+          budget_min: { type: ["string", "null"], maxLength: 200 },
+          budget_max: { type: ["string", "null"], maxLength: 200 },
+          currency: { type: ["string", "null"], pattern: "^[A-Z]{3}$" },
+          currency_scale: { type: ["integer", "null"], minimum: 0, maximum: 18 },
+        },
+      },
+      limit: { type: "integer", minimum: 1, maximum: 100 },
+      trace_id: { type: ["string", "null"], maxLength: 200 },
     },
   };
 }

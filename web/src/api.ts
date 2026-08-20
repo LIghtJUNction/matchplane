@@ -1,5 +1,13 @@
 import type { AssetListing } from "./types";
+import {
+  MAX_MEDIA_BYTES,
+  MEDIA_ATTACHMENT_PROTOCOL,
+  parseMediaUploadResponse,
+  type MarketplaceAttachment,
+} from "./media-attachment";
 import type { RetrievalResult } from "./retrieval-protocol";
+
+export type { MarketplaceAttachment } from "./media-attachment";
 
 const apiBase = (process.env.NEXT_PUBLIC_MATCHPLANE_API_BASE_URL ?? "/api").replace(/\/$/, "");
 
@@ -795,6 +803,23 @@ export interface MarketplaceDemandCandidate {
 
 export type MarketplaceOfferOutcome = MarketplaceOffer & { duplicate: boolean };
 
+/** Root-control-plane projection; package-owned attributes and terms are intentionally absent. */
+export interface MarketplaceOfferAdminRecord {
+  offer_id: string;
+  tenant_id: string;
+  supply_party_id: string;
+  domain_id: string;
+  asset_id: string | null;
+  external_key: string;
+  display_name: string;
+  status: string;
+  published_at: string | null;
+  expires_at: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MarketplaceIntroduction {
   introduction_id: string;
   tenant_id: string;
@@ -913,6 +938,37 @@ export class MarketplaceApiError extends Error {
     this.name = "MarketplaceApiError";
     this.status = status;
   }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function inferBrowserMediaKind(mediaType: string): "image" | "document" | "video" | "audio" | "file" {
+  if (mediaType.startsWith("image/")) return "image";
+  if (mediaType.startsWith("video/")) return "video";
+  if (mediaType.startsWith("audio/")) return "audio";
+  if (mediaType === "application/pdf" || mediaType === "application/json" || mediaType === "text/plain") return "document";
+  return "file";
+}
+
+async function readJson<T>(response: Response): Promise<T | null> {
+  try {
+    return await response.json() as T;
+  } catch {
+    return null;
+  }
+}
+
+function readApiError(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const error = (value as { error?: unknown }).error;
+  return typeof error === "string" && error.trim() ? error.slice(0, 500) : null;
 }
 
 /** Redeem a one-time CLI-issued administrator invitation after Better Auth sign-in. */
@@ -2124,6 +2180,118 @@ export function createMarketplaceOffer(input: {
     },
     input.session,
   );
+}
+
+/** Read the root-scoped generic offer queue for the administrator workspace. */
+export async function getMarketplaceOfferAdminRecords(input?: {
+  domainId?: string;
+  status?: "draft" | "active" | "reserved" | "sold" | "withdrawn" | "expired";
+  limit?: number;
+}): Promise<MarketplaceOfferAdminRecord[]> {
+  const query = new URLSearchParams();
+  if (input?.domainId) query.set("domain_id", input.domainId);
+  if (input?.status) query.set("status", input.status);
+  if (input?.limit) query.set("limit", String(input.limit));
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await fetch(`/api/admin/marketplace/offers${suffix}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null) as { offers?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "供给审核队列读取失败");
+  return Array.isArray(body?.offers) ? body.offers as MarketplaceOfferAdminRecord[] : [];
+}
+
+/** Activate one draft through the Rust gateway's operator state transition. */
+export async function activateMarketplaceOffer(input: {
+  offerId: string;
+  tenantId: string;
+}): Promise<MarketplaceOfferAdminRecord & { catalog_sync?: { synced?: boolean; error?: string; platform_path?: string | null } }> {
+  const response = await fetch(`/api/admin/marketplace/offers/${encodeURIComponent(input.offerId)}/activate`, {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ tenant_id: input.tenantId }),
+  });
+  const body = await response.json().catch(() => null) as (MarketplaceOfferAdminRecord & { error?: string }) | null;
+  if (!response.ok || !body?.offer_id) throw new MarketplaceApiError(response.status, body?.error || "供给激活失败");
+  return body;
+}
+
+/** Push the canonical offer projection to the selected child-owned catalog adapter. */
+export async function syncMarketplaceOfferToChild(input: {
+  offerId: string;
+  tenantId: string;
+  domainId: string;
+  platformPath: string;
+}): Promise<{ offerId: string; synced: boolean; platformPath: string | null }> {
+  const response = await fetch("/api/platform/catalog/sync", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({
+      protocol: "matchplane.catalog/v1",
+      request_id: crypto.randomUUID(),
+      scope: {
+        tenant_id: input.tenantId,
+        domain_id: input.domainId,
+        platform_path: input.platformPath,
+      },
+      offer_id: input.offerId,
+    }),
+  });
+  const body = await response.json().catch(() => null) as { offer_id?: string; synced?: boolean; platform_path?: string | null; error?: string } | null;
+  if (!response.ok && response.status !== 202) throw new MarketplaceApiError(response.status, body?.error || "子平台目录同步失败");
+  if (!body?.offer_id) throw new MarketplaceApiError(502, "子平台目录同步返回了无效响应");
+  return { offerId: body.offer_id, synced: body.synced === true, platformPath: body.platform_path ?? null };
+}
+
+/** Upload bytes transiently to the active child-owned media adapter. */
+export async function uploadMarketplaceAttachment(input: {
+  platformPath: string;
+  tenantId: string;
+  domainId: string;
+  file: File;
+  intentId?: string;
+  kind?: "image" | "document" | "video" | "audio" | "file";
+}): Promise<MarketplaceAttachment> {
+  if (input.file.size < 1 || input.file.size > MAX_MEDIA_BYTES) {
+    throw new MarketplaceApiError(413, "附件超过当前部署支持的大小上限");
+  }
+  const bytes = new Uint8Array(await input.file.arrayBuffer());
+  const dataBase64 = bytesToBase64(bytes);
+  const requestId = crypto.randomUUID();
+  const response = await fetch(`${apiBase}/platform/media/upload`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      protocol: MEDIA_ATTACHMENT_PROTOCOL,
+      request_id: requestId,
+      scope: {
+        tenant_id: input.tenantId,
+        domain_id: input.domainId,
+        platform_path: input.platformPath,
+      },
+      ...(input.intentId ? { intent_id: input.intentId } : {}),
+      attachment: {
+        kind: input.kind ?? inferBrowserMediaKind(input.file.type),
+        file_name: input.file.name,
+        media_type: input.file.type || "application/octet-stream",
+        size_bytes: input.file.size,
+        data_base64: dataBase64,
+      },
+    }),
+  });
+  const body = await readJson<unknown>(response);
+  if (!response.ok) throw new MarketplaceApiError(response.status, readApiError(body) ?? "附件上传失败");
+  const parsed = parseMediaUploadResponse(body, requestId, MAX_MEDIA_BYTES);
+  if (!parsed.ok) throw new MarketplaceApiError(502, parsed.error);
+  return parsed.value.attachment;
 }
 
 export function getMarketplaceOffers(input: {

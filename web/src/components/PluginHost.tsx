@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 
-import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing, type ContactExchange } from "../api";
+import { createMarketplaceOffer, isLiveMarketplaceEnabled, submitSellerListing, type ContactExchange, type MarketplaceAttachment } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
 import { pricingFor, subplatformCopy, type SubplatformConfig } from "../subplatform";
@@ -27,9 +27,12 @@ interface PluginHostProps {
     intentId?: string;
     attributes: Record<string, unknown>;
     terms: Record<string, unknown>;
+    attachments?: MarketplaceAttachment[];
   } | null;
   /** Let a mounted child platform own the viewport below the host back control. */
   fullscreen?: boolean;
+  /** Restore the host workspace when the plugin asset cannot load. */
+  onFailure?: () => void;
 }
 
 /**
@@ -38,7 +41,7 @@ interface PluginHostProps {
  * but it never receives a session token or payment authority. Contact updates are validated by
  * the host and forwarded through the same Better Auth session bridge as the generic workspace.
  */
-export function PluginHost({ subplatform, role, theme, locale, onNotice, fallback, listings = [], onOpenListing, sellerDraft = null, fullscreen = false }: PluginHostProps) {
+export function PluginHost({ subplatform, role, theme, locale, onNotice, fallback, listings = [], onOpenListing, sellerDraft = null, fullscreen = false, onFailure }: PluginHostProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const contextTokenRef = useRef<string | null>(null);
   const pluginReadyRef = useRef(false);
@@ -81,7 +84,9 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
         pricing: pricingFor(subplatform),
         assetSchema: subplatform.assetSchema,
         ui: subplatform.ui,
-        capabilities: ["chat.open", "match.results", "listing.open", "listing.select", "listing.submit", "contact.update", "navigation"],
+        capabilities: fullscreen
+          ? ["match.results", "listing.open", "listing.submit", "contact.update"]
+          : ["chat.open", "match.results", "listing.open", "listing.submit", "contact.update"],
         ...(role === "seller" && sellerDraft ? { agentDraft: sellerDraft } : {}),
       },
     }, "*");
@@ -109,10 +114,12 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
       }
       if (event.data.contextToken !== contextTokenRef.current) return;
       if (event.data.type === "chat.open") {
+        if (fullscreen) {
+          onNotice(copy("pluginChatUnavailableNotice", "请返回上一级继续描述需求"));
+          return;
+        }
         document.getElementById("match-chat-input")?.focus();
         onNotice(copy("pluginChatOpenedNotice", "已打开共享 AI 撮合输入框"));
-      } else if (event.data.type === "listing.select") {
-        onNotice(copy("pluginSelectionNotice", "插件已提交供给选择，平台会继续按权限撮合"));
       } else if (event.data.type === "listing.open") {
         const payload = isRecord(event.data.payload) ? event.data.payload : null;
         const listingId = payload && typeof payload.listingId === "string" ? payload.listingId : null;
@@ -140,8 +147,6 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
           subplatform,
           onNotice,
         });
-      } else if (event.data.type === "navigation") {
-        onNotice(copy("pluginNavigationNotice", "插件导航请求已收到；平台会校验当前路径权限"));
       }
     };
     window.addEventListener("message", onMessage);
@@ -149,7 +154,7 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
       pluginReadyRef.current = false;
       window.removeEventListener("message", onMessage);
     };
-  }, [locale, onNotice, onOpenListing, role, subplatform, theme]);
+  }, [fullscreen, locale, onNotice, onOpenListing, role, subplatform, theme]);
 
   useEffect(() => {
     postResults();
@@ -186,7 +191,10 @@ export function PluginHost({ subplatform, role, theme, locale, onNotice, fallbac
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
             loading={fullscreen ? "eager" : "lazy"}
-            onError={() => setFailed(true)}
+            onError={() => {
+              setFailed(true);
+              onFailure?.();
+            }}
             onLoad={postContext}
           />
         )}

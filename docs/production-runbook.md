@@ -29,6 +29,8 @@ web 管理员 BFF 还需要网关和支付管理员 token 的窄权限投影副�
 
 对拥有 retrieval 或其他 Agent 工具的子平台，请配置 manifest 中的 `agent.mcpServerKey`，并在 web 服务受限环境中通过 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 与该 key 绑定。每个条目包含运营方管理的 HTTPS `url`，需要时带 `tokenEnv`，其值从部署密钥管理器挂载。不要把 endpoint 或 token 写进仓库。`platform.child.tool` 仅接受活跃且可见的子路径和 manifest 中声明的工具名，且会剥离调用方凭据、强制请求超时与响应体限制。
 
+参考 `subplatforms/auto/agent` 可作为单独的 child Agent 进程运行。Compose 的开发配置包含一个无 root 数据库/支付凭据的 `auto-agent` 服务；生产部署应为它使用独立用户、持久化的 `MATCHPLANE_AUTO_DATA_DIR`、专用 `MATCHPLANE_AUTO_MCP_TOKEN`，并通过 HTTPS/mTLS 或受控内网网关暴露 `/mcp`。生产还必须设置 `MATCHPLANE_AUTO_TENANT_ID` 和 `MATCHPLANE_AUTO_DOMAIN_ID`，使服务拒绝被复用到其他租户。子服务的 `catalog.upsert`、`retrieval.query` 和 `media.upload` 只处理通用 ABI；向量库、媒体扫描器和领域字段仍由子平台运营方负责。激活包含 MCP 工具的注册前，运行一次 `initialize` 健康探测；没有健康 endpoint 时保持 registration 不可路由。
+
 路由默认会发送受限函数工具 `matchplane.platform.select_children`（`MATCHPLANE_ROUTER_AI_TOOL_MODE=auto`）。该工具的可选项枚举由服务端 allowlist（白名单）中子节点生成，因此供应商无法路由到未注册 slug。仅支持结构化 JSON 的供应商可设置 `MATCHPLANE_ROUTER_AI_TOOL_MODE=disabled`；供应商支持强制工具调用时可用 `required`。持久化的路由决策会记录结果来源于 MCP-compatible tool boundary、结构化 JSON，还是策略回退。
 
 子平台打包器是独立的信任边界。`MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN`（或生产的 `_TOKEN_FILE`）只配置在 web 与 builder 的受限密钥文件（或等效 Kubernetes 的 `subplatform-builder-token` key）中。systemd 必须把同一个随机值分别写入 `/etc/matchplane/secrets/web/builder.token`（`root:matchplane-web`, `0640`）和 `/etc/matchplane/secrets/builder/builder.token`（`root:matchplane-builder`, `0640`）；web 单元只读前者，builder 单元只读后者，不能把 builder 目录授予 web 用户。`POST /api/platform/subplatforms` 不接受调用方自报的 build digest。内置 `matchplane-subplatform-builder` 以无特权用户运行，只能 claim/回写 discovery 与构建租约；它没有数据库、支付、AI 或浏览器密钥，也不挂载 Docker socket。它会校验 Git 的完整 40 位 commit、来源 SHA-256、manifest SHA-256，拒绝归档路径穿越、软硬链接、设备文件、超大条目，并在 `bubblewrap --unshare-net` 的静态构建沙箱中只执行 `bun/npm/pnpm/yarn` 的固定 build 模板。Bun 默认从 `/opt/bun-stable/bin` 与系统 PATH 解析；运营方若需要另一个绝对路径，可通过 `MATCHPLANE_SUBPLATFORM_BUILDER_BUN` 覆盖，不必把运行时版本写进子平台包或服务代码。构建结果写入内容寻址的 artifact 目录，builder 永远不能激活路由。
@@ -112,7 +114,7 @@ systemctl enable --now \
   matchplane-subplatform-builder.service
 ```
 
-web/Better Auth 监听 `127.0.0.1:4173`，网关监听 `127.0.0.1:8080`，支付服务监听 `127.0.0.1:8081`，联邦 gRPC 使用配置地址。Kafka、PostgreSQL、Valkey 与支付 API 均不要暴露到公网。Nginx 仅转发 [deploy/nginx/matchplane.conf](../deploy/nginx/matchplane.conf) 中声明路由。
+web/Better Auth 监听 `127.0.0.1:4173`，网关监听 `127.0.0.1:8080`，支付服务监听 `127.0.0.1:8081`，联邦 gRPC 使用配置地址。Kafka、PostgreSQL、Valkey 与支付 API 均不要暴露到公网。Nginx 仅转发 [deploy/nginx/matchplane.conf](../deploy/nginx/matchplane.conf) 中声明路由。媒体上传的精确路径已解除 Nginx 默认的 1 MiB body 拦截；web 会先验证会话或 API key，再按 `MATCHPLANE_MEDIA_MAX_BYTES` 施加 25 MiB 默认、256 MiB 硬上限。如果部署调整该变量，必须同步超时、内存和监控。不要把应用层上限改成无界，超大视频应由子平台对象存储直传。
 
 ## 5. 上线前验收
 

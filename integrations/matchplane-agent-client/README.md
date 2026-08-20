@@ -94,6 +94,36 @@ const result = await client.queryRetrieval({
   limit: 10,
 });
 
+// A supply Agent may upload a photo/document first. The root only checks the bounded
+// envelope and scope; the active child owns scanning, storage and media:// references.
+const attachment = await client.uploadMedia({
+  tenant_id: capability.tenant_id,
+  domain_id: capability.domain_id,
+  platform_path: capability.platform_path,
+  kind: "image",
+  file_name: "offer-front.jpg",
+  media_type: "image/jpeg",
+  size_bytes: imageBytes.byteLength,
+  data_base64: Buffer.from(imageBytes).toString("base64"),
+});
+
+// After the seller has reviewed the draft, publish only a generic public projection.
+// Domain fields stay inside attributes/terms owned by the mounted package.
+await client.upsertCatalogOffer({
+  tenant_id: capability.tenant_id,
+  domain_id: capability.domain_id,
+  platform_path: capability.platform_path,
+  offer: {
+    offer_id: "00000000-0000-4000-8000-000000000001",
+    external_key: "seller-offer-1",
+    display_name: "供给方提交的方案",
+    attributes: { /* package-defined fields */ },
+    terms: { /* package-defined pricing/terms */ },
+    attachments: [attachment.attachment.attachment_ref],
+    status: "draft",
+  },
+});
+
 // For another child-owned MCP tool, use the generic allowlisted bridge:
 const toolResult = await client.callChildTool({
   platform_path: capability.platform_path,
