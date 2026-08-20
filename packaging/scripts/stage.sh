@@ -83,12 +83,13 @@ done
 # Complete that one traced package from the locked install so the packaged Node
 # process does not fail during module resolution.  The versioned `.bun` path is
 # discovered rather than hard-coded, keeping this valid across dependency bumps.
-staged_swc_helpers=$(find "$root/usr/share/matchplane/web/node_modules" \
-  -type f -path '*/node_modules/@swc/helpers/package.json' -print -quit 2>/dev/null || true)
 source_swc_helpers=$(find "$repository_root/node_modules" \
   -type f -path '*/node_modules/@swc/helpers/package.json' -print -quit 2>/dev/null || true)
-if [[ -n $staged_swc_helpers && -n $source_swc_helpers ]]; then
-  cp -a "$(dirname "$source_swc_helpers")/." "$(dirname "$staged_swc_helpers")/"
+if [[ -n $source_swc_helpers ]]; then
+  while IFS= read -r staged_swc_helpers; do
+    cp -a "$(dirname "$source_swc_helpers")/." "$(dirname "$staged_swc_helpers")/"
+  done < <(find "$root/usr/share/matchplane" \
+    -type f -path '*/node_modules/@swc/helpers/package.json' -print 2>/dev/null)
 fi
 if [[ -d $repository_root/web/public ]]; then
   cp -a "$repository_root/web/public/." "$root/usr/share/matchplane/web/public/"

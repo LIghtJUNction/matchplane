@@ -48,6 +48,9 @@ export function useInterfacePreferences() {
 export function applyInterfaceTheme(theme: InterfaceTheme): void {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.theme = theme;
+  // Appica scopes its semantic tokens with `.dark`; keep that contract in
+  // sync with MatchPlane's persisted data-theme preference.
+  document.documentElement.classList.toggle("dark", theme === "dark");
   document.documentElement.style.colorScheme = theme;
 }
 

@@ -17,6 +17,7 @@
     "preview": "node .next/standalone/server.js"
   },
   "dependencies": {
+    "@appica/ui-react": "1.1.0",
     "@better-auth/api-key": "1.7.0-rc.6",
     "@better-auth/oauth-provider": "1.7.0-rc.6",
     "@better-auth/passkey": "1.7.0-rc.6",

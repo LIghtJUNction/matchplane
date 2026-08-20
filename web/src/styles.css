@@ -1,3 +1,5 @@
+@import "@appica/ui-react/css";
+
 :root {
   color-scheme: light;
   font-family: "Avenir Next", "SF Pro Text", ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -4070,6 +4072,10 @@ main.subplatform-fullscreen-main {
   opacity: 0.55;
 }
 
+/* Appica buttons use a small active translation. These two controls live in a
+   vertically centred absolute group, so keep their alignment stable on press. */
+.login-password-actions button:active:not(:disabled) { transform: none; }
+
 /* Chat-first workspace shell ------------------------------------------------ */
 [hidden] {
   display: none !important;
@@ -4366,6 +4372,7 @@ main.subplatform-fullscreen-main {
   min-height: 5.25rem;
   padding: 1.15rem 1.15rem 1rem 1.35rem;
   display: flex;
+  flex-direction: row;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1.2rem;
@@ -5085,6 +5092,11 @@ main.subplatform-fullscreen-main {
   .workspace-settings-overlay {
     padding: 0;
     align-items: end;
+  }
+
+  [data-slot="dialog-viewport"]:has(.appica-workspace-settings-dialog) {
+    align-items: end;
+    padding: 0.6rem 0 0;
   }
 
   .workspace-settings-dialog,

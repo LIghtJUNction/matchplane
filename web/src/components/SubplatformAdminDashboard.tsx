@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { Mail, Save, ShieldCheck } from "lucide-react";
+import { Button } from "@appica/ui-react/button";
+import { Input } from "@appica/ui-react/input";
 
 import {
   getSubplatformEmailConfig,
@@ -131,19 +133,19 @@ export function SubplatformAdminDashboard({
       </section>
 
       <section className="surface seller-upload" aria-labelledby="email-config-title">
-        <SectionHeading eyebrow="邮箱服务器" title="配置登录邮件与通知发送方" />
+        <SectionHeading eyebrow="邮箱服务器" title="配置登录邮件与通知发送方" titleId="email-config-title" />
         <form className="seller-upload-form" onSubmit={save}>
-          <label htmlFor="email-provider-key"><span>Provider key</span><input id="email-provider-key" value={providerKey} onChange={(event) => setProviderKey(event.target.value)} placeholder="子平台自己的标识" /></label>
-          <label htmlFor="email-smtp-host"><span>SMTP 主机</span><input id="email-smtp-host" value={smtpHost} onChange={(event) => setSmtpHost(event.target.value)} placeholder="smtp.example.com" /></label>
-          <label htmlFor="email-smtp-port"><span>端口</span><input id="email-smtp-port" value={smtpPort} onChange={(event) => setSmtpPort(event.target.value)} inputMode="numeric" /></label>
+          <label htmlFor="email-provider-key"><span>Provider key</span><Input id="email-provider-key" value={providerKey} onChange={(event) => setProviderKey(event.target.value)} placeholder="子平台自己的标识" /></label>
+          <label htmlFor="email-smtp-host"><span>SMTP 主机</span><Input id="email-smtp-host" value={smtpHost} onChange={(event) => setSmtpHost(event.target.value)} placeholder="smtp.example.com" /></label>
+          <label htmlFor="email-smtp-port"><span>端口</span><Input id="email-smtp-port" value={smtpPort} onChange={(event) => setSmtpPort(event.target.value)} inputMode="numeric" /></label>
           <label htmlFor="email-tls-mode"><span>TLS 模式</span><select id="email-tls-mode" value={tlsMode} onChange={(event) => setTlsMode(event.target.value as "starttls" | "tls" | "plain")}><option value="starttls">STARTTLS</option><option value="tls">TLS</option><option value="plain">明文（仅受控内网）</option></select></label>
-          <label htmlFor="email-username"><span>SMTP 用户名</span><input id="email-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
-          <label htmlFor="email-secret-ref"><span>Secret reference（不填密码）</span><input id="email-secret-ref" value={credentialSecretRef} onChange={(event) => setCredentialSecretRef(event.target.value)} placeholder="secret://subplatform/&lt;tenant&gt;/&lt;domain&gt;/smtp-password" /></label>
-          <label htmlFor="email-from"><span>发件人地址</span><input id="email-from" type="email" value={fromAddress} onChange={(event) => setFromAddress(event.target.value)} /></label>
-          <label htmlFor="email-reply-to"><span>回复地址（可选）</span><input id="email-reply-to" type="email" value={replyTo} onChange={(event) => setReplyTo(event.target.value)} /></label>
+          <label htmlFor="email-username"><span>SMTP 用户名</span><Input id="email-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
+          <label htmlFor="email-secret-ref"><span>Secret reference（不填密码）</span><Input id="email-secret-ref" value={credentialSecretRef} onChange={(event) => setCredentialSecretRef(event.target.value)} placeholder="secret://subplatform/&lt;tenant&gt;/&lt;domain&gt;/smtp-password" /></label>
+          <label htmlFor="email-from"><span>发件人地址</span><Input id="email-from" type="email" value={fromAddress} onChange={(event) => setFromAddress(event.target.value)} /></label>
+          <label htmlFor="email-reply-to"><span>回复地址（可选）</span><Input id="email-reply-to" type="email" value={replyTo} onChange={(event) => setReplyTo(event.target.value)} /></label>
           <label htmlFor="email-mode"><span>发送模式</span><select id="email-mode" value={mode} onChange={(event) => setMode(event.target.value as "test" | "production")}><option value="test">测试</option><option value="production">生产</option></select></label>
           <label className="email-enabled"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用当前邮箱路由</label>
-          <div className="seller-upload-actions seller-upload-wide"><p><Mail size={17} aria-hidden="true" /> {config?.credential_configured ? "服务器密钥已配置" : "尚未配置服务器密钥"}</p><button className="button button-dark" type="submit" disabled={saving}><Save size={17} aria-hidden="true" />{saving ? "保存中…" : "保存邮箱配置"}</button></div>
+          <div className="seller-upload-actions seller-upload-wide"><p><Mail size={17} aria-hidden="true" /> {config?.credential_configured ? "服务器密钥已配置" : "尚未配置服务器密钥"}</p><Button type="submit" disabled={saving}><Save size={17} aria-hidden="true" />{saving ? "保存中…" : "保存邮箱配置"}</Button></div>
         </form>
       </section>
       <PlatformSiteSettingsPanel
