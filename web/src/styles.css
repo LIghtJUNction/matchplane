@@ -5047,6 +5047,9 @@ main.subplatform-fullscreen-main {
 .passkey-list strong { color: var(--ink); font-size: 0.78rem; }
 .passkey-empty { margin-top: 0.85rem; }
 
+.login-passkey-action { margin-top: 0.7rem; }
+.login-passkey-action > button { width: 100%; }
+
 .header-admin-action {
   min-height: 2.35rem;
   padding: 0 0.72rem;

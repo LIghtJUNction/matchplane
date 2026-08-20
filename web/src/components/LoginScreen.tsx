@@ -498,6 +498,31 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
     }
   };
 
+  const startPasskeyLogin = async () => {
+    if (!window.PublicKeyCredential) {
+      setError(copy.passkeyUnsupported);
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await authClient.signIn.passkey({
+        fetchOptions: authFetchOptions(subplatform.slug),
+      });
+      if (result.error) throw new Error(passkeyLoginFailure(result.error, copy));
+      const oauthRedirect = oauthRedirectUrl(result.data);
+      if (oauthQuery && oauthRedirect) {
+        window.location.assign(oauthRedirect);
+        return;
+      }
+      await finishSignIn();
+    } catch (error) {
+      setError(error instanceof Error && error.message ? passkeyLoginFailure(error, copy) : copy.passkeyFailed);
+      setSubmitting(false);
+    }
+  };
+
   const switchMethod = (nextMethod: AuthMethod) => {
     setMethod(nextMethod);
     setOtpSent(false);
@@ -591,6 +616,15 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
           </Button>
         </form>
 
+        {!isRegistration && !passwordResetMode && capabilities.passkey ? (
+          <div className="login-passkey-action">
+            <Button variant="outline" type="button" disabled={submitting} onClick={() => void startPasskeyLogin()}>
+              <Fingerprint size={17} aria-hidden="true" />
+              {copy.passkeyLogin}
+            </Button>
+          </div>
+        ) : null}
+
         {socialProviders.length && !isRegistration ? (
           <div className="social-login" aria-label={copy.socialMethods}>
             <span className="login-divider">{copy.otherMethods}</span>
@@ -613,6 +647,18 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
       </div>
     </main>
   );
+}
+
+function passkeyLoginFailure(
+  error: { code?: unknown; message?: unknown } | Error,
+  copy: ReturnType<typeof loginCopy>,
+): string {
+  const message = error instanceof Error ? error.message : typeof error.message === "string" ? error.message : "";
+  const code = !(error instanceof Error) && typeof error.code === "string" ? error.code : "";
+  if (/notallowed|not allowed|cancelled|permission/i.test(message) || /CANCELLED|NOT_ALLOWED/i.test(code)) {
+    return copy.passkeyCancelled;
+  }
+  return copy.passkeyFailed;
 }
 
 function oauthRedirectUrl(value: unknown): string | null {
@@ -754,6 +800,7 @@ function loginCopy(locale: "zh" | "en") {
       magicLinkUnavailable: "Magic links are not configured on this platform.",
       phoneOtpSent: "Code sent to your phone.",
       passkeyLogin: "Use a passkey",
+      passkeyCancelled: "The passkey request was not completed. Unlock your device or use a phone or USB security key, then try again.",
       showPassword: "Show password",
       hidePassword: "Hide password",
       passkeyUnsupported: "This browser or device does not support passkeys.",
@@ -828,6 +875,7 @@ function loginCopy(locale: "zh" | "en") {
     magicLinkUnavailable: "当前平台尚未配置免密链接服务。",
     phoneOtpSent: "验证码已发送到手机。",
     passkeyLogin: "使用 Passkey",
+    passkeyCancelled: "没有完成 Passkey 验证。请解锁设备，或使用手机、USB 安全密钥后重试。",
     showPassword: "显示密码",
     hidePassword: "隐藏密码",
     passkeyUnsupported: "当前浏览器或设备暂不支持 Passkey。",
