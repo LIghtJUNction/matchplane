@@ -3896,3 +3896,43 @@ body,
 
   .login-qr-entry span { display: none; }
 }
+
+.login-password-control input {
+  padding-right: 6.15rem;
+}
+
+.login-password-actions {
+  position: absolute;
+  top: 50%;
+  right: 0.42rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  transform: translateY(-50%);
+}
+
+.login-password-actions button {
+  position: static;
+  width: 2.35rem;
+  height: 2.35rem;
+  display: grid;
+  place-items: center;
+  transform: none;
+  border: 0;
+  border-radius: 0.7rem;
+  background: var(--ivory);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.login-password-actions button:hover,
+.login-password-actions button:focus-visible {
+  background: var(--cactus);
+  color: var(--ink);
+  outline: 0;
+}
+
+.login-password-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Fingerprint, KeyRound, QrCode, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint, KeyRound, QrCode, X } from "lucide-react";
 
 import {
   establishMarketplaceSession,
@@ -38,6 +38,7 @@ export function LoginScreen() {
   const copy = loginCopy(locale);
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState("");
   const [method, setMethod] = useState<AuthMethod>("password");
   const [next, setNext] = useState("/");
@@ -390,6 +391,7 @@ export function LoginScreen() {
     setMethod(nextMethod);
     setOtpSent(false);
     setRegistrationPending(false);
+    setShowPassword(false);
     setOtp("");
     setError(null);
     setNotice(null);
@@ -441,12 +443,17 @@ export function LoginScreen() {
             <div className="login-password-field">
               <label htmlFor="login-password"><span>{copy.password}</span></label>
               <span className="login-password-control">
-                <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password webauthn" placeholder={copy.passwordPlaceholder} />
-                {capabilities.passkey ? (
-                  <button className="login-passkey-button" type="button" onClick={() => void startPasskeyLogin()} disabled={submitting} aria-label={copy.passkeyLogin} title={copy.passkeyLogin}>
-                    <KeyRound size={17} aria-hidden="true" />
+                <input id="login-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password webauthn" placeholder={copy.passwordPlaceholder} />
+                <span className="login-password-actions">
+                  <button className="login-password-visibility" type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={submitting} aria-label={showPassword ? copy.hidePassword : copy.showPassword} title={showPassword ? copy.hidePassword : copy.showPassword}>
+                    {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
                   </button>
-                ) : null}
+                  {capabilities.passkey ? (
+                    <button className="login-passkey-button" type="button" onClick={() => void startPasskeyLogin()} disabled={submitting} aria-label={copy.passkeyLogin} title={copy.passkeyLogin}>
+                      <KeyRound size={17} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </span>
               </span>
             </div>
           ) : null}
@@ -522,7 +529,10 @@ function safeNext(value: string | null): string {
   if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\u0000-\u001f\u007f]/.test(value)) return "/";
   try {
     const resolved = new URL(value, window.location.origin);
-    return resolved.origin === window.location.origin ? `${resolved.pathname}${resolved.search}${resolved.hash}` : "/";
+    // Better Auth validates callback URLs as origins/paths and rejects fragments. The hash is
+    // browser-local state, so dropping it keeps login valid when a user arrives from a page
+    // anchor such as `/?role=buyer#top`.
+    return resolved.origin === window.location.origin ? `${resolved.pathname}${resolved.search}` : "/";
   } catch {
     return "/";
   }
@@ -579,6 +589,8 @@ function loginCopy(locale: "zh" | "en") {
       magicLinkUnavailable: "Magic links are not configured on this platform.",
       phoneOtpSent: "Code sent to your phone.",
       passkeyLogin: "Use a passkey",
+      showPassword: "Show password",
+      hidePassword: "Hide password",
       passkeyUnsupported: "This browser or device does not support passkeys.",
       passkeyFailed: "Passkey sign-in did not complete.",
       qrLogin: "Scan",
@@ -624,6 +636,8 @@ function loginCopy(locale: "zh" | "en") {
     magicLinkUnavailable: "当前平台尚未配置免密链接服务。",
     phoneOtpSent: "验证码已发送到手机。",
     passkeyLogin: "使用 Passkey",
+    showPassword: "显示密码",
+    hidePassword: "隐藏密码",
     passkeyUnsupported: "当前浏览器或设备暂不支持 Passkey。",
     passkeyFailed: "Passkey 登录没有完成。",
     qrLogin: "扫码",
