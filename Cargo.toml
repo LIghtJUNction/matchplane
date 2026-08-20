@@ -5,6 +5,7 @@ members = [
   "crates/matchplane-domain",
   "crates/matchplane-engine",
   "crates/matchplane-events",
+  "crates/matchplane-agent-runtime",
   "crates/matchplane-observability",
   "crates/matchplane-payments",
   "crates/matchplane-protocol",
@@ -56,6 +57,7 @@ redis = {
     features = ["connection-manager", "tokio-rustls-comp"],
 }
 reqwest = { version = "0.13.4", default-features = false, features = ["form", "json", "rustls", "stream"] }
+rig-core = { version = "0.42.0", default-features = false }
 rpassword = "7.5.4"
 rsa = { version = "0.9.10", features = ["sha2"] }
 scrypt = "0.11.0"
