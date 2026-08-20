@@ -843,7 +843,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       if (!session && !authState?.data) {
         const next = `${window.location.pathname}${window.location.search}`;
         window.sessionStorage.setItem(PENDING_CHAT_KEY, JSON.stringify({ text, next } satisfies PendingChat));
-        window.location.assign(`/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`);
+        window.location.assign(`/login?next=${encodeURIComponent(next)}`);
         return;
       }
       setSignedIn(true);

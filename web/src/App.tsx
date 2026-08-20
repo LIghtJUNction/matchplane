@@ -35,8 +35,6 @@ import {
   clearPartySessionCache,
   getPaymentSetting,
   type RecommendedBackendListing,
-  type MarketplaceAttachment,
-  type PlatformRouteHop,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
   switchPaymentMode,
@@ -51,7 +49,6 @@ interface AuthenticatedUser {
   name?: string | null;
   email?: string | null;
   role?: string | null;
-  marketplaceRole?: "buyer" | "seller" | null;
 }
 
 export function App({ initialPath = "/" }: { initialPath?: string }) {
@@ -60,13 +57,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform(initialPath));
   const [listings, setListings] = useState<AssetListing[]>([]);
-  const [sellerDraft, setSellerDraft] = useState<{
-    narrative: string;
-    intentId?: string;
-    attributes: Record<string, unknown>;
-    terms: Record<string, unknown>;
-    attachments?: MarketplaceAttachment[];
-  } | null>(null);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
@@ -83,10 +73,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   // safe buyer surface. Otherwise `?role=platform` can be overwritten before Better Auth
   // resolves, which silently strands a valid administrator in the buyer workspace.
   const requestedRoleRef = useRef<WorkspaceRole>(roleFromLocation());
-
-  useEffect(() => {
-    if (role !== "seller") setSellerDraft(null);
-  }, [role, subplatform.path]);
 
   useEffect(() => {
     setPluginFailed(false);
@@ -144,8 +130,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         }
         if (user && requiresAuthenticatedWorkspace(requestedRole)) {
           setRole(requestedRole);
-        } else if (user?.marketplaceRole === "seller") {
-          setRole("seller");
         }
       })
       .catch(() => {
@@ -163,8 +147,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     };
   }, [subplatform.slug]);
 
-  const openSignIn = (targetRole: WorkspaceRole = role) => {
-    window.location.assign(loginHref(targetRole));
+  const openSignIn = () => {
+    window.location.assign(loginHref(role));
   };
 
   const signOut = async () => {
@@ -179,7 +163,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       setRole("buyer");
       requestedRoleRef.current = "buyer";
       const url = new URL(window.location.href);
-      url.searchParams.set("role", "buyer");
+      url.searchParams.delete("role");
       window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
       setNotice(ui.signedOut);
     } catch (error) {
@@ -187,32 +171,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     }
   };
 
-  const selectSellerPlatform = useCallback(async (hop: PlatformRouteHop) => {
-    if (!authUser) {
-      openSignIn("seller");
-      return;
-    }
-    const loaded = await loadSubplatform(hop.path);
-    // The route decision owns the target identity; the package only fills in its UI/schema.
-    // Keep the browser in one process and update the URL so refresh/back links remain scoped.
-    setSubplatform({
-      ...loaded,
-      slug: hop.slug,
-      path: hop.path,
-      tenantId: hop.tenantId,
-      domainId: hop.domainId,
-    });
-    requestedRoleRef.current = "seller";
-    const url = new URL(window.location.href);
-    url.pathname = hop.path;
-    url.searchParams.set("role", "seller");
-    window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
-  }, [authUser]);
-
   useEffect(() => {
     if (!hydrated) return;
     const url = new URL(window.location.href);
-    url.searchParams.set("role", role);
+    if (role === "buyer") url.searchParams.delete("role");
+    else url.searchParams.set("role", role);
     window.history.replaceState(null, "", url);
   }, [hydrated, role]);
 
@@ -254,24 +217,22 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     setNotice(`支付系统已切换为${nextMode === "test" ? "测试" : "生产"}模式`);
   };
 
-  const genericWorkspace: ReactNode = role === "buyer" ? (
-    <BuyerDashboard listings={listings} locale={locale} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
-  ) : role === "seller" ? (
-    null
-  ) : role === "subplatform_admin" ? (
+  const genericWorkspace: ReactNode = role === "subplatform_admin" ? (
     <SubplatformAdminDashboard onNotice={setNotice} subplatform={subplatform} />
-  ) : (
+  ) : role === "platform" ? (
     <PlatformDashboard
       paymentMode={paymentMode}
       rootRole={authUser?.role}
       onRequestModeChange={() => setModeDialogOpen(true)}
       onNotice={setNotice}
     />
+  ) : (
+    <BuyerDashboard listings={listings} locale={locale} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
   );
   const fullscreenPlugin = subplatform.slug !== "root"
     && Boolean(subplatform.pluginArtifact)
     && !pluginFailed
-    && (role === "buyer" || role === "seller");
+    && role === "buyer";
   const pluginWorkspace = subplatform.pluginArtifact ? (
     <PluginHost
       fullscreen={fullscreenPlugin}
@@ -281,9 +242,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       locale={locale}
       onNotice={setNotice}
       subplatform={subplatform}
-      listings={role === "buyer" ? listings : []}
+      listings={listings}
       onOpenListing={setListing}
-      sellerDraft={sellerDraft}
       fallback={genericWorkspace}
     />
   ) : null;
@@ -376,14 +336,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 exit={{ opacity: 0, y: -8 }}
                 transition={spring}
               >
-                {role === "buyer" || role === "seller" ? (
+                {role === "buyer" ? (
                   <MatchChat
                     role={role}
                     locale={locale}
                     onNotice={setNotice}
                     onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform, locale))}
-                    onSellerDraft={role === "seller" ? setSellerDraft : undefined}
-                    onSellerPlatformSelected={selectSellerPlatform}
                     subplatform={subplatform}
                   />
                 ) : null}
@@ -399,15 +357,15 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
-          title={role === "seller" ? ui.sellerConsoleTitle : ui.console}
-          description={role === "seller" ? ui.sellerConsoleDescription : ui.consoleDescription}
-          className={role === "seller" ? "workspace-settings-dialog-wide" : undefined}
+          title={ui.console}
+          description={ui.consoleDescription}
+          className="workspace-settings-dialog-wide"
           closeLabel={ui.closeConsole}
           backdropLabel={ui.closeConsoleDialog}
         >
           <div className="workspace-settings-overview">
-            {authUser && role === "buyer" ? <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} /> : null}
-            {role === "seller" ? <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} agentDraft={sellerDraft} /> : null}
+            <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} />
+            <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} />
           </div>
         </WorkspaceSettingsDialog>}
 
@@ -574,12 +532,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 function roleFromLocation(): WorkspaceRole {
   if (typeof window === "undefined") return "buyer";
   const requested = new URLSearchParams(window.location.search).get("role");
-  return requested === "seller" || requested === "platform" || requested === "subplatform_admin" ? requested : "buyer";
+  return requested === "platform" || requested === "subplatform_admin" ? requested : "buyer";
 }
 
-/** Supply and administration are authenticated workspaces, never public destinations. */
+/** Administration is authenticated; the public matching conversation remains available to visitors. */
 function requiresAuthenticatedWorkspace(role: WorkspaceRole): boolean {
-  return role === "seller" || role === "platform" || role === "subplatform_admin";
+  return role === "platform" || role === "subplatform_admin";
 }
 
 /** Keep the intended workspace through Better Auth without trusting an external redirect. */
@@ -600,18 +558,14 @@ function parentPlatformHref(path: string, role: WorkspaceRole): string {
 function roleLabel(role: WorkspaceRole, locale: "zh" | "en", subplatform: SubplatformConfig): string {
   if (locale === "en") {
     return role === "buyer"
-      ? subplatformCopy(subplatform, "demandRoleLabelEn", "Demand")
-      : role === "seller"
-        ? subplatformCopy(subplatform, "supplyRoleLabelEn", "Supply")
-        : role === "subplatform_admin"
+      ? "Account"
+      : role === "subplatform_admin"
           ? subplatformCopy(subplatform, "subplatformAdminLabelEn", "Platform admin")
           : subplatformCopy(subplatform, "platformAdminLabelEn", "Admin");
   }
   return role === "buyer"
-    ? subplatformCopy(subplatform, "demandRoleLabel", "需求方")
-    : role === "seller"
-      ? subplatformCopy(subplatform, "supplyRoleLabel", "供给方")
-      : role === "subplatform_admin"
+    ? "统一账号"
+    : role === "subplatform_admin"
         ? subplatformCopy(subplatform, "subplatformAdminLabel", "子平台管理员")
         : subplatformCopy(subplatform, "platformAdminLabel", "平台管理员");
 }
@@ -623,11 +577,9 @@ function appCopy(locale: "zh" | "en") {
       backToParent: "Back to parent platform",
       rootPlatform: "Root platform",
       console: "Console",
-      consoleDescription: "Manage the current workspace.",
+      consoleDescription: "Manage your requests, listings, and contact details.",
       closeConsole: "Close console",
       closeConsoleDialog: "Close console dialog",
-      sellerConsoleTitle: "Seller console",
-      sellerConsoleDescription: "Manage your real supply details.",
       account: "Account",
       accountMenu: "Account menu",
       accountDescription: "Manage your account identity and sign out.",
@@ -638,8 +590,6 @@ function appCopy(locale: "zh" | "en") {
       signIn: "Sign in",
       user: "MatchPlane user",
       unifiedIdentity: "Unified identity",
-      buyerWorkspace: "Buyer workspace",
-      sellerWorkspace: "Seller workspace",
       subplatformAdmin: "Platform admin",
       platformAdmin: "Platform admin",
       signOut: "Sign out",
@@ -652,11 +602,9 @@ function appCopy(locale: "zh" | "en") {
     backToParent: "返回上一级平台",
     rootPlatform: "根平台",
     console: "控制台",
-    consoleDescription: "管理当前身份下的工作台。",
+    consoleDescription: "管理你的需求、商品和联系方式。",
     closeConsole: "关闭控制台",
     closeConsoleDialog: "关闭控制台对话框",
-    sellerConsoleTitle: "卖方控制台",
-    sellerConsoleDescription: "管理真实供给资料。",
     account: "账号",
     accountMenu: "账号菜单",
     accountDescription: "管理当前账号与登录状态。",
@@ -667,8 +615,6 @@ function appCopy(locale: "zh" | "en") {
     signIn: "登录",
     user: "MatchPlane 用户",
     unifiedIdentity: "已登录的统一身份",
-    buyerWorkspace: "买方工作台",
-    sellerWorkspace: "卖方工作台",
     subplatformAdmin: "子平台管理",
     platformAdmin: "根平台管理",
     signOut: "退出登录",

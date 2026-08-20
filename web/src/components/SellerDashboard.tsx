@@ -377,7 +377,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
     }
     if (!session) {
       const next = `${window.location.pathname}${window.location.search}`;
-      window.location.assign(`/login?role=seller&next=${encodeURIComponent(next)}`);
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
       return;
     }
     setSubmitting(true);
@@ -644,7 +644,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       ) : null}
 
       <div id="seller-panel-contacts" className="seller-settings-panel" role="tabpanel" hidden={activePanel !== "contacts"}>
-        <ContactProfileCard locale={locale} subplatform={subplatform} role="seller" onNotice={onNotice} />
+        {activePanel === "contacts" ? <ContactProfileCard locale={locale} subplatform={subplatform} role="seller" onNotice={onNotice} /> : null}
         <section className="surface seller-submissions" aria-labelledby="seller-introductions-title">
           <SectionHeading eyebrow={copy("contactRequestsEyebrow", "联系申请")} title={copy("contactRequestsTitle", "需要你明确同意，才会交换联系方式")} />
         {introductionsError ? (

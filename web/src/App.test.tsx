@@ -93,7 +93,7 @@ describe("MatchPlane workspaces", () => {
     expect(screen.queryByText("独立打开")).not.toBeInTheDocument();
   });
 
-  it("never renders the seller workspace or settings for an anonymous seller route", async () => {
+  it("treats a legacy seller URL as the public unified entry until the user signs in", async () => {
     window.history.replaceState(null, "", "/?role=seller");
     render(<App />);
 
@@ -103,13 +103,13 @@ describe("MatchPlane workspaces", () => {
     expect(await screen.findByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 
-  it("does not fabricate a seller submission when the marketplace API is disabled", async () => {
+  it("gives every signed-in account one console for contacts and publishing", async () => {
     const user = userEvent.setup();
-    window.history.replaceState(null, "", "/?role=seller");
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
     await openConsoleFromAccountMenu(user);
+    expect(screen.getByText("设置双方同意后交换的渠道")).toBeInTheDocument();
     await user.type(await screen.findByLabelText("商品名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("商品描述"), "一辆经过整理的二手车");
     await user.type(screen.getByLabelText("价格"), "128000");

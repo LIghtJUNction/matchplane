@@ -291,7 +291,6 @@ async function submitPluginListing(
   };
 
   try {
-    if (input.role !== "seller") throw new Error(subplatformCopy(input.subplatform, "supplyOnlyError", "只有供给方可以提交资料"));
     if (!isLiveMarketplaceEnabled()) throw new Error("插件供给提交需要连接真实平台 API");
     if (!input.subplatform.tenantId || !input.subplatform.domainId) {
       throw new Error("当前子平台尚未发布完整的身份配置");
@@ -327,8 +326,8 @@ async function submitPluginListing(
     });
     if (!session) {
       const next = `${window.location.pathname}${window.location.search}`;
-      input.onNotice(subplatformCopy(input.subplatform, "supplyLoginNotice", "请先登录供给方账号，登录后会回到当前子平台"));
-      window.location.assign(`/login?role=seller&next=${encodeURIComponent(next)}`);
+      input.onNotice(subplatformCopy(input.subplatform, "supplyLoginNotice", "请先登录，登录后会回到当前子平台"));
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
       throw new Error("Better Auth 会话尚未建立");
     }
 
