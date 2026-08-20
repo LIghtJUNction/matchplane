@@ -49,6 +49,7 @@ export async function POST(request: Request): Promise<Response> {
       `SELECT invite.id::text AS "inviteId",
               invite.organization_id::text AS "organizationId",
               invite.role,
+              invite.target_email AS "targetEmail",
               organization."tenantId" AS "tenantId",
               organization."rootPlatform" AS "rootPlatform",
               invite.claimed_by::text AS "claimedBy",
@@ -66,6 +67,10 @@ export async function POST(request: Request): Promise<Response> {
     if (!invite) {
       await client.query("ROLLBACK");
       return jsonError("管理员注册链接无效或已过期", 410);
+    }
+    if (invite.targetEmail && invite.targetEmail.toLowerCase() !== session.user.email.toLowerCase()) {
+      await client.query("ROLLBACK");
+      return jsonError("管理员邀请仅限指定邮箱注册", 403);
     }
     if (invite.role === "rootAdmin" && invite.rootPlatform !== true) {
       await client.query("ROLLBACK");
@@ -170,6 +175,7 @@ interface InviteRow {
   inviteId: string;
   organizationId: string;
   role: "rootAdmin" | "subplatform_admin";
+  targetEmail: string | null;
   tenantId: string;
   rootPlatform: boolean;
   claimedBy: string | null;

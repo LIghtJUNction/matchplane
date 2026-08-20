@@ -731,6 +731,12 @@ export interface RootEmailConfig {
   updatedAt: string;
 }
 
+export interface PlatformAdminInvite {
+  email: string;
+  expiresAt: string;
+  registrationUrl: string;
+}
+
 /** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
 export type ContactExchange = Record<string, string>;
 
@@ -1156,6 +1162,18 @@ export async function testRootEmailConfig(): Promise<void> {
   });
   const body = await response.json().catch(() => null) as { error?: string } | null;
   if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "根邮箱测试失败");
+}
+
+export async function createPlatformAdminInvite(input: { email: string; expiresHours?: number }): Promise<PlatformAdminInvite> {
+  const response = await fetch("/api/platform/admin-invites", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as (PlatformAdminInvite & { error?: string }) | null;
+  if (!response.ok || !body?.registrationUrl) throw new MarketplaceApiError(response.status, body?.error || "平台管理员邀请创建失败");
+  return body;
 }
 
 export async function getPublicPlatformSiteSettings(platformPath = "/"): Promise<PlatformSiteSettings> {

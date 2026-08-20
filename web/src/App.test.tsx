@@ -33,9 +33,9 @@ import { App } from "./App";
 import { clearPartySessionCache, savePartySession } from "./api";
 import { authClient } from "./lib/auth-client";
 
-async function openSettingsFromAccountMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+async function openConsoleFromAccountMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(await screen.findByRole("button", { name: "账号菜单" }));
-  await user.click(await screen.findByRole("menuitem", { name: "设置" }));
+  await user.click(await screen.findByRole("menuitem", { name: "控制台" }));
 }
 
 beforeEach(() => {
@@ -109,7 +109,7 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await openSettingsFromAccountMenu(user);
+    await openConsoleFromAccountMenu(user);
     await user.type(await screen.findByLabelText("供给名称"), "由卖家提交的资料");
     await user.type(screen.getByLabelText("内部编号"), "seller-item");
     await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
@@ -213,9 +213,9 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await openSettingsFromAccountMenu(user);
-    expect(screen.getByRole("dialog", { name: "设置" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭设置" }));
+    await openConsoleFromAccountMenu(user);
+    expect(screen.getByRole("dialog", { name: "控制台" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭控制台" }));
 
     const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
     await user.click(input);

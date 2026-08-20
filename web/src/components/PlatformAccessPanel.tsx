@@ -3,6 +3,7 @@ import { Globe2, MailPlus, ShieldCheck, UserMinus, Users } from "lucide-react";
 
 import {
   createPlatformApiKey,
+  createPlatformAdminInvite,
   createPlatformOidcClient,
   activateFederationBinding,
   createFederationInvite,
@@ -20,8 +21,8 @@ import {
   updatePlatformMember,
   updatePlatformApiKey,
   updatePlatformOidcClient,
-  updatePlatformAdministrator,
   type PlatformAdministratorRecord,
+  type PlatformAdminInvite,
   type PlatformApiKeyRecord,
   type PlatformOidcClientRecord,
   type PlatformMemberDirectory,
@@ -49,6 +50,8 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
   const [administrators, setAdministrators] = useState<PlatformAdministratorRecord[]>([]);
   const [administratorLoading, setAdministratorLoading] = useState(false);
+  const [administratorInviteEmail, setAdministratorInviteEmail] = useState("");
+  const [newAdministratorInvite, setNewAdministratorInvite] = useState<PlatformAdminInvite | null>(null);
   const [apiKeys, setApiKeys] = useState<PlatformApiKeyRecord[]>([]);
   const [apiKeyLoading, setApiKeyLoading] = useState(false);
   const [apiKeyName, setApiKeyName] = useState("");
@@ -197,14 +200,19 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
     }
   };
 
-  const changeAdministratorRole = async (administrator: PlatformAdministratorRecord, role: "rootAdmin" | "user") => {
+  const issueAdministratorInvite = async () => {
+    if (!administratorInviteEmail.trim()) {
+      onNotice("请填写平台管理员邮箱");
+      return;
+    }
     setAdministratorLoading(true);
     try {
-      await updatePlatformAdministrator({ userId: administrator.id, role });
-      setAdministrators(await getPlatformAdministrators());
-      onNotice(role === "rootAdmin" ? "根平台管理员权限已授予" : "根平台管理员权限已收回");
+      const invite = await createPlatformAdminInvite({ email: administratorInviteEmail.trim(), expiresHours: 24 });
+      setAdministratorInviteEmail("");
+      setNewAdministratorInvite(invite);
+      onNotice("平台管理员注册链接已生成；请通过安全渠道发送给指定邮箱");
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "根管理员权限更新失败");
+      onNotice(error instanceof Error ? error.message : "平台管理员邀请创建失败");
     } finally {
       setAdministratorLoading(false);
     }
@@ -471,12 +479,14 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
       )}
       {rootRole === "rootSuperAdmin" || rootRole === "rootAdmin" ? (
         <div className="root-administrator-panel">
-          <div className="subsection-heading"><div><p className="eyebrow">根平台账号</p><strong>管理员权限</strong></div><small>{administratorLoading ? "读取中…" : "账号先完成登录，再在这里授权"}</small></div>
+          <div className="subsection-heading"><div><p className="eyebrow">根平台账号</p><strong>管理员权限</strong></div><small>{administratorLoading ? "读取中…" : rootRole === "rootSuperAdmin" ? "管理员必须通过一次性邀请链接注册" : "只有超级管理员可以创建邀请"}</small></div>
+          {rootRole === "rootSuperAdmin" ? <div className="platform-access-invite"><label><span>管理员邮箱</span><input type="email" value={administratorInviteEmail} onChange={(event) => setAdministratorInviteEmail(event.target.value)} placeholder="admin@example.com" /></label><button className="button button-dark" type="button" disabled={administratorLoading} onClick={() => void issueAdministratorInvite()}>创建注册链接</button></div> : null}
+          {newAdministratorInvite ? <div className="api-key-secret"><div><strong>仅发给 {newAdministratorInvite.email}</strong><code>{newAdministratorInvite.registrationUrl}</code><small>到期 {new Date(newAdministratorInvite.expiresAt).toLocaleString()}</small></div><button type="button" onClick={() => void copySecret(newAdministratorInvite.registrationUrl)}>复制</button><button type="button" onClick={() => setNewAdministratorInvite(null)}>关闭</button></div> : null}
           <div className="root-administrator-list" aria-label="根平台账号列表">
             {administrators.length ? administrators.map((administrator) => (
               <div className="root-administrator-row" key={administrator.id}>
                 <span><strong>{administrator.name || administrator.email}</strong><small>{administrator.email}{administrator.emailVerified ? " · 已验证" : " · 待验证"}</small></span>
-                {rootRole === "rootSuperAdmin" && administrator.role !== "rootSuperAdmin" ? <select value={administrator.role === "rootAdmin" ? "rootAdmin" : "user"} disabled={administratorLoading || !administrator.emailVerified} title={administrator.emailVerified ? undefined : "先完成邮箱验证"} aria-label={`${administrator.email} 的根平台权限`} onChange={(event) => void changeAdministratorRole(administrator, event.target.value as "rootAdmin" | "user")}><option value="user">普通账号</option><option value="rootAdmin">根平台管理员</option></select> : <b className="status-chip is-on">{administrator.role === "rootSuperAdmin" ? "超级管理员" : administrator.role === "rootAdmin" ? "管理员" : "普通账号"}</b>}
+                <b className={administrator.role === "rootSuperAdmin" || administrator.role === "rootAdmin" ? "status-chip is-on" : "status-chip"}>{administrator.role === "rootSuperAdmin" ? "超级管理员" : administrator.role === "rootAdmin" ? "管理员" : "普通账号"}</b>
               </div>
             )) : <p className="platform-access-empty">{administratorLoading ? "正在读取账号…" : "还没有可管理的账号"}</p>}
           </div>

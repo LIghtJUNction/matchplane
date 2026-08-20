@@ -83,6 +83,18 @@ enum Command {
         #[arg(long, env = "BETTER_AUTH_URL")]
         base_url: Option<String>,
     },
+    /// Issue the single, one-time registration URL for the first root super administrator.
+    SuperAdminInvite {
+        /// Optionally bind the one-time link to this registration email.
+        #[arg(long)]
+        email: Option<String>,
+        /// Link lifetime in hours. The CLI caps this at seven days.
+        #[arg(long, default_value_t = 24)]
+        expires_hours: u32,
+        /// Public web origin to place in the registration URL. Defaults to BETTER_AUTH_URL.
+        #[arg(long, env = "BETTER_AUTH_URL")]
+        base_url: Option<String>,
+    },
     /// Manage Better Auth credentials through operator-only maintenance actions.
     Auth {
         #[command(subcommand)]
@@ -234,6 +246,11 @@ async fn main() -> Result<()> {
             expires_hours,
             base_url,
         } => create_admin_invite(role, organization_id, expires_hours, base_url).await,
+        Command::SuperAdminInvite {
+            email,
+            expires_hours,
+            base_url,
+        } => create_super_admin_invite(email, expires_hours, base_url).await,
         Command::Auth {
             command:
                 AuthCommand::Passwd {
@@ -412,6 +429,11 @@ async fn create_admin_invite(
     if !(1..=168).contains(&expires_hours) {
         bail!("--expires-hours must be between 1 and 168");
     }
+    if matches!(role, AdminInviteRole::RootAdmin) {
+        bail!(
+            "root-admin invitations must be created by a logged-in root super administrator in the platform console"
+        );
+    }
     let root_tenant_id = env::var("MATCHPLANE_ROOT_TENANT_ID")
         .context("MATCHPLANE_ROOT_TENANT_ID is required before issuing an administrator invite")?;
     let root_tenant_id = Uuid::parse_str(root_tenant_id.trim())
@@ -527,6 +549,117 @@ async fn create_admin_invite(
             "expiresInHours": expires_hours,
         }))
         .context("administrator invite output failed")?
+    );
+    Ok(())
+}
+
+async fn create_super_admin_invite(
+    email: Option<String>,
+    expires_hours: u32,
+    base_url: Option<String>,
+) -> Result<()> {
+    if !(1..=168).contains(&expires_hours) {
+        bail!("--expires-hours must be between 1 and 168");
+    }
+    let target_email = email
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
+    if let Some(value) = &target_email {
+        validate_operator_email(value)?;
+    }
+    let root_tenant_id = env::var("MATCHPLANE_ROOT_TENANT_ID")
+        .context("MATCHPLANE_ROOT_TENANT_ID is required before issuing a super-admin invite")?;
+    let root_tenant_id = Uuid::parse_str(root_tenant_id.trim())
+        .context("MATCHPLANE_ROOT_TENANT_ID must be a UUID")?;
+    validate_operator_uuid(root_tenant_id, "MATCHPLANE_ROOT_TENANT_ID")?;
+    let config = AppConfig::load().context("super-admin invite configuration is invalid")?;
+    let store = PgStore::connect(&config.database_url, 2)
+        .await
+        .context("super-admin invite could not connect to PostgreSQL")?;
+    store
+        .migrate()
+        .await
+        .context("super-admin invite could not apply database migrations")?;
+    let expires_at = OffsetDateTime::now_utc() + TimeDuration::hours(i64::from(expires_hours));
+    let raw_token = format!(
+        "mpsa_{}{}",
+        Uuid::now_v7().simple(),
+        Uuid::now_v7().simple()
+    );
+    let token_hash = sha256(&raw_token);
+
+    let mut transaction = store
+        .pool()
+        .begin()
+        .await
+        .context("super-admin invite transaction could not start")?;
+    let existing =
+        sqlx::query("SELECT count(*)::text AS count FROM \"user\" WHERE role = 'rootSuperAdmin'")
+            .fetch_one(&mut *transaction)
+            .await
+            .context("super-admin invite could not inspect existing accounts")?;
+    let existing_count: String = existing
+        .try_get("count")
+        .context("super-admin count is invalid")?;
+    if existing_count.parse::<u64>().unwrap_or(1) > 0 {
+        bail!(
+            "a root super administrator already exists; use the platform invitation controls for additional administrators"
+        );
+    }
+    let active = sqlx::query(
+        "SELECT expires_at FROM root_superadmin_invites WHERE tenant_id = $1::uuid FOR UPDATE",
+    )
+    .bind(root_tenant_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .context("super-admin invite could not inspect existing link")?;
+    if let Some(row) = active {
+        let active_expiry: OffsetDateTime = row
+            .try_get("expires_at")
+            .context("super-admin invite expiry is invalid")?;
+        if active_expiry > OffsetDateTime::now_utc() {
+            bail!(
+                "an active super-admin registration link already exists; wait for expiry or complete that registration"
+            );
+        }
+        sqlx::query("DELETE FROM root_superadmin_invites WHERE tenant_id = $1::uuid")
+            .bind(root_tenant_id)
+            .execute(&mut *transaction)
+            .await
+            .context("expired super-admin link could not be replaced")?;
+    }
+    sqlx::query(
+        "INSERT INTO root_superadmin_invites (tenant_id, token_hash, target_email, expires_at) VALUES ($1::uuid, $2, $3, $4)",
+    )
+    .bind(root_tenant_id)
+    .bind(&token_hash)
+    .bind(&target_email)
+    .bind(expires_at)
+    .execute(&mut *transaction)
+    .await
+    .context("super-admin link could not be stored")?;
+    transaction
+        .commit()
+        .await
+        .context("super-admin invite transaction could not commit")?;
+
+    let base_url = normalize_admin_base_url(
+        base_url
+            .or_else(|| env::var("BETTER_AUTH_URL").ok())
+            .unwrap_or_else(|| "http://localhost:4173".to_owned()),
+    )?;
+    let next = "/?role=platform";
+    let encoded_next: String = url::form_urlencoded::byte_serialize(next.as_bytes()).collect();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "role": "rootSuperAdmin",
+            "targetEmail": target_email,
+            "expiresAt": expires_at,
+            "registrationUrl": format!("{base_url}/admin/register?bootstrap_token={raw_token}&next={encoded_next}"),
+            "expiresInHours": expires_hours,
+        }))
+        .context("super-admin invite output failed")?
     );
     Ok(())
 }
@@ -1717,6 +1850,25 @@ mod tests {
         ));
         assert!(valid_root_email_secret_slot("smtp.password_2026"));
         assert!(!valid_root_email_secret_slot("../smtp-password"));
+    }
+
+    #[test]
+    fn super_admin_invite_command_accepts_an_optional_email_binding() {
+        let cli = Cli::try_parse_from([
+            "matchplane",
+            "super-admin-invite",
+            "--email",
+            "owner@matx.tech",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::SuperAdminInvite {
+                email: Some(email),
+                expires_hours: 24,
+                base_url: None,
+            } if email == "owner@matx.tech"
+        ));
     }
 
     #[test]

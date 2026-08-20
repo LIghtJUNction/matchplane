@@ -51,6 +51,7 @@ interface AuthenticatedUser {
   name?: string | null;
   email?: string | null;
   role?: string | null;
+  marketplaceRole?: "buyer" | "seller" | null;
 }
 
 export function App({ initialPath = "/" }: { initialPath?: string }) {
@@ -132,7 +133,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           setNotice("当前账号没有根平台管理员权限");
           return;
         }
-        if (user && requiresAuthenticatedWorkspace(requestedRole)) setRole(requestedRole);
+        if (user && requiresAuthenticatedWorkspace(requestedRole)) {
+          setRole(requestedRole);
+        } else if (user?.marketplaceRole === "seller") {
+          setRole("seller");
+        }
       })
       .catch(() => {
         setAuthUser(null);
@@ -335,7 +340,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                         <div className="account-menu-identity"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></div>
                         <div className="account-menu-links">
                           <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setAccountOpen(true); }}><UserRound size={16} aria-hidden="true" />{ui.account}</button>
-                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><Settings2 size={16} aria-hidden="true" />{ui.settings}</button>
+                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><Settings2 size={16} aria-hidden="true" />{ui.console}</button>
                         </div>
                         <button className="account-menu-signout" type="button" role="menuitem" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
                       </div>
@@ -380,11 +385,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
-          title={role === "seller" ? ui.sellerSettingsTitle : ui.settingsTitle}
-          description={role === "seller" ? ui.sellerSettingsDescription : ui.settingsDescription}
+          title={role === "seller" ? ui.sellerConsoleTitle : ui.console}
+          description={role === "seller" ? ui.sellerConsoleDescription : ui.consoleDescription}
           className={role === "seller" ? "workspace-settings-dialog-wide" : undefined}
-          closeLabel={ui.closeSettings}
-          backdropLabel={ui.closeSettingsDialog}
+          closeLabel={ui.closeConsole}
+          backdropLabel={ui.closeConsoleDialog}
         >
           <div className="workspace-settings-overview">
             {authUser && role === "buyer" ? <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} /> : null}
@@ -603,13 +608,12 @@ function appCopy(locale: "zh" | "en") {
       skipToContent: "Skip to content",
       backToParent: "Back to parent platform",
       rootPlatform: "Root platform",
-      settings: "Settings",
-      settingsTitle: "Settings",
-      settingsDescription: "Manage settings for this workspace.",
-      closeSettings: "Close settings",
-      closeSettingsDialog: "Close settings dialog",
-      sellerSettingsTitle: "Offer settings",
-      sellerSettingsDescription: "Review your profile and publish real supply details.",
+      console: "Console",
+      consoleDescription: "Manage the current workspace.",
+      closeConsole: "Close console",
+      closeConsoleDialog: "Close console dialog",
+      sellerConsoleTitle: "Seller console",
+      sellerConsoleDescription: "Manage your real supply details.",
       account: "Account",
       accountMenu: "Account menu",
       accountDescription: "Manage your account identity and sign out.",
@@ -633,13 +637,12 @@ function appCopy(locale: "zh" | "en") {
     skipToContent: "跳到主要内容",
     backToParent: "返回上一级平台",
     rootPlatform: "根平台",
-    settings: "设置",
-    settingsTitle: "设置",
-    settingsDescription: "管理当前身份下的工作台设置。",
-    closeSettings: "关闭设置",
-    closeSettingsDialog: "关闭设置对话框",
-    sellerSettingsTitle: "供给设置",
-    sellerSettingsDescription: "检查资料，并提交真实供给信息。",
+    console: "控制台",
+    consoleDescription: "管理当前身份下的工作台。",
+    closeConsole: "关闭控制台",
+    closeConsoleDialog: "关闭控制台对话框",
+    sellerConsoleTitle: "卖方控制台",
+    sellerConsoleDescription: "管理真实供给资料。",
     account: "账号",
     accountMenu: "账号菜单",
     accountDescription: "管理当前账号与登录状态。",
