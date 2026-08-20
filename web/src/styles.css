@@ -5050,6 +5050,19 @@ main.subplatform-fullscreen-main {
 .login-passkey-action { margin-top: 0.7rem; }
 .login-passkey-action > button { width: 100%; }
 
+.session-panel .workspace-settings-section-heading > div { display: grid; gap: 0.28rem; }
+.session-panel .workspace-settings-section-heading > svg { color: var(--cactus-deep); }
+.session-panel .workspace-settings-section-heading p,
+.session-empty,
+.session-list small { margin: 0; color: var(--muted); font-size: 0.72rem; line-height: 1.45; }
+.session-panel-actions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.8rem; }
+.session-list { display: grid; gap: 0.45rem; margin: 0.9rem 0 0; padding: 0; list-style: none; }
+.session-list li { display: flex; align-items: center; gap: 0.7rem; padding: 0.65rem 0.72rem; border: 1px solid var(--line); border-radius: 0.7rem; background: var(--paper); }
+.session-list li > svg { flex: 0 0 auto; color: var(--cactus-deep); }
+.session-list-copy { display: grid; gap: 0.14rem; min-width: 0; flex: 1; }
+.session-list strong { color: var(--ink); font-size: 0.78rem; }
+.session-empty { margin-top: 0.85rem; }
+
 .header-admin-action {
   min-height: 2.35rem;
   padding: 0 0.72rem;

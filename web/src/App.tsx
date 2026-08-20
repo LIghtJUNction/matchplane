@@ -22,6 +22,7 @@ import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboar
 import { PluginHost } from "./components/PluginHost";
 import { MatchChat } from "./components/MatchChat";
 import { PasskeyPanel } from "./components/PasskeyPanel";
+import { SessionPanel } from "./components/SessionPanel";
 import { PlatformFooter } from "./components/PlatformFooter";
 import { PlatformMenu } from "./components/PlatformMenu";
 import { WorkspaceSettingsDialog } from "./components/WorkspaceSettingsDialog";
@@ -391,6 +392,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               </div>
             </section>
             <PasskeyPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
+            <SessionPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
           </div>
         </WorkspaceSettingsDialog>}
 
