@@ -49,12 +49,13 @@ export async function POST(request: Request): Promise<Response> {
   const scopes = normalizeScopes(input.requestedScopes);
   if (!scopes) return jsonError("requestedScopes 包含未允许的权限", 400);
 
-  const parentId = parentOrganizationId || await readRootOrganizationId(tenantId);
-  if (!parentId) return jsonError("请先初始化根平台组织，再导入子平台", 409);
+  const parentId = await readRootOrganizationId(tenantId);
+  if (!parentId) return jsonError("请先初始化商城，再接入店铺", 409);
+  if (parentOrganizationId && parentOrganizationId !== parentId) {
+    return jsonError("店铺只能直接接入商城，不能嵌套在其他店铺中", 400);
+  }
   const role = (session.user as { role?: string }).role;
   if (!(await canManageParent(session.user.id, role, parentId))) return jsonError("当前账号没有导入该平台节点的权限", 403);
-  const parentError = await validateParent(parentId, tenantId);
-  if (parentError) return jsonError(parentError, 400);
   const domain = await authDatabase.query(
     `SELECT 1 FROM domains WHERE tenant_id = $1::uuid AND id = $2::uuid AND status = 'active' LIMIT 1`,
     [tenantId, domainId],

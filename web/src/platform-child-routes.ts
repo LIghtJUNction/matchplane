@@ -33,6 +33,10 @@ export async function readActiveDirectChildRoutes(
     isRootAdministrator?: boolean;
   },
 ): Promise<PlatformChildRoute[]> {
+  // The v2 mall is intentionally flat. Its current store pointer is the sole authority for
+  // package/federation version selection; the recursive query below remains only for a legacy
+  // nested path that has not yet been projected into `stores`.
+  if (platformPath === "/") return readActiveStoreRoutes(rootTenantId, viewer);
   const result = await authDatabase.query(
     `WITH RECURSIVE platform_tree AS (
        SELECT root.id,
@@ -145,6 +149,91 @@ export async function readActiveDirectChildRoutes(
     ],
   );
 
+  return result.rows.map((row) => ({
+    slug: String(row.slug),
+    path: safeRoutePath(String(row.path), String(row.slug)),
+    displayName: String(row.displayName),
+    description: String(row.description),
+    tenantId: String(row.tenantId),
+    domainId: String(row.domainId),
+    capabilities: boundedStrings(row.capabilities, 64),
+    agentStages: boundedStrings(row.agentStages, 8),
+    agentSkills: boundedStrings(row.agentSkills, 32),
+    agentMcpTools: boundedStrings(row.agentMcpTools, 64),
+    mcpServerKey: boundedMcpServerKey(row.mcpServerKey, String(row.slug)),
+    depth: 1,
+  }));
+}
+
+async function readActiveStoreRoutes(
+  rootTenantId: string,
+  viewer?: {
+    authUserId?: string | null;
+    organizationId?: string | null;
+    isRootAdministrator?: boolean;
+  },
+): Promise<PlatformChildRoute[]> {
+  const result = await authDatabase.query(
+    `SELECT store.slug,
+            store.display_name AS "displayName",
+            store.description,
+            store.tenant_id::text AS "tenantId",
+            store.domain_id::text AS "domainId",
+            alias.path,
+            COALESCE(registration.manifest -> 'capabilities',
+                     CASE WHEN store.integration_kind = 'hosted' THEN '["marketplace"]'::jsonb ELSE '[]'::jsonb END) AS capabilities,
+            COALESCE(registration.manifest -> 'agent' -> 'stages', '[]'::jsonb) AS "agentStages",
+            COALESCE(registration.manifest -> 'agent' -> 'skills', '[]'::jsonb) AS "agentSkills",
+            COALESCE(registration.manifest -> 'agent' -> 'mcpTools', '[]'::jsonb) AS "agentMcpTools",
+            COALESCE(NULLIF(binding.mcp_server_key, ''),
+                     NULLIF(registration.manifest -> 'agent' ->> 'mcpServerKey', ''),
+                     store.slug) AS "mcpServerKey"
+       FROM stores store
+       JOIN domains domain
+         ON domain.tenant_id = store.tenant_id AND domain.id = store.domain_id AND domain.status = 'active'
+       JOIN store_path_aliases alias
+         ON alias.tenant_id = store.tenant_id AND alias.store_id = store.id AND alias.is_canonical = true
+       LEFT JOIN subplatform_registrations registration
+         ON registration.tenant_id = store.tenant_id
+        AND registration.domain_id = store.domain_id
+        AND registration.slug = store.slug
+        AND registration.id = store.current_registration_id
+        AND registration.state = 'active'
+       LEFT JOIN platform_federation_bindings binding
+         ON binding.tenant_id = store.tenant_id
+        AND binding.domain_id = store.domain_id
+        AND binding.slug = store.slug
+        AND binding.organization_id = store.organization_id
+        AND binding.id = store.federation_binding_id
+        AND binding.registration_id = registration.id
+        AND binding.status = 'active'
+      WHERE store.tenant_id = $1::uuid
+        AND store.status = 'active'
+        AND (
+          store.integration_kind = 'hosted'
+          OR (
+            registration.id IS NOT NULL
+            AND (registration.source_kind <> 'remote' OR binding.id IS NOT NULL)
+          )
+        )
+        AND (
+          store.visibility = 'public'
+          OR ($2::uuid IS NOT NULL AND EXISTS (
+            SELECT 1 FROM "member" member
+             WHERE member."organizationId" = store.organization_id
+               AND member."userId" = $2::uuid
+          ))
+          OR ($3::uuid IS NOT NULL AND $3::uuid = store.organization_id)
+          OR ($4::boolean IS TRUE)
+        )
+      ORDER BY store.slug`,
+    [
+      rootTenantId,
+      viewer?.authUserId ?? null,
+      viewer?.organizationId ?? null,
+      viewer?.isRootAdministrator === true,
+    ],
+  );
   return result.rows.map((row) => ({
     slug: String(row.slug),
     path: safeRoutePath(String(row.path), String(row.slug)),

@@ -58,7 +58,7 @@ const sellerEnglishFallbacks: Record<string, string> = {
   submissionWorkflowLabel: "Submissions enter this platform's review workflow",
   uploadEyebrow: "Upload",
   uploadTitle: "Submit a new offer",
-  uploadDescription: "Fields come from this platform's schema. The root stores structured JSON without guessing domain data.",
+  uploadDescription: "Add a product image, name, description, and price. The mall reviews it before it appears in search.",
   offerNameLabel: "Offer name",
   offerNamePlaceholder: "Describe it yourself",
   externalKeyLabel: "Internal reference",
@@ -100,17 +100,11 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
   const [displayName, setDisplayName] = useState("");
   const [productDescription, setProductDescription] = useState("");
   const [askingAmount, setAskingAmount] = useState("");
-  const [askingAmountMin, setAskingAmountMin] = useState("");
-  const [askingAmountMax, setAskingAmountMax] = useState("");
-  const [pricingNote, setPricingNote] = useState("");
   const pricing = pricingFor(subplatform);
   const copy = (key: string, fallbackZh: string, fallbackEn = sellerEnglishFallbacks[key] ?? fallbackZh) => localizedSubplatformCopy(subplatform, locale, key, fallbackZh, fallbackEn);
-  const isFixedPrice = pricing.mode === "fixed";
-  const isRangePrice = pricing.mode === "range";
-  const isNegotiablePrice = pricing.mode === "negotiable";
   const usesLegacyMarketplace = subplatform.marketplaceContract === "legacy-v1";
-  const pricingCurrency = pricing.currency ?? subplatform.currency;
-  const pricingScale = pricing.currencyScale ?? subplatform.currencyScale;
+  const pricingCurrency = pricing.currency ?? subplatform.currency ?? "CNY";
+  const pricingScale = pricing.currencyScale ?? subplatform.currencyScale ?? 2;
   const [currency, setCurrency] = useState(pricingCurrency ?? "");
   const [draftImported, setDraftImported] = useState(false);
   const [attachments, setAttachments] = useState<MarketplaceAttachment[]>([]);
@@ -142,7 +136,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       return;
     }
     if (!subplatform.domainId || !subplatform.tenantId) {
-      setSubmissionsError(copy("platformIdentityIncomplete", "当前子平台还没有完成身份配置", "This platform has not finished its identity setup"));
+      setSubmissionsError(copy("platformIdentityIncomplete", "当前店铺还没有完成身份配置", "This store has not finished its identity setup"));
       return;
     }
     setSubmissionsLoading(true);
@@ -293,7 +287,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
   const uploadFiles = async (files: FileList | null) => {
     if (!files || !files.length || mediaUploading) return;
     if (!subplatform.tenantId || !subplatform.domainId) {
-      onNotice(copy("platformIdentityIncompleteNotice", "当前子平台尚未完成身份配置", "This platform's identity configuration is incomplete"));
+      onNotice(copy("platformIdentityIncompleteNotice", "当前店铺尚未完成身份配置", "This store's identity configuration is incomplete"));
       return;
     }
     const remaining = Math.max(0, 8 - attachments.length);
@@ -331,9 +325,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
     const normalizedName = displayName.trim();
     const normalizedKey = externalKey.trim() || `offer-${crypto.randomUUID()}`;
     const normalizedCurrency = currency.trim().toUpperCase();
-    const normalizedAmount = isFixedPrice ? toMinorUnits(askingAmount, pricingScale ?? 0) : null;
-    const normalizedMin = isRangePrice ? toMinorUnits(askingAmountMin, pricingScale ?? 0) : null;
-    const normalizedMax = isRangePrice ? toMinorUnits(askingAmountMax, pricingScale ?? 0) : null;
+    const normalizedAmount = toMinorUnits(askingAmount, pricingScale);
     if (!isLiveMarketplaceEnabled()) {
       onNotice(copy("supplyApiUnavailableNotice", "当前环境未启用真实供给 API，资料没有写入系统", "The live supply API is disabled; nothing was saved"));
       return;
@@ -342,19 +334,19 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       onNotice(copy("productRequired", "请填写商品名称、商品描述、价格并上传商品介绍图", "Enter a product name, description, price, and product image"));
       return;
     }
-    if (isRangePrice && BigInt(normalizedMin as string) > BigInt(normalizedMax as string)) {
-      onNotice(copy("rangePriceOrderError", "价格区间的最低值不能高于最高值", "The minimum price cannot exceed the maximum"));
+    if (!normalizedAmount) {
+      onNotice(copy("invalidProductPrice", "请填写有效的商品价格", "Enter a valid product price"));
       return;
     }
     if (!subplatform.domainId) {
-      onNotice(copy("platformIdentityIncompleteNotice", "当前子平台尚未完成身份配置", "This platform has not finished its identity setup"));
+      onNotice(copy("platformIdentityIncompleteNotice", "当前店铺尚未完成身份配置", "This store has not finished its identity setup"));
       return;
     }
-    if (usesLegacyMarketplace && (pricing.mode !== "fixed" || !subplatform.assetSchemaId || !pricingCurrency
+    if (usesLegacyMarketplace && (!subplatform.assetSchemaId || !pricingCurrency
       || typeof pricingScale !== "number"
       || !Number.isInteger(pricingScale)
       || pricingScale < 0 || pricingScale > 18)) {
-      onNotice(copy("platformSchemaIncomplete", "当前子平台尚未配置完整的资料 schema、结算币种和价格精度", "This platform has incomplete schema, currency, or price precision settings"));
+      onNotice(copy("platformSchemaIncomplete", "当前店铺尚未配置完整的商品字段、币种和价格精度", "This store has incomplete product fields, currency, or price precision settings"));
       return;
     }
     const parsedAttributes: Record<string, unknown> = { description: productDescription.trim() };
@@ -372,7 +364,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
         role: "seller",
       });
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : copy("platformSessionError", "当前子平台身份配置不完整", "This platform's identity configuration is incomplete"));
+      onNotice(error instanceof Error ? error.message : copy("platformSessionError", "当前店铺身份配置不完整", "This store's identity configuration is incomplete"));
       return;
     }
     if (!session) {
@@ -391,7 +383,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
           externalKey: normalizedKey,
           displayName: normalizedName,
           attributes: attributesWithAttachments,
-          askingAmount: normalizedAmount as string,
+          askingAmount: normalizedAmount,
           currency: normalizedCurrency,
           currencyScale: pricingScale as number,
         });
@@ -403,14 +395,10 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
           displayName: normalizedName,
           attributes: attributesWithAttachments,
           terms: {
-            pricing_mode: pricing.mode,
-            ...(normalizedAmount ? { amount_minor: normalizedAmount } : {}),
-            ...(normalizedMin ? { amount_min_minor: normalizedMin } : {}),
-            ...(normalizedMax ? { amount_max_minor: normalizedMax } : {}),
-            ...(normalizedCurrency ? { currency: normalizedCurrency } : {}),
-            ...(pricingScale !== undefined ? { currency_scale: pricingScale } : {}),
-            ...(pricing.label ? { pricing_label: pricing.label } : {}),
-            ...(pricingNote.trim() ? { pricing_note: pricingNote.trim() } : {}),
+            pricing_mode: "fixed",
+            amount_minor: normalizedAmount,
+            currency: normalizedCurrency,
+            currency_scale: pricingScale,
           },
         });
         record = offer;
@@ -420,9 +408,6 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       setDisplayName("");
       setProductDescription("");
       setAskingAmount("");
-      setAskingAmountMin("");
-      setAskingAmountMax("");
-      setPricingNote("");
       setCurrency(pricingCurrency ?? "");
       setAttachments([]);
       onNotice(copy("offerSubmittedNotice", "供给已提交，等待平台审核后展示", "Offer submitted; it will appear after platform review"));
@@ -437,10 +422,10 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
     <div className="dashboard seller-dashboard">
       <div className="seller-settings-summary">
         <div>
-          <strong>{subplatform.label || copy("currentPlatformLabel", "当前子平台")}</strong>
+          <strong>{subplatform.label || copy("currentPlatformLabel", "当前店铺")}</strong>
           <span>{submissions.length ? `${copy("submittedPrefix", "已提交")} ${submissions.length} ${copy("submittedSuffix", "份资料")}` : copy("noSubmissionsLabel", "还没有提交资料")}</span>
         </div>
-        <span className="seller-mode-note">{copy("identityProtectionLabel", "账号和联系方式由根平台保护")}</span>
+        <span className="seller-mode-note">{copy("identityProtectionLabel", "账号和联系方式由商城保护")}</span>
       </div>
 
       <nav className="seller-settings-nav" role="tablist" aria-label={copy("sellerSettingsSectionsLabel", "供给设置分区", "Supply settings sections")}>
@@ -512,41 +497,10 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
             <input id="seller-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="例如：2023 款新能源轿车" maxLength={500} required />
           </label>
           <label className="seller-upload-wide" htmlFor="seller-product-description"><span>商品描述</span><textarea id="seller-product-description" value={productDescription} onChange={(event) => setProductDescription(event.target.value)} rows={4} maxLength={4000} placeholder="介绍商品的主要特点、状况和交付信息" required /></label>
-          <label htmlFor="seller-asking-amount-simple"><span>价格</span><input id="seller-asking-amount-simple" value={askingAmount} onChange={(event) => setAskingAmount(event.target.value)} inputMode="decimal" placeholder="例如：128000" required /></label>
-          {isFixedPrice ? (
-            <>
-              <label htmlFor="seller-asking-amount">
-                <span>{copy("priceLabel", "报价")}{currency ? `（${currency}）` : ""}</span>
-                <input id="seller-asking-amount" value={askingAmount} onChange={(event) => setAskingAmount(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0, locale)} required />
-              </label>
-              <label htmlFor="seller-currency">
-                <span>{copy("currencyLabel", "币种")}</span>
-                <input id="seller-currency" value={currency} onChange={(event) => setCurrency(event.target.value.toUpperCase())} placeholder={copy("currencyPlaceholder", "等待子平台配置")} maxLength={3} readOnly={Boolean(pricingCurrency)} required />
-              </label>
-            </>
-          ) : null}
-          {isRangePrice ? (
-            <>
-              <label htmlFor="seller-asking-amount-min">
-                <span>{copy("priceMinLabel", "最低报价")}{currency ? `（${currency}）` : ""}</span>
-                <input id="seller-asking-amount-min" value={askingAmountMin} onChange={(event) => setAskingAmountMin(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0, locale)} required />
-              </label>
-              <label htmlFor="seller-asking-amount-max">
-                <span>{copy("priceMaxLabel", "最高报价")}{currency ? `（${currency}）` : ""}</span>
-                <input id="seller-asking-amount-max" value={askingAmountMax} onChange={(event) => setAskingAmountMax(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale ?? 0, locale)} required />
-              </label>
-              <label htmlFor="seller-currency-range">
-                <span>{copy("currencyLabel", "币种")}</span>
-                <input id="seller-currency-range" value={currency} onChange={(event) => setCurrency(event.target.value.toUpperCase())} placeholder={copy("currencyPlaceholder", "等待子平台配置")} maxLength={3} readOnly={Boolean(pricingCurrency)} required />
-              </label>
-            </>
-          ) : null}
-          {isNegotiablePrice ? (
-            <label className="seller-upload-wide" htmlFor="seller-pricing-note">
-              <span>{copy("pricingNoteLabel", "议价条件")}</span>
-              <textarea id="seller-pricing-note" value={pricingNote} onChange={(event) => setPricingNote(event.target.value)} rows={3} maxLength={500} placeholder={copy("pricingNotePlaceholder", "由你说明价格、条件或面议范围")} />
-            </label>
-          ) : null}
+          <label htmlFor="seller-asking-amount">
+            <span>{copy("priceLabel", "价格")}{currency ? `（${currency}）` : ""}</span>
+            <input id="seller-asking-amount" value={askingAmount} onChange={(event) => setAskingAmount(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale, locale)} required />
+          </label>
           <div className="seller-upload-actions seller-upload-wide">
             <p><FileUp size={17} aria-hidden="true" /> {copy("reviewNotice", "提交后状态为“待审核”，平台不会自动发布未经确认的资料。")}</p>
             <motion.button className="button button-dark" type="submit" disabled={submitting || (isLiveMarketplaceEnabled() && (!subplatform.domainId || (usesLegacyMarketplace && (!subplatform.assetSchemaId || !pricingCurrency || !Number.isInteger(pricingScale)))))} whileTap={{ scale: 0.97 }} transition={spring}>
@@ -559,7 +513,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       </div>
 
       <section id="seller-panel-history" className="surface seller-submissions seller-settings-panel" role="tabpanel" hidden={activePanel !== "history"} aria-labelledby="seller-submissions-title">
-        <SectionHeading eyebrow={copy("submissionHistoryEyebrow", "提交记录")} title={copy("submissionHistoryTitle", "当前子平台的资料")} />
+        <SectionHeading eyebrow={copy("submissionHistoryEyebrow", "提交记录")} title={copy("submissionHistoryTitle", "当前店铺的商品")} />
         {submissionsLoading ? (
           <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>{copy("loadingSubmissionsLabel", "正在读取你的提交记录…", "Loading your submissions…")}</p></div>
         ) : submissionsError ? (

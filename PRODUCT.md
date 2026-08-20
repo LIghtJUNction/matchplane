@@ -8,97 +8,101 @@ web
 
 ## Stack
 
-Existing production codebase: Next.js with Bun for the web surface, Rust for the gateway and
-domain kernel, PostgreSQL for durable state, and MCP/Skill contracts for Agent integrations.
+Next.js with Bun for the customer and operator web surfaces, Rust for the gateway and commerce
+kernel, PostgreSQL for durable state, Better Auth for identity, and bounded MCP/Skill contracts
+for store integrations and AI tools.
 
 ## Users
 
-- Buyers and other demand-side participants who describe what they need in natural language.
-- Sellers and other supply-side participants who publish their own offers and may bring their own
-  Agent.
-- Root platform administrators who operate the shared framework, platform tree, API keys, and
-  global policy.
-- Subplatform administrators and moderators who manage one mounted vertical, its members, schema,
-  retrieval adapter, email route, and publication workflow.
-- External buyer/seller Agents that continue multi-step matching with their own model credentials
-  and token budget.
+- Visitors who browse stores and products or ask the shopping assistant for help without signing
+  in.
+- Customers who create an account only when they want to save, contact a store, or buy.
+- Merchants who open stores, publish products, and handle customer enquiries.
+- Marketplace owners and marketplace operators who configure the marketplace, review stores and
+  products, and manage billing, identity, policy, and integrations.
+- External store systems and Agents that expose bounded catalog, retrieval, or fulfilment tools.
 
 ## Product Purpose
 
-MatchPlane is a domain-neutral negotiation and matching platform. A participant starts with a
-natural-language goal; the platform Agent routes it through active nested platforms, then a
-subplatform Agent selects merchants and canonical offers. The platform records an auditable,
-consent-controlled introduction, after which participants may exchange approved contact channels
-and continue an online or offline transaction. Success means a participant can find a relevant
-counterpart without every vertical needing a separate deployment or account system.
+MatchPlane is an AI-native marketplace. A visitor describes what they want, and the marketplace
+shopping assistant searches approved stores, presents real product images, compares prices and
+trade-offs, and helps calculate a suitable basket. Browsing and AI-assisted discovery are public;
+identity is required only for actions that create durable personal or commercial state.
 
 ## Positioning
 
-The product is one recursively composable platform rather than separate root and vertical
-applications. Any node can be mounted under another node, while each vertical owns its schema and
-retrieval implementation. The root supplies stable identity, authorization, routing, MCP/Agent
-boundaries, consent, payment hooks, and audit without taking ownership of a vertical's catalogue
-or vector database.
+The product has exactly two commercial layers:
+
+1. **Marketplace** — the public shopping entrance, configurable brand, shared identity, AI shopping
+   assistant, cross-store search and comparison, consent, checkout hooks, billing, and audit.
+2. **Store** — one merchant-facing storefront and catalog, either hosted inside MatchPlane or
+   connected from an external system through a reviewed integration.
+
+Stores never contain other stores. The database may retain older organization and platform fields
+for compatibility, but new product behavior must not expose or create a recursive platform tree.
 
 ## Operating Context
 
-The deployment root serves `/` and active subplatforms at paths such as `/used-car` from one web
-process. Every path exposes the same chat-first entry and can route to activated descendants.
-Better Auth owns email accounts, sessions, organizations, roles, and API keys. Rust exposes the
-tenant-scoped marketplace and payment interfaces. External Agents use the HTTP MCP facade or
-advertised subplatform MCP tools; caller-funded Agents own their provider credentials and token
-costs. Sellers may pay for exposure when a transaction continues offline, while contact release
-remains a separate explicit consent step.
+The marketplace is served at `/`. Active stores use one-segment paths such as `/matx-auto` and are
+also discoverable from the marketplace assistant. A hosted store uses the shared product editor;
+an integrated store may supply its own storefront, catalog retrieval, media, and fulfilment tools.
+Both types remain ordinary stores in the public experience.
+
+Better Auth owns accounts and sessions. A single account can browse, buy, open a store, and publish
+products; buyer and seller are actions, not account types. Store and marketplace permissions remain
+server-side roles, while customer-facing copy uses plain names such as “店主”, “商城负责人”, and
+“商城运营”.
 
 ## Capabilities and Constraints
 
-- Root and subplatform nodes share one recursive data model; root versus child is a deployment
-  position, not a different application.
-- Demand, supply, intent, offer, match, introduction, payment, invoice, refund, and contact
-  contracts are domain-neutral. Vehicle tables remain compatibility adapters only.
-- Sellers define their own domain attributes and terms. The root must not hard-code vehicle fields
-  or invent supply data.
-- Each subplatform may own its retrieval implementation, including its vector store, through its
-  Agent, Skill, and MCP tools. The root only verifies scope, bounded results, lifecycle, consent,
-  and audit invariants.
-- Buyers and sellers may connect their own Agents. Hosted routing is bounded and audited; no
-  platform model call may grant contact, payment, administrator, or transaction authority.
-- Better Auth is the sole user authentication system. Party capabilities are short-lived,
-  tenant-scoped integration credentials, not a second login system.
-- Payment is isolated behind standard gateway interfaces with production and test modes, including
-  the configured EPay, Waffo Pancake, WeChat Pay, and Alipay extension points.
-- MIT licensing is required for the repository.
-- The web interface must remain clean and simple, use the requested Anthropic-art sensibility and
-  Apple-design shape/motion guidance, and keep every visible control genuinely usable.
+- Every active store is a direct child of the marketplace root. New registrations cannot choose a
+  store as their parent.
+- Public catalog results contain product and store information only. Contact details, private
+  identities, credentials, and unpublished products never enter public AI prompts or results.
+- Every product has a stable public core: name, description, at least one product image, price,
+  currency, store, lifecycle state, and optional category-specific attributes.
+- AI may select stores, rank products, explain differences, and calculate totals. It cannot grant
+  contact access, authorize payment, publish a product, or change permissions.
+- Product comparison uses normalized price/currency and explicit attributes. Paid placement must
+  be labelled and cannot silently replace organic relevance.
+- Store integrations own their external catalog and retrieval implementation behind bounded MCP or
+  HTTP contracts. The marketplace verifies scope, result shape, lifecycle, and commercial policy.
+- Browsing and bounded shopping assistance work without login. Saving, contacting, ordering,
+  opening a store, and publishing require a valid account.
+- Payment is optional. A marketplace may begin with consent-gated contact exchange and later enable
+  checkout providers.
+- Merchant monetization may combine store subscription, active-listing fees, clearly labelled paid
+  exposure, and transaction service fees. Each charge must be configured, auditable, and disclosed.
+- MIT licensing is required for repository-owned code.
 
 ## Brand Commitments
 
-The product name is MatchPlane. The user has committed to a clean, restrained, chat-first
-interface with Anthropic-art visual character and Apple-design principles for shape, materials,
-motion, and responsive interaction. Domain-specific copy, imagery, and catalogue content belong
-to each subplatform or seller and must not be fabricated by the root.
+The marketplace name is configurable; MatchPlane is the underlying product. The interface is
+clean, restrained, image-led where real products exist, and centered on one useful conversation.
+It should feel like a modern marketplace rather than infrastructure management software. Product
+and store content must come from real approved records; the root never fabricates inventory.
 
 ## Evidence on Hand
 
-- Root web application: `web/`.
-- Rust services and shared domain/storage crates: `services/` and `crates/`.
-- Recursive subplatform contract: `docs/subplatform-contract.md`.
-- Automotive adapter as a Git submodule: `subplatforms/auto/`.
+- Marketplace web application: `web/`.
+- Rust services and shared commerce/storage crates: `services/` and `crates/`.
+- Store integration compatibility layer: `docs/subplatform-contract.md` and `subplatforms/auto/`.
 - HTTP MCP facade and Agent handoff: `web/app/api/mcp/` and
   `web/app/api/platform/agent/handoff/`.
-- No approved customer testimonials, catalogue fixtures, or universal vertical content are on
-  hand; future surfaces must not present fabricated inventory or proof.
 
 ## Product Principles
 
-1. Keep the kernel generic; let each vertical own meaning, schema, retrieval, and presentation.
-2. Compose platforms recursively without multiplying processes, accounts, or credential stores.
-3. Treat Agents as bounded decision makers; keep authority in explicit authenticated state changes.
-4. Make introductions useful and auditable while requiring consent before contact release.
-5. Prefer clear, quiet interfaces that make the next action obvious and keep controls functional.
+1. One marketplace, one flat store directory, no recursive commercial hierarchy.
+2. Let people browse and ask for help first; request an account at the first durable action.
+3. Make AI useful throughout discovery, comparison, calculation, and handoff while keeping
+   authority in explicit authenticated actions.
+4. Treat every merchant as a store and every active offer as a product with a clear owner.
+5. Make merchant onboarding simple for hosted stores and bounded for external integrations.
+6. Earn marketplace revenue transparently without corrupting organic recommendations.
 
 ## Accessibility & Inclusion
 
-The primary interaction is natural-language chat, but all actions must remain keyboard reachable,
-screen-reader labelled, focus-visible, and usable on narrow screens. Error, loading, authentication,
-consent, and empty states must be explicit rather than communicated only through color or motion.
+Chat, store navigation, product comparison, authentication, and merchant tools must be keyboard
+reachable, screen-reader labelled, focus-visible, and usable from 320px through desktop layouts.
+Images require useful alternative text. Loading, empty, error, authentication, sponsored, and
+consent states must be explicit rather than communicated only through color or motion.

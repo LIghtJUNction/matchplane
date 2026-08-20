@@ -133,36 +133,18 @@ function pathnameOnly(value: string): string {
 export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig> {
   const base = resolveSubplatform(pathname);
   if (!base.manifestUrl) {
-    // The root identity comes from the configured tenant. The bundled string is only a
-    // pre-hydration label for the first paint; it is never a marketplace record.
+    // The public shell needs only the mall's display name. Operational setup state and database
+    // identifiers remain behind the authenticated mall console.
     try {
-      const response = await fetch("/api/platform/setup", { headers: { accept: "application/json" } });
+      const response = await fetch("/api/mall/settings", { headers: { accept: "application/json" } });
       if (!response.ok) return base;
       const body = await response.json() as {
-        root?: {
-          tenantId?: unknown;
-          tenant?: { name?: unknown } | null;
-          ui?: { chat?: unknown; contactFields?: unknown };
-        };
-        domains?: Array<{ id?: unknown }>;
+        mall?: { name?: unknown } | null;
       };
-      const name = body.root?.tenant?.name;
-      const tenantId = typeof body.root?.tenantId === "string" ? body.root.tenantId : undefined;
-      // The root node is tenant-scoped. A child domain is selected only after routing into a
-      // mounted subplatform; attaching the first child domain to `/` violates the marketplace
-      // scope invariant and prevents a freshly verified user from entering their console.
-      const domainId = undefined;
-      const rootUi = validUi({
-        chat: body.root?.ui?.chat && typeof body.root.ui.chat === "object" && !Array.isArray(body.root.ui.chat)
-          ? body.root.ui.chat as ChatUiConfig
-          : undefined,
-        contactFields: Array.isArray(body.root?.ui?.contactFields)
-          ? body.root.ui.contactFields as ContactField[]
-          : undefined,
-      });
+      const name = body.mall?.name;
       return typeof name === "string" && name.trim()
-        ? { ...base, brandName: name.trim(), label: name.trim(), tenantId, domainId, ...(rootUi ? { ui: rootUi } : {}) }
-        : { ...base, tenantId, domainId, ...(rootUi ? { ui: rootUi } : {}) };
+        ? { ...base, brandName: name.trim(), label: name.trim() }
+        : base;
     } catch {
       return base;
     }

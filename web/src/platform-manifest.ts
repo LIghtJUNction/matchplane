@@ -2,7 +2,8 @@ import { authDatabase } from "./lib/auth";
 import { isProductionEnvironment } from "./lib/runtime";
 
 /**
- * Read the immutable manifest selected by the active recursive platform tree.
+ * Read the active store manifest. Native hosted stores use a small marketplace-owned manifest;
+ * package and external stores keep the immutable v1 manifest compatibility path.
  *
  * A package checked into `public/` is useful for local development, but it is
  * not an activation grant in production. The database record is the source of
@@ -17,7 +18,127 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
   }
 
   try {
-    const result = await authDatabase.query(
+    const hosted = await authDatabase.query(
+      `SELECT store.id::text,
+              store.organization_id::text AS "organizationId",
+              store.tenant_id::text AS "tenantId",
+              store.domain_id::text AS "domainId",
+              store.slug,
+              store.display_name AS "displayName",
+              store.description,
+              store.version::text
+         FROM stores store
+         JOIN store_path_aliases alias
+           ON alias.tenant_id = store.tenant_id AND alias.store_id = store.id
+         JOIN domains domain
+           ON domain.tenant_id = store.tenant_id AND domain.id = store.domain_id AND domain.status = 'active'
+        WHERE store.tenant_id = $1::uuid
+          AND alias.path = $2
+          AND store.integration_kind = 'hosted'
+          AND store.status = 'active'
+        LIMIT 1`,
+      [rootTenantId, platformPath],
+    );
+    const hostedStore = hosted.rows[0] as Record<string, unknown> | undefined;
+    if (hostedStore) {
+      return JSON.stringify({
+        apiVersion: "matchplane.subplatform/v1",
+        id: `hosted.${String(hostedStore.id)}`,
+        slug: hostedStore.slug,
+        displayName: hostedStore.displayName,
+        description: hostedStore.description,
+        marketplaceContract: "generic-v1",
+        pricing: { mode: "fixed", currency: "CNY", currencyScale: 2, label: "价格" },
+        rootApiVersion: "v1",
+        routes: [platformPath],
+        capabilities: ["demand", "supply", "public_catalog"],
+        requiredScopes: ["marketplace:read", "marketplace:write"],
+        organizationId: hostedStore.organizationId,
+        tenantId: hostedStore.tenantId,
+        domainId: hostedStore.domainId,
+        version: Number(hostedStore.version),
+      });
+    }
+
+    const projection = await authDatabase.query<{ integrationKind: string }>(
+      `SELECT store.integration_kind AS "integrationKind"
+         FROM store_path_aliases alias
+         JOIN stores store
+           ON store.tenant_id = alias.tenant_id
+          AND store.id = alias.store_id
+        WHERE alias.tenant_id = $1::uuid
+          AND alias.path = $2
+        LIMIT 1`,
+      [rootTenantId, platformPath],
+    );
+    const projectedStore = projection.rows[0];
+    // An inactive hosted projection was not returned above. It must not fall back to the old
+    // registration tree. Package/external projections are resolved only through their exact
+    // current_registration_id below.
+    if (projectedStore?.integrationKind === "hosted") return null;
+
+    const result = projectedStore
+      ? await authDatabase.query(
+        `SELECT registration.manifest,
+                store.organization_id::text AS "organizationId",
+                registration.tenant_id::text AS "tenantId",
+                registration.domain_id::text AS "domainId",
+                schema_default.id AS "assetSchemaId",
+                schema_default.schema_document AS "assetSchema",
+                market_default.quote_asset_key AS currency,
+                market_default.price_scale AS "currencyScale",
+                encode(registration.manifest_digest, 'hex') AS "manifestDigest",
+                encode(registration.build_digest, 'hex') AS "buildDigest",
+                registration.artifact_locator AS "artifactLocator",
+                registration.artifact_entry AS "artifactEntry",
+                registration.version
+           FROM stores store
+           JOIN store_path_aliases alias
+             ON alias.tenant_id = store.tenant_id
+            AND alias.store_id = store.id
+           JOIN domains domain
+             ON domain.tenant_id = store.tenant_id
+            AND domain.id = store.domain_id
+            AND domain.status = 'active'
+           JOIN subplatform_registrations registration
+             ON registration.id = store.current_registration_id
+            AND registration.tenant_id = store.tenant_id
+            AND registration.domain_id = store.domain_id
+            AND registration.state = 'active'
+           LEFT JOIN LATERAL (
+             SELECT s.id, s.schema_document
+               FROM asset_schemas s
+              WHERE s.tenant_id = registration.tenant_id
+                AND s.domain_id = registration.domain_id
+                AND s.active
+              ORDER BY s.schema_version DESC, s.created_at DESC, s.id DESC
+              LIMIT 1
+           ) schema_default ON true
+           LEFT JOIN LATERAL (
+             SELECT m.quote_asset_key, m.price_scale
+               FROM markets m
+              WHERE m.tenant_id = registration.tenant_id
+                AND m.domain_id = registration.domain_id
+                AND m.status = 'active'
+              ORDER BY m.created_at ASC, m.id ASC
+              LIMIT 1
+           ) market_default ON true
+          WHERE store.tenant_id = $1::uuid
+            AND alias.path = $2
+            AND store.status = 'active'
+            AND store.integration_kind IN ('package', 'external')
+            AND (store.integration_kind <> 'external' OR EXISTS (
+              SELECT 1
+                FROM platform_federation_bindings binding
+               WHERE binding.id = store.federation_binding_id
+                 AND binding.tenant_id = store.tenant_id
+                 AND binding.domain_id = store.domain_id
+                 AND binding.status = 'active'
+            ))
+          LIMIT 1`,
+        [rootTenantId, platformPath],
+      )
+      : await authDatabase.query(
       `WITH RECURSIVE platform_tree AS (
          SELECT o.id,
                 o.slug,
@@ -125,8 +246,8 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
         WHERE platform_path = $2
           AND path_active
         LIMIT 1`,
-      [rootTenantId, platformPath],
-    );
+        [rootTenantId, platformPath],
+      );
     const row = result.rows[0] as {
       manifest?: unknown;
       organizationId?: unknown;

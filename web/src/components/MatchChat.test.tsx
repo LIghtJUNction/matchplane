@@ -13,8 +13,13 @@ vi.mock("../lib/auth-client", () => ({
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
   isLiveMarketplaceEnabled: () => true,
-  routePlatformIntent: vi.fn(() => {
-    routePromise.current = new Promise((resolve) => { resolveRoute.current = () => resolve({ routePlan: [], routing: { source: "none" } }); });
+  searchMallCatalog: vi.fn(() => {
+    routePromise.current = new Promise((resolve) => { resolveRoute.current = () => resolve({
+      requestId: "11111111-1111-4111-8111-111111111111",
+      stores: [],
+      recommendations: [],
+      routing: { source: "policy_fallback", degraded: false, rationale: "none" },
+    }); });
     return routePromise.current;
   }),
 }));

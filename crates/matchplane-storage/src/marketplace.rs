@@ -876,15 +876,8 @@ impl PgStore {
              ON CONFLICT (tenant_id, id) DO UPDATE SET \
                scope_domain_id = EXCLUDED.scope_domain_id, platform_path = EXCLUDED.platform_path, \
                external_key = EXCLUDED.external_key, display_name = EXCLUDED.display_name, \
-               role = CASE \
-                   WHEN marketplace_parties.role = 'both' OR EXCLUDED.role = 'both' THEN 'both' \
-                   WHEN marketplace_parties.role = EXCLUDED.role THEN EXCLUDED.role \
-                   ELSE 'both' \
-               END, marketplace_sides = (\
-                   SELECT ARRAY(SELECT DISTINCT side FROM unnest(\
-                       marketplace_parties.marketplace_sides || EXCLUDED.marketplace_sides\
-                   ) AS side ORDER BY side)\
-               ), access_token_hash = EXCLUDED.access_token_hash, \
+               role = EXCLUDED.role, marketplace_sides = EXCLUDED.marketplace_sides, \
+               access_token_hash = EXCLUDED.access_token_hash, \
                access_token_expires_at = EXCLUDED.access_token_expires_at, \
                contact_ciphertext = CASE WHEN $14 THEN marketplace_parties.contact_ciphertext ELSE EXCLUDED.contact_ciphertext END, \
                contact_nonce = CASE WHEN $14 THEN marketplace_parties.contact_nonce ELSE EXCLUDED.contact_nonce END, \
@@ -1004,11 +997,13 @@ impl PgStore {
     /// Authenticates a high-entropy party capability within one tenant and, for child nodes,
     /// the exact recursive platform path represented by that capability.
     ///
-    /// Child capabilities are checked against the Rust membership projection. When a party is
-    /// linked to a human Better Auth identity, the query also requires the corresponding Better
-    /// Auth member row; removing that member therefore revokes access without waiting for the
-    /// fifteen-minute capability expiry. Legacy/manual child parties without an auth link remain
-    /// usable for the gateway-only integration contract.
+    /// Child capabilities are checked against the Rust membership projection. Demand-only access
+    /// to an active public store does not require organization membership. Supply access always
+    /// rechecks that the linked Better Auth user is a current store owner/operator; removing or
+    /// downgrading that membership therefore revokes supply immediately. A root super
+    /// administrator is the sole explicit global exception. Legacy/manual child parties without
+    /// an auth link remain usable for the gateway-only integration contract, while parties already
+    /// assigned to a store still follow that store and domain's current lifecycle state.
     pub async fn authenticate_marketplace_party(
         &self,
         tenant_id: TenantId,
@@ -1035,51 +1030,116 @@ impl PgStore {
                 AND p.platform_path = COALESCE($5::text, p.platform_path) \
                 AND p.status = 'active' AND p.access_token_expires_at > clock_timestamp() \
                 AND (p.platform_path = '/' \
-                     OR EXISTS ( \
-                         SELECT 1 FROM marketplace_subplatform_memberships m \
-                          WHERE m.tenant_id = p.tenant_id \
-                            AND m.domain_id = p.scope_domain_id \
-                            AND m.party_id = p.id \
-                            AND m.status = 'active' \
-                            AND ( \
-                                NOT EXISTS ( \
-                                    SELECT 1 \
-                                      FROM marketplace_party_auth_links l \
-                                      JOIN \"user\" u ON u.id = l.auth_user_id \
-                                     WHERE l.tenant_id = p.tenant_id \
-                                       AND l.party_id = p.id \
-                                       AND l.platform_path = p.platform_path \
-                                ) \
-                                OR EXISTS ( \
-                                    SELECT 1 \
-                                      FROM marketplace_party_auth_links l \
-                                      JOIN \"user\" linked_user \
-                                        ON linked_user.id = l.auth_user_id \
-                                       AND linked_user.banned IS NOT TRUE \
-                                       AND (linked_user.\"banExpires\" IS NULL \
-                                            OR linked_user.\"banExpires\" <= clock_timestamp()) \
-                                      JOIN \"member\" member_projection \
-                                        ON member_projection.\"userId\" = l.auth_user_id \
-                                      JOIN \"organization\" organization_projection \
-                                        ON organization_projection.id = member_projection.\"organizationId\" \
-                                     WHERE l.tenant_id = p.tenant_id \
-                                       AND l.party_id = p.id \
-                                       AND l.platform_path = p.platform_path \
-                                       AND organization_projection.\"tenantId\" = p.tenant_id::text \
-                                       AND organization_projection.\"domainId\" = p.scope_domain_id::text \
-                                       AND organization_projection.slug = regexp_replace(p.platform_path, '^.*/', '') \
-                                ) \
-                            ) \
-                     ) \
-                     OR ( \
-                         p.platform_path <> '/' \
-                         AND NOT EXISTS ( \
-                             SELECT 1 \
-                               FROM marketplace_party_auth_links l \
-                              WHERE l.tenant_id = p.tenant_id \
-                                AND l.party_id = p.id \
+                     OR (p.platform_path <> '/' AND ( \
+                         NOT EXISTS ( \
+                             SELECT 1 FROM marketplace_party_auth_links unlinked \
+                              WHERE unlinked.tenant_id = p.tenant_id \
+                                AND unlinked.party_id = p.id \
+                         ) AND ( \
+                             p.store_id IS NULL \
+                             OR EXISTS ( \
+                                 SELECT 1 \
+                                   FROM stores legacy_store \
+                                   JOIN domains legacy_domain \
+                                     ON legacy_domain.tenant_id = legacy_store.tenant_id \
+                                    AND legacy_domain.id = legacy_store.domain_id \
+                                    AND legacy_domain.status = 'active' \
+                                  WHERE legacy_store.tenant_id = p.tenant_id \
+                                    AND legacy_store.id = p.store_id \
+                                    AND legacy_store.status = 'active' \
+                             ) \
                          ) \
-                     ))",
+                         OR EXISTS ( \
+                             SELECT 1 \
+                               FROM marketplace_party_auth_links link \
+                               JOIN \"user\" linked_user \
+                                 ON linked_user.id = link.auth_user_id \
+                                AND linked_user.banned IS NOT TRUE \
+                                AND (linked_user.\"banExpires\" IS NULL \
+                                     OR linked_user.\"banExpires\" <= clock_timestamp()) \
+                               JOIN marketplace_subplatform_memberships membership_projection \
+                                 ON membership_projection.tenant_id = p.tenant_id \
+                                AND membership_projection.domain_id = p.scope_domain_id \
+                                AND membership_projection.party_id = p.id \
+                                AND membership_projection.status = 'active' \
+                                AND membership_projection.role = CASE p.role \
+                                    WHEN 'buyer' THEN 'buyer' \
+                                    WHEN 'seller' THEN 'seller' \
+                                    ELSE 'admin' \
+                                END \
+                              WHERE link.tenant_id = p.tenant_id \
+                                AND link.party_id = p.id \
+                                AND link.platform_path = p.platform_path \
+                                AND ( \
+                                    EXISTS ( \
+                                        SELECT 1 \
+                                          FROM stores active_store \
+                                          JOIN domains active_domain \
+                                            ON active_domain.tenant_id = active_store.tenant_id \
+                                           AND active_domain.id = active_store.domain_id \
+                                           AND active_domain.status = 'active' \
+                                         WHERE active_store.tenant_id = p.tenant_id \
+                                           AND active_store.id = p.store_id \
+                                           AND active_store.status = 'active' \
+                                           AND ( \
+                                               linked_user.role = 'rootSuperAdmin' \
+                                               OR ( \
+                                                   NOT (p.marketplace_sides @> ARRAY['supply']::text[]) \
+                                                   AND active_store.visibility = 'public' \
+                                               ) \
+                                               OR EXISTS ( \
+                                                   SELECT 1 \
+                                                     FROM \"member\" current_member \
+                                                    WHERE current_member.\"organizationId\" = active_store.organization_id \
+                                                      AND current_member.\"userId\" = link.auth_user_id \
+                                                      AND ( \
+                                                          NOT (p.marketplace_sides @> ARRAY['supply']::text[]) \
+                                                          OR string_to_array(replace(current_member.role, ' ', ''), ',') \
+                                                             && ARRAY['owner', 'admin', 'subplatform_admin']::text[] \
+                                                      ) \
+                                               ) \
+                                           ) \
+                                    ) \
+                                    OR ( \
+                                        p.store_id IS NULL \
+                                        AND EXISTS ( \
+                                            SELECT 1 \
+                                              FROM subplatform_registrations active_registration \
+                                              JOIN domains active_domain \
+                                                ON active_domain.tenant_id = active_registration.tenant_id \
+                                               AND active_domain.id = active_registration.domain_id \
+                                               AND active_domain.status = 'active' \
+                                             WHERE active_registration.tenant_id = p.tenant_id \
+                                               AND active_registration.domain_id = p.scope_domain_id \
+                                               AND active_registration.slug = regexp_replace(p.platform_path, '^.*/', '') \
+                                               AND active_registration.state = 'active' \
+                                               AND ( \
+                                                   linked_user.role = 'rootSuperAdmin' \
+                                                   OR ( \
+                                                       NOT (p.marketplace_sides @> ARRAY['supply']::text[]) \
+                                                       AND active_registration.membership_policy = 'public' \
+                                                   ) \
+                                                   OR EXISTS ( \
+                                                       SELECT 1 \
+                                                         FROM \"member\" current_member \
+                                                         JOIN \"organization\" current_organization \
+                                                           ON current_organization.id = current_member.\"organizationId\" \
+                                                        WHERE current_member.\"userId\" = link.auth_user_id \
+                                                          AND current_organization.\"tenantId\" = p.tenant_id::text \
+                                                          AND current_organization.\"domainId\" = p.scope_domain_id::text \
+                                                          AND current_organization.slug = active_registration.slug \
+                                                          AND ( \
+                                                              NOT (p.marketplace_sides @> ARRAY['supply']::text[]) \
+                                                              OR string_to_array(replace(current_member.role, ' ', ''), ',') \
+                                                                 && ARRAY['owner', 'admin', 'subplatform_admin']::text[] \
+                                                          ) \
+                                                   ) \
+                                               ) \
+                                        ) \
+                                    ) \
+                                ) \
+                         ) \
+                     )))",
         )
         .bind(tenant_id.into_uuid())
         .bind(party_id.into_uuid())

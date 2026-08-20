@@ -578,6 +578,7 @@ impl PgStore {
         if let Some(row) = sqlx::query(OFFER_SELECT)
             .bind(command.tenant_id.into_uuid())
             .bind(command.domain_id.into_uuid())
+            .bind(command.supply_party_id.into_uuid())
             .bind(&command.external_key)
             .fetch_optional(self.pool())
             .await?
@@ -681,20 +682,68 @@ impl PgStore {
         offer_id: MarketplaceOfferId,
     ) -> Result<MarketplaceOffer, StorageError> {
         let row = sqlx::query(
-            "UPDATE marketplace_offers
+            "UPDATE marketplace_offers offer
              SET status = 'active', published_at = coalesce(published_at, clock_timestamp()),
                  version = version + 1
-             WHERE tenant_id = $1 AND id = $2 AND status IN ('draft', 'withdrawn')
-             RETURNING id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
-                       display_name, attributes, terms, status, published_at, expires_at,
-                       version, created_at, updated_at",
+             WHERE offer.tenant_id = $1
+               AND offer.id = $2
+               AND offer.status IN ('draft', 'withdrawn')
+               AND (
+                 offer.store_id IS NULL
+                 OR EXISTS (
+                   SELECT 1
+                     FROM stores store
+                    WHERE store.tenant_id = offer.tenant_id
+                      AND store.id = offer.store_id
+                      AND store.domain_id = offer.domain_id
+                      AND store.status = 'active'
+                      AND store.visibility = 'public'
+                      AND length(trim(offer.display_name)) > 0
+                      AND length(trim(coalesce(offer.attributes ->> 'description', ''))) > 0
+                      AND offer.terms ->> 'pricing_mode' = 'fixed'
+                      AND CASE
+                            WHEN offer.terms ->> 'amount_minor' ~ '^[0-9]{1,38}$'
+                            THEN (offer.terms ->> 'amount_minor')::numeric
+                            ELSE 0
+                          END > 0
+                      AND offer.terms ->> 'currency' ~ '^[A-Z]{3}$'
+                      AND offer.terms ->> 'currency_scale' ~ '^(0|[1-9]|1[0-8])$'
+                      AND EXISTS (
+                        SELECT 1
+                          FROM jsonb_array_elements(
+                            CASE WHEN jsonb_typeof(offer.attributes -> 'attachments') = 'array'
+                                 THEN offer.attributes -> 'attachments' ELSE '[]'::jsonb END
+                          ) attachment
+                         WHERE attachment ->> 'kind' = 'image'
+                           AND (
+                             EXISTS (
+                               SELECT 1
+                                 FROM hosted_store_media media
+                                WHERE media.tenant_id = offer.tenant_id
+                                  AND media.store_id = offer.store_id
+                                  AND media.status IN ('pending', 'published')
+                                  AND attachment ->> 'attachment_ref' = 'media://hosted/' || media.id::text
+                             )
+                             OR (
+                               store.integration_kind <> 'hosted'
+                               AND attachment #>> '{metadata,public_url}' ~ '^https://'
+                             )
+                           )
+                      )
+                 )
+               )
+             RETURNING offer.id, offer.tenant_id, offer.domain_id, offer.supply_party_id,
+                       offer.asset_id, offer.external_key, offer.display_name, offer.attributes,
+                       offer.terms, offer.status, offer.published_at, offer.expires_at,
+                       offer.version, offer.created_at, offer.updated_at",
         )
         .bind(tenant_id.into_uuid())
         .bind(offer_id.into_uuid())
         .fetch_optional(self.pool())
         .await?
         .ok_or(StorageError::Conflict(
-            "marketplace offer is not awaiting activation".to_owned(),
+            "marketplace offer is not awaiting activation or is incomplete for publication"
+                .to_owned(),
         ))?;
         offer_from_row(&row)
     }
@@ -1964,7 +2013,11 @@ const INTENT_SELECT_DISCOVERABLE_DEMANDS: &str =
 const OFFER_SELECT: &str = "SELECT id, tenant_id, domain_id, supply_party_id, asset_id,
     external_key, display_name, attributes, terms, status, published_at, expires_at, version,
     created_at, updated_at FROM marketplace_offers
-    WHERE tenant_id = $1 AND domain_id = $2 AND external_key = $3";
+    WHERE tenant_id = $1 AND domain_id = $2 AND external_key = $4
+      AND store_id IS NOT DISTINCT FROM (
+          SELECT store_id FROM marketplace_parties
+          WHERE tenant_id = $1 AND id = $3
+      )";
 
 const OFFER_SELECT_BY_ID: &str = "SELECT id, tenant_id, domain_id, supply_party_id, asset_id,
     external_key, display_name, attributes, terms, status, published_at, expires_at, version,

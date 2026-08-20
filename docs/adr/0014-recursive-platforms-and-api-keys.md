@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0015](0015-flat-marketplace-and-stores.md) for all new product behavior. The
+organization tree and v1 paths remain only as an authorization and migration compatibility layer.
 
 ## Context
 

@@ -23,7 +23,7 @@
           "type": "string",
           "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)?$",
           "maxLength": 512,
-          "description": "规范化递归平台路径；根服务只将检索转发给该节点的 active 子平台。"
+          "description": "规范化店铺路径；商城只将检索转发给该 active 店铺。多段值仅保留给 v1 兼容别名。"
         }
       }
     },

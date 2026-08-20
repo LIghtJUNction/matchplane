@@ -34,6 +34,9 @@ web:
   artifactPvc: ''
   uploadRoot: /var/lib/matchplane/subplatform-uploads
   mediaMaxBytes: 26214400
+  hostedMediaRoot: /var/lib/matchplane/media
+  # ReadWriteMany is required when web.replicas is greater than one.
+  hostedMediaPvc: ''
   # Optional ReadWriteMany PVC for opaque archive uploads. The isolated builder should mount
   # the same PVC read-only or consume the upload object through an external worker.
   uploadPvc: ''

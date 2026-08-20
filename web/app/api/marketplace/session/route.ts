@@ -133,39 +133,31 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "当前子平台没有可用的 active registration" }, { status: 404 });
   }
 
-  // Resolve membership from the same tenant/domain registration that authorized the path.  Do
-  // not let a same-origin cookie turn a slug collision or a stale Better Auth organization into
-  // access to a different node.  The request origin is only a transport boundary; the database
-  // scope is the authorization boundary.
-  let membership = input.subplatform === "root"
+  // Store membership controls listing and store operations, not browsing. A public store can
+  // issue a buyer capability without silently adding every visitor to the merchant's team.
+  // Sellers must be an explicit owner/operator of that store.
+  const membership = input.subplatform === "root"
     ? await readRootOrganizationMembership(input.tenantId, identity.user.id)
     : await readOrganizationMembershipByScope(input.tenantId, input.domainId, input.subplatform, identity.user.id);
   const userRole = identity.user.role;
   const rootSuperAdmin = userRole === "rootSuperAdmin";
-  if (input.role === "subplatform_admin") {
-    const scopedAdmin = membership?.role
-      .split(",")
-      .some((role) => role === "owner" || role === "admin" || role === "subplatform_admin");
-    if (!rootSuperAdmin && !scopedAdmin) {
+  const scopedOperator = membership?.role
+    .split(",")
+    .some((role) => role === "owner" || role === "admin" || role === "subplatform_admin") === true;
+  if (input.role === "subplatform_admin" || input.role === "seller") {
+    if (!rootSuperAdmin && !scopedOperator) {
       return NextResponse.json(
-        { error: "当前 Better Auth 账号没有这个子平台的管理员权限" },
+        { error: input.role === "seller" ? "只有店主或店铺运营可以上架商品" : "当前账号没有这家店铺的运营权限" },
         { status: 403 },
       );
     }
-  } else if (!rootSuperAdmin && !membership && input.subplatform !== "root") {
-    const canClaim = await subplatformAllowsPublicClaim(input.tenantId, input.domainId, input.subplatform);
-    if (canClaim) {
-      membership = await claimPublicSubplatformMembership(
-        input.tenantId,
-        input.domainId,
-        input.subplatform,
-        identity.user.id,
-      );
-    }
   }
-  if (!rootSuperAdmin && !membership && input.role !== "subplatform_admin" && input.subplatform !== "root") {
+  const publicBuyerAccess = input.role === "buyer"
+    && input.subplatform !== "root"
+    && await storeAllowsPublicBuyerAccess(input.tenantId, input.domainId, input.subplatform);
+  if (!rootSuperAdmin && !membership && !publicBuyerAccess && input.subplatform !== "root") {
     return NextResponse.json(
-      { error: "当前子平台尚未开放公开认领；请使用同一个 Better Auth 账号接受平台邀请" },
+      { error: "这家店铺仅对受邀成员开放" },
       { status: 403 },
     );
   }
@@ -499,17 +491,11 @@ async function upsertMarketplaceMembershipProjection(input: {
        (tenant_id, domain_id, party_id, role, labels, status, approved_at, approved_by)
      VALUES ($1::uuid, $2::uuid, $3::uuid, $4, ARRAY['better-auth:member'], 'active', clock_timestamp(), $5)
      ON CONFLICT (tenant_id, domain_id, party_id) DO UPDATE
-       SET role = CASE
-                    WHEN marketplace_subplatform_memberships.role = 'admin' OR EXCLUDED.role = 'admin'
-                      THEN 'admin'
-                    WHEN marketplace_subplatform_memberships.role = EXCLUDED.role
-                      THEN EXCLUDED.role
-                    ELSE 'both'
-                  END,
+       SET role = EXCLUDED.role,
            labels = ARRAY['better-auth:member'],
            status = 'active',
-           approved_at = COALESCE(marketplace_subplatform_memberships.approved_at, clock_timestamp()),
-           approved_by = COALESCE(marketplace_subplatform_memberships.approved_by, EXCLUDED.approved_by),
+           approved_at = clock_timestamp(),
+           approved_by = EXCLUDED.approved_by,
            version = marketplace_subplatform_memberships.version + 1,
            updated_at = clock_timestamp()`,
     [input.tenantId, input.domainId, input.partyId, role, input.authUserId],
@@ -579,6 +565,19 @@ async function readOrganizationMembershipByScope(
   slug: string,
   userId: string,
 ): Promise<{ role: string } | null> {
+  const storeMembership = await authDatabase.query<{ role: string }>(
+    `SELECT membership.role
+       FROM stores store
+       JOIN "member" membership ON membership."organizationId" = store.organization_id
+      WHERE store.tenant_id = $1::uuid
+        AND store.domain_id = $2::uuid
+        AND store.slug = $3
+        AND store.status = 'active'
+        AND membership."userId" = $4::uuid
+      LIMIT 1`,
+    [tenantId, domainId, slug, userId],
+  );
+  if (storeMembership.rows[0]) return storeMembership.rows[0];
   const result = await authDatabase.query<{ role: string }>(
     `SELECT m.role
        FROM "member" m
@@ -598,57 +597,31 @@ async function readOrganizationMembershipByScope(
   return result.rows[0] ?? null;
 }
 
-/**
- * Public buyer/seller access is a one-account SSO flow: the first authenticated visit claims a
- * member projection for the active child platform. Admin roles never use this path and still
- * require an explicit owner/admin invitation.
- */
-async function claimPublicSubplatformMembership(
-  tenantId: string,
-  domainId: string | undefined,
-  slug: string,
-  userId: string,
-): Promise<{ role: string } | null> {
-  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) return null;
-  const result = await authDatabase.query<{ organization_id: string }>(
-    `SELECT o.id AS organization_id
-       FROM "organization" o
-       JOIN subplatform_registrations r ON r.slug = o.slug
-       JOIN domains d ON d.id = r.domain_id
-                    AND d.tenant_id = r.tenant_id
-                    AND d.status = 'active'
-      WHERE o.slug = $1
-        AND r.tenant_id = $2::uuid
-        AND ($3::uuid IS NULL OR r.domain_id = $3::uuid)
-        AND o."tenantId" = $2::text
-        AND ($3::uuid IS NULL OR o."domainId" = $3::text)
-        AND r.state = 'active'
-        AND r.membership_policy = 'public'
-      ORDER BY r.version DESC
-      LIMIT 1`,
-    [slug, tenantId, domainId ?? null],
-  );
-  const organizationId = result.rows[0]?.organization_id;
-  if (!organizationId) return null;
-
-  try {
-    // This is a server-only Better Auth operation. The user id is taken from the verified
-    // session above, never from the browser request body.
-    await auth.api.addMember({
-      body: { organizationId, userId, role: "member" },
-    });
-  } catch {
-    // A concurrent request may have claimed the same membership. Read the authoritative
-    // Better Auth projection below instead of treating that race as a failure.
-  }
-  return readOrganizationMembershipByScope(tenantId, domainId, slug, userId);
-}
-
 async function activeSubplatformScope(
   tenantId: string,
   domainId: string | undefined,
   slug: string,
 ): Promise<boolean> {
+  const store = await authDatabase.query(
+    `SELECT 1
+       FROM stores store
+       JOIN domains domain
+         ON domain.tenant_id = store.tenant_id AND domain.id = store.domain_id AND domain.status = 'active'
+       LEFT JOIN subplatform_registrations registration ON registration.id = store.current_registration_id
+      WHERE store.tenant_id = $1::uuid
+        AND store.slug = $2
+        AND ($3::uuid IS NULL OR store.domain_id = $3::uuid)
+        AND store.status = 'active'
+        AND (store.integration_kind = 'hosted' OR registration.state = 'active')
+        AND (store.integration_kind <> 'external' OR EXISTS (
+          SELECT 1 FROM platform_federation_bindings binding
+           WHERE binding.id = store.federation_binding_id AND binding.status = 'active'
+        ))
+      LIMIT 1`,
+    [tenantId, slug, domainId ?? null],
+  );
+  if (store.rowCount === 1) return true;
+  if (await storeProjectionExists(tenantId, domainId, slug)) return false;
   const result = await authDatabase.query(
     `SELECT 1
        FROM subplatform_registrations
@@ -665,11 +638,26 @@ async function activeSubplatformScope(
   return result.rowCount === 1;
 }
 
-async function subplatformAllowsPublicClaim(
+async function storeAllowsPublicBuyerAccess(
   tenantId: string,
   domainId: string | undefined,
   slug: string,
 ): Promise<boolean> {
+  const store = await authDatabase.query(
+    `SELECT 1
+       FROM stores store
+       JOIN domains domain
+         ON domain.tenant_id = store.tenant_id AND domain.id = store.domain_id AND domain.status = 'active'
+      WHERE store.tenant_id = $1::uuid
+        AND store.slug = $2
+        AND ($3::uuid IS NULL OR store.domain_id = $3::uuid)
+        AND store.status = 'active'
+        AND store.visibility = 'public'
+      LIMIT 1`,
+    [tenantId, slug, domainId ?? null],
+  );
+  if (store.rowCount === 1) return true;
+  if (await storeProjectionExists(tenantId, domainId, slug)) return false;
   const result = await authDatabase.query(
     `SELECT 1
        FROM subplatform_registrations
@@ -681,6 +669,23 @@ async function subplatformAllowsPublicClaim(
         AND ($3::uuid IS NULL OR subplatform_registrations.domain_id = $3::uuid)
         AND subplatform_registrations.state = 'active'
         AND subplatform_registrations.membership_policy = 'public'
+      LIMIT 1`,
+    [tenantId, slug, domainId ?? null],
+  );
+  return result.rowCount === 1;
+}
+
+async function storeProjectionExists(
+  tenantId: string,
+  domainId: string | undefined,
+  slug: string,
+): Promise<boolean> {
+  const result = await authDatabase.query(
+    `SELECT 1
+       FROM stores
+      WHERE tenant_id = $1::uuid
+        AND slug = $2
+        AND ($3::uuid IS NULL OR domain_id = $3::uuid)
       LIMIT 1`,
     [tenantId, slug, domainId ?? null],
   );

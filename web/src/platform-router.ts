@@ -58,7 +58,7 @@ export interface PlatformRouteUsage {
 /** Raised when the platform's own model-call budget has no remaining admission. */
 export class PlatformRouterQuotaExceededError extends Error {
   constructor() {
-    super("平台 AI 撮合额度暂时用尽，请稍后再试。");
+    super("商城 AI 导购额度暂时用尽，请稍后再试。");
     this.name = "PlatformRouterQuotaExceededError";
   }
 }
@@ -108,7 +108,7 @@ export async function decidePlatformRoutes(input: {
       source: "policy_fallback",
       routeMechanism: "policy_fallback",
       model: null,
-      rationale: "当前节点没有可用的已激活子平台。",
+      rationale: "商城目前没有可检索的已上线店铺。",
       confidence: null,
       degraded: false,
       costBearer: "platform",
@@ -123,18 +123,18 @@ export async function decidePlatformRoutes(input: {
   const model = router?.model ?? null;
   const protocol = router?.protocol ?? DEFAULT_ROUTER_PROTOCOL;
   if (!router || !endpoint || !apiKey || !model) {
-    return policyFallback(candidates, input.narrative, "AI 路由服务未配置，使用受控相关性降级。", null);
+    return policyFallback(candidates, input.narrative, "AI 导购尚未配置，先按商品与店铺相关性搜索。", null);
   }
 
   try {
     const remainingBeforeAdmission = remainingDeadlineMs(input.deadlineAt);
     if (remainingBeforeAdmission === 0) {
-      return policyFallback(candidates, input.narrative, "平台路由达到本次请求的总时限，使用受控相关性降级。", model);
+      return policyFallback(candidates, input.narrative, "商城导购达到本次请求时限，先按相关性搜索。", model);
     }
     await input.admitCall?.();
     const remaining = remainingDeadlineMs(input.deadlineAt);
     if (remaining === 0) {
-      return policyFallback(candidates, input.narrative, "平台路由达到本次请求的总时限，使用受控相关性降级。", model);
+      return policyFallback(candidates, input.narrative, "商城导购达到本次请求时限，先按相关性搜索。", model);
     }
     const toolMode = configuredToolMode();
     const providerRequest = buildProviderRequest({
@@ -146,8 +146,8 @@ export async function decidePlatformRoutes(input: {
       toolMode,
       candidates,
       systemPrompt: toolMode === "disabled"
-        ? "你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。返回 JSON：selectedSlugs(string[]), rationale(string), confidence(number 0..1)。如果没有合适候选，selectedSlugs 返回空数组。"
-        : `你是 MatchPlane 平台路由器。只能从候选 slug 中选择与用户目标相关的子平台，不能创造 slug。优先调用 ${NATIVE_ROUTER_TOOL_NAME} 完成选择；不要调用未声明的工具。`,
+        ? "你是商城 AI 导购。只能从候选 slug 中选择可能出售用户所需商品的店铺，不能创造 slug。返回 JSON：selectedSlugs(string[]), rationale(string), confidence(number 0..1)。如果没有合适候选，selectedSlugs 返回空数组。"
+        : `你是商城 AI 导购。只能从候选 slug 中选择可能出售用户所需商品的店铺，不能创造 slug。优先调用 ${NATIVE_ROUTER_TOOL_NAME} 完成选择；不要调用未声明的工具。`,
       userContent: boundedProviderIntent(input, candidates),
     });
     // The recursive orchestrator owns the larger request deadline, but one
@@ -175,8 +175,8 @@ export async function decidePlatformRoutes(input: {
     };
   } catch (error) {
     if (error instanceof PlatformRouterQuotaExceededError) throw error;
-    const reason = error instanceof Error ? error.message : "AI 路由服务不可用";
-    return policyFallback(candidates, input.narrative, `AI 路由降级：${reason.slice(0, 240)}`, model);
+    const reason = error instanceof Error ? error.message : "AI 导购服务不可用";
+    return policyFallback(candidates, input.narrative, `AI 导购暂时降级：${reason.slice(0, 240)}`, model);
   }
 }
 
@@ -507,7 +507,7 @@ function routerSelectionFunction(
 ): Record<string, unknown> {
   return {
     name,
-    description: "从当前节点已授权的候选子平台中选择下一跳；不得创造候选之外的 slug。",
+    description: "从商城已授权的候选店铺中选择可能有相关商品的店铺；不得创造候选之外的 slug。",
     strict: true,
     parameters: routerSelectionParameters(candidates),
   };
@@ -567,7 +567,7 @@ function buildProviderRequest(input: {
     if (input.toolMode !== "disabled") {
       body.tools = [{
         name: NATIVE_ROUTER_TOOL_NAME,
-        description: "从当前节点已授权的候选子平台中选择下一跳；不得创造候选之外的 slug。",
+        description: "从商城已授权的候选店铺中选择可能有相关商品的店铺；不得创造候选之外的 slug。",
         input_schema: routerSelectionParameters(input.candidates),
       }];
       if (input.toolMode === "required") body.tool_choice = { type: "tool", name: NATIVE_ROUTER_TOOL_NAME };

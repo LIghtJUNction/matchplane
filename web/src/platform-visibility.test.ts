@@ -25,6 +25,17 @@ describe("platform path visibility", () => {
     );
   });
 
+  it("does not expose a private projected store through its legacy public registration", async () => {
+    query
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ exists: 1 }] });
+
+    await expect(isActivePlatformPathVisible("/private-market")).resolves.toBe(false);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1]?.[0]).toContain("FROM store_path_aliases alias");
+    expect(query.mock.calls.some(([sql]) => String(sql).includes("membership_policy = 'public'"))).toBe(false);
+  });
+
   it("allows the same path when the database confirms membership", async () => {
     query.mockResolvedValue({ rowCount: 1 });
 

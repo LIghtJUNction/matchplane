@@ -25,6 +25,50 @@ export async function isActivePlatformPathVisible(
   if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath)) return false;
 
   try {
+    const store = await authDatabase.query(
+      `SELECT 1
+         FROM stores store
+         JOIN store_path_aliases alias
+           ON alias.tenant_id = store.tenant_id AND alias.store_id = store.id
+         JOIN domains domain
+           ON domain.tenant_id = store.tenant_id AND domain.id = store.domain_id AND domain.status = 'active'
+         LEFT JOIN subplatform_registrations registration ON registration.id = store.current_registration_id
+        WHERE store.tenant_id = $1::uuid
+          AND alias.path = $2
+          AND store.status = 'active'
+          AND (store.integration_kind = 'hosted' OR registration.state = 'active')
+          AND (store.integration_kind <> 'external' OR EXISTS (
+            SELECT 1 FROM platform_federation_bindings binding
+             WHERE binding.id = store.federation_binding_id AND binding.status = 'active'
+          ))
+          AND (
+            store.visibility = 'public'
+            OR ($3::uuid IS NOT NULL AND EXISTS (
+              SELECT 1 FROM "member" membership
+               WHERE membership."organizationId" = store.organization_id
+                 AND membership."userId" = $3::uuid
+            ))
+            OR ($4::uuid IS NOT NULL AND $4::uuid = store.organization_id)
+            OR $5::boolean IS TRUE
+          )
+        LIMIT 1`,
+      [rootTenantId, platformPath, viewer?.authUserId ?? null, viewer?.organizationId ?? null, viewer?.isRootAdministrator === true],
+    );
+    if (store.rowCount === 1) return true;
+
+    const projection = await authDatabase.query(
+      `SELECT 1
+         FROM store_path_aliases alias
+         JOIN stores store
+           ON store.tenant_id = alias.tenant_id
+          AND store.id = alias.store_id
+        WHERE alias.tenant_id = $1::uuid
+          AND alias.path = $2
+        LIMIT 1`,
+      [rootTenantId, platformPath],
+    );
+    if (projection.rowCount === 1) return false;
+
     const result = await authDatabase.query(
       `WITH RECURSIVE platform_tree AS (
          SELECT o.id,

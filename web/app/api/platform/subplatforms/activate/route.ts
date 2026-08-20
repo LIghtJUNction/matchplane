@@ -47,6 +47,7 @@ export async function POST(request: Request): Promise<Response> {
     `SELECT r.id,
             r.slug,
             r.state,
+            r.version::text AS version,
             encode(r.build_digest, 'hex') AS "buildDigest",
             encode(r.manifest_digest, 'hex') AS "manifestDigest",
             r.tenant_id AS "tenantId",
@@ -63,7 +64,6 @@ export async function POST(request: Request): Promise<Response> {
         AND d.tenant_id = r.tenant_id
         AND d.status = 'active'
       WHERE r.id = $1::uuid
-      ORDER BY r.version DESC
       LIMIT 1`,
     [input.registrationId],
   );
@@ -74,51 +74,120 @@ export async function POST(request: Request): Promise<Response> {
   if (!(await canManageParent(session.user.id, userRole, row.parentOrganizationId))) {
     return NextResponse.json({ error: "当前账号没有激活该平台节点的权限" }, { status: 403 });
   }
-  if (row.state === "active") {
-    if (row.buildDigest?.toLowerCase() !== input.buildDigest.toLowerCase()) {
-      return NextResponse.json({ error: "已激活版本的 buildDigest 不匹配，不能覆盖不可变发布" }, { status: 409 });
-    }
-    return NextResponse.json(toResponse(row), { headers: { "cache-control": "no-store" } });
-  }
-  if (!new Set(["validated", "building", "ready"]).has(row.state)) {
+  if (row.state !== "active" && !new Set(["validated", "building", "ready"]).has(row.state)) {
     return NextResponse.json({ error: `当前状态 ${row.state} 不允许激活` }, { status: 409 });
   }
-  if (!row.buildDigest) {
+  if (row.state !== "active" && !row.buildDigest) {
     return NextResponse.json({ error: "隔离构建器尚未附加 buildDigest" }, { status: 409 });
   }
-  if (row.buildDigest.toLowerCase() !== input.buildDigest.toLowerCase()) {
+  if (row.state !== "active" && (!row.buildDigest || row.buildDigest.toLowerCase() !== input.buildDigest.toLowerCase())) {
     return NextResponse.json({ error: "buildDigest 与已验证构建产物不一致" }, { status: 409 });
   }
 
-  const toolHealthError = await validateDeclaredMcpTools(row);
-  if (toolHealthError) return NextResponse.json({ error: toolHealthError }, { status: 409 });
+  if (row.state !== "active") {
+    const toolHealthError = await validateDeclaredMcpTools(row);
+    if (toolHealthError) return NextResponse.json({ error: toolHealthError }, { status: 409 });
+  }
 
   const client = await authDatabase.connect();
   try {
     await client.query("BEGIN");
+    // `version` is the immutable release ordinal, not an optimistic-lock counter.  Every
+    // activation for a tenant/slug therefore shares one transactional lock before it inspects
+    // the currently live release.  This avoids a transient duplicate version and prevents a
+    // late activation of an old release from suspending the newer storefront projection.
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))",
+      [row.tenantId, row.slug],
+    );
+    const lockedTargetResult = await client.query<RegistrationRow>(
+      `SELECT r.id,
+              r.slug,
+              r.state,
+              r.version::text AS version,
+              encode(r.build_digest, 'hex') AS "buildDigest",
+              encode(r.manifest_digest, 'hex') AS "manifestDigest",
+              r.tenant_id AS "tenantId",
+              r.domain_id AS "domainId",
+              o.id AS "organizationId",
+              o."parentOrganizationId" AS "parentOrganizationId",
+              r.manifest AS manifest,
+              COALESCE(NULLIF(r.manifest -> 'agent' ->> 'mcpServerKey', ''), r.slug) AS "mcpServerKey"
+         FROM subplatform_registrations r
+         JOIN "organization" o
+           ON o.slug = r.slug AND o."tenantId" = r.tenant_id::text
+        WHERE r.id = $1::uuid
+        FOR UPDATE`,
+      [input.registrationId],
+    );
+    const target = lockedTargetResult.rows[0];
+    if (!target
+      || target.tenantId !== row.tenantId
+      || target.slug !== row.slug
+      || target.domainId !== row.domainId
+      || target.version !== row.version
+      || target.manifestDigest !== row.manifestDigest) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: "注册版本已被其他操作修改，请重新读取后再试" }, { status: 409 });
+    }
+    if (target.buildDigest?.toLowerCase() !== input.buildDigest.toLowerCase()) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: target.state === "active" ? "已激活版本的 buildDigest 不匹配，不能覆盖不可变发布" : "buildDigest 与已验证构建产物不一致" }, { status: 409 });
+    }
+
+    const currentActiveResult = await client.query<ActiveRegistration>(
+      `SELECT id, version::text AS version
+         FROM subplatform_registrations
+        WHERE tenant_id = $1::uuid
+          AND slug = $2
+          AND state = 'active'
+        ORDER BY version DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [target.tenantId, target.slug],
+    );
+    const currentActive = currentActiveResult.rows[0];
+    if (target.state === "active") {
+      if (currentActive?.id !== target.id) {
+        await client.query("ROLLBACK");
+        return NextResponse.json({ error: "已有更新的注册版本处于激活状态，不能回退覆盖" }, { status: 409 });
+      }
+      await client.query("COMMIT");
+      return NextResponse.json(toResponse(target), { headers: { "cache-control": "no-store" } });
+    }
+    if (!new Set(["validated", "building", "ready"]).has(target.state) || !target.buildDigest) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: `当前状态 ${target.state} 不允许激活` }, { status: 409 });
+    }
+    if (currentActive && compareRegistrationVersion(target.version, currentActive.version) <= 0) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: "目标注册版本必须严格新于当前激活版本" }, { status: 409 });
+    }
+
     const activated = await client.query(
       `UPDATE subplatform_registrations
           SET state = 'active',
-              activated_at = COALESCE(activated_at, clock_timestamp()),
-              version = version + 1
+              activated_at = COALESCE(activated_at, clock_timestamp())
         WHERE id = $1::uuid
           AND state IN ('validated', 'building', 'ready')
-          AND build_digest = decode($2, 'hex')
+          AND version::text = $2
+          AND build_digest = decode($3, 'hex')
         RETURNING id,
                   slug,
                   state,
+                  version::text AS version,
                   encode(build_digest, 'hex') AS "buildDigest",
                   encode(manifest_digest, 'hex') AS "manifestDigest",
                   tenant_id AS "tenantId",
                   domain_id AS "domainId",
                   activated_at AS "activatedAt"`,
-      [input.registrationId, input.buildDigest.toLowerCase()],
+      [target.id, target.version, input.buildDigest.toLowerCase()],
     );
     if (activated.rowCount !== 1) {
       await client.query("ROLLBACK");
       return NextResponse.json({ error: "注册版本已被其他操作修改，请重新读取后再试" }, { status: 409 });
     }
-    const active = activated.rows[0] as { tenantId: string; slug: string };
+    const active = activated.rows[0] as ActivationResponseRow;
     // A slug is one mounted organization path. Once a newer immutable release is active,
     // retire older active rows so routing and child-tool discovery cannot fan out duplicates.
     await client.query(
@@ -127,8 +196,9 @@ export async function POST(request: Request): Promise<Response> {
         WHERE tenant_id = $1::uuid
           AND slug = $2
           AND id <> $3::uuid
-          AND state = 'active'`,
-      [active.tenantId, active.slug, input.registrationId],
+          AND state = 'active'
+          AND version < $4::bigint`,
+      [active.tenantId, active.slug, target.id, target.version],
     );
     await client.query("COMMIT");
     return NextResponse.json({
@@ -153,6 +223,7 @@ interface RegistrationRow {
   id: string;
   slug: string;
   state: string;
+  version: string;
   buildDigest: string | null;
   manifestDigest: string;
   tenantId: string;
@@ -161,6 +232,23 @@ interface RegistrationRow {
   parentOrganizationId: string | null;
   manifest: unknown;
   mcpServerKey: string;
+}
+
+interface ActiveRegistration {
+  id: string;
+  version: string;
+}
+
+interface ActivationResponseRow {
+  id: string;
+  slug: string;
+  state: string;
+  version: string;
+  buildDigest: string | null;
+  manifestDigest: string;
+  tenantId: string;
+  domainId: string;
+  activatedAt?: string | null;
 }
 
 /**
@@ -214,7 +302,7 @@ async function canManageParent(userId: string, role: string | null | undefined, 
   return result.rowCount === 1;
 }
 
-function toResponse(row: RegistrationRow): Record<string, unknown> {
+function toResponse(row: Pick<RegistrationRow, "id" | "slug" | "state" | "buildDigest" | "manifestDigest" | "tenantId" | "domainId">): Record<string, unknown> {
   return {
     registrationId: row.id,
     slug: row.slug,
@@ -225,6 +313,18 @@ function toResponse(row: RegistrationRow): Record<string, unknown> {
     domainId: row.domainId,
     routing: "enabled",
   };
+}
+
+function compareRegistrationVersion(left: string, right: string): number {
+  try {
+    const leftVersion = BigInt(left);
+    const rightVersion = BigInt(right);
+    return leftVersion === rightVersion ? 0 : leftVersion < rightVersion ? -1 : 1;
+  } catch {
+    // The database constrains versions to positive bigint values. Treat an unexpectedly malformed
+    // row as non-activatable rather than accepting a potentially stale release.
+    return -1;
+  }
 }
 
 function isUuid(value: string): boolean {

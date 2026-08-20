@@ -2,11 +2,12 @@
 
 - Require `apiVersion: matchplane.subplatform/v1`, `rootApiVersion: v1`, a globally stable `id`,
   a lowercase slug, immutable source/build digests, and only declared scopes.
-- Keep `parentOrganizationId` explicit at registration. Better Auth organization membership and
-  PostgreSQL's parent foreign key/cycle trigger are the authority.
-- Route only `state = active` registrations. For `/a/b`, verify both `/a` and `/a/b`; missing,
-  disabled, or stale ancestors fail closed.
+- Do not accept a caller-selected `parentOrganizationId`. Resolve the canonical marketplace root
+  on the server and attach every new store directly to it.
+- Route only active public stores. New canonical paths contain one slug, such as `/store-a`.
+  Preserve historical multi-segment paths only as compatibility aliases and audit scope tokens.
 - Let each subplatform own retrieval. The root exchanges `matchplane.retrieval/v1` envelopes,
   canonical asset IDs, scores, provider versions, and degraded state—never vectors or credentials.
-- A selected child is the only branch eligible for the next Agent decision. Never broadcast to
-  siblings, invent slugs, or bypass the step/depth/hop caps.
+- The mall Agent selects a bounded set of stores from the database whitelist once. Re-read active
+  canonical offers before returning them; never invent slugs, expose contacts, or recursively fan
+  out through another store.

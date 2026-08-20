@@ -1,4 +1,4 @@
 interface:
-  display_name: "MatchPlane Subplatform"
-  short_description: "Build recursive domain-neutral MatchPlane subplatforms."
-  default_prompt: "Create or review a MatchPlane subplatform package using the immutable manifest, recursive mount, Agent/Skill/MCP, and retrieval contracts."
+  display_name: "MatchPlane Store"
+  short_description: "Build flat merchant-store integrations for MatchPlane."
+  default_prompt: "Create or review one MatchPlane merchant store using the immutable manifest, flat mount, Agent/Skill/MCP, and retrieval contracts."

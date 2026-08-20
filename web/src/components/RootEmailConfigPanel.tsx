@@ -80,7 +80,7 @@ export function RootEmailConfigPanel({
     setTesting(true);
     try {
       await testRootEmailConfig();
-      onNotice("测试邮件已发送到当前超级管理员的已验证邮箱");
+      onNotice("测试邮件已发送到当前商城负责人的已验证邮箱");
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "测试邮件发送失败");
     } finally {
@@ -102,8 +102,8 @@ export function RootEmailConfigPanel({
 
   return (
     <section className="surface root-email-config" aria-labelledby="root-email-config-title">
-      <SectionHeading eyebrow="根邮箱" title="配置登录、验证与密码重置邮件" titleId="root-email-config-title" />
-      <p className="subplatform-intro">这是全站账号邮件通道，不属于任何卖方或子平台。密码只会写入服务器受保护存储，不会显示或保存到数据库。</p>
+      <SectionHeading eyebrow="账号邮件" title="配置登录、验证与密码重置邮件" titleId="root-email-config-title" />
+      <p className="subplatform-intro">这是整个商城的账号邮件通道，不属于任何单独店铺。密码只会写入服务器受保护存储，不会再次显示。</p>
       <form className="seller-upload-form" onSubmit={save}>
         <label htmlFor="root-email-provider"><span>发信标识</span><Input id="root-email-provider" value={providerKey} disabled={!canEdit || loading} onChange={(event) => setProviderKey(event.target.value)} placeholder="root-smtp" /></label>
         <label htmlFor="root-email-host"><span>SMTP 主机</span><Input id="root-email-host" value={smtpHost} disabled={!canEdit || loading} onChange={(event) => setSmtpHost(event.target.value)} placeholder="smtp.example.com" /></label>
@@ -113,7 +113,7 @@ export function RootEmailConfigPanel({
         <label htmlFor="root-email-password"><span>SMTP 密码</span><Input id="root-email-password" type="password" value={smtpPassword} disabled={!canEdit || loading} onChange={(event) => setSmtpPassword(event.target.value)} autoComplete="new-password" placeholder={config?.credentialConfigured ? "留空则保持当前密码" : "填写 SMTP 密码"} /></label>
         <label htmlFor="root-email-from"><span>发件人地址</span><Input id="root-email-from" type="email" value={fromAddress} disabled={!canEdit || loading} onChange={(event) => setFromAddress(event.target.value)} /></label>
         <label htmlFor="root-email-reply"><span>回复地址（可选）</span><Input id="root-email-reply" type="email" value={replyTo} disabled={!canEdit || loading} onChange={(event) => setReplyTo(event.target.value)} /></label>
-        <label className="email-enabled"><input type="checkbox" checked={enabled} disabled={!canEdit || loading} onChange={(event) => setEnabled(event.target.checked)} />启用根邮箱路由</label>
+        <label className="email-enabled"><input type="checkbox" checked={enabled} disabled={!canEdit || loading} onChange={(event) => setEnabled(event.target.checked)} />启用商城账号邮件</label>
         <div className="seller-upload-wide root-email-actions">
           <p><ShieldCheck size={16} aria-hidden="true" />密钥槽：{config?.credentialConfigured ? "已就绪" : "尚未写入"}</p>
           <div className="root-email-action-buttons">
@@ -122,7 +122,7 @@ export function RootEmailConfigPanel({
           </div>
         </div>
       </form>
-      {!canEdit ? <p className="subplatform-intro">根管理员可以查看状态；保存配置和发送测试邮件只由超级管理员执行。</p> : null}
+      {!canEdit ? <p className="subplatform-intro">商城运营可以查看状态；保存和发送测试邮件仅由商城负责人执行。</p> : null}
     </section>
   );
 }

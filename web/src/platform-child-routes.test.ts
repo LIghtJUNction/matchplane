@@ -27,7 +27,7 @@ describe("platform child route visibility", () => {
     });
   });
 
-  it("passes human and machine scope to the visibility query", async () => {
+  it("reads the mall's flat store directory with human and machine scope", async () => {
     const routes = await readActiveDirectChildRoutes(
       "/",
       "00000000-0000-4000-8000-000000000001",
@@ -39,9 +39,8 @@ describe("platform child route visibility", () => {
 
     expect(routes[0]?.slug).toBe("used-car");
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining("r.membership_policy = 'public'"),
+      expect.stringContaining("FROM stores store"),
       [
-        "/",
         "00000000-0000-4000-8000-000000000001",
         "00000000-0000-4000-8000-000000000003",
         "00000000-0000-4000-8000-000000000004",

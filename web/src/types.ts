@@ -16,7 +16,14 @@ export interface AssetListing {
   intentId?: string;
   title: string;
   subtitle: string;
+  description?: string;
+  imageUrl?: string;
+  storeName?: string;
   price: string;
+  /** Exact canonical price used for deterministic comparison and basket calculations. */
+  priceAmountMinor?: string;
+  priceCurrency?: string;
+  priceCurrencyScale?: number;
   priceLabel?: string;
   location?: string;
   matchScore?: number;

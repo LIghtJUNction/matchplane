@@ -96,10 +96,11 @@ export function ListingSheet({ listing, subplatform, locale, onClose, onContact,
               </motion.button>
             </div>
             <div className="sheet-scroll">
-              <ListingVisual accent={listing.accent} label={listing.trust?.[0]} />
+              <ListingVisual accent={listing.accent} label={listing.trust?.[0]} imageUrl={listing.imageUrl} alt={listing.title} />
               {listing.matchScore !== undefined ? <div className="sheet-match"><Sparkles size={15} aria-hidden="true" /> {matchLevelForScore(listing.matchScore, locale)} · {copy("matchLabel", "匹配", "match")}</div> : null}
               <h2 id="listing-sheet-title">{listing.title}</h2>
               <p className="sheet-subtitle">{listing.subtitle}</p>
+              {listing.description ? <p className="sheet-description">{listing.description}</p> : null}
               <div className="sheet-price"><strong>{listing.price}</strong>{listing.priceLabel ? <span>{listing.priceLabel}</span> : null}</div>
               <dl className="sheet-facts">
                 {listing.facts.map((fact) => <div key={`${fact.label}-${fact.value}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
@@ -148,7 +149,7 @@ export function ListingSheet({ listing, subplatform, locale, onClose, onContact,
               </section>
             </div>
             <div className="sheet-footer">
-              <div><small>{copy("platformFeeLabel", "平台服务费", "Platform service fee")}</small><strong>{copy("platformFeeDescription", "按当前子平台披露规则结算", "Settled under the active platform disclosure")}</strong></div>
+              <div><small>{copy("platformFeeLabel", "商城服务费", "Mall service fee")}</small><strong>{copy("platformFeeDescription", "按当前店铺披露规则结算", "Settled under the active store disclosure")}</strong></div>
               <motion.button
                 className="button button-dark"
                 type="button"
@@ -214,7 +215,7 @@ export function ModeDialog({ open, currentMode, onClose, onConfirm, resourceLabe
             transition={spring}
           >
             <span className="dialog-icon"><ShieldCheck aria-hidden="true" /></span>
-            <p className="eyebrow">管理员操作</p>
+            <p className="eyebrow">运营操作</p>
             <h2 id="mode-dialog-title">切换{resourceLabel ? `${resourceLabel}到` : "到"}{target}？</h2>
             <p>
               切换前系统会检查目标模式的配置，并阻止存在未知结果时切换。

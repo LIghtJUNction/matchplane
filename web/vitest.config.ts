@@ -12,6 +12,7 @@ export default defineConfig({
       },
     },
     setupFiles: "./src/test/setup.ts",
+    exclude: ["**/.next/**", "**/node_modules/**"],
     css: true,
     // Next-compatible modules and jsdom can take longer to boot on CI runners. Avoid turning
     // a slow interaction test into a flaky failure under the default five-second budget.

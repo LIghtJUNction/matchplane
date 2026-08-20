@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { auth } from "../../../../../../../src/lib/auth";
+import { auth, authDatabase } from "../../../../../../../src/lib/auth";
 import { readJsonBody, readResponseTextBody } from "../../../../../../../src/lib/body-limit";
 import { loadInternalBearer } from "../../../../../../../src/lib/internal-auth";
 import { hasTrustedBrowserOrigin } from "../../../../../../../src/lib/request-origin";
 import { syncCanonicalMarketplaceOffer } from "../../../../../../../src/catalog-sync";
+import { validateStorefrontPublication } from "../../../../../../../src/storefront-publication";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export async function POST(
   const session = await auth.api.getSession({ headers: request.headers });
   const role = (session?.user as { role?: unknown } | undefined)?.role;
   if (!session || (role !== "rootSuperAdmin" && role !== "rootAdmin")) {
-    return jsonError("只有根平台管理员可以激活供给", 403);
+    return jsonError("当前账号没有商城商品审核权限", 403);
   }
 
   const { offerId } = await context.params;
@@ -42,6 +43,14 @@ export async function POST(
   if (body.tenant_id !== undefined && body.tenant_id !== tenantId) {
     return jsonError("供给审核只能访问当前根平台 tenant", 403);
   }
+
+  const publication = await readPublicationCandidate(tenantId, offerId).catch((error) => {
+    console.error("storefront publication validation failed", error);
+    return null;
+  });
+  if (!publication) return jsonError("商品不存在或审核资料暂时不可用", 404);
+  const validation = validateStorefrontPublication(publication);
+  if (!validation.ok) return jsonError(validation.error, 409);
 
   let bearer: string;
   try {
@@ -98,6 +107,21 @@ export async function POST(
     });
   }
   const sync = await syncCanonicalMarketplaceOffer({ request, offerId, tenantId });
+  if (validation.hostedMediaIds.length) {
+    await authDatabase.query(
+      `UPDATE hosted_store_media media
+          SET status = 'published'
+         FROM marketplace_offers offer
+        WHERE offer.tenant_id = $1::uuid
+          AND offer.id = $2::uuid
+          AND offer.status = 'active'
+          AND media.tenant_id = offer.tenant_id
+          AND media.store_id = offer.store_id
+          AND media.id = ANY($3::uuid[])
+          AND media.status IN ('pending', 'published')`,
+      [tenantId, offerId, validation.hostedMediaIds],
+    );
+  }
   activated.catalog_sync = {
     synced: sync.synced,
     platform_path: sync.platformPath,
@@ -107,6 +131,43 @@ export async function POST(
     status: upstream.status,
     headers: { "cache-control": "no-store" },
   });
+}
+
+async function readPublicationCandidate(tenantId: string, offerId: string) {
+  const result = await authDatabase.query<{
+    storeId: string | null;
+    storeStatus: string | null;
+    storeVisibility: string | null;
+    integrationKind: string | null;
+    domainMatches: boolean;
+    displayName: string;
+    attributes: unknown;
+    terms: unknown;
+    availableHostedMediaIds: string[];
+  }>(
+    `SELECT offer.store_id::text AS "storeId",
+            store.status AS "storeStatus",
+            store.visibility AS "storeVisibility",
+            store.integration_kind AS "integrationKind",
+            (store.domain_id = offer.domain_id) AS "domainMatches",
+            offer.display_name AS "displayName",
+            offer.attributes,
+            offer.terms,
+            COALESCE(array_agg(media.id::text) FILTER (WHERE media.id IS NOT NULL), '{}') AS "availableHostedMediaIds"
+       FROM marketplace_offers offer
+       LEFT JOIN stores store
+         ON store.tenant_id = offer.tenant_id AND store.id = offer.store_id
+       LEFT JOIN hosted_store_media media
+         ON media.tenant_id = store.tenant_id
+        AND media.store_id = store.id
+        AND media.status IN ('pending', 'published')
+      WHERE offer.tenant_id = $1::uuid
+        AND offer.id = $2::uuid
+        AND offer.status IN ('draft', 'withdrawn')
+      GROUP BY offer.id, store.id`,
+    [tenantId, offerId],
+  );
+  return result.rows[0] ?? null;
 }
 
 function isUuid(value: string): boolean {

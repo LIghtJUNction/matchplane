@@ -202,7 +202,7 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
 
   const issueAdministratorInvite = async () => {
     if (!administratorInviteEmail.trim()) {
-      onNotice("请填写平台管理员邮箱");
+      onNotice("请填写商城运营人员邮箱");
       return;
     }
     setAdministratorLoading(true);
@@ -210,9 +210,9 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
       const invite = await createPlatformAdminInvite({ email: administratorInviteEmail.trim(), expiresHours: 24 });
       setAdministratorInviteEmail("");
       setNewAdministratorInvite(invite);
-      onNotice("平台管理员注册链接已生成；请通过安全渠道发送给指定邮箱");
+      onNotice("商城运营注册链接已生成；请通过安全渠道发送给指定邮箱");
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "平台管理员邀请创建失败");
+      onNotice(error instanceof Error ? error.message : "商城运营邀请创建失败");
     } finally {
       setAdministratorLoading(false);
     }
@@ -283,7 +283,7 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
 
   const createOidc = async () => {
     if (!oidcRegistrationId || !oidcName.trim() || !oidcRedirectUri.trim()) {
-      onNotice("请选择已激活子平台，并填写客户端名称和 HTTPS 回调地址");
+      onNotice("请选择已上线店铺，并填写客户端名称和 HTTPS 回调地址");
       return;
     }
     setOidcLoading(true);
@@ -331,7 +331,6 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
     try {
       const invite = await createFederationInvite({
         domainId: federationDomainId,
-        ...(selectedOrganization && !selectedOrganization.isRoot ? { parentOrganizationId: selectedOrganization.id } : {}),
         expiresInHours: Math.max(1, Math.min(168, Number.parseInt(federationExpiresHours, 10) || 24)),
       });
       setNewFederationInvite({ token: invite.enrollmentToken, url: invite.enrollmentUrl, expiresAt: invite.expiresAt });
@@ -353,7 +352,7 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
         membershipPolicy: "invite",
       });
       await refreshFederation();
-      onNotice(`/${binding.slug} 已激活；现在可以由根平台路由到该节点`);
+      onNotice(`店铺 /${binding.slug} 已上线，现在可以被商城 AI 检索`);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "联邦节点激活失败");
     } finally {
@@ -391,16 +390,16 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
     <section className="surface platform-access-panel" aria-labelledby="platform-access-title">
       <div className="subplatform-header">
         <div>
-          <p className="eyebrow"><Users size={14} aria-hidden="true" /> 统一身份与权限</p>
-          <h2 id="platform-access-title">一个账号，管理它被授权的平台。</h2>
-          <p className="subplatform-intro">成员只需要一个 Better Auth 账号；平台管理员在这里发邀请、调整角色或收回权限。</p>
+          <p className="eyebrow"><Users size={14} aria-hidden="true" /> 团队与权限</p>
+          <h2 id="platform-access-title">一个账号，管理商城和店铺</h2>
+          <p className="subplatform-intro">在这里邀请商城运营或店铺成员、调整职责并收回权限。</p>
         </div>
         {organizations.length ? (
-          <label className="platform-access-select"><span>当前平台</span><select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.isRoot ? "根平台" : `/${organization.slug}`} · {organization.name}</option>)}</select></label>
+          <label className="platform-access-select"><span>管理范围</span><select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.isRoot ? "商城" : "店铺"} · {organization.name}</option>)}</select></label>
         ) : null}
       </div>
       {!organizations.length ? (
-        <div className="subplatform-empty"><ShieldCheck size={22} aria-hidden="true" /><p>还没有可管理的平台组织；请先配置根平台组织或激活一个子平台。</p></div>
+        <div className="subplatform-empty"><ShieldCheck size={22} aria-hidden="true" /><p>还没有可管理的商城团队或店铺。</p></div>
       ) : (
         <>
           <div className="platform-access-invite">
@@ -417,9 +416,9 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
                   <select aria-label={`${member.user?.email || member.userId} 的角色`} value={member.role.split(",")[0]} disabled={busyMemberId === member.id} onChange={(event) => void changeRole(member, event.target.value)}>{roleOptions(directory.canAssignOwner).map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select>
                   <button className="icon-button" type="button" aria-label={`移除 ${member.user?.email || member.userId}`} disabled={busyMemberId === member.id} onClick={() => void remove(member)}><UserMinus size={16} aria-hidden="true" /></button>
                 </div>
-              )) : <p className="platform-access-empty">这个平台还没有成员。</p>}
+              )) : <p className="platform-access-empty">这个团队还没有成员。</p>}
             </div>
-          ) : <p className="platform-access-empty">{loading ? "正在读取成员…" : "选择一个平台读取成员"}</p>}
+          ) : <p className="platform-access-empty">{loading ? "正在读取成员…" : "选择商城或店铺读取成员"}</p>}
           {directory?.invitations.filter((invitation) => invitation.status === "pending").length ? (
             <div className="platform-invitation-list">
               <p className="eyebrow">待处理邀请</p>
@@ -442,10 +441,10 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
           </div>
           {(rootRole === "rootSuperAdmin" || rootRole === "rootAdmin") ? (
             <div className="platform-oidc-panel">
-              <div className="subsection-heading"><div><p className="eyebrow">联邦登录</p><strong>OIDC 客户端</strong></div><small>{oidcLoading ? "处理中…" : "只为已激活子平台签发"}</small></div>
+              <div className="subsection-heading"><div><p className="eyebrow">统一登录</p><strong>店铺 OIDC 客户端</strong></div><small>{oidcLoading ? "处理中…" : "只为已上线店铺签发"}</small></div>
               <div className="platform-oidc-form">
-                <label><span>子平台</span><select value={oidcRegistrationId} onChange={(event) => setOidcRegistrationId(event.target.value)}><option value="">选择已激活子平台</option>{organizations.filter((organization) => organization.registrationId && organization.registrationState === "active").map((organization) => <option key={organization.registrationId} value={organization.registrationId!}>/{organization.slug} · {organization.name}</option>)}</select></label>
-                <label><span>客户端名称</span><input value={oidcName} onChange={(event) => setOidcName(event.target.value)} placeholder="子平台登录客户端" autoComplete="off" /></label>
+                <label><span>店铺</span><select value={oidcRegistrationId} onChange={(event) => setOidcRegistrationId(event.target.value)}><option value="">选择已上线店铺</option>{organizations.filter((organization) => organization.registrationId && organization.registrationState === "active").map((organization) => <option key={organization.registrationId} value={organization.registrationId!}>{organization.name}</option>)}</select></label>
+                <label><span>客户端名称</span><input value={oidcName} onChange={(event) => setOidcName(event.target.value)} placeholder="店铺登录客户端" autoComplete="off" /></label>
                 <label><span>HTTPS 回调地址</span><input value={oidcRedirectUri} onChange={(event) => setOidcRedirectUri(event.target.value)} placeholder="https://child.example.com/callback" inputMode="url" /></label>
                 <button className="button button-dark" type="button" disabled={oidcLoading} onClick={() => void createOidc()}>创建客户端</button>
               </div>
@@ -457,21 +456,21 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
           ) : null}
           {(rootRole === "rootSuperAdmin" || rootRole === "rootAdmin") ? (
             <div className="platform-federation-panel platform-api-key-panel">
-              <div className="subsection-heading"><div><p className="eyebrow"><Globe2 size={14} aria-hidden="true" /> 远程平台</p><strong>接入另一台 MatchPlane</strong></div><small>{federationLoading ? "处理中…" : "一次性签名入驻，人工激活"}</small></div>
-              <p className="platform-access-empty">远端管理员使用一次性 token 提交签名清单；API Key 只负责运行时 MCP 授权，不代表平台身份。</p>
+              <div className="subsection-heading"><div><p className="eyebrow"><Globe2 size={14} aria-hidden="true" /> 外部店铺</p><strong>接入远程经营的店铺</strong></div><small>{federationLoading ? "处理中…" : "一次性签名入驻，人工上线"}</small></div>
+              <p className="platform-access-empty">外部商家使用一次性 token 提交签名清单；商城仅获得店铺授权的商品检索能力。</p>
               <div className="platform-federation-form">
-                <label><span>挂载 domain</span><select value={federationDomainId} onChange={(event) => setFederationDomainId(event.target.value)}><option value="">选择 domain</option>{federationDomains.map((domain) => <option key={domain.id} value={domain.id}>{domain.slug} · {domain.name}</option>)}</select></label>
+                <label><span>商品范围</span><select value={federationDomainId} onChange={(event) => setFederationDomainId(event.target.value)}><option value="">选择商品范围</option>{federationDomains.map((domain) => <option key={domain.id} value={domain.id}>{domain.name}</option>)}</select></label>
                 <label><span>邀请有效期（小时）</span><input type="number" min={1} max={168} value={federationExpiresHours} onChange={(event) => setFederationExpiresHours(event.target.value)} /></label>
                 <button className="button button-dark" type="button" disabled={federationLoading} onClick={() => void issueFederationInvite()}>生成入驻 token</button>
               </div>
-              {newFederationInvite ? <div className="api-key-secret"><div><strong>请立即交给远端管理员</strong><code>{newFederationInvite.token}</code><small>POST {newFederationInvite.url} · 到期 {new Date(newFederationInvite.expiresAt).toLocaleString()}</small></div><button type="button" onClick={() => void copySecret(newFederationInvite.token)}>复制 token</button><button type="button" onClick={() => setNewFederationInvite(null)}>关闭</button></div> : null}
-              <div className="platform-oidc-list" aria-label="远程平台绑定列表">
+              {newFederationInvite ? <div className="api-key-secret"><div><strong>请立即交给外部店主</strong><code>{newFederationInvite.token}</code><small>POST {newFederationInvite.url} · 到期 {new Date(newFederationInvite.expiresAt).toLocaleString()}</small></div><button type="button" onClick={() => void copySecret(newFederationInvite.token)}>复制 token</button><button type="button" onClick={() => setNewFederationInvite(null)}>关闭</button></div> : null}
+              <div className="platform-oidc-list" aria-label="外部店铺列表">
                 {federationBindings.length ? federationBindings.map((binding) => (
                   <div className="platform-oidc-row platform-federation-row" key={binding.id}>
                     <span><strong>/{binding.slug} · {binding.displayName}</strong><small>{binding.endpoint} · {binding.status}</small></span>
                     {binding.status === "pending" ? <><input aria-label={`${binding.slug} 的 MCP token 环境变量`} value={federationTokenEnv[binding.id] ?? defaultFederationTokenEnv(binding.slug)} onChange={(event) => setFederationTokenEnv((current) => ({ ...current, [binding.id]: event.target.value }))} placeholder="MATCHPLANE_REMOTE_MCP_TOKEN" /><button type="button" disabled={federationLoading} onClick={() => void activateFederation(binding)}>激活</button></> : binding.status !== "revoked" ? <><button type="button" disabled={federationLoading} onClick={() => void probeFederation(binding)}>检查</button><button type="button" disabled={federationLoading} onClick={() => void revokeFederation(binding)}>撤销</button></> : <b className="status-chip">已撤销</b>}
                   </div>
-                )) : <p className="platform-access-empty">还没有远程平台入驻。</p>}
+                )) : <p className="platform-access-empty">还没有外部店铺入驻。</p>}
               </div>
             </div>
           ) : null}
@@ -479,14 +478,14 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
       )}
       {rootRole === "rootSuperAdmin" || rootRole === "rootAdmin" ? (
         <div className="root-administrator-panel">
-          <div className="subsection-heading"><div><p className="eyebrow">根平台账号</p><strong>管理员权限</strong></div><small>{administratorLoading ? "读取中…" : rootRole === "rootSuperAdmin" ? "管理员必须通过一次性邀请链接注册" : "只有超级管理员可以创建邀请"}</small></div>
-          {rootRole === "rootSuperAdmin" ? <div className="platform-access-invite"><label><span>管理员邮箱</span><input type="email" value={administratorInviteEmail} onChange={(event) => setAdministratorInviteEmail(event.target.value)} placeholder="admin@example.com" /></label><button className="button button-dark" type="button" disabled={administratorLoading} onClick={() => void issueAdministratorInvite()}>创建注册链接</button></div> : null}
+          <div className="subsection-heading"><div><p className="eyebrow">商城团队</p><strong>运营权限</strong></div><small>{administratorLoading ? "读取中…" : rootRole === "rootSuperAdmin" ? "商城运营必须通过一次性邀请链接加入" : "只有商城负责人可以创建邀请"}</small></div>
+          {rootRole === "rootSuperAdmin" ? <div className="platform-access-invite"><label><span>运营人员邮箱</span><input type="email" value={administratorInviteEmail} onChange={(event) => setAdministratorInviteEmail(event.target.value)} placeholder="operator@example.com" /></label><button className="button button-dark" type="button" disabled={administratorLoading} onClick={() => void issueAdministratorInvite()}>创建注册链接</button></div> : null}
           {newAdministratorInvite ? <div className="api-key-secret"><div><strong>仅发给 {newAdministratorInvite.email}</strong><code>{newAdministratorInvite.registrationUrl}</code><small>到期 {new Date(newAdministratorInvite.expiresAt).toLocaleString()}</small></div><button type="button" onClick={() => void copySecret(newAdministratorInvite.registrationUrl)}>复制</button><button type="button" onClick={() => setNewAdministratorInvite(null)}>关闭</button></div> : null}
-          <div className="root-administrator-list" aria-label="根平台账号列表">
+          <div className="root-administrator-list" aria-label="商城运营账号列表">
             {administrators.length ? administrators.map((administrator) => (
               <div className="root-administrator-row" key={administrator.id}>
                 <span><strong>{administrator.name || administrator.email}</strong><small>{administrator.email}{administrator.emailVerified ? " · 已验证" : " · 待验证"}</small></span>
-                <b className={administrator.role === "rootSuperAdmin" || administrator.role === "rootAdmin" ? "status-chip is-on" : "status-chip"}>{administrator.role === "rootSuperAdmin" ? "超级管理员" : administrator.role === "rootAdmin" ? "管理员" : "普通账号"}</b>
+                <b className={administrator.role === "rootSuperAdmin" || administrator.role === "rootAdmin" ? "status-chip is-on" : "status-chip"}>{administrator.role === "rootSuperAdmin" ? "商城负责人" : administrator.role === "rootAdmin" ? "商城运营" : "普通账号"}</b>
               </div>
             )) : <p className="platform-access-empty">{administratorLoading ? "正在读取账号…" : "还没有可管理的账号"}</p>}
           </div>
@@ -512,12 +511,12 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
 
 function roleOptions(canAssignOwner: boolean): Array<{ value: string; label: string }> {
   const roles = [
-    { value: "admin", label: "管理员" },
-    { value: "subplatform_admin", label: "平台管理员" },
-    { value: "moderator", label: "运营管理员" },
-    { value: "member", label: "普通成员" },
+    { value: "admin", label: "店铺运营" },
+    { value: "subplatform_admin", label: "店铺运营" },
+    { value: "moderator", label: "内容审核" },
+    { value: "member", label: "店铺成员" },
   ];
-  return canAssignOwner ? [{ value: "owner", label: "平台所有者" }, ...roles] : roles;
+  return canAssignOwner ? [{ value: "owner", label: "店主" }, ...roles] : roles;
 }
 
 function roleLabel(role: string): string {

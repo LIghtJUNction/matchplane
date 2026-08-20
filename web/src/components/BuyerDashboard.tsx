@@ -197,6 +197,18 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
     });
   }, [activeFilters, dismissed, filterDefinitions, listings, query]);
 
+  const comparedListings = useMemo(
+    () => [...compareIds].flatMap((id) => {
+      const listing = listings.find((candidate) => candidate.id === id);
+      return listing ? [listing] : [];
+    }),
+    [compareIds, listings],
+  );
+  const comparisonCalculation = useMemo(
+    () => calculateComparablePrices(comparedListings),
+    [comparedListings],
+  );
+
   const recordBehavior = useCallback(async (listing: AssetListing, eventType: string, reason?: string) => {
     if (!listing.offerId || !listing.tenantId || !listing.domainId) return;
     const scopePath = listing.platformPath || subplatform.path;
@@ -392,7 +404,7 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
                   : copy("noOffersDescription", "平台不预置样例内容；供给方提交并通过审核后，这里会出现真实供给。", "There are no seeded examples. Approved offers will appear here after supply partners publish them.")}
               </p>
               {query ? <button type="button" onClick={() => setQuery("")}>{copy("clearSearchLabel", "清除搜索", "Clear search")}</button> : null}
-              {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice(copy("describeDemandNotice", "先描述你的目标，平台会从已激活的子平台开始路由", "Describe your goal and the platform will route it through active matching nodes.")); }}>{copy("describeDemandLabel", "描述需求", "Describe a need")}</button> : null}
+              {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice(copy("describeDemandNotice", "告诉 AI 导购你想买什么，它会在已上线店铺中寻找商品", "Tell the shopping assistant what you want and it will search live stores.")); }}>{copy("describeDemandLabel", "继续挑选", "Keep shopping")}</button> : null}
             </div>
           )}
         </section>
@@ -401,15 +413,23 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
       {compareIds.size ? (
         <section className="surface compare-panel" aria-label={copy("compareLabel", "比较", "Compare")}>
           <div className="compare-panel-heading">
-            <div><Scale size={18} aria-hidden="true" /><strong>{copy("compareTitle", "正在比较", "Comparing")}</strong><span>{compareIds.size}/3</span></div>
+            <div><Scale size={18} aria-hidden="true" /><strong>{copy("compareTitle", "跨店比价", "Compare stores")}</strong><span>{compareIds.size}/3</span></div>
             <button type="button" className="text-action" onClick={() => setCompareIds(new Set())}>{copy("clearCompareLabel", "清空", "Clear")}</button>
           </div>
           <div className="compare-items">
-            {[...compareIds].map((id) => {
-              const listing = listings.find((candidate) => candidate.id === id);
-              return listing ? <button key={id} type="button" onClick={() => onOpenListing(listing)}>{listing.title}</button> : null;
-            })}
+            {comparedListings.map((listing) => (
+              <button key={listing.id} type="button" onClick={() => onOpenListing(listing)}>
+                <span><strong>{listing.title}</strong><small>{listing.storeName ?? listing.subtitle}</small></span>
+                <b>{listing.price}</b>
+              </button>
+            ))}
           </div>
+          {comparisonCalculation ? (
+            <div className="compare-calculation" aria-live="polite">
+              <span>{copy("compareTotalLabel", "所选商品合计", "Selected total")} <strong>{comparisonCalculation.total}</strong></span>
+              {comparedListings.length > 1 ? <span>{copy("compareSpreadLabel", "最高与最低相差", "Highest–lowest difference")} <strong>{comparisonCalculation.spread}</strong></span> : null}
+            </div>
+          ) : comparedListings.length > 1 ? <p className="compare-note">{copy("compareCurrencyNote", "币种或价格格式不同，暂不计算合计。", "Totals are unavailable for mixed currencies or price formats.")}</p> : null}
         </section>
       ) : null}
 
@@ -473,6 +493,39 @@ function matchLevelForScore(score: number, locale: InterfaceLocale): string {
   return score >= 80 ? "非常适合" : score >= 60 ? "比较适合" : score >= 40 ? "一般" : "不太适合";
 }
 
+function calculateComparablePrices(listings: AssetListing[]): { total: string; spread: string } | null {
+  if (!listings.length) return null;
+  const first = listings[0];
+  if (!first?.priceAmountMinor || !first.priceCurrency || first.priceCurrencyScale === undefined) return null;
+  const currency = first.priceCurrency;
+  const scale = first.priceCurrencyScale;
+  if (listings.some((listing) => (
+    !listing.priceAmountMinor
+    || listing.priceCurrency !== currency
+    || listing.priceCurrencyScale !== scale
+  ))) return null;
+  try {
+    const values = listings.map((listing) => BigInt(listing.priceAmountMinor as string));
+    const total = values.reduce((sum, value) => sum + value, 0n);
+    const minimum = values.reduce((current, value) => value < current ? value : current);
+    const maximum = values.reduce((current, value) => value > current ? value : current);
+    return {
+      total: formatMinorUnits(total, currency, scale),
+      spread: formatMinorUnits(maximum - minimum, currency, scale),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatMinorUnits(amount: bigint, currency: string, scale: number): string {
+  const divisor = 10n ** BigInt(Math.max(0, scale));
+  const whole = amount / divisor;
+  if (scale === 0) return `${currency} ${whole}`;
+  const remainder = (amount < 0n ? -amount : amount) % divisor;
+  return `${currency} ${whole}.${remainder.toString().padStart(scale, "0")}`;
+}
+
 function AssetCard({
   listing,
   index,
@@ -516,7 +569,7 @@ function AssetCard({
       layout
     >
       <button className="listing-open" type="button" onClick={onOpen} aria-label={offerViewLabel}>
-        <ListingVisual accent={listing.accent} label={listing.trust?.[0]} />
+        <ListingVisual accent={listing.accent} label={listing.trust?.[0]} imageUrl={listing.imageUrl} alt={listing.title} />
       </button>
       <motion.button
         type="button"

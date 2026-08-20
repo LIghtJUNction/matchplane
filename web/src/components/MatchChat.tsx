@@ -11,6 +11,7 @@ import {
   getMarketplaceOfferMatches,
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
+  searchMallCatalog,
   uploadMarketplaceAttachment,
   querySubplatformRetrieval,
   updateMarketplaceIntent,
@@ -66,40 +67,40 @@ interface ChatCopy {
 }
 
 const defaultChatCopy: ChatCopy = {
-  buyerEyebrow: "需求方入口",
+  buyerEyebrow: "AI 导购",
   sellerEyebrow: "供给方入口",
-  buyerTitle: "先说说你想解决什么。",
+  buyerTitle: "想买什么，告诉我就行。",
   sellerTitle: "说说你能提供什么。",
-  buyerHeadlines: ["先说说你想解决什么。", "让目标找到合适的答案。", "从一句话开始。"],
+  buyerHeadlines: ["想买什么，告诉我就行。", "帮你逛店、比价、算清总价。", "从一句话开始挑选。"],
   sellerHeadlines: ["说说你能提供什么。", "让真实供给被看见。", "把你的优势交给匹配。"],
-  buyerDescription: "说出目标、预算和不能妥协的条件。",
+  buyerDescription: "我会在商城店铺中找商品、比较价格，并说明为什么适合你。无需登录即可开始。",
   sellerDescription: "说出你能提供的内容、条件和限制。",
-  buyerPlaceholder: "例如：我想解决一个具体问题，预算、时间和不能妥协的条件是……",
+  buyerPlaceholder: "例如：预算 3000 元，想找一台适合通勤的轻薄电脑……",
   buyerDiscoveryLabel: "允许供给方看到这条需求摘要（不含联系方式）",
   buyerDiscoveryDefault: false,
   sellerPlaceholder: "例如：我能提供什么，交付条件和限制是……",
   buyerFootnote: "Enter 发送 · Shift + Enter 换行",
   sellerFootnote: "Enter 发送 · Shift + Enter 换行",
-  buyerSuccess: "需求已发送，撮合会围绕你的真实目标展开",
+  buyerSuccess: "商品已经按你的需求整理好了",
   sellerSuccess: "供给描述已整理；请在下方提交资料，提交后才会写入系统",
 };
 
 const defaultChatCopyEn: ChatCopy = {
-  buyerEyebrow: "Buyer entry",
+  buyerEyebrow: "AI shopping assistant",
   sellerEyebrow: "Seller entry",
-  buyerTitle: "Tell us what you want to solve.",
+  buyerTitle: "Tell me what you want to buy.",
   sellerTitle: "Tell us what you can offer.",
-  buyerHeadlines: ["Tell us what you want to solve.", "Find an answer that fits.", "Start with one sentence."],
+  buyerHeadlines: ["Tell me what you want to buy.", "Browse stores and compare prices.", "Start with one sentence."],
   sellerHeadlines: ["Tell us what you can offer.", "Let the right people find you.", "Start with one sentence."],
-  buyerDescription: "Share your goal, budget, and non-negotiable constraints.",
+  buyerDescription: "I’ll search the mall, compare products, and explain the best options. No sign-in needed to browse.",
   sellerDescription: "Share what you offer, the terms, and any constraints.",
-  buyerPlaceholder: "For example: I need to solve a specific problem, with this budget, timing, and constraints…",
+  buyerPlaceholder: "For example: a lightweight laptop for commuting, under $900…",
   buyerDiscoveryLabel: "Let supply agents see this request summary (no contact details)",
   buyerDiscoveryDefault: false,
   sellerPlaceholder: "For example: I can offer this, under these terms and constraints…",
   buyerFootnote: "Enter to send · Shift + Enter for a new line",
   sellerFootnote: "Enter to send · Shift + Enter for a new line",
-  buyerSuccess: "Your request was sent; matching will follow your actual goal.",
+  buyerSuccess: "Products have been organized around what you asked for.",
   sellerSuccess: "Your offer is organized; submit the details below to publish it.",
 };
 
@@ -172,17 +173,17 @@ function runtimeChatCopy(locale: InterfaceLocale): RuntimeChatCopy {
     unavailableDemand: "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。",
     multiplePlatforms: "我找到了多个适合发布供给的平台，请先选择一个。",
     choosePlatform: "请选择供给发布的平台",
-    targetPlatform: "目标子平台",
-    authDisconnected: "Better Auth 会话尚未连接到当前平台节点",
-    routeNode: "当前平台节点",
+    targetPlatform: "目标店铺",
+    authDisconnected: "登录会话尚未连接到当前店铺",
+    routeNode: "商城",
     routeOverflow: " 等平台",
-    routeDegraded: (names, overflow) => `AI 路由暂时不可用，已按受控策略把需求交给 ${names}${overflow}；下级平台会继续筛选商家与具体供给。`,
-    routeSelected: (names, overflow) => `AI 已从当前节点的候选平台中选出 ${names}${overflow}，接下来由下级平台继续挑选商家与具体供给，并解释匹配理由。`,
-    noMatch: "需求已记录在当前平台节点；AI 判断当前候选平台暂时没有合适的匹配。你可以补充目标、预算或限制条件后重试。",
-    noChildren: "需求已记录在当前平台节点，当前没有已激活的下级平台；管理员启用子平台后会继续向下传递。",
-    recorded: "需求已记录在当前平台节点。",
-    retrievalDegraded: " 子平台智能检索暂时不可用，已先使用基础条件匹配；管理员配置检索服务后会自动恢复。",
-    retrievalDegradedNotice: "子平台智能检索暂时不可用，已先使用基础条件匹配",
+    routeDegraded: (names, overflow) => `AI 导购暂时不可用，已按相关性在 ${names}${overflow} 中查找商品。`,
+    routeSelected: (names, overflow) => `AI 导购选择了 ${names}${overflow}，正在从这些店铺的在售商品中挑选并解释理由。`,
+    noMatch: "暂时没有找到合适的店铺。你可以补充品类、预算或必须具备的功能后重试。",
+    noChildren: "商城目前还没有上线店铺。",
+    recorded: "你的购物需求已经记录。",
+    retrievalDegraded: " 店铺智能检索暂时不可用，已先使用基础商品条件匹配。",
+    retrievalDegradedNotice: "店铺智能检索暂时不可用，已先使用基础条件匹配",
     sendFailed: "需求暂时没有发送成功，请稍后再试。",
     authFailed: "Better Auth 会话校验失败",
     routeChoicesAria: "选择供给发布平台",
@@ -784,6 +785,43 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     [conversationAttachments, copy.buyerSuccess, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerDraft, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
   );
 
+  const submitGuestMessage = useCallback(async (rawText: string) => {
+    const text = rawText.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setMessage("");
+    const requestId = crypto.randomUUID();
+    const narrative = buildConversationNarrative(
+      messages.filter((item) => item.role === "user").map((item) => item.text),
+      text,
+    );
+    setMessages((current) => [...current, { id: `${requestId}-user`, role: "user", text }]);
+    try {
+      const result = await searchMallCatalog({
+        narrative,
+        ...(isRoot ? {} : { storePath: subplatform.path }),
+      });
+      onRecommendations?.(result.recommendations);
+      const storeNames = result.stores.map((store) => store.displayName).slice(0, 4);
+      const answer = result.recommendations.length
+        ? locale === "en"
+          ? `I found ${result.recommendations.length} products${storeNames.length ? ` from ${storeNames.join(", ")}` : ""}. I’ve ordered them by relevance so you can compare them below.`
+          : `我找到了 ${result.recommendations.length} 件商品${storeNames.length ? `，来自${storeNames.join("、")}` : ""}。已经按相关性整理在下方，可以直接比较。`
+        : locale === "en"
+          ? "I couldn’t find a matching product yet. Try adding a category, budget, brand, or must-have feature."
+          : "暂时没有找到合适的在售商品。可以补充品类、预算、品牌或必须具备的功能。";
+      setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: answer }]);
+      onNotice(result.recommendations.length ? copy.buyerSuccess : answer);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : runtime.sendFailed;
+      setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: detail }]);
+      setMessage(text);
+      focusInputAfterErrorRef.current = true;
+    } finally {
+      setSending(false);
+    }
+  }, [copy.buyerSuccess, isRoot, locale, messages, onNotice, onRecommendations, runtime.sendFailed, sending, subplatform.path]);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -840,6 +878,11 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
       const authState = scopedMarketplace
         ? null
         : await authClient.getSession({ fetchOptions: authFetchOptions(subplatform.slug) });
+      if (!isSeller) {
+        setSignedIn(Boolean(session || authState?.data));
+        void submitGuestMessage(text);
+        return;
+      }
       if (!session && !authState?.data) {
         const next = `${window.location.pathname}${window.location.search}`;
         window.sessionStorage.setItem(PENDING_CHAT_KEY, JSON.stringify({ text, next } satisfies PendingChat));
@@ -983,7 +1026,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           {sending ? <LoaderCircle className="match-chat-spinner" size={18} aria-hidden="true" /> : <ArrowUp size={18} aria-hidden="true" />}
         </Button>
       </form>
-      {!isSeller ? (
+      {!isSeller && signedIn && !isRoot ? (
         <label className="match-chat-discovery">
           <input
             type="checkbox"

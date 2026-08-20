@@ -5,9 +5,11 @@ import { Globe2, Search, Save, ShieldCheck } from "lucide-react";
 
 import {
   getPlatformSiteSettings,
+  getMallSettings,
   isLiveMarketplaceEnabled,
   lookupPlatformSiteSettings,
   savePlatformSiteSettings,
+  saveMallSettings,
   type PlatformSiteSettings,
 } from "../api";
 import { SectionHeading } from "./Primitives";
@@ -35,6 +37,9 @@ export function PlatformSiteSettingsPanel({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
+  const [mallName, setMallName] = useState(platformName);
+  const [mallVersion, setMallVersion] = useState<number | null>(null);
+  const [mallSaving, setMallSaving] = useState(false);
 
   useEffect(() => {
     if (!organizationId || !isLiveMarketplaceEnabled()) return;
@@ -55,6 +60,33 @@ export function PlatformSiteSettingsPanel({
       mounted = false;
     };
   }, [organizationId]);
+
+  useEffect(() => {
+    if (platformPath !== "/") return;
+    let mounted = true;
+    void getMallSettings().then((mall) => {
+      if (!mounted) return;
+      setMallName(mall.name);
+      setMallVersion(mall.version);
+    }).catch(() => undefined);
+    return () => { mounted = false; };
+  }, [platformPath]);
+
+  const saveMallName = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!mallVersion) return;
+    setMallSaving(true);
+    try {
+      const mall = await saveMallSettings({ name: mallName, expectedVersion: mallVersion });
+      setMallName(mall.name);
+      setMallVersion(mall.version);
+      onNotice("商城名称已保存，刷新公开页后生效");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "商城名称保存失败");
+    } finally {
+      setMallSaving(false);
+    }
+  };
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -118,13 +150,19 @@ export function PlatformSiteSettingsPanel({
   return (
     <section className="surface site-settings-panel" aria-labelledby="site-settings-title">
       <div className="site-settings-heading">
-        <SectionHeading eyebrow="网站设置" title="备案信息" />
+        <SectionHeading eyebrow="网站设置" title={platformPath === "/" ? "商城名称与备案信息" : "备案信息"} />
         <button className="button button-light site-settings-lookup" type="button" onClick={() => void lookup()} disabled={lookingUp || loading}>
           <Search size={16} aria-hidden="true" />
           {lookingUp ? "查询中…" : "自动查询当前域名"}
         </button>
       </div>
-      <p className="site-settings-intro">{platformName} 的公开备案资料由管理员确认后发布。自动查询只连接服务器端配置的查询服务，不会把域名或凭据交给浏览器外的未知网站。</p>
+      {platformPath === "/" ? (
+        <form className="site-settings-name-form" onSubmit={saveMallName}>
+          <label htmlFor="mall-display-name"><span>商城名称</span><input id="mall-display-name" value={mallName} onChange={(event) => setMallName(event.target.value)} maxLength={200} required /></label>
+          <button className="button button-dark" type="submit" disabled={mallSaving || !mallVersion}>{mallSaving ? "保存中…" : "保存名称"}</button>
+        </form>
+      ) : null}
+      <p className="site-settings-intro">{platformName} 的公开备案资料由商城负责人确认后发布。自动查询只连接服务器端配置的查询服务，不会把域名或凭据交给浏览器外的未知网站。</p>
       <form className="site-settings-form" onSubmit={save}>
         <label htmlFor="site-icp-number"><span>ICP备案号</span><input id="site-icp-number" value={icpNumber} onChange={(event) => setIcpNumber(event.target.value)} placeholder="例如：京ICP备00000000号" maxLength={128} /></label>
         <label htmlFor="site-icp-subject"><span>备案主体</span><input id="site-icp-subject" value={icpSubject} onChange={(event) => setIcpSubject(event.target.value)} placeholder="公司或个人主体名称" maxLength={200} /></label>

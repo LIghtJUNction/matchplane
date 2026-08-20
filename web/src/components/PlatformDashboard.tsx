@@ -55,6 +55,8 @@ import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
+import { MallCatalogModeration } from "./MallCatalogModeration";
+import { StoreCommercialTermsPanel } from "./StoreCommercialTermsPanel";
 import { SectionHeading } from "./Primitives";
 
 interface PlatformDashboardProps {
@@ -114,7 +116,6 @@ export function PlatformDashboard({
   const [domainName, setDomainName] = useState("");
   const [subplatformEditorOpen, setSubplatformEditorOpen] = useState(false);
   const [subplatformSourceKind, setSubplatformSourceKind] = useState<"git" | "archive">("git");
-  const [subplatformParentId, setSubplatformParentId] = useState("");
   const [subplatformDomainId, setSubplatformDomainId] = useState("");
   const [subplatformPackageId, setSubplatformPackageId] = useState("");
   const [subplatformSlug, setSubplatformSlug] = useState("");
@@ -313,7 +314,6 @@ export function PlatformDashboard({
 
   const resetSubplatformEditor = () => {
     setSubplatformSourceKind("git");
-    setSubplatformParentId("");
     setSubplatformPackageId("");
     setSubplatformSlug("");
     setSubplatformSourceLocator("");
@@ -329,11 +329,11 @@ export function PlatformDashboard({
 
   const submitSubplatform = async () => {
     if (!setup?.root.tenantId) {
-      onNotice("根平台 tenant 尚未配置，暂时不能注册子平台");
+      onNotice("商城尚未完成初始化，暂时不能接入店铺");
       return;
     }
     if (!subplatformDomainId) {
-      onNotice("请先在根平台配置一个 active domain");
+      onNotice("请先为商城配置一个可用的商品范围");
       return;
     }
     let packageId = subplatformPackageId.trim();
@@ -354,10 +354,10 @@ export function PlatformDashboard({
     try {
       if (subplatformSourceKind === "archive") {
         if (!subplatformArchive) {
-          onNotice("请选择 .tar.gz、.tgz、.tar.zst 或 .tzst 子平台压缩包");
+          onNotice("请选择 .tar.gz、.tgz、.tar.zst 或 .tzst 店铺接入包");
           return;
         }
-        const uploaded = await uploadSubplatformArchive(subplatformArchive, subplatformParentId || undefined);
+        const uploaded = await uploadSubplatformArchive(subplatformArchive);
         sourceLocator = uploaded.sourceLocator;
         sourceDigest = uploaded.sourceDigest;
         pinnedRevision = pinnedRevision || uploaded.sourceDigest;
@@ -375,7 +375,6 @@ export function PlatformDashboard({
         setSubplatformDiscoveryState("正在提交到隔离构建器…");
         const intake = await discoverSubplatformSource({
           domainId: subplatformDomainId,
-          parentOrganizationId: subplatformParentId || undefined,
           sourceKind: subplatformSourceKind,
           sourceLocator,
           sourceDigest: sourceDigest || undefined,
@@ -387,7 +386,7 @@ export function PlatformDashboard({
           discovered = await getSubplatformSourceIntake(intake.intakeId);
           if (discovered.state === "ready") break;
           if (discovered.state === "rejected") {
-            throw new Error(discovered.error || "隔离构建器拒绝了这个子平台来源");
+            throw new Error(discovered.error || "隔离构建器拒绝了这个店铺来源");
           }
           setSubplatformDiscoveryState(
             discovered.state === "discovering" ? "隔离构建器正在读取 manifest…" : "等待隔离构建器接单…",
@@ -405,7 +404,7 @@ export function PlatformDashboard({
         slug = discovered.slug || String(manifest.slug || "");
         sourceDigest = discovered.sourceDigest?.toLowerCase() || sourceDigest;
         pinnedRevision = discovered.pinnedRevision?.toLowerCase() || pinnedRevision;
-        setSubplatformDiscoveryState("manifest 已验证，正在登记平台节点…");
+        setSubplatformDiscoveryState("manifest 已验证，正在登记店铺…");
       } else {
         try {
           const parsed = JSON.parse(subplatformManifest);
@@ -426,7 +425,7 @@ export function PlatformDashboard({
         return;
       }
       if (!manifest || manifest.id !== packageId || manifest.slug !== slug) {
-        onNotice("构建器返回的 manifest.id/slug 与平台节点不一致");
+        onNotice("构建器返回的 manifest.id/slug 与店铺不一致");
         return;
       }
       if (!/^[0-9a-f]{7,128}$/i.test(pinnedRevision)) {
@@ -440,7 +439,6 @@ export function PlatformDashboard({
       const result = await registerSubplatform({
         tenantId: setup.root.tenantId,
         domainId: subplatformDomainId,
-        parentOrganizationId: subplatformParentId || undefined,
         packageId,
         slug,
         sourceKind: subplatformSourceKind,
@@ -454,10 +452,10 @@ export function PlatformDashboard({
       await refreshSubplatforms();
       setSubplatformEditorOpen(false);
       resetSubplatformEditor();
-      onNotice(`子平台 ${result.slug} 已登记，等待隔离构建器附加 build digest`);
+      onNotice(`店铺 ${result.slug} 已登记，等待隔离构建器完成构建`);
     } catch (error) {
-      setSubplatformDiscoveryState(error instanceof Error ? error.message : "子平台源码发现失败");
-      onNotice(error instanceof Error ? error.message : "子平台注册失败");
+      setSubplatformDiscoveryState(error instanceof Error ? error.message : "店铺来源读取失败");
+      onNotice(error instanceof Error ? error.message : "店铺接入失败");
     } finally {
       setSaving(false);
     }
@@ -474,7 +472,7 @@ export function PlatformDashboard({
       await refreshSubplatforms();
       onNotice(`${organization.name} 已激活并加入平台路由`);
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "子平台激活失败");
+      onNotice(error instanceof Error ? error.message : "店铺启用失败");
     } finally {
       setSaving(false);
     }
@@ -645,16 +643,16 @@ export function PlatformDashboard({
     <div className="dashboard platform-dashboard">
       <section className="workspace-heading platform-heading">
         <div>
-          <p className="eyebrow">平台管理</p>
-          <h1>平台管理</h1>
-          <p>一次只处理一个管理分区；线上支付是可选能力。</p>
+          <p className="eyebrow">商城运营</p>
+          <h1>商城控制台</h1>
+          <p>管理店铺接入、团队、商城外观和可选的线上支付。</p>
         </div>
       </section>
 
       <div className="platform-admin-shell">
-        <nav className="platform-admin-nav" role="tablist" aria-label="平台管理分区">
-          <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>嵌入子平台</span></button>
-          <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>访问与接入</span></button>
+        <nav className="platform-admin-nav" role="tablist" aria-label="商城管理分区">
+          <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>店铺接入</span></button>
+          <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>团队与服务</span></button>
           <button id="platform-tab-payments" type="button" role="tab" aria-selected={activeSection === "payments"} aria-controls="platform-panel-payments" className={activeSection === "payments" ? "is-active" : ""} onClick={() => setActiveSection("payments")}><CreditCard size={17} aria-hidden="true" /><span>支付（可选）</span></button>
           <button id="platform-tab-finance" type="button" role="tab" aria-selected={activeSection === "finance"} aria-controls="platform-panel-finance" className={activeSection === "finance" ? "is-active" : ""} onClick={() => setActiveSection("finance")}><ReceiptText size={17} aria-hidden="true" /><span>财务与退款</span></button>
           <button id="platform-tab-site" type="button" role="tab" aria-selected={activeSection === "site"} aria-controls="platform-panel-site" className={activeSection === "site" ? "is-active" : ""} onClick={() => setActiveSection("site")}><FileCheck2 size={17} aria-hidden="true" /><span>网站与合规</span></button>
@@ -671,7 +669,7 @@ export function PlatformDashboard({
           <PlatformSiteSettingsPanel
             organizationId={setup?.root.organization?.id}
             platformPath="/"
-            platformName={setup?.root.organization?.name || "根平台"}
+            platformName={setup?.root.organization?.name || "商城"}
             onNotice={onNotice}
           />
         </div>
@@ -679,28 +677,28 @@ export function PlatformDashboard({
         <section id="platform-panel-tree" className="surface subplatform-panel" role="tabpanel" aria-labelledby="platform-tab-tree" hidden={activeSection !== "tree"}>
           <div className="subplatform-header">
             <div>
-              <p className="eyebrow">子平台</p>
-              <h2 id="subplatform-title">嵌入一个子平台。</h2>
-              <p className="subplatform-intro">选择一个来源并嵌入当前平台。子平台负责自己的页面、Agent 与领域资料。</p>
+              <p className="eyebrow">店铺</p>
+              <h2 id="subplatform-title">接入一个店铺</h2>
+              <p className="subplatform-intro">每个商家对应一个店铺。店铺可以托管在商城内，也可以通过受控接口接入并被 AI 导购检索。</p>
             </div>
             <button
               className="button button-dark"
               type="button"
               disabled={saving || !setup?.root.organization?.id || !setup.domains.length}
-              title={!setup?.root.organization?.id ? "根平台组织尚未就绪" : !setup.domains.length ? "当前平台还没有可用范围" : undefined}
+              title={!setup?.root.organization?.id ? "商城尚未完成初始化" : !setup.domains.length ? "商城还没有可用的商品范围" : undefined}
               onClick={() => setSubplatformEditorOpen((open) => !open)}
             >
-              {subplatformEditorOpen ? "关闭" : "嵌入子平台"}
+              {subplatformEditorOpen ? "关闭" : "接入店铺"}
             </button>
           </div>
           {subplatforms.length ? (
-            <div className="subplatform-list" aria-label="已登记子平台">
+            <div className="subplatform-list" aria-label="已接入店铺">
               {subplatforms.map((organization) => (
                 <div className="subplatform-row" key={organization.id}>
                   <span className="subplatform-row-icon" aria-hidden="true"><Archive size={18} /></span>
                   <span className="subplatform-row-copy">
                     <strong>{organization.name}</strong>
-                    <small>嵌入路径 /{organization.slug}</small>
+                    <small>店铺地址 /{organization.slug}</small>
                   </span>
                   <span className={`subplatform-state state-${organization.registrationState || "unknown"}`}>
                     {subplatformStateLabel[organization.registrationState || ""] || "未登记"}
@@ -708,7 +706,7 @@ export function PlatformDashboard({
                   {organization.buildError ? <small className="subplatform-build-error" title={organization.buildError}>最近失败：{organization.buildError.slice(0, 120)}</small> : null}
                   {organization.registrationState === "ready" && organization.buildDigest ? (
                     <button className="button button-dark subplatform-activate" type="button" disabled={saving} onClick={() => void activateRegisteredSubplatform(organization)}>
-                      激活路由
+                      上线店铺
                     </button>
                   ) : null}
                 </div>
@@ -717,19 +715,16 @@ export function PlatformDashboard({
           ) : (
             <div className="subplatform-empty">
               <GitBranch size={22} aria-hidden="true" />
-              <p>还没有嵌入的子平台。</p>
+              <p>还没有接入店铺。</p>
             </div>
           )}
           {subplatformEditorOpen ? (
-            <div className="admin-editor subplatform-editor" aria-label="嵌入子平台">
+            <div className="admin-editor subplatform-editor" aria-label="接入店铺">
               <div className="admin-editor-heading">
-                <div><strong>嵌入子平台</strong><small>填 Git 地址或上传压缩包，系统会读取子平台自身的配置。</small></div>
+                <div><strong>接入店铺</strong><small>填写 Git 地址或上传接入包，系统读取店铺自己的页面与商品能力。</small></div>
                 <button type="button" onClick={() => setSubplatformEditorOpen(false)}>关闭</button>
               </div>
-              <div className="subplatform-form-grid">
-                <label><span>嵌入位置</span><select value={subplatformParentId} onChange={(event) => setSubplatformParentId(event.target.value)}><option value="">当前根平台</option>{subplatforms.map((organization) => <option key={organization.id} value={organization.id}>/{organization.slug} · {organization.name}</option>)}</select></label>
-              </div>
-              <div className="subplatform-source-switch" role="group" aria-label="子平台来源类型">
+              <div className="subplatform-source-switch" role="group" aria-label="店铺接入方式">
                 <button type="button" className={subplatformSourceKind === "git" ? "is-selected" : ""} aria-pressed={subplatformSourceKind === "git"} onClick={() => setSubplatformSourceKind("git")}><GitBranch size={16} aria-hidden="true" />Git 仓库</button>
                 <button type="button" className={subplatformSourceKind === "archive" ? "is-selected" : ""} aria-pressed={subplatformSourceKind === "archive"} onClick={() => setSubplatformSourceKind("archive")}><Upload size={16} aria-hidden="true" />上传压缩包</button>
               </div>
@@ -739,24 +734,29 @@ export function PlatformDashboard({
                 </div>
               ) : (
                 <div className="subplatform-upload-box">
-                  <label className="file-picker"><Upload size={18} aria-hidden="true" /><span>{subplatformArchive?.name || "选择子平台压缩包"}</span><input type="file" accept=".tar.gz,.tgz,.tar.zst,.tzst" onChange={(event) => setSubplatformArchive(event.target.files?.[0] ?? null)} /></label>
+                  <label className="file-picker"><Upload size={18} aria-hidden="true" /><span>{subplatformArchive?.name || "选择店铺接入包"}</span><input type="file" accept=".tar.gz,.tgz,.tar.zst,.tzst" onChange={(event) => setSubplatformArchive(event.target.files?.[0] ?? null)} /></label>
                   <p>{subplatformUpload ? `已上传 ${subplatformUpload.originalName} · ${(subplatformUpload.size / 1024 / 1024).toFixed(1)} MiB · digest ${subplatformUpload.sourceDigest.slice(0, 12)}…` : "限制 64 MiB；服务端只保存随机 locator，隔离构建器负责解包与验证。"}</p>
                 </div>
               )}
               <div className="subplatform-editor-footer">
-                <p><ShieldCheck size={16} aria-hidden="true" />子平台会先完成构建与校验，准备好后再由你激活。</p>
+                <p><ShieldCheck size={16} aria-hidden="true" />店铺接入包会先完成隔离构建与校验，准备好后再上线。</p>
                 {subplatformDiscoveryState ? <small className="subplatform-discovery-state" role="status">{subplatformDiscoveryState}</small> : null}
-                <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup.root.organization?.id || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "嵌入中…" : "嵌入并构建"}</button>
+                <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup.root.organization?.id || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "接入中…" : "接入并构建"}</button>
               </div>
             </div>
           ) : null}
         </section>
+
+        <div className="platform-component-panel" hidden={activeSection !== "tree"}>
+          <MallCatalogModeration onNotice={onNotice} />
+        </div>
 
         <div id="platform-panel-access" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-access" hidden={activeSection !== "access"}>
           <PlatformAccessPanel organizations={accessOrganizations} rootRole={rootRole} onNotice={onNotice} />
         </div>
 
         <section id="platform-panel-payments" className="surface gateway-panel" role="tabpanel" aria-labelledby="platform-tab-payments" hidden={activeSection !== "payments"}>
+          <StoreCommercialTermsPanel rootRole={rootRole} onNotice={onNotice} />
           <div className={`payment-mode-control mode-${paymentMode}`}>
             <div><span className="status-orb" aria-hidden="true" /><span><small>可选线上支付</small><strong>{paymentMode === "test" ? "测试模式" : "生产模式"}</strong></span></div>
             <button type="button" onClick={onRequestModeChange}>切换支付模式</button>

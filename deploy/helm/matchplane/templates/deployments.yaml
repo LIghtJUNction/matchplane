@@ -209,6 +209,10 @@ spec:
               value: {{ $root.Values.web.uploadRoot | quote }}
             - name: MATCHPLANE_MEDIA_MAX_BYTES
               value: {{ $root.Values.web.mediaMaxBytes | quote }}
+          {{- if $root.Values.web.hostedMediaPvc }}
+            - name: MATCHPLANE_HOSTED_MEDIA_ROOT
+              value: {{ $root.Values.web.hostedMediaRoot | quote }}
+          {{- end }}
             - name: MATCHPLANE_SUBPLATFORM_SECRET_ROOT
               value: {{ $root.Values.web.secretRoot | quote }}
             - name: MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID
@@ -312,6 +316,11 @@ spec:
               mountPath: {{ $root.Values.web.uploadRoot | quote }}
               readOnly: false
           {{- end }}
+          {{- if $root.Values.web.hostedMediaPvc }}
+            - name: hosted-store-media
+              mountPath: {{ $root.Values.web.hostedMediaRoot | quote }}
+              readOnly: false
+          {{- end }}
           {{- if $root.Values.web.secretPvc }}
             - name: subplatform-email-secrets
               mountPath: {{ $root.Values.web.secretRoot | quote }}
@@ -347,6 +356,11 @@ spec:
         - name: subplatform-uploads
           persistentVolumeClaim:
             claimName: {{ $root.Values.web.uploadPvc | quote }}
+      {{- end }}
+      {{- if $root.Values.web.hostedMediaPvc }}
+        - name: hosted-store-media
+          persistentVolumeClaim:
+            claimName: {{ $root.Values.web.hostedMediaPvc | quote }}
       {{- end }}
       {{- if $root.Values.web.secretPvc }}
         - name: subplatform-email-secrets

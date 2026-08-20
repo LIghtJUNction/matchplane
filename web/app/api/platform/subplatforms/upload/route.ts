@@ -36,8 +36,21 @@ export async function POST(request: Request): Promise<Response> {
   if (parentOrganizationId && !isUuid(parentOrganizationId)) {
     return NextResponse.json({ error: "parentOrganizationId must be a UUID" }, { status: 400 });
   }
+  const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
+  const rootOrganizationId = isUuid(tenantId)
+    ? (await authDatabase.query<{ id: string }>(
+        `SELECT id::text FROM "organization"
+          WHERE "tenantId" = $1 AND "rootPlatform" = true AND "parentOrganizationId" IS NULL
+          LIMIT 1`,
+        [tenantId],
+      )).rows[0]?.id ?? null
+    : null;
+  if (!rootOrganizationId) return NextResponse.json({ error: "请先初始化商城，再接入店铺" }, { status: 409 });
+  if (parentOrganizationId && parentOrganizationId !== rootOrganizationId) {
+    return NextResponse.json({ error: "店铺只能直接接入商城，不能嵌套在其他店铺中" }, { status: 400 });
+  }
   const userRole = (session.user as { role?: string }).role;
-  if (!(await canManageParent(session.user.id, userRole, parentOrganizationId))) {
+  if (!(await canManageParent(session.user.id, userRole, rootOrganizationId))) {
     return NextResponse.json({ error: "当前账号没有上传该平台节点的权限" }, { status: 403 });
   }
 

@@ -293,7 +293,7 @@ async function submitPluginListing(
   try {
     if (!isLiveMarketplaceEnabled()) throw new Error("插件供给提交需要连接真实平台 API");
     if (!input.subplatform.tenantId || !input.subplatform.domainId) {
-      throw new Error("当前子平台尚未发布完整的身份配置");
+      throw new Error("当前店铺尚未发布完整的身份配置");
     }
     if (!isRecord(message.payload)) throw new Error("插件供给资料格式无效");
     const supply = message.payload;
@@ -308,7 +308,7 @@ async function submitPluginListing(
     const askingAmount = typeof supply.askingAmount === "string" ? supply.askingAmount.trim() : "";
     const currency = typeof supply.currency === "string" ? supply.currency.trim().toUpperCase() : "";
     if (pricing.mode === "fixed") {
-      if (!pricing.currency) throw new Error("当前子平台尚未发布完整的结算配置");
+      if (!pricing.currency) throw new Error("当前店铺尚未发布完整的价格配置");
       if (!/^\d+$/.test(askingAmount)) throw new Error("报价必须是非负整数（最小货币单位）");
       if (!/^[A-Z]{3}$/.test(currency)) throw new Error("币种必须是三位大写 ISO 4217 代码");
     }
@@ -326,7 +326,7 @@ async function submitPluginListing(
     });
     if (!session) {
       const next = `${window.location.pathname}${window.location.search}`;
-      input.onNotice(subplatformCopy(input.subplatform, "supplyLoginNotice", "请先登录，登录后会回到当前子平台"));
+      input.onNotice(subplatformCopy(input.subplatform, "supplyLoginNotice", "请先登录，登录后会回到当前店铺"));
       window.location.assign(`/login?next=${encodeURIComponent(next)}`);
       throw new Error("Better Auth 会话尚未建立");
     }
@@ -359,7 +359,7 @@ async function submitPluginListing(
         },
       });
     }
-    input.onNotice(subplatformCopy(input.subplatform, "pluginSubmissionSuccess", "供给已真实提交，等待子平台审核后进入 AI 撮合"));
+    input.onNotice(subplatformCopy(input.subplatform, "pluginSubmissionSuccess", "商品已提交，等待店铺审核后进入商城检索"));
     respond(true);
   } catch (error) {
     const messageText = error instanceof Error ? error.message : "供给提交失败，请稍后重试";

@@ -113,12 +113,30 @@ export function MetricCard({
   );
 }
 
-export function ListingVisual({ accent, compact = false, label }: { accent: Accent; compact?: boolean; label?: string }) {
+export function ListingVisual({
+  accent,
+  compact = false,
+  label,
+  imageUrl,
+  alt = "",
+}: {
+  accent: Accent;
+  compact?: boolean;
+  label?: string;
+  imageUrl?: string;
+  alt?: string;
+}) {
   return (
-    <div className={`listing-visual accent-${accent}${compact ? " listing-compact" : ""}`}>
-      <span className="organic-shape organic-one" />
-      <span className="organic-shape organic-two" />
-      <Sparkles aria-hidden="true" strokeWidth={1.45} />
+    <div className={`listing-visual accent-${accent}${compact ? " listing-compact" : ""}${imageUrl ? " has-product-image" : ""}`}>
+      {imageUrl ? (
+        <img src={imageUrl} alt={alt} loading={compact ? "lazy" : "eager"} decoding="async" />
+      ) : (
+        <>
+          <span className="organic-shape organic-one" />
+          <span className="organic-shape organic-two" />
+          <Sparkles aria-hidden="true" strokeWidth={1.45} />
+        </>
+      )}
       {label ? <span className="visual-label">{label}</span> : null}
     </div>
   );

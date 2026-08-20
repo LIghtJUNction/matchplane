@@ -69,20 +69,17 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const requestedParentId = input.parentOrganizationId ?? null;
-  // A child registered without an explicit parent belongs to the deployment's root
-  // organization.  Never leave it as another top-level node: that would make the recursive
-  // router treat a package as a second root.  The root organization is created through the
-  // Better Auth bridge, not inferred from a child package.
-  const parentId = requestedParentId ?? await readRootOrganizationId(input.tenantId);
+  const parentId = await readRootOrganizationId(input.tenantId);
   if (!parentId) {
-    return NextResponse.json({ error: "请先初始化根平台组织，再登记子平台" }, { status: 409 });
+    return NextResponse.json({ error: "请先初始化商城，再接入店铺" }, { status: 409 });
+  }
+  if (requestedParentId && requestedParentId !== parentId) {
+    return NextResponse.json({ error: "店铺只能直接接入商城，不能嵌套在其他店铺中" }, { status: 400 });
   }
   const userRole = (session.user as { role?: string }).role;
   const canManage = await canManageParent(session.user.id, userRole, parentId);
   if (!canManage) return NextResponse.json({ error: "当前账号没有注册该平台节点的权限" }, { status: 403 });
 
-  const parentError = await validateParent(parentId, input.tenantId);
-  if (parentError) return NextResponse.json({ error: parentError }, { status: 400 });
   const domainExists = await authDatabase.query(
     `SELECT 1
        FROM domains
@@ -246,53 +243,43 @@ export async function GET(request: Request): Promise<Response> {
           LIMIT 1`,
         [configuredTenantId],
       )).rows[0]?.id ?? null);
-  // The dashboard asks for the root's children without a query parameter. Scope that default
-  // to the configured root organization; otherwise registrations projected under the root are
-  // invisible because the recursive anchor only looks for top-level organizations.
-  const parentId = requestedParentId || rootOrganizationId;
+  if (requestedParentId && requestedParentId !== rootOrganizationId) {
+    return NextResponse.json({ error: "商城只展示直接接入的店铺" }, { status: 400 });
+  }
+  const parentId = rootOrganizationId;
   const userRole = (session.user as { role?: string }).role;
   if (!(await canManageParent(session.user.id, userRole, parentId || null))) {
     return NextResponse.json({ error: "平台管理员权限不足" }, { status: 403 });
   }
   const rows = await authDatabase.query(
-    `WITH RECURSIVE nodes AS (
-       SELECT id, name, slug, "parentOrganizationId", "tenantId", "domainId", "sourceRepository", "createdAt"
-         FROM "organization"
-        WHERE "tenantId" = $2
-          AND "rootPlatform" = false
-          AND (($1::uuid IS NULL AND "parentOrganizationId" IS NULL)
-           OR "parentOrganizationId" = $1::uuid)
-       UNION ALL
-       SELECT child.id, child.name, child.slug, child."parentOrganizationId", child."tenantId",
-              child."domainId", child."sourceRepository", child."createdAt"
-         FROM "organization" child
-         JOIN nodes parent ON child."parentOrganizationId" = parent.id
-     )
-     SELECT nodes.id,
-            nodes.name,
-            nodes.slug,
-            nodes."parentOrganizationId" AS "parentOrganizationId",
-            nodes."tenantId" AS "tenantId",
-            nodes."domainId" AS "domainId",
-            nodes."sourceRepository" AS "sourceRepository",
-            nodes."createdAt" AS "createdAt",
+    `SELECT node.id,
+            node.name,
+            node.slug,
+            node."parentOrganizationId" AS "parentOrganizationId",
+            node."tenantId" AS "tenantId",
+            node."domainId" AS "domainId",
+            node."sourceRepository" AS "sourceRepository",
+            node."createdAt" AS "createdAt",
             registration.id AS "registrationId",
             registration.state AS "registrationState",
             encode(registration.build_digest, 'hex') AS "buildDigest",
             encode(registration.manifest_digest, 'hex') AS "manifestDigest",
             registration.build_attempts AS "buildAttempts",
             registration.build_error AS "buildError"
-       FROM nodes
+       FROM "organization" node
        LEFT JOIN LATERAL (
          SELECT r.id, r.state, r.build_digest, r.manifest_digest,
                 r.build_attempts, r.build_error
            FROM subplatform_registrations r
-          WHERE r.slug = nodes.slug
-            AND r.tenant_id::text = nodes."tenantId"
+          WHERE r.slug = node.slug
+            AND r.tenant_id::text = node."tenantId"
           ORDER BY r.version DESC
           LIMIT 1
        ) registration ON true
-      ORDER BY "createdAt" ASC`,
+      WHERE node."tenantId" = $2
+        AND node."rootPlatform" = false
+        AND node."parentOrganizationId" = $1::uuid
+      ORDER BY node."createdAt" ASC`,
     [
       parentId,
       configuredTenantId,

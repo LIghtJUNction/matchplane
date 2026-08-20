@@ -171,7 +171,7 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
       setSubplatform(targetSubplatform);
     }
     if (isLiveMarketplaceEnabled() && role !== "platform") {
-      if (!targetSubplatform.tenantId) throw new Error("当前子平台尚未完成 root tenant 注册");
+      if (!targetSubplatform.tenantId) throw new Error("当前店铺尚未完成商城接入");
       const current = await authClient.getSession({
         fetchOptions: authFetchOptions(targetSubplatform.slug),
       });
@@ -749,8 +749,8 @@ function loginCopy(locale: "zh" | "en") {
       hasAccount: "Already have an account?",
       forgotPassword: "Forgot password?",
       backToSignIn: "Back to sign in",
-      admin: "Administrator",
-      adminDetail: "Invited platform management only",
+      admin: "Mall operator",
+      adminDetail: "Invited mall team only",
       adminInviteRequired: "Administrator registration is available only from a verified invitation link.",
       authMethods: "Authentication methods",
       nationalIdentity: "National online identity",
@@ -824,9 +824,9 @@ function loginCopy(locale: "zh" | "en") {
     hasAccount: "已有账号？",
     forgotPassword: "忘记密码？",
     backToSignIn: "返回登录",
-    admin: "管理员",
-    adminDetail: "仅限受邀的平台管理",
-    adminInviteRequired: "管理员注册仅能通过超级管理员发出的邀请链接进行。",
+    admin: "商城运营",
+    adminDetail: "仅限受邀的商城团队",
+    adminInviteRequired: "商城运营账号只能通过商城负责人发出的一次性邀请链接注册。",
     authMethods: "登录方式",
     nationalIdentity: "国家网络身份认证",
     socialMethods: "第三方登录",

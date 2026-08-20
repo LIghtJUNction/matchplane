@@ -3,35 +3,34 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
-import { getPlatformChildren, type PlatformChildSummary } from "../api";
+import { getStores, type StoreSummary } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 
 interface PlatformMenuProps {
   locale: InterfaceLocale;
-  platformPath?: string;
 }
 
-/** A compact, registry-backed platform menu for the root navigation. */
-export function PlatformMenu({ locale, platformPath = "/" }: PlatformMenuProps) {
-  const [children, setChildren] = useState<PlatformChildSummary[]>([]);
+/** A compact, registry-backed store menu for the marketplace navigation. */
+export function PlatformMenu({ locale }: PlatformMenuProps) {
+  const [stores, setStores] = useState<StoreSummary[]>([]);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
-  const label = locale === "en" ? "Platforms" : "平台";
+  const label = locale === "en" ? "Stores" : "店铺";
 
   useEffect(() => {
     let active = true;
-    void getPlatformChildren(platformPath)
+    void getStores()
       .then((items) => {
-        if (active) setChildren(items);
+        if (active) setStores(items);
       })
       .catch(() => {
-        if (active) setChildren([]);
+        if (active) setStores([]);
       });
     return () => {
       active = false;
     };
-  }, [platformPath]);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -51,7 +50,7 @@ export function PlatformMenu({ locale, platformPath = "/" }: PlatformMenuProps) 
     };
   }, [open]);
 
-  if (!children.length) return null;
+  if (!stores.length) return null;
 
   return (
     <div className="platform-menu" ref={rootRef}>
@@ -68,11 +67,11 @@ export function PlatformMenu({ locale, platformPath = "/" }: PlatformMenuProps) 
       {open ? (
         <nav className="platform-menu-popover" id={menuId} aria-label={label}>
           <ul className="platform-menu-grid">
-            {children.map((child) => (
-              <li key={child.path}>
-                <a href={child.path} onClick={() => setOpen(false)}>
-                  <strong>{child.displayName}</strong>
-                  {child.description ? <span>{child.description}</span> : null}
+            {stores.map((store) => (
+              <li key={store.id}>
+                <a href={store.path} onClick={() => setOpen(false)}>
+                  <strong>{store.displayName}</strong>
+                  {store.description ? <span>{store.description}</span> : null}
                 </a>
               </li>
             ))}

@@ -18,7 +18,7 @@ export function OAuthConsentScreen() {
   // reconstruct or trust individual parameters: forwarding the exact signed
   // string lets the provider verify state, expiry and redirect_uri server-side.
   const oauthQuery = params.get("oauth_query") ?? params.toString();
-  const clientId = params.get("client_id") ?? "外部子平台";
+  const clientId = params.get("client_id") ?? "外部店铺";
   const scopes = useMemo(
     () => (params.get("scope") ?? "openid").split(" ").map((scope) => scope.trim()).filter(Boolean),
     [params],
@@ -26,7 +26,7 @@ export function OAuthConsentScreen() {
 
   const decide = async (accept: boolean) => {
     if (!oauthQuery || submitting) {
-      setError("授权请求已失效，请从子平台重新发起登录。 ");
+      setError("授权请求已失效，请从店铺重新发起登录。 ");
       return;
     }
     setSubmitting(true);
@@ -55,9 +55,9 @@ export function OAuthConsentScreen() {
       <section className="login-card oauth-consent-card" aria-labelledby="oauth-consent-title">
         <div className="login-mark" aria-hidden="true"><Sparkles size={19} /></div>
         <span className="eyebrow"><LockKeyhole size={14} aria-hidden="true" /> 跨域统一身份授权</span>
-        <h1 id="oauth-consent-title">确认继续到子平台。</h1>
+        <h1 id="oauth-consent-title">确认继续到店铺</h1>
         <p className="login-intro">
-          <strong>{clientId}</strong> 请求使用你的 MatchPlane 统一身份。子平台只会获得下方明确列出的资料，
+          <strong>{clientId}</strong> 请求使用你的商城统一身份。店铺只会获得下方明确列出的资料，
           不会获得密码、支付信息、联系方式或其他平台的管理权限。
         </p>
         <ul className="oauth-consent-scopes" aria-label="授权范围">
@@ -76,7 +76,7 @@ export function OAuthConsentScreen() {
             {!submitting ? <ArrowRight size={17} aria-hidden="true" /> : null}
           </button>
         </div>
-        <p className="login-footnote">授权可随时在根平台账户设置中撤销；子平台会话也会在短期内失效。</p>
+        <p className="login-footnote">授权可随时在商城账户页撤销；店铺会话也会在短期内失效。</p>
       </section>
     </main>
   );

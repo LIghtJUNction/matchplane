@@ -631,6 +631,115 @@ export interface PlatformChildSummary {
   agentSkills: string[];
 }
 
+export interface StoreSummary {
+  id: string;
+  slug: string;
+  path: string;
+  displayName: string;
+  description: string;
+  integrationKind: "hosted" | "package" | "external";
+  status?: "pending" | "active" | "suspended" | "closed";
+  commercialTerms?: {
+    pricingModel: "none" | "subscription" | "commission" | "hybrid";
+    recurringFeeMinor: string;
+    currency: string;
+    billingInterval: "month" | "year" | null;
+    commissionBps: number;
+    status: "draft" | "active" | "paused";
+    version: number;
+  };
+}
+
+export interface MallSettings {
+  name: string;
+  slug: string;
+  version: number;
+}
+
+export async function getMallSettings(): Promise<MallSettings> {
+  const response = await fetch("/api/mall/settings", { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
+  const body = await response.json().catch(() => null) as { mall?: MallSettings; error?: string } | null;
+  if (!response.ok || !body?.mall) throw new MarketplaceApiError(response.status, body?.error || "商城设置读取失败");
+  return body.mall;
+}
+
+export async function saveMallSettings(input: { name: string; expectedVersion: number }): Promise<MallSettings> {
+  const response = await fetch("/api/mall/settings", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { mall?: MallSettings; error?: string } | null;
+  if (!response.ok || !body?.mall) throw new MarketplaceApiError(response.status, body?.error || "商城名称保存失败");
+  return body.mall;
+}
+
+export async function getStores(): Promise<StoreSummary[]> {
+  const response = await fetch("/api/stores", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as { stores?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "店铺目录读取失败");
+  return Array.isArray(body?.stores) ? body.stores as StoreSummary[] : [];
+}
+
+export async function getOwnedStores(): Promise<StoreSummary[]> {
+  const response = await fetch("/api/stores?mine=1", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null) as { stores?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "我的店铺读取失败");
+  return Array.isArray(body?.stores) ? body.stores as StoreSummary[] : [];
+}
+
+export async function getManagedStores(): Promise<StoreSummary[]> {
+  const response = await fetch("/api/stores?manage=1", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null) as { stores?: unknown; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "店铺计费读取失败");
+  return Array.isArray(body?.stores) ? body.stores as StoreSummary[] : [];
+}
+
+export async function saveStoreCommercialTerms(input: {
+  storeId: string;
+  pricingModel: "none" | "subscription" | "commission" | "hybrid";
+  recurringFeeMinor: string;
+  currency: string;
+  billingInterval: "month" | "year" | null;
+  commissionBps: number;
+  status: "draft" | "active" | "paused";
+  expectedVersion: number;
+}): Promise<NonNullable<StoreSummary["commercialTerms"]>> {
+  const response = await fetch(`/api/stores/${encodeURIComponent(input.storeId)}/commercial-terms`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { commercialTerms?: NonNullable<StoreSummary["commercialTerms"]>; error?: string } | null;
+  if (!response.ok || !body?.commercialTerms) throw new MarketplaceApiError(response.status, body?.error || "店铺计费保存失败");
+  return body.commercialTerms;
+}
+
+export async function createHostedStore(input: { name: string; slug: string; description: string }): Promise<StoreSummary> {
+  const response = await fetch("/api/stores", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { store?: StoreSummary; error?: string } | null;
+  if (!response.ok || !body?.store) throw new MarketplaceApiError(response.status, body?.error || "店铺创建失败");
+  return body.store;
+}
+
 export async function getPlatformChildren(path = "/"): Promise<PlatformChildSummary[]> {
   const response = await fetch(`/api/platform/children?path=${encodeURIComponent(path)}`, {
     credentials: "include",
@@ -850,6 +959,14 @@ export interface MarketplaceOfferAdminRecord {
   version: number;
   created_at: string;
   updated_at: string;
+  store_id?: string | null;
+  store_name?: string | null;
+  store_path?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  amount_minor?: string | null;
+  currency?: string | null;
+  currency_scale?: number | null;
 }
 
 export interface MarketplaceIntroduction {
@@ -884,8 +1001,8 @@ export interface MarketplaceContactResponse {
 export interface RecommendedBackendListing {
   listing_id?: string;
   offer_id?: string;
-  tenant_id: string;
-  domain_id: string;
+  tenant_id?: string;
+  domain_id?: string;
   asset_id?: string | null;
   display_name: string;
   attributes: Record<string, unknown>;
@@ -902,6 +1019,34 @@ export interface RecommendedBackendListing {
   match_reasons?: string[];
   match_risks?: string[];
   [key: string]: unknown;
+}
+
+export interface MallSearchResponse {
+  requestId: string;
+  stores: Array<{ slug: string; path: string; displayName: string }>;
+  recommendations: RecommendedBackendListing[];
+  routing: {
+    source: "ai" | "policy_fallback";
+    degraded: boolean;
+    rationale: string;
+  };
+}
+
+export async function searchMallCatalog(input: {
+  narrative: string;
+  storePath?: string;
+}): Promise<MallSearchResponse> {
+  const response = await fetch("/api/mall/search", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as (MallSearchResponse & { error?: string }) | null;
+  if (!response.ok || !body) {
+    throw new MarketplaceApiError(response.status, body?.error || "商城搜索暂时不可用");
+  }
+  return body;
 }
 
 export interface ContactResponse {

@@ -67,6 +67,13 @@ if ! rg -q '^d /var/lib/matchplane/subplatform-artifacts 0750 matchplane-builder
   echo 'immutable builder artifacts must be writable by the isolated builder and readable by web' >&2
   exit 1
 fi
+if ! rg -q '^d /var/lib/matchplane/media 0750 matchplane-web matchplane-web -$' \
+  packaging/tmpfiles/matchplane.conf \
+  || ! rg -q '^ReadWritePaths=.* /var/lib/matchplane/media( |$)' \
+  packaging/systemd/matchplane-web.service; then
+  echo 'hosted store media must be private and writable by the web service' >&2
+  exit 1
+fi
 
 if rg -n --glob '*.Dockerfile' --glob 'Dockerfile*' \
   '^FROM [^$@[:space:]]+:[^@[:space:]]+( |$)' deploy packaging; then

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { statSync } from "node:fs";
 
-import { authDatabase } from "../../../../src/lib/auth";
+import { auth, authDatabase } from "../../../../src/lib/auth";
 import { isPlatformRouterConfigured } from "../../../../src/platform-router";
 
 export const runtime = "nodejs";
@@ -35,7 +35,12 @@ interface PlatformBuilderStatus {
  * exists. The root organization is returned only when the operator has created it through the
  * Better Auth bridge (or pinned its UUID explicitly), never by treating a child package as root.
  */
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
+  const session = await auth.api.getSession({ headers: request.headers });
+  const role = (session?.user as { role?: unknown } | undefined)?.role;
+  if (!session || (role !== "rootSuperAdmin" && role !== "rootAdmin")) {
+    return NextResponse.json({ error: "当前账号没有商城运营权限" }, { status: 403, headers: { "cache-control": "no-store" } });
+  }
   const configuredTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
   const tenantConfigured = isUuid(configuredTenantId);
   const configuredRootOrganizationId = process.env.MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID?.trim() ?? "";

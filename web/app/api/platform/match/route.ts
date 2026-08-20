@@ -22,6 +22,7 @@ import { isActivePlatformPathVisible } from "../../../../src/platform-visibility
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { normalizeMatchIdempotencyKey } from "../../../../src/platform-match-idempotency";
+import { admitPlatformAiCall } from "../../../../src/platform-ai-admission";
 
 export const runtime = "nodejs";
 
@@ -168,7 +169,7 @@ export async function POST(request: Request): Promise<Response> {
             admitCall: isPlatformRouterConfigured()
               ? async () => {
                   if (!(await admitPlatformAiCall({
-                    authUserId: actor.subject,
+                    subject: actor.subject,
                     requestId,
                     platformPath: currentPath,
                     perSubjectLimit: configuredAiRequestsPerHour(),
@@ -409,67 +410,6 @@ function idempotentMatchResponse(existing: StoredMatchRequest, access: "session"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
- * Serialize admission per subject and reserve exactly one provider call. The
- * reservation is made before fetch, so concurrent requests cannot all observe
- * the same remaining quota and overspend the platform's model budget.
- */
-async function admitPlatformAiCall(input: {
-  authUserId: string;
-  requestId: string;
-  platformPath: string;
-  perSubjectLimit: number;
-  globalLimit: number;
-}): Promise<boolean> {
-  const client = await authDatabase.connect();
-  try {
-    await client.query("BEGIN");
-    // The per-subject limit prevents one identity from monopolizing the hosted router; the
-    // global limit prevents a large number of verified identities from multiplying the
-    // platform's provider bill without an operator changing an explicit deployment setting.
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('matchplane:platform-ai:global'))");
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.authUserId]);
-    await client.query(
-      `DELETE FROM platform_ai_call_admissions
-        WHERE created_at < clock_timestamp() - interval '2 hours'`,
-    );
-    const globalRecent = await client.query<{ count: number }>(
-      `SELECT count(*)::int AS count
-         FROM platform_ai_call_admissions
-        WHERE created_at >= clock_timestamp() - interval '1 hour'`,
-    );
-    if (Number(globalRecent.rows[0]?.count ?? 0) >= input.globalLimit) {
-      await client.query("ROLLBACK");
-      return false;
-    }
-    const recent = await client.query<{ count: number }>(
-      `SELECT count(*)::int AS count
-         FROM platform_ai_call_admissions
-        WHERE auth_user_id = $1
-          AND created_at >= clock_timestamp() - interval '1 hour'`,
-      [input.authUserId],
-    );
-    const count = Number(recent.rows[0]?.count ?? 0);
-    if (count >= input.perSubjectLimit) {
-      await client.query("ROLLBACK");
-      return false;
-    }
-    await client.query(
-      `INSERT INTO platform_ai_call_admissions
-        (id, auth_user_id, request_id, platform_path)
-       VALUES ($1::uuid, $2, $3::uuid, $4)`,
-      [randomUUID(), input.authUserId, input.requestId, input.platformPath],
-    );
-    await client.query("COMMIT");
-    return true;
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    client.release();
-  }
 }
 
 function configuredAiRequestsPerHour(): number {

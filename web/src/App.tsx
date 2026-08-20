@@ -26,11 +26,14 @@ import { PasskeyPanel } from "./components/PasskeyPanel";
 import { SessionPanel } from "./components/SessionPanel";
 import { PlatformFooter } from "./components/PlatformFooter";
 import { PlatformMenu } from "./components/PlatformMenu";
+import { StorefrontDirectory } from "./components/StorefrontDirectory";
+import { HostedStoreOnboarding } from "./components/HostedStoreOnboarding";
 import { WorkspaceSettingsDialog } from "./components/WorkspaceSettingsDialog";
 import { loadSubplatform, resolveSubplatform, subplatformCopy, subplatformFieldLabel, type SubplatformConfig } from "./subplatform";
 import { localizedSubplatformCopy } from "./lib/localized-copy";
 import {
   createMarketplaceIntroduction,
+  createMarketplaceIntent,
   createMarketplaceSalesHandoff,
   getMarketplaceProfile,
   requestMarketplaceContact,
@@ -135,7 +138,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         }
         if (requestedRole === "platform" && !isRootManager) {
           setRole("buyer");
-          setNotice("当前账号没有根平台管理员权限");
+          setNotice("当前账号没有商城运营权限");
           return;
         }
         if (user && requiresAuthenticatedWorkspace(requestedRole)) {
@@ -281,7 +284,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   label={subplatform.brandName}
                   homeHref={subplatform.slug === "root" ? "#top" : subplatform.path}
                 />
-                {subplatform.slug === "root" ? <PlatformMenu locale={locale} platformPath={subplatform.path} /> : null}
+                {subplatform.slug === "root" ? <PlatformMenu locale={locale} /> : null}
                 {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">{ui.rootPlatform}</a> : null}
               </div>
               <div className="header-actions">
@@ -347,13 +350,16 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 transition={spring}
               >
                 {role === "buyer" ? (
-                  <MatchChat
-                    role={role}
-                    locale={locale}
-                    onNotice={setNotice}
-                    onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform, locale))}
-                    subplatform={subplatform}
-                  />
+                  <>
+                    <MatchChat
+                      role={role}
+                      locale={locale}
+                      onNotice={setNotice}
+                      onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform, locale))}
+                      subplatform={subplatform}
+                    />
+                    {subplatform.slug === "root" && listings.length === 0 ? <StorefrontDirectory locale={locale} mallName={subplatform.brandName} /> : null}
+                  </>
                 ) : null}
                 {subplatform.pluginArtifact && (role === "platform" || role === "subplatform_admin" || (role === "buyer" && listings.length > 0))
                   ? pluginWorkspace
@@ -374,8 +380,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           backdropLabel={ui.closeConsoleDialog}
         >
           <div className="workspace-settings-overview">
-            <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} />
-            <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} />
+            {subplatform.slug === "root" ? (
+              <HostedStoreOnboarding locale={locale} onNotice={setNotice} />
+            ) : (
+              <>
+                <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} />
+                <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} />
+              </>
+            )}
           </div>
         </WorkspaceSettingsDialog>}
 
@@ -418,8 +430,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   ...(await loadSubplatform(selectedPath)),
                   path: selectedPath,
                   slug: selected.subplatform,
-                  tenantId: selected.tenantId,
-                  domainId: selected.domainId,
+                  ...(selected.tenantId ? { tenantId: selected.tenantId } : {}),
+                  ...(selected.domainId ? { domainId: selected.domainId } : {}),
                 }
               : subplatform;
             const selectedTenantId = selected.tenantId || selectedSubplatform.tenantId;
@@ -428,14 +440,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               setNotice("当前环境未连接真实撮合 API，未发送联系申请");
               return;
             }
-            const isGenericOffer = Boolean(selected.offerId && selected.intentId);
+            const isGenericOffer = Boolean(selected.offerId);
             const listingId = isGenericOffer ? null : listingIdFromBackend(selected);
             if (!isGenericOffer && !listingId) {
-              setNotice("供给必须来自当前子平台的真实 API；当前未发送申请");
+              setNotice("商品必须来自已接入店铺的真实目录；当前未发送申请");
               return;
             }
             if (!selectedDomainId || (!isGenericOffer && !selectedSubplatform.currency)) {
-              setNotice("当前子平台尚未完成身份与结算配置；当前未发送申请");
+              setNotice("当前店铺尚未完成身份与价格配置；当前未发送申请");
               return;
             }
             try {
@@ -447,10 +459,24 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 role: "buyer",
               });
               if (!session) {
-                setNotice("请先使用 Better Auth 邮箱登录，再申请联系");
+                const next = `${window.location.pathname}${window.location.search}`;
+                window.location.assign(`/login?next=${encodeURIComponent(next)}`);
                 return;
               }
-              if (isGenericOffer && selected.offerId && selected.intentId) {
+              if (isGenericOffer && selected.offerId) {
+                const selectedIntentId = selected.intentId ?? (await createMarketplaceIntent({
+                  session,
+                  domainId: selectedDomainId,
+                  side: "demand",
+                  narrative: `我想进一步了解并购买“${selected.title}”`,
+                  attributes: {
+                    source: "public_storefront",
+                    offer_id: selected.offerId,
+                    platform_path: selectedPath,
+                  },
+                  supplyDiscoveryEnabled: false,
+                  idempotencyKey: `public-offer-${selected.offerId}`,
+                })).intent_id;
                 const profile = await getMarketplaceProfile({
                   session,
                   domainId: selectedDomainId,
@@ -459,7 +485,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   await createMarketplaceSalesHandoff({
                     session,
                     domainId: selectedDomainId,
-                    intentId: selected.intentId,
+                    intentId: selectedIntentId,
                     summary: {
                       source: "buyer_contact_request",
                       offer_id: selected.offerId,
@@ -474,7 +500,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                       recent_offer_ids: listings.filter((item) => item.platformPath === selectedPath).map((item) => item.offerId ?? item.id).slice(0, 32),
                       saved_offer_ids: readSavedOfferIds(selectedPath),
                     },
-                    idempotencyKey: `web-handoff-${selected.intentId}-${selected.offerId}`,
+                    idempotencyKey: `web-handoff-${selectedIntentId}-${selected.offerId}`,
                   });
                 } catch {
                   // A missing optional handoff migration must not prevent a consent-gated contact request.
@@ -482,7 +508,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 const introduction = await createMarketplaceIntroduction({
                   session,
                   domainId: selectedDomainId,
-                  intentId: selected.intentId,
+                  intentId: selectedIntentId,
                   offerId: selected.offerId,
                   score: (selected.matchScore ?? 0) / 100,
                   idempotencyKey: `web-introduction-${Date.now()}`,
@@ -563,9 +589,8 @@ function loginHref(role: WorkspaceRole): string {
 }
 
 function parentPlatformHref(path: string, role: WorkspaceRole): string {
-  const segments = path.split("/").filter(Boolean);
-  const parentPath = segments.length > 1 ? `/${segments.slice(0, -1).join("/")}` : "/";
-  return role === "buyer" ? parentPath : `${parentPath}?role=${encodeURIComponent(role)}`;
+  void path;
+  return role === "buyer" ? "/" : `/?role=${encodeURIComponent(role)}`;
 }
 
 function roleLabel(role: WorkspaceRole, locale: "zh" | "en", subplatform: SubplatformConfig): string {
@@ -573,22 +598,22 @@ function roleLabel(role: WorkspaceRole, locale: "zh" | "en", subplatform: Subpla
     return role === "buyer"
       ? "Account"
       : role === "subplatform_admin"
-          ? subplatformCopy(subplatform, "subplatformAdminLabelEn", "Platform admin")
-          : subplatformCopy(subplatform, "platformAdminLabelEn", "Admin");
+          ? subplatformCopy(subplatform, "subplatformAdminLabelEn", "Store operator")
+          : subplatformCopy(subplatform, "platformAdminLabelEn", "Mall operator");
   }
   return role === "buyer"
     ? "统一账号"
     : role === "subplatform_admin"
-        ? subplatformCopy(subplatform, "subplatformAdminLabel", "子平台管理员")
-        : subplatformCopy(subplatform, "platformAdminLabel", "平台管理员");
+        ? subplatformCopy(subplatform, "subplatformAdminLabel", "店铺运营")
+        : subplatformCopy(subplatform, "platformAdminLabel", "商城运营");
 }
 
 function appCopy(locale: "zh" | "en") {
   if (locale === "en") {
     return {
       skipToContent: "Skip to content",
-      backToParent: "Back to parent platform",
-      rootPlatform: "Root platform",
+      backToParent: "Back to mall",
+      rootPlatform: "Mall",
       console: "Console",
       consoleDescription: "Manage your requests, listings, and contact details.",
       closeConsole: "Close console",
@@ -603,8 +628,8 @@ function appCopy(locale: "zh" | "en") {
       signIn: "Sign in",
       user: "MatchPlane user",
       unifiedIdentity: "Unified identity",
-      subplatformAdmin: "Platform admin",
-      platformAdmin: "Platform admin",
+      subplatformAdmin: "Store console",
+      platformAdmin: "Mall console",
       signOut: "Sign out",
       signedOut: "Signed out",
       signOutFailed: "Could not sign out. Try again.",
@@ -612,8 +637,8 @@ function appCopy(locale: "zh" | "en") {
   }
   return {
     skipToContent: "跳到主要内容",
-    backToParent: "返回上一级平台",
-    rootPlatform: "根平台",
+    backToParent: "返回商城",
+    rootPlatform: "商城首页",
     console: "控制台",
     consoleDescription: "管理你的需求、商品和联系方式。",
     closeConsole: "关闭控制台",
@@ -628,8 +653,8 @@ function appCopy(locale: "zh" | "en") {
     signIn: "登录",
     user: "MatchPlane 用户",
     unifiedIdentity: "已登录的统一身份",
-    subplatformAdmin: "子平台管理",
-    platformAdmin: "根平台管理",
+    subplatformAdmin: "店铺控制台",
+    platformAdmin: "商城控制台",
     signOut: "退出登录",
     signedOut: "已退出当前账号",
     signOutFailed: "退出登录失败，请稍后重试",
@@ -665,6 +690,7 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
       ? item.field_labels as Record<string, unknown>
       : {};
     const facts = Object.entries(attributes)
+      .filter(([key]) => key !== "description" && key !== "attachments")
       .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
       .slice(0, 4)
       .map(([label, value]) => ({
@@ -674,7 +700,12 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
         key: label,
         value: String(value),
       }));
-    const subtitle = facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ");
+    const storeName = typeof item.store_name === "string" && item.store_name.trim() ? item.store_name.trim() : undefined;
+    const subtitle = storeName ?? facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ");
+    const description = typeof attributes.description === "string" && attributes.description.trim()
+      ? attributes.description.trim()
+      : undefined;
+    const imageUrl = typeof item.image_url === "string" && item.image_url.trim() ? item.image_url.trim() : undefined;
     const location = typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined;
     const terms = item.terms && typeof item.terms === "object" && !Array.isArray(item.terms) ? item.terms : {};
     const currencyScale = item.currency_scale;
@@ -709,7 +740,19 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
       subplatform: typeof item.subplatform === "string" ? item.subplatform : subplatform.slug,
       title: item.display_name,
       subtitle,
+      description,
+      imageUrl,
+      storeName,
       price,
+      ...(termAmount && termCurrency && termScale !== undefined ? {
+        priceAmountMinor: termAmount,
+        priceCurrency: termCurrency,
+        priceCurrencyScale: termScale,
+      } : item.asking_amount && item.currency && typeof currencyScale === "number" && Number.isInteger(currencyScale) ? {
+        priceAmountMinor: item.asking_amount,
+        priceCurrency: item.currency,
+        priceCurrencyScale: currencyScale,
+      } : {}),
       location,
       matchScore: Math.round(Math.max(0, Math.min(1, item.match_score ?? 0)) * 100),
       accent: (["cactus", "clay", "heather", "oat"] as const)[index % 4],
@@ -717,6 +760,7 @@ function mapRecommendations(items: RecommendedBackendListing[], subplatform: Sub
       reasons: item.match_reasons ?? (typeof item.reasons === "object" && Array.isArray(item.reasons) ? item.reasons.filter((reason): reason is string => typeof reason === "string") : undefined),
       risks: item.match_risks ?? (typeof item.risks === "object" && Array.isArray(item.risks) ? item.risks.filter((risk): risk is string => typeof risk === "string") : undefined),
       trust: stringArrayAttribute(item, ["trust", "verification_labels", "verificationLabels"]),
+      seller: storeName,
       response: stringAttribute(item, ["response", "seller_response", "sellerResponse"]),
       offerId: item.offer_id,
       intentId: typeof item.intent_id === "string" ? item.intent_id : undefined,

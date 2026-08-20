@@ -30,11 +30,15 @@ export async function POST(request: Request): Promise<Response> {
   }
   const domainId = typeof body.domainId === "string" ? body.domainId : "";
   if (!isUuid(domainId)) return jsonError("domainId 必须是 UUID", 400);
-  const parentOrganizationId = typeof body.parentOrganizationId === "string" && body.parentOrganizationId
+  const requestedParentOrganizationId = typeof body.parentOrganizationId === "string" && body.parentOrganizationId
     ? body.parentOrganizationId
-    : await readRootOrganizationId(guard.admin.rootTenantId);
+    : null;
+  const parentOrganizationId = await readRootOrganizationId(guard.admin.rootTenantId);
   if (!parentOrganizationId || !isUuid(parentOrganizationId)) {
-    return jsonError("parentOrganizationId 必须是 UUID；请先初始化根平台组织", 409);
+    return jsonError("请先初始化商城，再邀请外部店铺", 409);
+  }
+  if (requestedParentOrganizationId && requestedParentOrganizationId !== parentOrganizationId) {
+    return jsonError("外部店铺只能直接接入商城，不能嵌套在其他店铺中", 400);
   }
   const parentError = await validateFederationParent(guard.admin.rootTenantId, parentOrganizationId, domainId);
   if (parentError) return jsonError(parentError, 400);

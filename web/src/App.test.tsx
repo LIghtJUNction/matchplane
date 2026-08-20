@@ -46,6 +46,21 @@ beforeEach(() => {
   document.documentElement.dataset.theme = "light";
   document.documentElement.lang = "zh-CN";
   clearPartySessionCache();
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (url === "/api/mall/search") {
+      return new Response(JSON.stringify({
+        requestId: crypto.randomUUID(),
+        stores: [],
+        recommendations: [],
+        routing: { source: "policy_fallback", degraded: false, rationale: "no stores" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url === "/api/stores") {
+      return new Response(JSON.stringify({ stores: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ error: "test service unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+  });
 });
 
 afterEach(() => {
@@ -56,7 +71,7 @@ describe("MatchPlane workspaces", () => {
   it("keeps the root entry focused on one public buyer chat and a visible sign-in entry", async () => {
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "先说说你想解决什么。" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "想买什么，告诉我就行。" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "从一句话开始。" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "卖方供给" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" })).toBeInTheDocument();
@@ -70,7 +85,7 @@ describe("MatchPlane workspaces", () => {
 
   it("lets a mounted child platform own the viewport with only a parent back control", async () => {
     window.history.replaceState(null, "", "/market/auto");
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
+    vi.mocked(globalThis.fetch).mockImplementation(async () => ({
       ok: true,
       json: async () => ({
         displayName: "Match Auto",
@@ -87,9 +102,9 @@ describe("MatchPlane workspaces", () => {
     render(<App initialPath="/market/auto" />);
 
     expect(await screen.findByTitle("Match Auto buyer 工作台")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "返回上一级平台" })).toHaveAttribute("href", "/market");
+    expect(screen.getByRole("link", { name: "返回商城" })).toHaveAttribute("href", "/");
     expect(screen.queryByRole("button", { name: "设置" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "先说说你想解决什么。" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "想买什么，告诉我就行。" })).not.toBeInTheDocument();
     expect(screen.queryByText("独立打开")).not.toBeInTheDocument();
   });
 
@@ -103,20 +118,16 @@ describe("MatchPlane workspaces", () => {
     expect(await screen.findByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 
-  it("gives every signed-in account one console for contacts and publishing", async () => {
+  it("gives every signed-in account one console for opening and entering its stores", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
     await openConsoleFromAccountMenu(user);
-    expect(screen.getByText("设置双方同意后交换的渠道")).toBeInTheDocument();
-    await user.type(await screen.findByLabelText("商品名称"), "由卖家提交的资料");
-    await user.type(screen.getByLabelText("商品描述"), "一辆经过整理的二手车");
-    await user.type(screen.getByLabelText("价格"), "128000");
-    await user.click(screen.getByRole("button", { name: "上传并提交审核" }));
-
-    expect(screen.getByRole("status")).toHaveTextContent("没有写入系统");
-    expect(screen.queryByText("由卖家提交的资料")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "我的店铺" })).toBeInTheDocument();
+    expect(screen.getByLabelText("店铺名称")).toBeInTheDocument();
+    expect(screen.getByLabelText(/^店铺地址/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("商品名称")).not.toBeInTheDocument();
   });
 
   it("requires an explicit administrator confirmation before changing payment mode", async () => {
@@ -125,7 +136,7 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await screen.findByRole("heading", { name: "平台管理" });
+    await screen.findByRole("heading", { name: "商城控制台" });
     await user.click(screen.getByRole("tab", { name: "支付（可选）" }));
     await user.click(screen.getByRole("button", { name: "切换支付模式" }));
 
@@ -153,7 +164,8 @@ describe("MatchPlane workspaces", () => {
     await user.type(input, "我有一个需要被认真匹配的问题");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/未连接真实撮合 API/);
+    expect(await screen.findByRole("status")).toHaveTextContent(/暂时没有找到合适的在售商品/);
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/mall/search", expect.objectContaining({ method: "POST" }));
   });
 
   it("submits with Enter while Shift+Enter keeps a multiline draft", async () => {
@@ -175,7 +187,7 @@ describe("MatchPlane workspaces", () => {
     expect(input).toHaveValue("第一行\n第二行");
     await user.keyboard("{Enter}");
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/未连接真实撮合 API/);
+    expect(await screen.findByRole("status")).toHaveTextContent(/暂时没有找到合适的在售商品/);
   });
 
   it("lets the user clear the visible conversation without leaving the page", async () => {
@@ -264,7 +276,7 @@ describe("MatchPlane workspaces", () => {
 
     await user.click(screen.getByRole("button", { name: "EN" }));
 
-    expect(screen.getByRole("heading", { name: "Tell us what you want to solve." })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tell me what you want to buy." })).toBeInTheDocument();
     expect(screen.queryByText("More entry points")).not.toBeInTheDocument();
   });
 

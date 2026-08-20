@@ -28,18 +28,18 @@ export async function syncCanonicalMarketplaceOffer(input: {
   if (!session) return failure(401, input.offerId, "Better Auth session is required");
 
   const result = await authDatabase.query<CanonicalOfferRow>(
-    `WITH RECURSIVE platform_tree AS (
+    `WITH RECURSIVE legacy_platform_tree AS (
        SELECT o.id, o."parentOrganizationId", o.slug, o."domainId", '/'::text AS platform_path
          FROM "organization" o
         WHERE o."tenantId" = $1::text AND o."parentOrganizationId" IS NULL AND o."rootPlatform" = true
        UNION ALL
        SELECT child.id, child."parentOrganizationId", child.slug, child."domainId",
-              CASE WHEN platform_tree.platform_path = '/' THEN '/' || child.slug
-                   ELSE platform_tree.platform_path || '/' || child.slug END
+              CASE WHEN legacy_platform_tree.platform_path = '/' THEN '/' || child.slug
+                   ELSE legacy_platform_tree.platform_path || '/' || child.slug END
          FROM "organization" child
-         JOIN platform_tree ON child."parentOrganizationId" = platform_tree.id
+         JOIN legacy_platform_tree ON child."parentOrganizationId" = legacy_platform_tree.id
                            AND child."tenantId" = $1::text
-        WHERE length(platform_tree.platform_path) < 4096
+        WHERE length(legacy_platform_tree.platform_path) < 4096
      )
      SELECT offer.id::text AS offer_id,
             offer.tenant_id::text AS tenant_id,
@@ -50,7 +50,8 @@ export async function syncCanonicalMarketplaceOffer(input: {
             offer.attributes,
             offer.terms,
             offer.status,
-            tree.platform_path,
+            COALESCE(alias.path, tree.platform_path) AS platform_path,
+            store.integration_kind,
             EXISTS (
               SELECT 1 FROM marketplace_party_auth_links link
                WHERE link.tenant_id = offer.tenant_id
@@ -58,7 +59,14 @@ export async function syncCanonicalMarketplaceOffer(input: {
                  AND link.auth_user_id = $2::uuid
             ) AS owner
        FROM marketplace_offers offer
-       LEFT JOIN platform_tree tree
+       LEFT JOIN stores store
+         ON store.tenant_id = offer.tenant_id
+        AND store.id = offer.store_id
+       LEFT JOIN store_path_aliases alias
+         ON alias.tenant_id = store.tenant_id
+        AND alias.store_id = store.id
+        AND alias.is_canonical = true
+       LEFT JOIN legacy_platform_tree tree
          ON NULLIF(tree."domainId", '')::uuid = offer.domain_id
       WHERE offer.tenant_id = $1::uuid AND offer.id = $3::uuid
       LIMIT 1`,
@@ -80,6 +88,19 @@ export async function syncCanonicalMarketplaceOffer(input: {
   }
   if (input.requested?.platformPath && input.requested.platformPath !== offer.platform_path) {
     return failure(403, input.offerId, "供给平台路径与当前平台不一致");
+  }
+
+  // A hosted store writes directly into the mall's canonical catalog. There is no child index
+  // to synchronize, so activation itself completes publication.
+  if (offer.integration_kind === "hosted") {
+    return {
+      ok: true,
+      status: 200,
+      synced: true,
+      offerId: offer.offer_id,
+      platformPath: offer.platform_path,
+      payload: { catalog: "mall", mode: "canonical" },
+    };
   }
 
   const execution = await executeAuthenticatedChildTool({
@@ -147,5 +168,6 @@ interface CanonicalOfferRow {
   terms: unknown;
   status: string;
   platform_path: string | null;
+  integration_kind: string | null;
   owner: boolean;
 }

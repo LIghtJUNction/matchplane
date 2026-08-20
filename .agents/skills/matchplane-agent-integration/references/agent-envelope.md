@@ -3,7 +3,7 @@
 The root accepts a bounded narrative at `POST /api/platform/match` from a Better Auth session. A
 machine integration uses an organization-owned `mpk_` API key and the canonical
 `x-matchplane-api-key` header where the target endpoint permits it. The provider sees only
-allowlisted child metadata; tenant/domain authority stays server-side.
+allowlisted store metadata; tenant/domain authority stays server-side.
 
 An Agent stage follows:
 
@@ -11,7 +11,7 @@ An Agent stage follows:
 {
   "protocol": "matchplane.agent/v1",
   "stage": "merchant",
-  "scope": { "platform_path": "/market/auto" },
+  "scope": { "platform_path": "/matx-auto" },
   "intent": { "narrative": "...", "requirements": {} },
   "skill": "matchplane.matching.v1",
   "allowed_mcp_tools": ["merchant.search", "inventory.search"],
@@ -29,13 +29,13 @@ but cannot authorize contact exchange, payment, settlement, or a hidden cross-te
 
 ## Marketplace capability exchange
 
-An external demand or supply Agent does not create a separate browser account on every child
-platform. A Better Auth organization API key is the machine identity; bind it to the smallest
+An external demand or supply Agent does not create a separate browser account for every store. A
+Better Auth organization API key is the machine identity; bind it to the smallest
 `marketplace:write` permission and set API-key metadata `agentSide` to `demand`, `supply`, or
 `both`. Call `marketplace.agent.session` through `/api/mcp` (or
 `POST /api/marketplace/agent-session`) with the active `tenant_id`, `domain_id`, `platform_path`,
-and requested side. The platform verifies the mounted path, parent/child organization access, and
-active registration before returning a short-lived (15-minute) party bearer plus its
+and requested side. The marketplace verifies the store's canonical/legacy path, scoped
+organization access, and active registration before returning a short-lived (15-minute) party bearer plus its
 `access_token_expires_at` deadline.
 
 Use that bearer only as `Authorization: Bearer ...` for the generic marketplace MCP tools. The

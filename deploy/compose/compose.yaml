@@ -208,6 +208,7 @@ services:
       MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON: '${MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON:-{"used-car":{"url":"http://auto-agent:8787/mcp","tokenEnv":"MATCHPLANE_AUTO_MCP_TOKEN"}}}'
       MATCHPLANE_AUTO_MCP_TOKEN: ${MATCHPLANE_AUTO_MCP_TOKEN:-matchplane_auto_dev_only}
       MATCHPLANE_MEDIA_MAX_BYTES: ${MATCHPLANE_MEDIA_MAX_BYTES:-26214400}
+      MATCHPLANE_HOSTED_MEDIA_ROOT: ${MATCHPLANE_HOSTED_MEDIA_ROOT:-/var/lib/matchplane/media}
       MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN: ${MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN:-}
       MATCHPLANE_SUBPLATFORM_SECRET_ROOT: ${MATCHPLANE_SUBPLATFORM_SECRET_ROOT:-/run/secrets/subplatform-email}
       MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID: ${MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID:-}
@@ -244,6 +245,7 @@ services:
     volumes:
       - ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-./var/subplatform-artifacts}:/var/lib/matchplane/subplatform-artifacts:ro
       - ${MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT:-./var/subplatform-uploads}:/var/lib/matchplane/subplatform-uploads:rw
+      - ${MATCHPLANE_HOSTED_MEDIA_HOST_ROOT:-./var/hosted-media}:/var/lib/matchplane/media:rw
       - ${MATCHPLANE_SUBPLATFORM_SECRET_HOST_ROOT:-./var/subplatform-email-secrets}:/run/secrets/subplatform-email:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health/web').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]

@@ -9,10 +9,8 @@ export interface MountedPlatformScope {
 }
 
 /**
- * Production UI routes are controlled by the same immutable registration tree
- * that drives Agent delegation. Test/development profiles may render a static
- * package for local UI work, but production fails closed when the mount is not
- * active.
+ * Production UI routes are controlled by the flat store directory. The historical registration
+ * tree remains a fallback for paths that have not yet been projected into `stores`.
  */
 export async function isMountedPlatformPath(platformPath: string): Promise<boolean> {
   if (!isProductionEnvironment()) return true;
@@ -24,6 +22,12 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
   if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath)) return false;
 
   try {
+    const store = await readActiveStoreScope(rootTenantId, platformPath);
+    if (store) return true;
+    // Once a path has entered the flat directory, `stores` is authoritative. In particular,
+    // suspension must not expose the same organization through its historical registration.
+    if (await hasStoreProjection(rootTenantId, platformPath)) return false;
+
     const result = await authDatabase.query(
       `WITH RECURSIVE platform_tree AS (
          SELECT o.id,
@@ -80,8 +84,8 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
 }
 
 /**
- * Resolves the active node from the immutable organization tree.  Callers must use this result
- * instead of trusting a browser-supplied tenant/domain pair for a child capability exchange.
+ * Resolves an active store before falling back to a historical organization-tree path. Callers
+ * must use this result instead of trusting browser-supplied scope fields.
  */
 export async function readActivePlatformScope(
   platformPath: string,
@@ -90,6 +94,10 @@ export async function readActivePlatformScope(
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath)) return null;
   try {
+    const store = await readActiveStoreScope(rootTenantId, platformPath);
+    if (store) return store;
+    if (await hasStoreProjection(rootTenantId, platformPath)) return null;
+
     const result = await authDatabase.query<MountedPlatformScope>(
       `WITH RECURSIVE platform_tree AS (
          SELECT o.id,
@@ -147,6 +155,60 @@ export async function readActivePlatformScope(
     console.error("active platform scope lookup failed", error);
     return null;
   }
+}
+
+async function readActiveStoreScope(rootTenantId: string, platformPath: string): Promise<MountedPlatformScope | null> {
+  const result = await authDatabase.query<MountedPlatformScope>(
+      `SELECT store.organization_id::text AS "organizationId",
+              store.tenant_id::text AS "tenantId",
+              store.domain_id::text AS "domainId",
+              store.slug
+         FROM stores store
+         JOIN store_path_aliases alias
+           ON alias.tenant_id = store.tenant_id
+          AND alias.store_id = store.id
+         JOIN domains domain
+           ON domain.tenant_id = store.tenant_id
+          AND domain.id = store.domain_id
+          AND domain.status = 'active'
+         LEFT JOIN subplatform_registrations registration
+           ON registration.id = store.current_registration_id
+        WHERE store.tenant_id = $1::uuid
+          AND alias.path = $2
+          AND store.status = 'active'
+          AND (
+            store.integration_kind = 'hosted'
+            OR (registration.id IS NOT NULL AND registration.state = 'active')
+          )
+          AND (
+            store.integration_kind <> 'external'
+            OR EXISTS (
+              SELECT 1 FROM platform_federation_bindings binding
+               WHERE binding.id = store.federation_binding_id AND binding.status = 'active'
+            )
+          )
+        LIMIT 1`,
+      [rootTenantId, platformPath],
+  );
+  const row = result.rows[0];
+  return row && isUuid(row.organizationId) && isUuid(row.tenantId) && isUuid(row.domainId)
+    ? row
+    : null;
+}
+
+async function hasStoreProjection(rootTenantId: string, platformPath: string): Promise<boolean> {
+  const result = await authDatabase.query(
+    `SELECT 1
+       FROM store_path_aliases alias
+       JOIN stores store
+         ON store.tenant_id = alias.tenant_id
+        AND store.id = alias.store_id
+      WHERE alias.tenant_id = $1::uuid
+        AND alias.path = $2
+      LIMIT 1`,
+    [rootTenantId, platformPath],
+  );
+  return result.rowCount === 1;
 }
 
 /**
