@@ -148,7 +148,10 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       };
       const name = body.root?.tenant?.name;
       const tenantId = typeof body.root?.tenantId === "string" ? body.root.tenantId : undefined;
-      const domainId = typeof body.domains?.[0]?.id === "string" ? body.domains[0].id : undefined;
+      // The root node is tenant-scoped. A child domain is selected only after routing into a
+      // mounted subplatform; attaching the first child domain to `/` violates the marketplace
+      // scope invariant and prevents a freshly verified user from entering their console.
+      const domainId = undefined;
       const rootUi = validUi({
         chat: body.root?.ui?.chat && typeof body.root.ui.chat === "object" && !Array.isArray(body.root.ui.chat)
           ? body.root.ui.chat as ChatUiConfig

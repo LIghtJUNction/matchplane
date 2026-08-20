@@ -383,7 +383,7 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
       }
       await finishSignIn();
     } catch (cause) {
-      setError(!isRegistration && method === "password" ? copy.invalidCredentials : cause instanceof Error ? cause.message : copy.authFailed);
+      setError(!isRegistration && method === "password" ? copy.invalidCredentials : copy.authFailed);
       setSubmitting(false);
     }
   };
