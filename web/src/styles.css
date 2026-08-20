@@ -5015,6 +5015,25 @@ main.subplatform-fullscreen-main {
   text-underline-offset: 0.16em;
 }
 
+.login-link-button {
+  margin-left: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+  cursor: pointer;
+}
+
+.login-link-button:focus-visible {
+  outline: 2px solid var(--cactus-deep);
+  outline-offset: 3px;
+  border-radius: 0.15rem;
+}
+
 .header-admin-action {
   min-height: 2.35rem;
   padding: 0 0.72rem;

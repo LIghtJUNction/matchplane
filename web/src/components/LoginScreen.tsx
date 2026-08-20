@@ -63,6 +63,8 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
   });
   const [otpSent, setOtpSent] = useState(false);
   const [registrationPending, setRegistrationPending] = useState(false);
+  const [passwordResetMode, setPasswordResetMode] = useState(false);
+  const [passwordResetOtpSent, setPasswordResetOtpSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -209,6 +211,10 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
       setError(copy.registrationEmailOnly);
       return;
     }
+    if (passwordResetMode && resolvedIdentifier.kind !== "email") {
+      setError(copy.registrationEmailOnly);
+      return;
+    }
     if (method === "password" && resolvedIdentifier.kind === "phone") {
       setError(isRegistration ? copy.registrationEmailOnly : copy.invalidCredentials);
       return;
@@ -239,7 +245,7 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
       setError(copy.magicLinkUnavailable);
       return;
     }
-    if (method === "password" && !registrationPending && password.length < 8) {
+    if (method === "password" && !registrationPending && !passwordResetMode && password.length < 8) {
       setError(copy.passwordTooShort);
       return;
     }
@@ -251,11 +257,56 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
       setError(copy.invalidOtp);
       return;
     }
+    if (passwordResetMode && passwordResetOtpSent) {
+      if (!/^\d{6}$/.test(otp.trim())) {
+        setError(copy.invalidOtp);
+        return;
+      }
+      if (password.length < 8) {
+        setError(copy.passwordTooShort);
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError(copy.passwordMismatch);
+        return;
+      }
+    }
     setSubmitting(true);
     setError(null);
     setNotice(null);
     try {
       const options = authFetchOptions(subplatform.slug);
+      if (passwordResetMode) {
+        if (!passwordResetOtpSent) {
+          const response = await fetch("/api/auth/email-otp/request-password-reset", {
+            method: "POST",
+            credentials: "include",
+            headers: { accept: "application/json", "content-type": "application/json", ...options.headers },
+            body: JSON.stringify({ email: resolvedIdentifier.value }),
+          });
+          if (!response.ok) throw new Error(copy.passwordResetFailed);
+          setPasswordResetOtpSent(true);
+          setOtp("");
+          setNotice(copy.passwordResetOtpSent);
+          setSubmitting(false);
+          return;
+        }
+        const response = await fetch("/api/auth/email-otp/reset-password", {
+          method: "POST",
+          credentials: "include",
+          headers: { accept: "application/json", "content-type": "application/json", ...options.headers },
+          body: JSON.stringify({ email: resolvedIdentifier.value, otp: otp.trim(), password }),
+        });
+        if (!response.ok) throw new Error(copy.passwordResetFailed);
+        setPasswordResetMode(false);
+        setPasswordResetOtpSent(false);
+        setPassword("");
+        setConfirmPassword("");
+        setOtp("");
+        setNotice(copy.passwordResetComplete);
+        setSubmitting(false);
+        return;
+      }
       if (registrationPending) {
         const result = await authClient.emailOtp.verifyEmail({
           email: resolvedIdentifier.value,
@@ -419,7 +470,9 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
       }
       await finishSignIn();
     } catch (cause) {
-      setError(!isRegistration && method === "password" ? copy.invalidCredentials : copy.authFailed);
+      setError(passwordResetMode
+        ? copy.passwordResetFailed
+        : !isRegistration && method === "password" ? copy.invalidCredentials : copy.authFailed);
       setSubmitting(false);
     }
   };
@@ -449,6 +502,8 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
     setMethod(nextMethod);
     setOtpSent(false);
     setRegistrationPending(false);
+    setPasswordResetMode(false);
+    setPasswordResetOtpSent(false);
     setShowPassword(false);
     setConfirmPassword("");
     setOtp("");
@@ -458,7 +513,7 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
 
   const availableMethods: AuthMethod[] = ["password"];
   const isRegistration = authIntent === "sign-up";
-  const emailOnlyIdentifier = isRegistration || registrationPending;
+  const emailOnlyIdentifier = isRegistration || registrationPending || passwordResetMode;
   const hasMethodTabs = availableMethods.length > 1;
   const activeMethodTabId = `${authMethodsId}-${method}-tab`;
   const registrationHref = `/register?next=${encodeURIComponent(next)}`;
@@ -476,8 +531,8 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
         <section className="login-card" aria-labelledby="login-form-title">
           <div className="login-card-header">
             <Brand label={subplatform.brandName} homeHref="/" />
-            <h1 id="login-form-title">{isRegistration ? copy.registrationTitle : copy.formTitle}</h1>
-            <p>{isRegistration ? copy.registrationDescription : copy.formDescription}</p>
+            <h1 id="login-form-title">{passwordResetMode ? copy.passwordResetTitle : isRegistration ? copy.registrationTitle : copy.formTitle}</h1>
+            <p>{passwordResetMode ? copy.passwordResetDescription : isRegistration ? copy.registrationDescription : copy.formDescription}</p>
           </div>
 
         {nationalIdentityEnabled ? (
@@ -502,13 +557,13 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
         <form id={hasMethodTabs ? `${authMethodsId}-panel` : undefined} className="login-form" role={hasMethodTabs ? "tabpanel" : undefined} aria-labelledby={hasMethodTabs ? activeMethodTabId : undefined} onSubmit={submit}>
           <label htmlFor="login-identifier">
             <span>{emailOnlyIdentifier ? copy.email : copy.identifier}</span>
-            <Input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} readOnly={registrationPending} autoComplete="username webauthn" inputMode="text" placeholder={emailOnlyIdentifier ? copy.emailPlaceholder : copy.identifierPlaceholder} autoFocus />
+            <Input id="login-identifier" type="text" value={identifier} onChange={(event) => setIdentifier(event.target.value)} readOnly={registrationPending || (passwordResetMode && passwordResetOtpSent)} autoComplete="username webauthn" inputMode="text" placeholder={emailOnlyIdentifier ? copy.emailPlaceholder : copy.identifierPlaceholder} autoFocus />
           </label>
-          {method === "password" && !registrationPending ? (
+          {method === "password" && !registrationPending && (!passwordResetMode || passwordResetOtpSent) ? (
             <div className="login-password-field">
               <label htmlFor="login-password"><span>{copy.password}</span></label>
               <span className="login-password-control">
-                <Input id="login-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={authIntent === "sign-up" ? "new-password" : "current-password webauthn"} placeholder={copy.passwordPlaceholder} />
+                <Input id="login-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={authIntent === "sign-up" || passwordResetMode ? "new-password" : "current-password webauthn"} placeholder={copy.passwordPlaceholder} />
                 <span className="login-password-actions">
                   <Button className="login-password-visibility" variant="outline" size="icon-sm" type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={submitting} aria-label={showPassword ? copy.hidePassword : copy.showPassword} title={showPassword ? copy.hidePassword : copy.showPassword}>
                     {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
@@ -517,7 +572,7 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
               </span>
             </div>
           ) : null}
-          {method === "password" && isRegistration && !registrationPending ? (
+          {method === "password" && (isRegistration || passwordResetMode) && !registrationPending && (!passwordResetMode || passwordResetOtpSent) ? (
             <div className="login-password-field">
               <label htmlFor="login-password-confirm"><span>{copy.confirmPassword}</span></label>
               <span className="login-password-control">
@@ -525,13 +580,13 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
               </span>
             </div>
           ) : null}
-          {((method === "email-otp" && otpSent) || registrationPending) ? (
+          {((method === "email-otp" && otpSent) || registrationPending || passwordResetOtpSent) ? (
             <label htmlFor="login-otp"><span>{copy.otp}</span><Input id="login-otp" inputMode="numeric" pattern="[0-9]{6}" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} autoComplete="one-time-code" placeholder={copy.otpPlaceholder} /></label>
           ) : null}
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           {notice ? <p className="login-notice" role="status">{notice}</p> : null}
           <Button className="login-submit" type="submit" disabled={submitting}>
-            {submitting ? copy.loading : registrationPending ? copy.verifyAndCreate : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : authIntent === "sign-up" ? copy.sendRegistrationOtp : copy.continue}
+            {submitting ? copy.loading : passwordResetMode ? (passwordResetOtpSent ? copy.resetPassword : copy.sendPasswordResetOtp) : registrationPending ? copy.verifyAndCreate : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : authIntent === "sign-up" ? copy.sendRegistrationOtp : copy.continue}
             {!submitting ? <ArrowRight size={17} aria-hidden="true" /> : null}
           </Button>
         </form>
@@ -551,7 +606,7 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
         ) : null}
         {!adminInviteToken && !oauthQuery && role !== "platform" && !registrationPending ? (
           <p className="login-registration-link">
-            {isRegistration ? <>{copy.hasAccount} <a href={loginHref}>{copy.signIn}</a></> : <>{copy.noAccount} <a href={registrationHref}>{copy.signUp}</a></>}
+            {passwordResetMode ? <button className="login-link-button" type="button" onClick={() => { setPasswordResetMode(false); setPasswordResetOtpSent(false); setPassword(""); setConfirmPassword(""); setOtp(""); setError(null); setNotice(null); }}>{copy.backToSignIn}</button> : isRegistration ? <>{copy.hasAccount} <a href={loginHref}>{copy.signIn}</a></> : <>{copy.noAccount} <a href={registrationHref}>{copy.signUp}</a> <button className="login-link-button" type="button" onClick={() => { setPasswordResetMode(true); setPassword(""); setConfirmPassword(""); setOtp(""); setError(null); setNotice(null); }}>{copy.forgotPassword}</button></>}
           </p>
         ) : null}
         </section>
@@ -640,10 +695,14 @@ function loginCopy(locale: "zh" | "en") {
       formDescription: "Use email or another method enabled for this platform.",
       registrationTitle: "Create your account",
       registrationDescription: "One account lets you find what you need and publish your own listings.",
+      passwordResetTitle: "Reset your password",
+      passwordResetDescription: "We will send a six-digit code to your email, then you can set a new password.",
       signIn: "Sign in",
       signUp: "Register",
       noAccount: "No account?",
       hasAccount: "Already have an account?",
+      forgotPassword: "Forgot password?",
+      backToSignIn: "Back to sign in",
       admin: "Administrator",
       adminDetail: "Invited platform management only",
       adminInviteRequired: "Administrator registration is available only from a verified invitation link.",
@@ -666,6 +725,8 @@ function loginCopy(locale: "zh" | "en") {
       verifyAndContinue: "Verify and continue",
       verifyAndCreate: "Verify and create account",
       sendRegistrationOtp: "Send verification code",
+      sendPasswordResetOtp: "Send reset code",
+      resetPassword: "Save new password",
       sendOtp: "Send code",
       sendMagicLink: "Send magic link",
       continue: "Continue",
@@ -678,6 +739,9 @@ function loginCopy(locale: "zh" | "en") {
       otpSent: "Code sent.",
       registrationOtpSent: "A verification code was sent to your email.",
       registrationOtpResent: "This email has a pending registration. A new verification code was sent.",
+      passwordResetOtpSent: "If this email has an account, a reset code was sent.",
+      passwordResetComplete: "Password updated. You can sign in with the new password.",
+      passwordResetFailed: "Password reset did not complete. Check the code and try again.",
       magicLinkSent: "Magic link sent.",
       authFailed: "Sign-in did not complete. Try again.",
       invalidIdentifier: "Enter a valid email address or phone number.",
@@ -705,10 +769,14 @@ function loginCopy(locale: "zh" | "en") {
     formDescription: "使用邮箱，或选择当前平台已启用的其他方式。",
     registrationTitle: "创建你的账号",
     registrationDescription: "一个账号既能寻找需要的商品，也能发布自己的商品。",
+    passwordResetTitle: "重置密码",
+    passwordResetDescription: "我们会向你的邮箱发送 6 位验证码，然后设置新密码。",
     signIn: "登录",
     signUp: "注册",
     noAccount: "没有账号？",
     hasAccount: "已有账号？",
+    forgotPassword: "忘记密码？",
+    backToSignIn: "返回登录",
     admin: "管理员",
     adminDetail: "仅限受邀的平台管理",
     adminInviteRequired: "管理员注册仅能通过超级管理员发出的邀请链接进行。",
@@ -731,6 +799,8 @@ function loginCopy(locale: "zh" | "en") {
     verifyAndContinue: "验证并继续",
     verifyAndCreate: "验证并创建账号",
     sendRegistrationOtp: "发送验证码",
+    sendPasswordResetOtp: "发送重置验证码",
+    resetPassword: "保存新密码",
     sendOtp: "发送验证码",
     sendMagicLink: "发送免密链接",
     continue: "继续",
@@ -743,6 +813,9 @@ function loginCopy(locale: "zh" | "en") {
     otpSent: "验证码已发送。",
     registrationOtpSent: "验证码已发送至你的邮箱。",
     registrationOtpResent: "该邮箱的注册尚待验证，新的验证码已发送。",
+    passwordResetOtpSent: "如果该邮箱已注册，重置验证码已发送。",
+    passwordResetComplete: "密码已更新，请使用新密码登录。",
+    passwordResetFailed: "密码重置没有完成，请检查验证码后重试。",
     magicLinkSent: "免密链接已发送。",
     authFailed: "登录没有完成，请再试一次。",
     invalidIdentifier: "请输入有效的邮箱或手机号。",

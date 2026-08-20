@@ -208,13 +208,15 @@ export const auth = betterAuth({
       disableSignUp: true,
       overrideDefaultEmailVerification: true,
       rateLimit: { window: 60, max: 3 },
-      sendVerificationOTP: (data) =>
-        sendConfiguredAuthEmail({
+      sendVerificationOTP: (data) => {
+        const resettingPassword = data.type === "forget-password";
+        return sendConfiguredAuthEmail({
           recipient: data.email,
-          subject: "你的 MatchPlane 登录验证码",
-          text: `你的 MatchPlane 登录验证码是 ${data.otp}。验证码 5 分钟内有效，请勿转发给他人。`,
-          html: `<p>你的 MatchPlane 登录验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:0.3em">${escapeHtml(data.otp)}</p><p>验证码 5 分钟内有效，请勿转发给他人。</p>`,
-        }),
+          subject: resettingPassword ? "重置你的 MatchPlane 密码" : "你的 MatchPlane 登录验证码",
+          text: `你的 MatchPlane${resettingPassword ? "密码重置" : "登录"}验证码是 ${data.otp}。验证码 5 分钟内有效，请勿转发给他人。`,
+          html: `<p>你的 MatchPlane${resettingPassword ? "密码重置" : "登录"}验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:0.3em">${escapeHtml(data.otp)}</p><p>验证码 5 分钟内有效，请勿转发给他人。</p>`,
+        });
+      },
     }),
     phoneNumber({
       otpLength: 6,
