@@ -2,7 +2,6 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { MailCheck, Save, Send, ShieldCheck } from "lucide-react";
-import { Button } from "@appica/ui-react/button";
 import { Input } from "@appica/ui-react/input";
 
 import {
@@ -119,10 +118,12 @@ export function RootEmailConfigPanel({
         <label htmlFor="root-email-reply"><span>回复地址（可选）</span><Input id="root-email-reply" type="email" value={replyTo} disabled={!canEdit || loading} onChange={(event) => setReplyTo(event.target.value)} /></label>
         <label htmlFor="root-email-mode"><span>发送模式</span><select id="root-email-mode" value={mode} disabled={!canEdit || loading} onChange={(event) => setMode(event.target.value as RootEmailConfig["mode"])}><option value="production">生产</option><option value="test">测试</option></select></label>
         <label className="email-enabled"><input type="checkbox" checked={enabled} disabled={!canEdit || loading} onChange={(event) => setEnabled(event.target.checked)} />启用根邮箱路由</label>
-        <div className="seller-upload-actions seller-upload-wide root-email-actions">
-          <p><ShieldCheck size={17} aria-hidden="true" /> {config?.credentialConfigured ? "密钥槽已就绪" : "密钥槽尚未写入"}</p>
-          {canEdit ? <Button type="submit" disabled={saving || loading}><Save size={17} aria-hidden="true" />{saving ? "保存中…" : "保存根邮箱配置"}</Button> : null}
-          <Button type="button" variant="outline" disabled={!canEdit || testing || !config?.credentialConfigured || !config.enabled} onClick={() => void test()}><Send size={17} aria-hidden="true" />{testing ? "发送中…" : "发送测试邮件"}</Button>
+        <div className="seller-upload-wide root-email-actions">
+          <p><ShieldCheck size={16} aria-hidden="true" />密钥槽：{config?.credentialConfigured ? "已就绪" : "尚未写入"}</p>
+          <div className="root-email-action-buttons">
+            {canEdit ? <button className="root-email-save" type="submit" disabled={saving || loading}><Save size={16} aria-hidden="true" />{saving ? "保存中…" : "保存配置"}</button> : null}
+            <button className="root-email-test" type="button" disabled={!canEdit || testing || !config?.credentialConfigured || !config.enabled} onClick={() => void test()}><Send size={16} aria-hidden="true" />{testing ? "发送中…" : "发送测试"}</button>
+          </div>
         </div>
       </form>
       {canEdit ? <div className="root-email-secret-step"><MailCheck size={18} aria-hidden="true" /><div><strong>写入密钥后即可生效</strong><code>{secretCommand}</code><small>命令会隐藏输入内容，原子写入服务器受保护目录；无需编辑环境变量或重启服务。</small></div></div> : <p className="subplatform-intro">根管理员可以查看状态；保存配置和发送测试邮件只由超级管理员执行。</p>}
