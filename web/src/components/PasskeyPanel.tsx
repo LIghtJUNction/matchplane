@@ -66,14 +66,13 @@ export function PasskeyPanel({ locale, subplatform, onNotice }: PasskeyPanelProp
     try {
       const result = await authClient.passkey.addPasskey({
         name: copy.thisDevice,
-        authenticatorAttachment: "platform",
         fetchOptions: authFetchOptions(subplatform.slug),
       });
-      if (result.error) throw new Error(result.error.message || copy.bindFailed);
+      if (result.error) throw new Error(passkeyFailureMessage(result.error, copy));
       await load();
       onNotice(copy.bound);
     } catch (error) {
-      onNotice(error instanceof Error && error.message ? error.message : copy.bindFailed);
+      onNotice(error instanceof Error && error.message ? passkeyFailureMessage(error, copy) : copy.bindFailed);
     } finally {
       setBinding(false);
     }
@@ -153,6 +152,7 @@ function passkeyCopy(locale: InterfaceLocale) {
     removed: "Passkey 已移除。",
     loadFailed: "Passkey 状态暂时无法读取。",
     bindFailed: "Passkey 绑定没有完成，请再试一次。",
+    permissionNeeded: "浏览器没有完成 Passkey 请求。请启用系统 Passkey，或连接手机/USB 安全密钥后重试。",
     removeFailed: "Passkey 移除失败，请稍后重试。",
   } : {
     title: "Passkey",
@@ -169,6 +169,19 @@ function passkeyCopy(locale: InterfaceLocale) {
     removed: "Passkey removed.",
     loadFailed: "Passkey status is temporarily unavailable.",
     bindFailed: "Passkey binding did not complete. Try again.",
+    permissionNeeded: "The browser did not complete the passkey request. Enable a system passkey, or connect a phone or USB security key and try again.",
     removeFailed: "Could not remove the passkey. Try again later.",
   };
+}
+
+function passkeyFailureMessage(
+  error: { code?: unknown; message?: unknown } | Error,
+  copy: ReturnType<typeof passkeyCopy>,
+): string {
+  const message = error instanceof Error ? error.message : typeof error.message === "string" ? error.message : "";
+  const code = ! (error instanceof Error) && typeof error.code === "string" ? error.code : "";
+  if (/notallowed|not allowed|cancelled|permission/i.test(message) || /CANCELLED|NOT_ALLOWED/i.test(code)) {
+    return copy.permissionNeeded;
+  }
+  return copy.bindFailed;
 }
