@@ -7,6 +7,7 @@ import nodemailer from "nodemailer";
 import { Pool } from "pg";
 import {
   getActiveRootEmailConfig,
+  getRootEmailConfig,
   readRootEmailCredential,
 } from "./root-email-config";
 
@@ -161,8 +162,8 @@ export async function sendConfiguredAuthEmail(input: AuthEmailInput): Promise<vo
 
 /** Fixed-content administrator verification for a newly saved root SMTP route. */
 export async function sendRootEmailConfigTest(recipient: string): Promise<void> {
-  const route = await managedRootEmailRoute();
-  if (!route || !route.enabled) throw new Error("请先保存、写入密钥槽并启用根邮箱路由");
+  const route = await managedRootEmailRoute({ requireEnabled: false });
+  if (!route) throw new Error("请先保存 SMTP 配置和密码");
   await deliverEmail(route, {
     recipient,
     subject: "MatchPlane 根邮箱配置测试",
@@ -171,9 +172,9 @@ export async function sendRootEmailConfigTest(recipient: string): Promise<void> 
   });
 }
 
-async function managedRootEmailRoute(): Promise<EmailRoute | null> {
-  const managed = await getActiveRootEmailConfig();
-  if (!managed) return null;
+async function managedRootEmailRoute(options: { requireEnabled?: boolean } = {}): Promise<EmailRoute | null> {
+  const managed = options.requireEnabled === false ? await getRootEmailConfig() : await getActiveRootEmailConfig();
+  if (!managed || !managed.credentialConfigured || (options.requireEnabled !== false && !managed.enabled)) return null;
   return {
     providerKey: managed.providerKey,
     smtpHost: managed.smtpHost,
@@ -184,7 +185,7 @@ async function managedRootEmailRoute(): Promise<EmailRoute | null> {
     fromAddress: managed.fromAddress,
     replyTo: managed.replyTo,
     mode: managed.mode,
-    enabled: managed.enabled,
+    enabled: true,
     tenantId: null,
     domainId: null,
   };

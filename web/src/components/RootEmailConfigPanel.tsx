@@ -118,7 +118,7 @@ export function RootEmailConfigPanel({
           <p><ShieldCheck size={16} aria-hidden="true" />密钥槽：{config?.credentialConfigured ? "已就绪" : "尚未写入"}</p>
           <div className="root-email-action-buttons">
             {canEdit ? <button className="root-email-save" type="submit" disabled={saving || loading}><Save size={16} aria-hidden="true" />{saving ? "保存中…" : "保存配置"}</button> : null}
-            <button className="root-email-test" type="button" disabled={!canEdit || testing || !config?.credentialConfigured || !config.enabled} onClick={() => void test()}><Send size={16} aria-hidden="true" />{testing ? "发送中…" : "发送测试"}</button>
+            <button className="root-email-test" type="button" disabled={!canEdit || testing || !config?.credentialConfigured} onClick={() => void test()}><Send size={16} aria-hidden="true" />{testing ? "发送中…" : "发送测试"}</button>
           </div>
         </div>
       </form>

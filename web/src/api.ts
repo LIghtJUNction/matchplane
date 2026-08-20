@@ -1154,6 +1154,15 @@ export async function saveManagedPlatformRouterConfig(input: Omit<ManagedPlatfor
   return body.config;
 }
 
+export async function listManagedPlatformRouterModels(input: { endpoint: string; protocol: ManagedPlatformRouterConfig["protocol"]; apiKey?: string }): Promise<string[]> {
+  const response = await fetch("/api/platform/ai/models", {
+    method: "POST", credentials: "include", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { models?: string[]; error?: string } | null;
+  if (!response.ok || !body?.models) throw new MarketplaceApiError(response.status, body?.error || "模型列表读取失败");
+  return body.models;
+}
+
 export async function getRootEmailConfig(): Promise<RootEmailConfig | null> {
   const response = await fetch("/api/platform/email-config", {
     credentials: "include",

@@ -139,6 +139,7 @@ export async function decidePlatformRoutes(input: {
     const toolMode = configuredToolMode();
     const providerRequest = buildProviderRequest({
       endpoint,
+      endpointIsBase: router.managed,
       apiKey,
       model,
       protocol,
@@ -217,10 +218,10 @@ function stableHash(value: string): number {
   return hash >>> 0;
 }
 
-function configuredPlatformRouter(): { endpoint: string; apiKey: string; model: string; protocol: PlatformRouterProtocol } | null {
+function configuredPlatformRouter(): { endpoint: string; apiKey: string; model: string; protocol: PlatformRouterProtocol; managed: boolean } | null {
   const managed = readManagedPlatformRouterConfig();
   if (managed?.enabled && isAllowedEndpoint(managed.endpoint)) {
-    return managed;
+    return { ...managed, managed: true };
   }
   const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
@@ -231,7 +232,7 @@ function configuredPlatformRouter(): { endpoint: string; apiKey: string; model: 
     ? rawProtocol
     : DEFAULT_ROUTER_PROTOCOL;
   if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) return null;
-  return { endpoint, apiKey, model, protocol };
+  return { endpoint, apiKey, model, protocol, managed: false };
 }
 
 /** True when a server-side provider credential is present and the endpoint is allowed. */
@@ -285,6 +286,7 @@ export async function probePlatformRouter(options: {
   try {
     const providerRequest = buildProviderRequest({
       endpoint,
+      endpointIsBase: router.managed,
       apiKey,
       model,
       protocol,
@@ -537,6 +539,7 @@ interface ProviderRequest {
 
 function buildProviderRequest(input: {
   endpoint: string;
+  endpointIsBase: boolean;
   apiKey: string;
   model: string;
   protocol: PlatformRouterProtocol;
@@ -569,7 +572,7 @@ function buildProviderRequest(input: {
       }];
       if (input.toolMode === "required") body.tool_choice = { type: "tool", name: NATIVE_ROUTER_TOOL_NAME };
     }
-    return { url: input.endpoint, headers, body };
+    return { url: input.endpointIsBase ? `${input.endpoint}/v1/messages` : input.endpoint, headers, body };
   }
   if (input.protocol === "gemini-generate-content") {
     headers["x-goog-api-key"] = input.apiKey;
@@ -588,7 +591,7 @@ function buildProviderRequest(input: {
         body.toolConfig = { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [NATIVE_ROUTER_TOOL_NAME] } };
       }
     }
-    return { url: geminiEndpoint(input.endpoint, input.model), headers, body };
+    return { url: geminiEndpoint(input.endpoint, input.model, input.endpointIsBase), headers, body };
   }
 
   headers.authorization = `Bearer ${input.apiKey}`;
@@ -607,7 +610,7 @@ function buildProviderRequest(input: {
     body.tools = [routerSelectionTool(input.candidates)];
     if (input.toolMode === "required") body.tool_choice = { type: "function", function: { name: NATIVE_ROUTER_TOOL_NAME } };
   }
-  return { url: input.endpoint, headers, body };
+  return { url: input.endpointIsBase ? `${input.endpoint}/v1/chat/completions` : input.endpoint, headers, body };
 }
 
 function geminiRouterFunction(candidates: PlatformRouteCandidate[]): Record<string, unknown> {
@@ -619,9 +622,12 @@ function geminiRouterFunction(candidates: PlatformRouteCandidate[]): Record<stri
   };
 }
 
-function geminiEndpoint(endpoint: string, model: string): string {
+function geminiEndpoint(endpoint: string, model: string, endpointIsBase: boolean): string {
   if (endpoint.includes(":generateContent")) return endpoint;
-  return `${endpoint.replace(/\/$/, "")}/models/${encodeURIComponent(model)}:generateContent`;
+  const base = endpoint.replace(/\/$/, "");
+  return endpointIsBase
+    ? `${base}/v1beta/models/${encodeURIComponent(model)}:generateContent`
+    : `${base}/models/${encodeURIComponent(model)}:generateContent`;
 }
 
 function normalizeDecision(
