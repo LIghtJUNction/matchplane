@@ -1,6 +1,7 @@
 use std::{
     env, fs,
     io::{self, IsTerminal, Write},
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::Path,
     process::Command as ProcessCommand,
     time::Duration,
@@ -96,6 +97,11 @@ enum Command {
         #[arg(long)]
         password_stdin: bool,
     },
+    /// Store one root email credential in the protected local secret store.
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
+    },
     /// Issue a one-time invite for a signed remote MatchPlane platform enrollment.
     #[command(name = "federation-invite")]
     FederationInvite {
@@ -179,6 +185,19 @@ enum AuthCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum SecretCommand {
+    /// Store or replace a root email secret. The value is read from a hidden prompt or stdin.
+    Put {
+        /// A simple slot name chosen in the root SMTP configuration page.
+        #[arg(long)]
+        slot: String,
+        /// Read one secret line from stdin instead of opening a hidden TTY prompt.
+        #[arg(long)]
+        secret_stdin: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum McpCommand {
     /// Serve `platform.status`, `platform.doctor`, and `platform.health` tools.
     Serve,
@@ -226,6 +245,9 @@ async fn main() -> Result<()> {
             email,
             password_stdin,
         } => reset_root_admin_password(email, password_stdin).await,
+        Command::Secret {
+            command: SecretCommand::Put { slot, secret_stdin },
+        } => put_root_email_secret(&slot, secret_stdin),
         Command::FederationInvite {
             domain_id,
             parent_organization_id,
@@ -242,6 +264,75 @@ async fn main() -> Result<()> {
             command: McpCommand::Serve,
         } => serve_mcp().await,
     }
+}
+
+fn put_root_email_secret(slot: &str, secret_stdin: bool) -> Result<()> {
+    if !valid_root_email_secret_slot(slot) {
+        bail!("--slot must contain 1..=128 letters, numbers, dots, underscores, or hyphens");
+    }
+    let secret = if secret_stdin {
+        read_single_secret_line_from_stdin()?
+    } else {
+        rpassword::prompt_password("SMTP password or API credential: ")
+            .context("could not read the secret from the terminal")?
+    };
+    let secret = secret.trim_end_matches(['\r', '\n']);
+    if secret.is_empty() || secret.len() > 16_384 {
+        bail!("secret must contain 1..=16384 bytes");
+    }
+    let root = Path::new("/etc/matchplane/secrets/root-email");
+    if !root.is_dir() {
+        bail!(
+            "/etc/matchplane/secrets/root-email is missing; install or initialize the MatchPlane host first"
+        );
+    }
+    let destination = root.join(slot);
+    let temporary = root.join(format!(".{slot}.{}.tmp", Uuid::now_v7()));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o640)
+        .open(&temporary)
+        .context("could not create the protected temporary secret file")?;
+    if let Err(error) = file
+        .write_all(secret.as_bytes())
+        .and_then(|_| file.write_all(b"\n"))
+        .and_then(|_| file.sync_all())
+    {
+        let _ = fs::remove_file(&temporary);
+        return Err(error).context("could not write the protected secret file");
+    }
+    fs::rename(&temporary, &destination).context("could not activate the protected secret file")?;
+    fs::set_permissions(&destination, fs::Permissions::from_mode(0o640))
+        .context("could not protect the root email secret file")?;
+    println!("Root email secret slot `{slot}` is ready.");
+    Ok(())
+}
+
+fn valid_root_email_secret_slot(slot: &str) -> bool {
+    let bytes = slot.as_bytes();
+    (1..=128).contains(&bytes.len())
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn read_single_secret_line_from_stdin() -> Result<String> {
+    use std::io::Read;
+
+    let mut raw = String::new();
+    io::stdin()
+        .read_to_string(&mut raw)
+        .context("could not read the secret from stdin")?;
+    let mut lines = raw.lines();
+    let Some(first) = lines.next() else {
+        bail!("stdin did not contain a secret");
+    };
+    if lines.next().is_some() {
+        bail!("stdin must contain exactly one secret line");
+    }
+    Ok(first.to_owned())
 }
 
 async fn initialize() -> Result<()> {
@@ -1462,11 +1553,11 @@ impl JsonRpcResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdminInviteRole, AuthCommand, Cli, Command, Service, admin_invite_role_value,
-        better_auth_derived_key, dotenv_value, hosted_agent_report_from_values,
-        normalize_admin_base_url, resolve_web_node_with, safe_endpoint_origin,
-        select_root_admin_email, service_command, sha256, validate_operator_email,
-        validate_operator_uuid,
+        AdminInviteRole, AuthCommand, Cli, Command, SecretCommand, Service,
+        admin_invite_role_value, better_auth_derived_key, dotenv_value,
+        hosted_agent_report_from_values, normalize_admin_base_url, resolve_web_node_with,
+        safe_endpoint_origin, select_root_admin_email, service_command, sha256,
+        valid_root_email_secret_slot, validate_operator_email, validate_operator_uuid,
     };
     use clap::Parser;
     use uuid::Uuid;
@@ -1612,6 +1703,20 @@ mod tests {
                 password_stdin: true,
             }
         ));
+    }
+
+    #[test]
+    fn root_email_secret_command_accepts_a_safe_slot() {
+        let cli = Cli::try_parse_from(["matchplane", "secret", "put", "--slot", "smtp-password"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Secret {
+                command: SecretCommand::Put { slot, secret_stdin: false }
+            } if slot == "smtp-password"
+        ));
+        assert!(valid_root_email_secret_slot("smtp.password_2026"));
+        assert!(!valid_root_email_secret_slot("../smtp-password"));
     }
 
     #[test]

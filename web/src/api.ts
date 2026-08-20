@@ -712,6 +712,25 @@ export interface SubplatformEmailConfig {
   updated_at: string;
 }
 
+/** Browser-safe root authentication mail configuration. The SMTP password is never returned. */
+export interface RootEmailConfig {
+  providerKey: string;
+  smtpHost: string;
+  smtpPort: number;
+  tlsMode: "starttls" | "tls" | "plain";
+  username: string;
+  credentialSlot: string;
+  credentialConfigured: boolean;
+  fromAddress: string;
+  replyTo: string | null;
+  mode: "test" | "production";
+  enabled: boolean;
+  version: number;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
 export type ContactExchange = Record<string, string>;
 
@@ -1104,6 +1123,39 @@ export async function testPlatformAi(): Promise<PlatformAiProbeResult> {
     throw new MarketplaceApiError(response.status, body?.message || body?.error || "AI 连接测试失败");
   }
   return body;
+}
+
+export async function getRootEmailConfig(): Promise<RootEmailConfig | null> {
+  const response = await fetch("/api/platform/email-config", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null) as { config?: RootEmailConfig | null; error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "根邮箱配置读取失败");
+  return body?.config ?? null;
+}
+
+export async function saveRootEmailConfig(input: Omit<RootEmailConfig, "credentialConfigured" | "version" | "updatedBy" | "createdAt" | "updatedAt"> & { expectedVersion?: number }): Promise<RootEmailConfig> {
+  const response = await fetch("/api/platform/email-config", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { config?: RootEmailConfig; error?: string } | null;
+  if (!response.ok || !body?.config) throw new MarketplaceApiError(response.status, body?.error || "根邮箱配置保存失败");
+  return body.config;
+}
+
+export async function testRootEmailConfig(): Promise<void> {
+  const response = await fetch("/api/platform/email-config/test", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = await response.json().catch(() => null) as { error?: string } | null;
+  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "根邮箱测试失败");
 }
 
 export async function getPublicPlatformSiteSettings(platformPath = "/"): Promise<PlatformSiteSettings> {
