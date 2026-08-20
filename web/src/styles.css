@@ -5037,7 +5037,46 @@ main.subplatform-fullscreen-main {
   background: color-mix(in srgb, var(--paper) 62%, var(--ivory));
 }
 
-.root-email-actions { align-items: center; }
+.root-email-actions {
+  padding-top: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.root-email-actions > p {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.root-email-action-buttons { display: inline-flex; align-items: center; gap: 0.45rem; }
+
+.root-email-save,
+.root-email-test {
+  min-height: 2.55rem;
+  padding: 0 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.7rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 680;
+}
+
+.root-email-save { border-color: var(--cactus-deep); background: var(--cactus); color: var(--ink); }
+.root-email-test { background: transparent; color: var(--ink-soft); }
+.root-email-save:hover:not(:disabled), .root-email-test:hover:not(:disabled) { border-color: var(--ink); color: var(--ink); }
+.root-email-save:disabled, .root-email-test:disabled { cursor: not-allowed; opacity: 0.42; }
 
 .root-email-secret-step {
   margin-top: 0.85rem;
@@ -5456,4 +5495,7 @@ main.subplatform-fullscreen-main {
   .login-persona-hint { grid-column: auto; margin: 0; }
   .login-registration-role { grid-template-columns: 1fr; }
   .login-registration-role button { min-height: 4.25rem; }
+  .root-email-actions { align-items: stretch; flex-direction: column; }
+  .root-email-action-buttons { width: 100%; }
+  .root-email-save, .root-email-test { flex: 1; }
 }
