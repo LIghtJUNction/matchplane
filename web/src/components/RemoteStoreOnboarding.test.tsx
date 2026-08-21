@@ -21,10 +21,10 @@ describe("RemoteStoreOnboarding", () => {
     const user = userEvent.setup();
     render(<RemoteStoreOnboarding domains={[{ id: "domain", slug: "market", name: "商城商品", status: "active", version: 1, created_at: "", updated_at: "" }]} onNotice={vi.fn()} />);
 
-    await user.click(await screen.findByRole("button", { name: "生成接入凭据" }));
+    await user.click(await screen.findByRole("button", { name: "生成一次性连接链接" }));
 
-    expect(api.createFederationInvite).toHaveBeenCalledWith({ domainId: "domain", expiresInHours: 24 });
-    expect(await screen.findByText("交给远程店铺服务")).toBeInTheDocument();
+    expect(api.createFederationInvite).toHaveBeenCalledWith({ domainId: "domain", expiresInHours: 168 });
+    expect(await screen.findByText("一次性连接信息")).toBeInTheDocument();
     expect(screen.getByText("mpf_token")).toBeInTheDocument();
   });
 });

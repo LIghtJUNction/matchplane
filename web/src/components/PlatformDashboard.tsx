@@ -29,7 +29,6 @@ import {
   createRootPlatformOrganization,
   isLiveMarketplaceEnabled,
   activateSubplatform,
-  createPlatformDomain,
   discoverSubplatformSource,
   getPlatformDomains,
   getSubplatformSourceIntake,
@@ -38,7 +37,6 @@ import {
   savePaymentGateway,
   savePaymentRoute,
   switchInvoiceMode,
-  updatePlatformDomain,
   uploadSubplatformArchive,
   type InvoiceProviderRecord,
   type InvoiceAdminRecord,
@@ -103,7 +101,6 @@ export function PlatformDashboard({
   const [routeEditorOpen, setRouteEditorOpen] = useState(false);
   const [invoiceEditorOpen, setInvoiceEditorOpen] = useState(false);
   const [invoiceModeDialogOpen, setInvoiceModeDialogOpen] = useState(false);
-  const [domainEditorOpen, setDomainEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
   const [gatewayName, setGatewayName] = useState("");
@@ -120,8 +117,6 @@ export function PlatformDashboard({
   const [invoiceMode, setInvoiceMode] = useState<"test" | "production">("test");
   const [invoiceSettings, setInvoiceSettings] = useState("{}");
   const [invoiceCredentialRef, setInvoiceCredentialRef] = useState("");
-  const [domainSlug, setDomainSlug] = useState("");
-  const [domainName, setDomainName] = useState("");
   const [subplatformEditorOpen, setSubplatformEditorOpen] = useState(false);
   const [subplatformSourceKind, setSubplatformSourceKind] = useState<"git" | "archive">("git");
   const [subplatformDomainId, setSubplatformDomainId] = useState("");
@@ -305,45 +300,6 @@ export function PlatformDashboard({
     }
   };
 
-  const submitDomain = async () => {
-    const slug = domainSlug.trim().toLowerCase();
-    const name = domainName.trim();
-    if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) {
-      onNotice("商品范围地址标识只能使用小写字母、数字和短横线");
-      return;
-    }
-    if (!name || name.length > 200) {
-      onNotice("商品范围名称必须为 1..200 个字符");
-      return;
-    }
-    setSaving(true);
-    try {
-      await createPlatformDomain({ slug, name });
-      await refreshDomains();
-      setDomainSlug("");
-      setDomainName("");
-      setDomainEditorOpen(false);
-      onNotice(`商品范围“${name}”已创建`);
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "商品范围创建失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const toggleDomain = async (domain: PlatformDomainRecord) => {
-    setSaving(true);
-    try {
-      await updatePlatformDomain({ id: domain.id, status: domain.status === "active" ? "disabled" : "active" });
-      await refreshDomains();
-      onNotice(`domain ${domain.slug} 已${domain.status === "active" ? "停用" : "启用"}`);
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "domain 状态更新失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const resetSubplatformEditor = () => {
     setSubplatformSourceKind("git");
     setSubplatformPackageId("");
@@ -365,7 +321,7 @@ export function PlatformDashboard({
       return;
     }
     if (!subplatformDomainId) {
-      onNotice("请先为商城配置一个可用的商品范围");
+      onNotice("商城内部数据尚未初始化，请先完成商城初始化");
       return;
     }
     let packageId = subplatformPackageId.trim();
@@ -723,7 +679,7 @@ export function PlatformDashboard({
             aiStatus={aiStatus}
             saving={saving}
             onInitializeRoot={() => void initializeRootOrganization()}
-            onOpenStores={(openScope) => { setActiveSection("tree"); if (openScope) setDomainEditorOpen(true); }}
+            onOpenStores={() => setActiveSection("tree")}
             onOpenSettings={() => setActiveSection("brand")}
             onOpenAi={() => setActiveSection("ai")}
           />
@@ -746,20 +702,6 @@ export function PlatformDashboard({
         </section>
 
         <section id="platform-panel-tree" className="surface subplatform-panel" role="tabpanel" aria-labelledby="platform-tab-tree" hidden={activeSection !== "tree"}>
-          <section className="product-scope-panel" aria-labelledby="product-scope-title">
-            <div>
-              <h2 id="product-scope-title">商品范围</h2>
-              <p>每家店铺都归入一个商品范围，方便审核、搜索和权限管理。</p>
-            </div>
-            {domains.length ? <ul className="product-scope-list">{domains.map((domain) => <li key={domain.id}><strong>{domain.name}</strong><small>{domain.slug}</small></li>)}</ul> : <p className="product-scope-empty">还没有商品范围。先创建一个，再接入店铺。</p>}
-            {!domainEditorOpen ? <button className="button button-light" type="button" disabled={saving || !setup?.root.organization?.id} onClick={() => setDomainEditorOpen(true)}>新建商品范围</button> : (
-              <form className="product-scope-form" onSubmit={(event) => { event.preventDefault(); void submitDomain(); }}>
-                <label><span>名称</span><input value={domainName} onChange={(event) => setDomainName(event.target.value)} placeholder="例如：汽车" maxLength={200} /></label>
-                <label><span>地址标识</span><input value={domainSlug} onChange={(event) => setDomainSlug(event.target.value.toLowerCase())} placeholder="automotive" maxLength={63} /></label>
-                <div><button className="button button-dark" type="submit" disabled={saving}>{saving ? "创建中…" : "创建商品范围"}</button><button className="text-action" type="button" onClick={() => setDomainEditorOpen(false)}>取消</button></div>
-              </form>
-            )}
-          </section>
           <div className="subplatform-header">
             <div>
               <h2 id="subplatform-title">本地店铺</h2>
@@ -769,7 +711,7 @@ export function PlatformDashboard({
               className="button button-dark"
               type="button"
               disabled={saving || !setup?.root.organization?.id || !setup.domains.length}
-              title={!setup?.root.organization?.id ? "商城尚未完成初始化" : !setup.domains.length ? "商城还没有可用的商品范围" : undefined}
+              title={!setup?.root.organization?.id ? "商城尚未完成初始化" : !setup.domains.length ? "商城数据尚未准备好" : undefined}
               onClick={() => setSubplatformEditorOpen((open) => !open)}
             >
               {subplatformEditorOpen ? "关闭" : "接入本地店铺"}
@@ -1047,7 +989,7 @@ function MallInitializationPanel({
           {rootReady ? <span>已完成</span> : setup?.root.tenantExists && rootRole === "rootSuperAdmin" ? <button type="button" disabled={saving} onClick={onInitializeRoot}>{saving ? "创建中…" : "创建"}</button> : <span>{setup?.root.tenantExists ? "需要商城负责人" : "请先完成服务器初始化"}</span>}
         </li>
         <li className={scopeReady ? "is-complete" : ""}>
-          <div><strong>商品范围</strong><small>{scopeReady ? `已创建 ${setup?.domains.length} 个范围` : "给店铺的商品确定审核与搜索范围"}</small></div>
+          <div><strong>商城数据</strong><small>{scopeReady ? "店铺与商品数据已准备好" : "完成初始化后即可接入店铺"}</small></div>
           {scopeReady ? <button type="button" onClick={() => onOpenStores(true)}>管理</button> : <button type="button" disabled={!rootReady} onClick={() => onOpenStores(true)}>创建</button>}
         </li>
         <li>

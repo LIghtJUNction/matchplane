@@ -34,6 +34,7 @@ import {
   createMarketplaceIntroduction,
   createMarketplaceIntent,
   createMarketplaceSalesHandoff,
+  browseMallCatalog,
   getMarketplaceProfile,
   getOwnedStores,
   requestMarketplaceContact,
@@ -65,6 +66,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform(initialPath));
   const [listings, setListings] = useState<AssetListing[]>([]);
+  const [catalogResolved, setCatalogResolved] = useState(false);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
@@ -86,6 +88,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   // safe buyer surface. Otherwise `?role=platform` can be overwritten before Better Auth
   // resolves, which silently strands a valid administrator in the buyer workspace.
   const requestedRoleRef = useRef<WorkspaceRole>(roleFromLocation());
+  const catalogInteractionRef = useRef(false);
+  const catalogPathRef = useRef(subplatform.path);
 
   useEffect(() => {
     setPluginFailed(false);
@@ -198,6 +202,31 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       .finally(() => { if (!cancelled) setOwnedStoresResolved(true); });
     return () => { cancelled = true; };
   }, [authUser?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!hydrated) {
+      return () => { cancelled = true; };
+    }
+    if (catalogPathRef.current !== subplatform.path) {
+      catalogPathRef.current = subplatform.path;
+      catalogInteractionRef.current = false;
+    }
+    setCatalogResolved(false);
+    void browseMallCatalog(subplatform.slug === "root" ? {} : { storePath: subplatform.path })
+      .then(({ recommendations }) => {
+        if (!cancelled && !catalogInteractionRef.current) {
+          setListings(mapRecommendations(recommendations, subplatform, locale));
+        }
+      })
+      .catch(() => {
+        // The live store directory remains available when the product feed is temporarily down.
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogResolved(true);
+      });
+    return () => { cancelled = true; };
+  }, [hydrated, locale, subplatform.path, subplatform.slug]);
 
   const currentManagedStore = subplatform.slug === "root"
     ? null
@@ -443,27 +472,21 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 transition={spring}
               >
                 {role === "buyer" ? (
-                  subplatform.slug === "root" && listings.length === 0 ? (
-                    <div className="mall-browse-scene">
-                      <StorefrontDirectory locale={locale} />
-                      <MatchChat
-                        role={role}
-                        locale={locale}
-                        onNotice={setNotice}
-                        onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform, locale))}
-                        subplatform={subplatform}
-                      />
-                    </div>
-                  ) : (
-                    <MatchChat
-                      role={role}
-                      locale={locale}
-                      onNotice={setNotice}
-                      onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform, locale))}
-                      subplatform={subplatform}
-                    />
-                  )
+                  <MatchChat
+                    compact={subplatform.slug === "root"}
+                    role={role}
+                    locale={locale}
+                    onNotice={setNotice}
+                    onRecommendations={(recommendations) => {
+                      catalogInteractionRef.current = true;
+                      setListings(mapRecommendations(recommendations, subplatform, locale));
+                    }}
+                    subplatform={subplatform}
+                  />
                 ) : null}
+                {subplatform.slug === "root" && catalogResolved && listings.length === 0
+                  ? <div className="root-empty-directory"><StorefrontDirectory locale={locale} /></div>
+                  : null}
                 {subplatform.pluginArtifact && (role === "platform" || (role === "buyer" && listings.length > 0))
                   ? pluginWorkspace
                   : genericWorkspace}
@@ -490,8 +513,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         {!authUser || !managesCurrentStore ? null : <WorkspaceSettingsDialog
           open={storeConsoleOpen}
           onClose={() => setStoreConsoleOpen(false)}
-          title={ui.manageStore}
-          description={subplatform.label || subplatform.brandName}
+          title={subplatform.label || subplatform.brandName}
+          description={ui.manageStore}
           className="workspace-settings-dialog-wide"
           closeLabel={ui.closeStoreConsole}
           backdropLabel={ui.closeStoreConsoleDialog}

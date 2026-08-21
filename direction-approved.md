@@ -40,3 +40,12 @@ Reference material supplied in the conversation:
 - Do not fabricate stores or products. Empty states remain honest until approved records exist.
 - This explicit pinned direction is the user's instruction to proceed with one implementation rather than another three-style selection round.
 
+## Product-first refinement
+
+After reviewing the deployed page, the user clarified:
+
+> AI味道太浓了,一眼就没有购买欲望了,你参考下瓜子二手车,商品就是最好的,用户一眼就应该看到自己可能感兴趣的商品
+
+This keeps the approved modern marketplace direction and changes its hierarchy: real products lead the first viewport, while AI becomes a compact search and recommendation aid.
+
+The same review also requires the operator and merchant interfaces to remove leaked technical concepts, clarify persistent remote stores versus expiring connection links, derive AI reasoning controls from each model's capabilities, and turn product submission into a catalogue-first publishing workflow.

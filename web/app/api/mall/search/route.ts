@@ -29,6 +29,30 @@ interface MallSearchInput {
   storePath?: string;
 }
 
+/** Public browse feed. It reads canonical active offers without invoking the routing model. */
+export async function GET(request: Request): Promise<Response> {
+  const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
+  if (!isUuid(rootTenantId)) return jsonError("商城尚未完成初始化", 503);
+  const requestedStorePath = normalizeStorePath(new URL(request.url).searchParams.get("storePath") ?? undefined);
+
+  try {
+    let stores = await readPublicStores(rootTenantId);
+    if (requestedStorePath) stores = stores.filter((store) => store.path === requestedStorePath);
+    const recommendations = await searchPublicStoreOffers({ stores, narrative: "", limit: 24 });
+    return NextResponse.json({
+      stores: stores.map((store) => ({
+        slug: store.slug,
+        path: store.path,
+        displayName: store.displayName,
+      })),
+      recommendations,
+    }, { headers: { "cache-control": "public, max-age=30, stale-while-revalidate=120" } });
+  } catch (error) {
+    console.error("mall browse feed failed", error);
+    return jsonError("商品目录暂时不可用，请稍后重试", 503);
+  }
+}
+
 /**
  * Public, contact-free shopping search.
  *

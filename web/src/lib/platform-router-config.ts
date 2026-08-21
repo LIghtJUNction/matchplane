@@ -7,6 +7,12 @@ const CONFIG_PATH = path.join(SECRET_ROOT, "platform-router.json");
 const KEY_PATH = path.join(SECRET_ROOT, "platform-router.key");
 
 export type ManagedRouterProtocol = "openai-compatible" | "anthropic-messages" | "gemini-generate-content";
+export type ManagedReasoningEffort = string;
+
+export interface ManagedRouterModel {
+  id: string;
+  reasoningEfforts: string[];
+}
 
 export interface ManagedPlatformRouterConfig {
   endpoint: string;
@@ -19,7 +25,8 @@ export interface ManagedPlatformRouterConfig {
   assistantTemperature: number;
   assistantMaxSteps: number;
   assistantTimeoutMs: number;
-  assistantReasoningEffort: "low" | "medium" | "high";
+  assistantReasoningEffort: ManagedReasoningEffort;
+  modelReasoningEfforts: string[];
 }
 
 interface StoredRouterConfig {
@@ -32,7 +39,8 @@ interface StoredRouterConfig {
   assistantTemperature?: number;
   assistantMaxSteps?: number;
   assistantTimeoutMs?: number;
-  assistantReasoningEffort?: "low" | "medium" | "high";
+  assistantReasoningEffort?: ManagedReasoningEffort;
+  modelReasoningEfforts?: string[];
 }
 
 /** Reads the administrator-managed provider from host-protected files, never from the browser. */
@@ -53,7 +61,7 @@ export function getManagedPlatformRouterConfig(): ManagedPlatformRouterConfig | 
     if (!isStoredConfig(parsed)) return null;
     let credentialConfigured = false;
     try { credentialConfigured = Boolean(readFileSync(KEY_PATH, "utf8").trim()); } catch { /* absent is a normal first-run state */ }
-    return { ...normalizeStoredConfig(parsed), credentialConfigured };
+    return presentManagedConfig(parsed, credentialConfigured);
   } catch {
     return null;
   }
@@ -70,32 +78,36 @@ export function saveManagedPlatformRouterConfig(input: {
   assistantTemperature?: number;
   assistantMaxSteps?: number;
   assistantTimeoutMs?: number;
-  assistantReasoningEffort?: "low" | "medium" | "high";
+  assistantReasoningEffort?: ManagedReasoningEffort;
+  modelReasoningEfforts?: string[];
 }): ManagedPlatformRouterConfig {
+  const protocol = normalizeProtocol(input.protocol);
+  const model = boundedText(input.model, "模型", 256);
   const config: StoredRouterConfig = {
     endpoint: normalizeEndpoint(input.endpoint),
-    model: boundedText(input.model, "模型", 256),
-    protocol: normalizeProtocol(input.protocol),
+    model,
+    protocol,
     enabled: input.enabled,
     assistantInstructions: boundedOptionalText(input.assistantInstructions, "导购补充指引", 4_000),
     assistantMaxOutputTokens: boundedInteger(input.assistantMaxOutputTokens, 320, 64, 512),
     assistantTemperature: boundedNumber(input.assistantTemperature, 0.2, 0, 1),
     assistantMaxSteps: boundedInteger(input.assistantMaxSteps, 3, 2, 8),
     assistantTimeoutMs: boundedInteger(input.assistantTimeoutMs, 20_000, 4_000, 30_000),
-    assistantReasoningEffort: normalizeReasoningEffort(input.assistantReasoningEffort),
+    modelReasoningEfforts: normalizeReasoningEfforts(input.modelReasoningEfforts),
+    assistantReasoningEffort: normalizeReasoningEffort(input.assistantReasoningEffort, normalizeReasoningEfforts(input.modelReasoningEfforts)),
   };
   if (input.apiKey !== undefined) writeProtected(KEY_PATH, input.apiKey, "API Key");
   const existingKey = readOptional(KEY_PATH);
   if (!existingKey) throw new Error("请输入 API Key 后再保存");
   writeProtected(CONFIG_PATH, JSON.stringify(config), "AI 配置");
-  return { ...normalizeStoredConfig(config), credentialConfigured: true };
+  return presentManagedConfig(config, true);
 }
 
 export async function listManagedPlatformRouterModels(input: {
   endpoint: string;
   protocol: ManagedRouterProtocol;
   apiKey?: string;
-}): Promise<string[]> {
+}): Promise<ManagedRouterModel[]> {
   const endpoint = normalizeEndpoint(input.endpoint);
   const protocol = normalizeProtocol(input.protocol);
   const apiKey = input.apiKey?.trim() || readOptional(KEY_PATH);
@@ -128,7 +140,8 @@ function normalizeStoredConfig(value: StoredRouterConfig): Required<StoredRouter
     assistantTemperature: boundedNumber(value.assistantTemperature, 0.2, 0, 1),
     assistantMaxSteps: boundedInteger(value.assistantMaxSteps, 3, 2, 8),
     assistantTimeoutMs: boundedInteger(value.assistantTimeoutMs, 20_000, 4_000, 30_000),
-    assistantReasoningEffort: normalizeReasoningEffort(value.assistantReasoningEffort),
+    modelReasoningEfforts: normalizeReasoningEfforts(value.modelReasoningEfforts),
+    assistantReasoningEffort: normalizeReasoningEffort(value.assistantReasoningEffort, normalizeReasoningEfforts(value.modelReasoningEfforts)),
   };
 }
 
@@ -167,8 +180,24 @@ function boundedNumber(value: unknown, fallback: number, minimum: number, maximu
   return typeof value === "number" && Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
 }
 
-function normalizeReasoningEffort(value: unknown): "low" | "medium" | "high" {
-  return value === "medium" || value === "high" ? value : "low";
+function presentManagedConfig(value: StoredRouterConfig, credentialConfigured: boolean): ManagedPlatformRouterConfig {
+  const normalized = normalizeStoredConfig(value);
+  return {
+    ...normalized,
+    credentialConfigured,
+    modelReasoningEfforts: normalized.modelReasoningEfforts,
+  };
+}
+
+function normalizeReasoningEffort(value: unknown, supported: string[]): ManagedReasoningEffort {
+  return typeof value === "string" && supported.includes(value) ? value : "none";
+}
+
+function normalizeReasoningEfforts(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => (
+    typeof item === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(item)
+  )))].slice(0, 16);
 }
 
 function readOptional(file: string): string | null {
@@ -185,7 +214,7 @@ function modelListRequest(endpoint: string, protocol: ManagedRouterProtocol, api
   return { url: `${endpoint}/v1/models`, headers: { authorization: `Bearer ${apiKey}` } };
 }
 
-function parseModelList(value: unknown, protocol: ManagedRouterProtocol): string[] {
+function parseModelList(value: unknown, protocol: ManagedRouterProtocol): ManagedRouterModel[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const records = (value as { data?: unknown; models?: unknown }).data ?? (value as { models?: unknown }).models;
   if (!Array.isArray(records)) return [];
@@ -194,9 +223,30 @@ function parseModelList(value: unknown, protocol: ManagedRouterProtocol): string
     const candidate = (record as { id?: unknown; name?: unknown }).id ?? (record as { name?: unknown }).name;
     if (typeof candidate !== "string") return [];
     const normalized = protocol === "gemini-generate-content" ? candidate.replace(/^models\//, "") : candidate;
-    return /^[A-Za-z0-9._:/-]{1,256}$/.test(normalized) ? [normalized] : [];
+    return /^[A-Za-z0-9._:/-]{1,256}$/.test(normalized)
+      ? [{ id: normalized, reasoningEfforts: modelReasoningEffortsFromRecord(record) }]
+      : [];
   });
-  return [...new Set(names)].sort((left, right) => left.localeCompare(right)).slice(0, 512);
+  return [...new Map(names.map((model) => [model.id, model])).values()]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .slice(0, 512);
+}
+
+export function modelReasoningEffortsFromRecord(value: object): string[] {
+  const record = value as Record<string, unknown>;
+  const capabilities = record.capabilities && typeof record.capabilities === "object" && !Array.isArray(record.capabilities)
+    ? record.capabilities as Record<string, unknown>
+    : {};
+  const reasoning = capabilities.reasoning && typeof capabilities.reasoning === "object" && !Array.isArray(capabilities.reasoning)
+    ? capabilities.reasoning as Record<string, unknown>
+    : {};
+  return normalizeReasoningEfforts(
+    record.supported_reasoning_efforts
+      ?? record.reasoning_efforts
+      ?? capabilities.reasoning_efforts
+      ?? reasoning.efforts
+      ?? reasoning.levels,
+  );
 }
 
 function writeProtected(destination: string, value: string, label: string): void {

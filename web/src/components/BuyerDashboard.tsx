@@ -50,6 +50,7 @@ interface IntroductionEntry {
 
 export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subplatform }: BuyerDashboardProps) {
   const [query, setQuery] = useState("");
+  const [activeStore, setActiveStore] = useState("");
   const [saved, setSaved] = useState<Set<string>>(() => readSavedItems(`matchplane.saved.${subplatform.path}`));
   const [dismissed, setDismissed] = useState<Set<string>>(() => readSavedItems(`matchplane.dismissed.${subplatform.path}`));
   const [compareIds, setCompareIds] = useState<Set<string>>(() => new Set());
@@ -180,10 +181,16 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
     }
   };
 
+  const storeOptions = useMemo(
+    () => [...new Set(listings.map((listing) => listing.storeName).filter((value): value is string => Boolean(value)))],
+    [listings],
+  );
+
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return listings.filter((listing) => {
       if (dismissed.has(listing.id)) return false;
+      if (activeStore && listing.storeName !== activeStore) return false;
       const searchable = [listing.title, listing.subtitle, listing.location, listing.price, listing.trust?.join(" "), ...listing.facts.map((fact) => `${fact.label} ${fact.value}`)]
         .filter(Boolean)
         .join(" ")
@@ -195,7 +202,7 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
       }
       return true;
     });
-  }, [activeFilters, dismissed, filterDefinitions, listings, query]);
+  }, [activeFilters, activeStore, dismissed, filterDefinitions, listings, query]);
 
   const comparedListings = useMemo(
     () => [...compareIds].flatMap((id) => {
@@ -307,6 +314,16 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
     <div className="dashboard buyer-dashboard">
       {listings.length ? (
         <section className="discovery-panel" aria-label={copy("searchOffersLabel", "搜索供给")}>
+          <div className="catalog-filter-strip" role="group" aria-label={copy("storeFilterLabel", "按店铺浏览", "Browse by store")}>
+            <button type="button" className={!activeStore ? "is-active" : ""} aria-pressed={!activeStore} onClick={() => setActiveStore("")}>
+              {copy("allProductsLabel", "全部商品", "All products")}
+            </button>
+            {storeOptions.map((storeName) => (
+              <button key={storeName} type="button" className={activeStore === storeName ? "is-active" : ""} aria-pressed={activeStore === storeName} onClick={() => setActiveStore(storeName)}>
+                {storeName}
+              </button>
+            ))}
+          </div>
           <label className="search-field">
             <Search size={20} aria-hidden="true" />
             <span className="sr-only">{copy("searchOffersLabel", "搜索供给")}</span>

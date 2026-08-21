@@ -1,6 +1,7 @@
 import { authDatabase } from "./lib/auth";
 import type { RecommendedBackendListing } from "./api";
 import type { PublicStore } from "./store-directory";
+import { evaluateShoppingIntent, type PublicShoppingIntent } from "./shopping-intent";
 
 interface PublicOfferRow {
   id: string;
@@ -13,6 +14,7 @@ interface PublicOfferRow {
   storeSlug: string;
   storePath: string;
   integrationKind: string;
+  supplyFields: unknown;
   publishedAt: string | null;
 }
 
@@ -22,6 +24,7 @@ const HOSTED_MEDIA_REFERENCE = /^media:\/\/hosted\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8
 export async function searchPublicStoreOffers(input: {
   stores: PublicStore[];
   narrative: string;
+  intent?: PublicShoppingIntent;
   limit?: number;
 }): Promise<RecommendedBackendListing[]> {
   if (!input.stores.length) return [];
@@ -38,6 +41,7 @@ export async function searchPublicStoreOffers(input: {
             store.slug AS "storeSlug",
             alias.path AS "storePath",
             store.integration_kind AS "integrationKind",
+            COALESCE(registration.manifest -> 'ui' -> 'supplyFields', '[]'::jsonb) AS "supplyFields",
             offer.published_at::text AS "publishedAt",
             CASE WHEN length(trim($2::text)) = 0 THEN 0::real
                  ELSE ts_rank_cd(
@@ -61,6 +65,8 @@ export async function searchPublicStoreOffers(input: {
         AND store.id = offer.store_id
         AND store.status = 'active'
         AND store.visibility = 'public'
+       LEFT JOIN subplatform_registrations registration
+         ON registration.id = store.current_registration_id
        JOIN store_path_aliases alias
          ON alias.tenant_id = store.tenant_id
         AND alias.store_id = store.id
@@ -79,11 +85,11 @@ export async function searchPublicStoreOffers(input: {
   );
 
   const maximum = Math.max(1, Math.min(48, input.limit ?? 24));
-  return rankRows(result.rows, input.narrative).flatMap(({ row, score, overlapLabels }): RecommendedBackendListing[] => {
-    const attributes = publicAttributes(row.attributes, row.integrationKind);
+  return rankRows(result.rows, input.narrative, input.intent).flatMap(({ row, score, overlapLabels, intentReasons }): RecommendedBackendListing[] => {
+    const attributes = publicAttributes(row.attributes, row.integrationKind, row.supplyFields);
     const terms = publicTerms(row.terms);
     const imageUrl = firstPublicImageUrl(attributes.attachments);
-    if (!text(attributes.description) || !imageUrl || !hasFixedPublicPrice(terms)) return [];
+    if (!text(attributes.description) || !imageUrl || !hasFixedPublicPrice(terms) || attributes.stock_quantity === 0) return [];
     return [{
       offer_id: row.id,
       tenant_id: row.tenantId,
@@ -96,30 +102,38 @@ export async function searchPublicStoreOffers(input: {
       store_name: row.storeName,
       ...(imageUrl ? { image_url: imageUrl } : {}),
       match_score: score,
-      match_reasons: overlapLabels.length
-        ? [`在${row.storeName}找到，名称或介绍与“${overlapLabels.slice(0, 4).join("、")}”相关`]
-        : [`来自${row.storeName}的在售商品`],
+      match_reasons: [
+        ...intentReasons,
+        ...(overlapLabels.length
+          ? [`在${row.storeName}找到，名称或介绍与“${overlapLabels.slice(0, 4).join("、")}”相关`]
+          : [`来自${row.storeName}的在售商品`]),
+      ].slice(0, 8),
       match_risks: [],
       status: "active",
     }];
   }).slice(0, maximum);
 }
 
-function rankRows(rows: PublicOfferRow[], narrative: string): Array<{
+function rankRows(rows: PublicOfferRow[], narrative: string, intent?: PublicShoppingIntent): Array<{
   row: PublicOfferRow;
   score: number;
   overlapLabels: string[];
+  intentReasons: string[];
 }> {
   const queryTokens = tokenize(narrative);
-  return rows.map((row, index) => {
-    const attributes = record(row.attributes);
+  return rows.flatMap((row, index) => {
+    const attributes = publicAttributes(row.attributes, row.integrationKind, row.supplyFields);
+    const terms = publicTerms(row.terms);
+    const evaluation = evaluateShoppingIntent(attributes, terms, intent);
+    if (!evaluation.eligible) return [];
     const description = text(attributes.description);
     const haystackTokens = new Set(tokenize(`${row.displayName}\n${description}`));
     const overlapLabels = queryTokens.filter((token) => haystackTokens.has(token));
-    const score = queryTokens.length
-      ? Math.min(0.99, 0.45 + overlapLabels.length / Math.max(4, queryTokens.length))
-      : 0.45;
-    return { row, score, overlapLabels, index };
+    const lexicalScore = queryTokens.length
+      ? 0.35 + overlapLabels.length / Math.max(4, queryTokens.length)
+      : 0.35;
+    const score = Math.min(0.99, lexicalScore + evaluation.boost);
+    return [{ row, score, overlapLabels, intentReasons: evaluation.reasons, index }];
   }).sort((left, right) => (
     right.overlapLabels.length - left.overlapLabels.length
     || right.score - left.score
@@ -127,12 +141,17 @@ function rankRows(rows: PublicOfferRow[], narrative: string): Array<{
   ));
 }
 
-function publicAttributes(value: unknown, integrationKind: string): Record<string, unknown> {
+function publicAttributes(value: unknown, integrationKind: string, supplyFields: unknown): Record<string, unknown> {
   const source = record(value);
   const result: Record<string, unknown> = {};
   const description = text(source.description).slice(0, 4_000);
   if (description) result.description = description;
-  for (const key of ["brand", "model", "category", "condition", "location"] as const) {
+  const declaredKeys = Array.isArray(supplyFields) ? supplyFields.flatMap((field): string[] => {
+    const item = record(field);
+    return typeof item.key === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(item.key) ? [item.key] : [];
+  }) : [];
+  const publicKeys = [...new Set(["brand", "model", "category", "condition", "location", "delivery_mode", "stock_quantity", ...declaredKeys])].slice(0, 32);
+  for (const key of publicKeys) {
     const candidate = source[key];
     if (typeof candidate === "string" && candidate.trim()) result[key] = candidate.trim().slice(0, 300);
     else if (typeof candidate === "number" && Number.isFinite(candidate)) result[key] = candidate;

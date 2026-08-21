@@ -98,6 +98,9 @@ const sellerEnglishFallbacks: Record<string, string> = {
 export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = null }: SellerDashboardProps) {
   const [externalKey, setExternalKey] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [category, setCategory] = useState("");
+  const [deliveryMode, setDeliveryMode] = useState<"" | "digital" | "shipping" | "service">("");
+  const [stockQuantity, setStockQuantity] = useState("1");
   const [productDescription, setProductDescription] = useState("");
   const [askingAmount, setAskingAmount] = useState("");
   const pricing = pricingFor(subplatform);
@@ -121,7 +124,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
   const [consentingIntroductionId, setConsentingIntroductionId] = useState<string | null>(null);
   const [releasedContacts, setReleasedContacts] = useState<Record<string, MarketplaceContactResponse>>({});
   const [releasingContactId, setReleasingContactId] = useState<string | null>(null);
-  const [activePanel, setActivePanel] = useState<SellerPanel>("details");
+  const [activePanel, setActivePanel] = useState<SellerPanel>("history");
 
   const loadSubmissions = useCallback(async () => {
     setSubmissions([]);
@@ -323,15 +326,21 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedName = displayName.trim();
+    const normalizedCategory = category.trim();
     const normalizedKey = externalKey.trim() || `offer-${crypto.randomUUID()}`;
     const normalizedCurrency = currency.trim().toUpperCase();
     const normalizedAmount = toMinorUnits(askingAmount, pricingScale);
+    const normalizedStock = Number.parseInt(stockQuantity, 10);
     if (!isLiveMarketplaceEnabled()) {
       onNotice(copy("supplyApiUnavailableNotice", "当前环境未启用真实供给 API，资料没有写入系统", "The live supply API is disabled; nothing was saved"));
       return;
     }
-    if (!normalizedName || !productDescription.trim() || !askingAmount.trim() || !attachments.length) {
-      onNotice(copy("productRequired", "请填写商品名称、商品描述、价格并上传商品介绍图", "Enter a product name, description, price, and product image"));
+    if (!normalizedName || !normalizedCategory || !deliveryMode || !productDescription.trim() || !askingAmount.trim() || !attachments.length) {
+      onNotice(copy("productRequired", "请填写商品名称、分类、描述、价格、交付方式并上传商品图片", "Enter a product name, category, description, price, delivery mode, and product image"));
+      return;
+    }
+    if (!Number.isSafeInteger(normalizedStock) || normalizedStock < 0 || normalizedStock > 1_000_000) {
+      onNotice(copy("invalidProductStock", "库存必须是 0 到 1000000 之间的整数", "Stock must be an integer between 0 and 1000000"));
       return;
     }
     if (!normalizedAmount) {
@@ -349,7 +358,12 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       onNotice(copy("platformSchemaIncomplete", "当前店铺尚未配置完整的商品字段、币种和价格精度", "This store has incomplete product fields, currency, or price precision settings"));
       return;
     }
-    const parsedAttributes: Record<string, unknown> = { description: productDescription.trim() };
+    const parsedAttributes: Record<string, unknown> = {
+      description: productDescription.trim(),
+      category: normalizedCategory,
+      delivery_mode: deliveryMode,
+      stock_quantity: normalizedStock,
+    };
     const attributesWithAttachments = attachments.length
       ? { ...parsedAttributes, attachments: attachments.map(publicAttachment) }
       : parsedAttributes;
@@ -406,10 +420,14 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       setSubmissions((current) => [record, ...current]);
       setExternalKey("");
       setDisplayName("");
+      setCategory("");
+      setDeliveryMode("");
+      setStockQuantity("1");
       setProductDescription("");
       setAskingAmount("");
       setCurrency(pricingCurrency ?? "");
       setAttachments([]);
+      setActivePanel("history");
       onNotice(copy("offerSubmittedNotice", "供给已提交，等待平台审核后展示", "Offer submitted; it will appear after platform review"));
     } catch (error) {
       onNotice(error instanceof Error ? error.message : copy("offerSubmitError", "供给提交失败，请稍后重试", "Could not submit the offer; try again"));
@@ -423,22 +441,22 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       <div className="seller-settings-summary">
         <div>
           <strong>{subplatform.label || copy("currentPlatformLabel", "当前店铺")}</strong>
-          <span>{submissions.length ? `${copy("submittedPrefix", "已提交")} ${submissions.length} ${copy("submittedSuffix", "份资料")}` : copy("noSubmissionsLabel", "还没有提交资料")}</span>
+          <span>{submissions.length ? `${submissions.length} 件商品` : copy("noSubmissionsLabel", "还没有商品")}</span>
         </div>
-        <span className="seller-mode-note">{copy("identityProtectionLabel", "账号和联系方式由商城保护")}</span>
+        <div className="seller-summary-actions"><span className="seller-mode-note">{copy("identityProtectionLabel", "账号和联系方式由商城保护")}</span><button className="button button-dark" type="button" onClick={() => setActivePanel("details")}>发布商品<ArrowRight size={16} aria-hidden="true" /></button></div>
       </div>
 
       <nav className="seller-settings-nav" role="tablist" aria-label={copy("sellerSettingsSectionsLabel", "供给设置分区", "Supply settings sections")}>
-        <button type="button" role="tab" aria-selected={activePanel === "details"} aria-controls="seller-panel-details" className={activePanel === "details" ? "is-active" : ""} onClick={() => setActivePanel("details")}>{copy("sellerDetailsTab", "供给资料", "Offer details")}</button>
-        <button type="button" role="tab" aria-selected={activePanel === "history"} aria-controls="seller-panel-history" className={activePanel === "history" ? "is-active" : ""} onClick={() => setActivePanel("history")}>{copy("sellerHistoryTab", "提交记录", "History")}<span>{submissions.length}</span></button>
+        <button type="button" role="tab" aria-selected={activePanel === "history"} aria-controls="seller-panel-history" className={activePanel === "history" ? "is-active" : ""} onClick={() => setActivePanel("history")}>{copy("sellerHistoryTab", "商品列表", "Products")}<span>{submissions.length}</span></button>
+        <button type="button" role="tab" aria-selected={activePanel === "details"} aria-controls="seller-panel-details" className={activePanel === "details" ? "is-active" : ""} onClick={() => setActivePanel("details")}>{copy("sellerDetailsTab", "发布商品", "Publish")}</button>
         {!usesLegacyMarketplace ? <button type="button" role="tab" aria-selected={activePanel === "demand"} aria-controls="seller-panel-demand" className={activePanel === "demand" ? "is-active" : ""} onClick={() => setActivePanel("demand")}>{copy("sellerDemandTab", "需求匹配", "Demand")}</button> : null}
         <button type="button" role="tab" aria-selected={activePanel === "contacts"} aria-controls="seller-panel-contacts" className={activePanel === "contacts" ? "is-active" : ""} onClick={() => setActivePanel("contacts")}>{copy("sellerContactsTab", "联系申请", "Contacts")}<span>{introductions.length}</span></button>
       </nav>
 
       <div id="seller-panel-details" className="seller-settings-panel" role="tabpanel" hidden={activePanel !== "details"}>
         <section className="surface seller-upload" aria-labelledby="seller-upload-title">
-        <SectionHeading eyebrow={copy("uploadEyebrow", "资料上传")} title={copy("uploadTitle", "提交一份新的供给资料")} />
-        <p className="seller-upload-intro">填写商品的核心资料后提交审核。</p>
+        <SectionHeading title={copy("uploadTitle", "发布商品")} action="返回商品列表" onAction={() => setActivePanel("history")} />
+        <p className="seller-upload-intro">填写买家真正需要看到的信息。提交后进入审核，通过后才会公开展示。</p>
         {agentDraft ? (
           <div className="seller-agent-draft" role="status">
             <div>
@@ -453,8 +471,8 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
           <div className="seller-media-uploader seller-upload-wide">
             <div className="seller-media-uploader-heading">
               <div>
-                <strong>商品介绍图</strong>
-                <small>上传清晰的商品图片，至少一张。</small>
+                <strong>商品图片</strong>
+                <small>上传清晰实拍图，至少一张；第一张作为商品封面。</small>
               </div>
               <label className="text-action seller-media-picker" htmlFor="seller-media-input">
                 <FileUp size={16} aria-hidden="true" />
@@ -494,13 +512,16 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
         <form className="seller-upload-form" onSubmit={submit}>
           <label htmlFor="seller-display-name">
             <span>商品名称</span>
-            <input id="seller-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="例如：2023 款新能源轿车" maxLength={500} required />
+            <input id="seller-display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="写清品牌、型号或商品内容" maxLength={500} required />
           </label>
-          <label className="seller-upload-wide" htmlFor="seller-product-description"><span>商品描述</span><textarea id="seller-product-description" value={productDescription} onChange={(event) => setProductDescription(event.target.value)} rows={4} maxLength={4000} placeholder="介绍商品的主要特点、状况和交付信息" required /></label>
+          <label htmlFor="seller-category"><span>商品分类</span><input id="seller-category" value={category} onChange={(event) => setCategory(event.target.value)} placeholder="填写你的商品分类" maxLength={120} required /></label>
+          <label className="seller-upload-wide" htmlFor="seller-product-description"><span>商品描述</span><textarea id="seller-product-description" value={productDescription} onChange={(event) => setProductDescription(event.target.value)} rows={4} maxLength={4000} placeholder="介绍商品特点、包含内容、使用条件和交付说明" required /></label>
           <label htmlFor="seller-asking-amount">
             <span>{copy("priceLabel", "价格")}{currency ? `（${currency}）` : ""}</span>
             <input id="seller-asking-amount" value={askingAmount} onChange={(event) => setAskingAmount(event.target.value)} inputMode="decimal" placeholder={amountPlaceholder(pricingScale, locale)} required />
           </label>
+          <label htmlFor="seller-delivery-mode"><span>交付方式</span><select id="seller-delivery-mode" value={deliveryMode} onChange={(event) => setDeliveryMode(event.target.value as typeof deliveryMode)} required><option value="">选择交付方式</option><option value="digital">在线交付</option><option value="shipping">物流交付</option><option value="service">线下或人工交付</option></select></label>
+          <label htmlFor="seller-stock"><span>可售库存</span><input id="seller-stock" value={stockQuantity} onChange={(event) => setStockQuantity(event.target.value)} type="number" min={0} max={1000000} step={1} required /><small>填 0 表示暂时售罄</small></label>
           <div className="seller-upload-actions seller-upload-wide">
             <p><FileUp size={17} aria-hidden="true" /> {copy("reviewNotice", "提交后状态为“待审核”，平台不会自动发布未经确认的资料。")}</p>
             <motion.button className="button button-dark" type="submit" disabled={submitting || (isLiveMarketplaceEnabled() && (!subplatform.domainId || (usesLegacyMarketplace && (!subplatform.assetSchemaId || !pricingCurrency || !Number.isInteger(pricingScale)))))} whileTap={{ scale: 0.97 }} transition={spring}>
@@ -513,7 +534,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
       </div>
 
       <section id="seller-panel-history" className="surface seller-submissions seller-settings-panel" role="tabpanel" hidden={activePanel !== "history"} aria-labelledby="seller-submissions-title">
-        <SectionHeading eyebrow={copy("submissionHistoryEyebrow", "提交记录")} title={copy("submissionHistoryTitle", "当前店铺的商品")} />
+        <SectionHeading title={copy("submissionHistoryTitle", "商品列表")} action="发布商品" onAction={() => setActivePanel("details")} />
         {submissionsLoading ? (
           <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>{copy("loadingSubmissionsLabel", "正在读取你的提交记录…", "Loading your submissions…")}</p></div>
         ) : submissionsError ? (
@@ -528,7 +549,7 @@ export function SellerDashboard({ locale, onNotice, subplatform, agentDraft = nu
             ))}
           </ol>
         ) : (
-          <div className="seller-empty-state"><FileUp size={24} aria-hidden="true" /><p>{copy("noSubmissionHistoryLabel", "还没有上传记录。第一份资料由你定义。")}</p></div>
+          <div className="seller-empty-state seller-product-empty"><FileUp size={24} aria-hidden="true" /><strong>还没有商品</strong><p>发布第一件商品，审核通过后买家就能在商城看到。</p><button className="button button-dark" type="button" onClick={() => setActivePanel("details")}>发布第一件商品</button></div>
         )}
       </section>
 

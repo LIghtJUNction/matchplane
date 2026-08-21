@@ -11,6 +11,7 @@ export interface PublicStore {
   capabilities: string[];
   agentStages: string[];
   agentSkills: string[];
+  publicFields?: string[];
   tenantId: string;
   domainId: string;
 }
@@ -33,6 +34,7 @@ export async function readPublicStores(rootTenantId: string): Promise<PublicStor
             COALESCE(registration.manifest -> 'capabilities', '[]'::jsonb) AS capabilities,
             COALESCE(registration.manifest -> 'agent' -> 'stages', '[]'::jsonb) AS "agentStages",
             COALESCE(registration.manifest -> 'agent' -> 'skills', '[]'::jsonb) AS "agentSkills"
+            ,COALESCE(registration.manifest -> 'ui' -> 'supplyFields', '[]'::jsonb) AS "publicFields"
        FROM stores store
        JOIN store_path_aliases alias
          ON alias.tenant_id = store.tenant_id
@@ -85,10 +87,20 @@ export async function readPublicStores(rootTenantId: string): Promise<PublicStor
       capabilities: boundedStrings(row.capabilities, 64),
       agentStages: boundedStrings(row.agentStages, 8),
       agentSkills: boundedStrings(row.agentSkills, 32),
+      publicFields: boundedFieldKeys(row.publicFields, 32),
       tenantId,
       domainId,
     }];
   });
+}
+
+function boundedFieldKeys(value: unknown, maximum: number): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.flatMap((item): string[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const key = (item as { key?: unknown }).key;
+    return typeof key === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(key) ? [key] : [];
+  }))].slice(0, maximum);
 }
 
 export function storeRouteCandidates(stores: PublicStore[]): PlatformRouteCandidate[] {

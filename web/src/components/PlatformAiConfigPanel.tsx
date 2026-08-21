@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot, Save, Send, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { Input } from "@appica/ui-react/input";
 
@@ -10,6 +10,7 @@ import {
   saveManagedPlatformRouterConfig,
   testPlatformAi,
   type ManagedPlatformRouterConfig,
+  type ManagedPlatformRouterModel,
 } from "../api";
 import { SectionHeading } from "./Primitives";
 
@@ -20,7 +21,7 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
   const [model, setModel] = useState("");
   const [protocol, setProtocol] = useState<ManagedPlatformRouterConfig["protocol"]>("openai-compatible");
   const [apiKey, setApiKey] = useState("");
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ManagedPlatformRouterModel[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [assistantInstructions, setAssistantInstructions] = useState("");
@@ -28,10 +29,15 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
   const [assistantTemperature, setAssistantTemperature] = useState("0.2");
   const [assistantMaxSteps, setAssistantMaxSteps] = useState("3");
   const [assistantTimeoutMs, setAssistantTimeoutMs] = useState("20000");
-  const [assistantReasoningEffort, setAssistantReasoningEffort] = useState<"low" | "medium" | "high">("low");
+  const [assistantReasoningEffort, setAssistantReasoningEffort] = useState<ManagedPlatformRouterConfig["assistantReasoningEffort"]>("none");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const reasoningEfforts = useMemo(() => {
+    const listed = models.find((candidate) => candidate.id === model)?.reasoningEfforts;
+    if (listed) return listed;
+    return config?.model === model ? config.modelReasoningEfforts : [];
+  }, [config, model, models]);
 
   useEffect(() => {
     let mounted = true;
@@ -58,6 +64,7 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
         assistantMaxSteps: Number.parseInt(assistantMaxSteps, 10),
         assistantTimeoutMs: Number.parseInt(assistantTimeoutMs, 10),
         assistantReasoningEffort,
+        modelReasoningEfforts: reasoningEfforts,
       });
       apply(updated);
       setApiKey("");
@@ -79,7 +86,10 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
     try {
       const loaded = await listManagedPlatformRouterModels({ endpoint, protocol, apiKey: apiKey || undefined });
       setModels(loaded);
-      if (!loaded.includes(model)) setModel(loaded[0] ?? "");
+      if (!loaded.some((candidate) => candidate.id === model)) {
+        setModel(loaded[0]?.id ?? "");
+        setAssistantReasoningEffort("none");
+      }
       onNotice(`已获取 ${loaded.length} 个模型`);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "模型列表读取失败");
@@ -87,7 +97,7 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
   };
 
   function apply(current: ManagedPlatformRouterConfig) {
-    setConfig(current); setEndpoint(current.endpoint); setModel(current.model); setModels([current.model]); setProtocol(current.protocol); setEnabled(current.enabled);
+    setConfig(current); setEndpoint(current.endpoint); setModel(current.model); setModels([{ id: current.model, reasoningEfforts: current.modelReasoningEfforts }]); setProtocol(current.protocol); setEnabled(current.enabled);
     setAssistantInstructions(current.assistantInstructions ?? "");
     setAssistantMaxOutputTokens(String(current.assistantMaxOutputTokens ?? 320));
     setAssistantTemperature(String(current.assistantTemperature ?? 0.2));
@@ -102,9 +112,9 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
       <p className="subplatform-intro">在这里配置模型、导购行为和输出边界。API Key 只保存在服务器受保护存储中。</p>
       <div className="seller-upload-form">
         <label htmlFor="platform-ai-endpoint"><span>模型网关主机</span><Input id="platform-ai-endpoint" value={endpoint} disabled={!canEdit || loading} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://api.example.com" inputMode="url" /></label>
-        <label htmlFor="platform-ai-protocol"><span>协议</span><select id="platform-ai-protocol" value={protocol} disabled={!canEdit || loading} onChange={(event) => setProtocol(event.target.value as ManagedPlatformRouterConfig["protocol"])}><option value="openai-compatible">OpenAI Compatible</option><option value="anthropic-messages">Anthropic Messages</option><option value="gemini-generate-content">Gemini Generate Content</option></select></label>
+        <label htmlFor="platform-ai-protocol"><span>协议</span><select id="platform-ai-protocol" value={protocol} disabled={!canEdit || loading} onChange={(event) => { setProtocol(event.target.value as ManagedPlatformRouterConfig["protocol"]); setModels([]); setModel(""); setAssistantReasoningEffort("none"); }}><option value="openai-compatible">OpenAI Compatible</option><option value="anthropic-messages">Anthropic Messages</option><option value="gemini-generate-content">Gemini Generate Content</option></select></label>
         <label htmlFor="platform-ai-key"><span>API Key</span><Input id="platform-ai-key" type="password" value={apiKey} disabled={!canEdit || loading} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" placeholder={config?.credentialConfigured ? "留空则保持当前 API Key" : "填写 API Key"} /></label>
-        <div className="platform-ai-model-picker seller-upload-wide"><button className="root-email-test" type="button" disabled={!canEdit || modelsLoading || loading} onClick={() => void loadModels()}>{modelsLoading ? "获取中…" : "获取模型列表"}</button><label htmlFor="platform-ai-model"><span>模型</span><select id="platform-ai-model" value={model} disabled={!canEdit || loading || !models.length} onChange={(event) => setModel(event.target.value)}><option value="">选择模型</option>{models.map((candidate) => <option key={candidate} value={candidate}>{candidate}</option>)}</select></label></div>
+        <div className="platform-ai-model-picker seller-upload-wide"><button className="root-email-test" type="button" disabled={!canEdit || modelsLoading || loading} onClick={() => void loadModels()}>{modelsLoading ? "获取中…" : "获取模型列表"}</button><label htmlFor="platform-ai-model"><span>模型</span><select id="platform-ai-model" value={model} disabled={!canEdit || loading || !models.length} onChange={(event) => { const next = event.target.value; setModel(next); const supported = models.find((candidate) => candidate.id === next)?.reasoningEfforts ?? []; if (assistantReasoningEffort !== "none" && !supported.includes(assistantReasoningEffort)) setAssistantReasoningEffort("none"); }}><option value="">选择模型</option>{models.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.id}</option>)}</select></label></div>
         <label className="email-enabled"><input type="checkbox" checked={enabled} disabled={!canEdit || loading} onChange={(event) => setEnabled(event.target.checked)} />启用商城 AI 导购</label>
         <div className="platform-ai-advanced seller-upload-wide">
           <div><SlidersHorizontal size={16} aria-hidden="true" /><strong>导购行为</strong></div>
@@ -113,7 +123,7 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
           <label><span>回答发散度</span><Input type="number" min={0} max={1} step={0.1} value={assistantTemperature} disabled={!canEdit || loading} onChange={(event) => setAssistantTemperature(event.target.value)} /><small>0 更稳定，1 更开放</small></label>
           <label><span>工具循环步数</span><Input type="number" min={2} max={8} value={assistantMaxSteps} disabled={!canEdit || loading} onChange={(event) => setAssistantMaxSteps(event.target.value)} /><small>2–8 步，保留最终回答</small></label>
           <label><span>单次超时</span><Input type="number" min={4000} max={30000} step={1000} value={assistantTimeoutMs} disabled={!canEdit || loading} onChange={(event) => setAssistantTimeoutMs(event.target.value)} /><small>4000–30000 ms</small></label>
-          <label><span>推理强度</span><select value={assistantReasoningEffort} disabled={!canEdit || loading} onChange={(event) => setAssistantReasoningEffort(event.target.value as typeof assistantReasoningEffort)}><option value="low">低 · 优先最终回答</option><option value="medium">中 · 平衡</option><option value="high">高 · 更长推理</option></select><small>支持该参数的模型会使用它</small></label>
+          {reasoningEfforts.length ? <label><span>思考等级</span><select value={assistantReasoningEffort} disabled={!canEdit || loading} onChange={(event) => setAssistantReasoningEffort(event.target.value)}><option value="none">不指定，由模型决定</option>{reasoningEfforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}</select><small>完全来自模型服务返回的能力元数据，不按模型名称猜测。</small></label> : <div className="platform-ai-capability-note"><span>思考等级</span><strong>{model ? "模型服务未返回可选等级" : "选择模型后读取能力"}</strong><small>未声明时不发送该参数，避免错误配置。</small></div>}
         </div>
         <div className="platform-ai-tools seller-upload-wide" aria-label="导购 Agent 工具">
           <strong>导购 Agent 工具</strong>

@@ -139,14 +139,16 @@ export function SubplatformAdminDashboard({
 
   return (
     <div className="dashboard subplatform-admin-dashboard">
-      <section className="workspace-heading">
+      <section className="store-console-heading">
         <div>
-          <h1>管理 {subplatform.label || subplatform.brandName}</h1>
-          <p>{canManageStore ? "管理商品、店铺资料和团队。" : "管理商品、提交审核并处理联系申请。"}</p>
+          <span>店铺工作台</span>
+          <h1>经营管理</h1>
+          <p>{canManageStore ? "商品、店铺、团队与通知。" : "商品、审核与联系申请。"}</p>
         </div>
         <span className="seller-mode-note"><ShieldCheck size={16} aria-hidden="true" /> {canManageStore ? "店长权限" : "店员权限"}</span>
       </section>
 
+      <div className="store-console-layout">
       <nav className="store-management-tabs" role="tablist" aria-label="店铺管理分区">
         <button type="button" role="tab" aria-selected={section === "products"} className={section === "products" ? "is-active" : ""} onClick={() => setSection("products")}>商品管理</button>
         {canManageStore ? <button type="button" role="tab" aria-selected={section === "store"} className={section === "store" ? "is-active" : ""} onClick={() => setSection("store")}>店铺管理</button> : null}
@@ -154,6 +156,7 @@ export function SubplatformAdminDashboard({
         {canManageStore ? <button type="button" role="tab" aria-selected={section === "notifications"} className={section === "notifications" ? "is-active" : ""} onClick={() => setSection("notifications")}>通知</button> : null}
       </nav>
 
+      <div className="store-console-content">
       <div hidden={section !== "products"}><SellerDashboard locale={locale} onNotice={onNotice} subplatform={subplatform} /></div>
       {canManageStore ? <div hidden={section !== "store"}><StoreManagementPanel store={store} canManageStore={canManageStore} onNotice={onNotice} onUpdated={onStoreUpdated} /></div> : null}
       {canManageStore ? <div hidden={section !== "team"}><PlatformAccessPanel organizations={subplatform.organizationId ? [scopedOrganization(subplatform)] : []} rootRole="subplatform_admin" onNotice={onNotice} /></div> : null}
@@ -176,6 +179,8 @@ export function SubplatformAdminDashboard({
           </form>
         </section>
       </div> : null}
+      </div>
+      </div>
     </div>
   );
 }

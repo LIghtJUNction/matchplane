@@ -37,9 +37,8 @@ export async function PATCH(request: Request): Promise<Response> {
       assistantTemperature: numberValue(body.assistantTemperature),
       assistantMaxSteps: numberValue(body.assistantMaxSteps),
       assistantTimeoutMs: numberValue(body.assistantTimeoutMs),
-      assistantReasoningEffort: body.assistantReasoningEffort === "medium" || body.assistantReasoningEffort === "high" || body.assistantReasoningEffort === "low"
-        ? body.assistantReasoningEffort
-        : undefined,
+      assistantReasoningEffort: optionalText(body.assistantReasoningEffort),
+      modelReasoningEfforts: Array.isArray(body.modelReasoningEfforts) ? body.modelReasoningEfforts : undefined,
     });
     return NextResponse.json({ config }, { headers: { "cache-control": "no-store" } });
   } catch (cause) {

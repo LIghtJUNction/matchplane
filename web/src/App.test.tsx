@@ -88,7 +88,7 @@ describe("MatchPlane workspaces", () => {
   it("keeps the root entry focused on one public buyer chat and a visible sign-in entry", async () => {
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "想买什么，告诉我就行。" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "想找什么？" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "从一句话开始。" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "卖方供给" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" })).toBeInTheDocument();
@@ -173,8 +173,8 @@ describe("MatchPlane workspaces", () => {
 
     render(<App initialPath="/used-car" />);
 
-    expect(await screen.findByRole("dialog", { name: "管理这家店" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "管理 Matx Auto" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Matx Auto" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Matx Auto" })).toBeInTheDocument();
     expect(window.location.search).not.toContain("console");
   });
 
@@ -241,7 +241,7 @@ describe("MatchPlane workspaces", () => {
     expect(await screen.findByRole("heading", { name: "开始配置商城" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "返回商城" })).toHaveAttribute("href", "/");
     expect(screen.getByText("商城组织")).toBeInTheDocument();
-    expect(screen.getAllByText("商品范围").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("商城数据").length).toBeGreaterThan(0);
     expect(screen.getByText("第一家店铺")).toBeInTheDocument();
   });
 
@@ -391,7 +391,7 @@ describe("MatchPlane workspaces", () => {
 
     await user.click(screen.getByRole("button", { name: "EN" }));
 
-    expect(screen.getByRole("heading", { name: "Tell me what you want to buy." })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What are you looking for?" })).toBeInTheDocument();
     expect(screen.queryByText("More entry points")).not.toBeInTheDocument();
   });
 

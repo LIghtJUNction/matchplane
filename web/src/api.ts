@@ -985,7 +985,13 @@ export interface ManagedPlatformRouterConfig {
   assistantTemperature: number;
   assistantMaxSteps: number;
   assistantTimeoutMs: number;
-  assistantReasoningEffort: "low" | "medium" | "high";
+  assistantReasoningEffort: string;
+  modelReasoningEfforts: string[];
+}
+
+export interface ManagedPlatformRouterModel {
+  id: string;
+  reasoningEfforts: string[];
 }
 
 /** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
@@ -1164,6 +1170,28 @@ export interface MallSearchResponse {
     source: "ai" | "policy_fallback";
     degraded: boolean;
     rationale: string;
+  };
+}
+
+export interface MallBrowseResponse {
+  stores: Array<{ slug: string; path: string; displayName: string }>;
+  recommendations: RecommendedBackendListing[];
+}
+
+export async function browseMallCatalog(input: { storePath?: string } = {}): Promise<MallBrowseResponse> {
+  const query = input.storePath ? `?storePath=${encodeURIComponent(input.storePath)}` : "";
+  const response = await fetch(`/api/mall/search${query}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null) as (MallBrowseResponse & { error?: string }) | null;
+  if (!response.ok || !body) {
+    throw new MarketplaceApiError(response.status, body?.error || "商品目录暂时不可用");
+  }
+  return {
+    stores: Array.isArray(body.stores) ? body.stores : [],
+    recommendations: Array.isArray(body.recommendations) ? body.recommendations : [],
   };
 }
 
@@ -1491,11 +1519,11 @@ export async function saveManagedPlatformRouterConfig(input: Omit<ManagedPlatfor
   return body.config;
 }
 
-export async function listManagedPlatformRouterModels(input: { endpoint: string; protocol: ManagedPlatformRouterConfig["protocol"]; apiKey?: string }): Promise<string[]> {
+export async function listManagedPlatformRouterModels(input: { endpoint: string; protocol: ManagedPlatformRouterConfig["protocol"]; apiKey?: string }): Promise<ManagedPlatformRouterModel[]> {
   const response = await fetch("/api/platform/ai/models", {
     method: "POST", credentials: "include", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { models?: string[]; error?: string } | null;
+  const body = await response.json().catch(() => null) as { models?: ManagedPlatformRouterModel[]; error?: string } | null;
   if (!response.ok || !body?.models) throw new MarketplaceApiError(response.status, body?.error || "模型列表读取失败");
   return body.models;
 }

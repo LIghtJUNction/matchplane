@@ -75,7 +75,7 @@ const defaultChatCopy: ChatCopy = {
   sellerHeadlines: ["说说你能提供什么。", "让真实供给被看见。", "把你的优势交给匹配。"],
   buyerDescription: "我会在商城店铺中找商品、比较价格，并说明为什么适合你。无需登录即可开始。",
   sellerDescription: "说出你能提供的内容、条件和限制。",
-  buyerPlaceholder: "例如：预算 3000 元，想找一台适合通勤的轻薄电脑……",
+  buyerPlaceholder: "输入预算、用途和偏好……",
   buyerDiscoveryLabel: "允许供给方看到这条需求摘要（不含联系方式）",
   buyerDiscoveryDefault: false,
   sellerPlaceholder: "例如：我能提供什么，交付条件和限制是……",
@@ -94,7 +94,7 @@ const defaultChatCopyEn: ChatCopy = {
   sellerHeadlines: ["Tell us what you can offer.", "Let the right people find you.", "Start with one sentence."],
   buyerDescription: "I’ll search the mall, compare products, and explain the best options. No sign-in needed to browse.",
   sellerDescription: "Share what you offer, the terms, and any constraints.",
-  buyerPlaceholder: "For example: a lightweight laptop for commuting, under $900…",
+  buyerPlaceholder: "Describe your budget, needs, and preferences…",
   buyerDiscoveryLabel: "Let supply agents see this request summary (no contact details)",
   buyerDiscoveryDefault: false,
   sellerPlaceholder: "For example: I can offer this, under these terms and constraints…",
@@ -234,6 +234,7 @@ function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale
 }
 
 interface MatchChatProps {
+  compact?: boolean;
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
   locale?: InterfaceLocale;
@@ -245,7 +246,7 @@ interface MatchChatProps {
   onSellerPlatformSelected?: (hop: PlatformRouteHop) => void | Promise<void>;
 }
 
-export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer", onRecommendations, onSellerDraft, onSellerPlatformSelected }: MatchChatProps) {
+export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh", role = "buyer", onRecommendations, onSellerDraft, onSellerPlatformSelected }: MatchChatProps) {
   const copy = resolveChatCopy(subplatform, locale);
   const runtime = runtimeChatCopy(locale);
   const [message, setMessage] = useState("");
@@ -269,6 +270,12 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   // scanning and makes a marketplace feel like a demo; merchants may still
   // customize the static copy through the manifest.
   const headline = isSeller ? copy.sellerTitle : copy.buyerTitle;
+  const visibleHeadline = compact && isRoot && !isSeller
+    ? (locale === "en" ? "What are you looking for?" : "想找什么？")
+    : headline;
+  const visibleDescription = compact && isRoot && !isSeller
+    ? (locale === "en" ? "Describe your budget and must-haves. AI will filter real products." : "说出预算和要求，AI 从真实商品中筛选。")
+    : isSeller ? copy.sellerDescription : copy.buyerDescription;
 
   const resizeInput = useCallback((input: HTMLTextAreaElement | null) => {
     if (!input) return;
@@ -915,12 +922,12 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
   };
 
   return (
-    <section className={`match-chat${isRoot ? " is-root" : ""}${isSeller ? " is-seller" : ""}`} aria-labelledby="match-chat-title">
+    <section className={"match-chat" + (isRoot ? " is-root" : "") + (isSeller ? " is-seller" : "") + (compact ? " is-catalog-header" : "")} aria-labelledby="match-chat-title">
       <div className="match-chat-heading">
         <div>
-          <h1 id="match-chat-title">{headline}</h1>
-          <p>{isSeller ? copy.sellerDescription : copy.buyerDescription}</p>
-          {isRoot && !isSeller ? (
+          <h1 id="match-chat-title">{visibleHeadline}</h1>
+          <p>{visibleDescription}</p>
+          {isRoot && !isSeller && !compact ? (
             <ul className="match-chat-promises" aria-label={locale === "en" ? "Shopping assistant capabilities" : "导购能力"}>
               {shoppingPromises.map((item) => <li key={item}>{item}</li>)}
             </ul>
@@ -1000,7 +1007,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           ))}
         </ul>
       ) : null}
-      {isRoot && !isSeller && !messages.length ? (
+      {isRoot && !isSeller && !compact && !messages.length ? (
         <div className="match-chat-suggestions" aria-label={locale === "en" ? "Example shopping requests" : "购物需求示例"}>
           <span>{locale === "en" ? "Try asking" : "试着这样问"}</span>
           <div>

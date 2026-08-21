@@ -169,6 +169,7 @@ export async function decidePlatformRoutes(input: {
         ? "你是商城 AI 导购。只能从候选 slug 中选择可能出售用户所需商品的店铺，不能创造 slug。返回 JSON：selectedSlugs(string[]), rationale(string), confidence(number 0..1)。如果没有合适候选，selectedSlugs 返回空数组。"
         : `你是商城 AI 导购。只能从候选 slug 中选择可能出售用户所需商品的店铺，不能创造 slug。优先调用 ${NATIVE_ROUTER_TOOL_NAME} 完成选择；不要调用未声明的工具。`,
       userContent: boundedProviderIntent(input, candidates),
+      reasoningEffort: router.assistantReasoningEffort,
     });
     // The recursive orchestrator owns the larger request deadline, but one
     // provider hop must stay bounded so a slow model cannot consume the whole
@@ -249,7 +250,7 @@ interface ConfiguredPlatformRouter {
   assistantTemperature: number;
   assistantMaxSteps: number;
   assistantTimeoutMs: number;
-  assistantReasoningEffort: "low" | "medium" | "high";
+  assistantReasoningEffort: string;
 }
 
 function configuredPlatformRouter(): ConfiguredPlatformRouter | null {
@@ -266,7 +267,12 @@ function configuredPlatformRouter(): ConfiguredPlatformRouter | null {
     ? rawProtocol
     : DEFAULT_ROUTER_PROTOCOL;
   if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) return null;
-  return { endpoint, apiKey, model, protocol, managed: false, assistantInstructions: "", assistantMaxOutputTokens: 320, assistantTemperature: 0.2, assistantMaxSteps: 3, assistantTimeoutMs: 20_000, assistantReasoningEffort: "low" };
+  return { endpoint, apiKey, model, protocol, managed: false, assistantInstructions: "", assistantMaxOutputTokens: 320, assistantTemperature: 0.2, assistantMaxSteps: 3, assistantTimeoutMs: 20_000, assistantReasoningEffort: configuredEnvironmentReasoningEffort() };
+}
+
+function configuredEnvironmentReasoningEffort(): string {
+  const value = process.env.MATCHPLANE_ROUTER_AI_REASONING_EFFORT?.trim() ?? "";
+  return /^[A-Za-z0-9_-]{1,32}$/.test(value) ? value : "none";
 }
 
 /** True when a server-side provider credential is present and the endpoint is allowed. */
@@ -303,6 +309,7 @@ export async function answerPlatformShoppingQuestion(input: {
       name: store.displayName,
       description: store.description,
       path: store.path,
+      publicFields: store.publicFields ?? [],
     }));
     const catalog = new Map<string, { id: string; name: string; store: string; description: string; price: string; path: string }>();
     let recommendations: RecommendedBackendListing[] = [];
@@ -310,7 +317,7 @@ export async function answerPlatformShoppingQuestion(input: {
       model: provider.chatModel(router.model),
       system: [
         router.assistantInstructions,
-        "你是一个自然、可靠的商城助手。像正常人一样接住用户的话，不要反复自我介绍，也不要强行把闲聊带回购物。根据问题自行决定是否使用工具：查询店铺或商品时使用公开查询工具；比较时使用比较工具；算术或总价时使用计算工具。工具只提供帮助，不必向用户解释工具本身。店铺、商品、价格和库存只能依据工具结果陈述；绝不能编造这些信息，也不能透露联系方式、密钥或未审核内容。最终回答自然简洁，不使用 Markdown 标题或项目符号。",
+        "你是一个自然、可靠的商城助手。像正常人一样接住用户的话，不要反复自我介绍，也不要强行把闲聊带回购物。根据问题自行决定是否使用工具：查询店铺或商品时使用公开查询工具；比较时使用比较工具；算术或总价时使用计算工具。把用户明确说出的预算、必须条件、偏好和排除项原样放入检索参数；属性 field 只能来自店铺公开的 publicFields，未声明字段就只做自由文本检索。工具只提供帮助，不必向用户解释工具本身。店铺、商品、价格和库存只能依据工具结果陈述；绝不能编造这些信息，也不能透露联系方式、密钥或未审核内容。最终回答自然简洁，不使用 Markdown 标题或项目符号。",
       ].filter(Boolean).join("\n\n"),
       prompt: question,
       tools: {
@@ -320,10 +327,28 @@ export async function answerPlatformShoppingQuestion(input: {
           execute: async () => visibleStores.map(({ id: _id, ...store }) => store),
         }),
         search_public_products: tool({
-          description: "从当前公开、已审核上架的商品中检索。只在用户提出具体购物需求时调用。",
-          inputSchema: z.object({ query: z.string().min(1).max(2_000) }),
-          execute: async ({ query }) => {
-            const offers = await searchPublicStoreOffers({ stores: input.stores, narrative: query, limit: 6 });
+          description: "从公开、已审核商品中检索。预算和属性条件必须来自用户原话；字段名只能使用店铺公开声明的 publicFields，不能猜商品数据。",
+          inputSchema: z.object({
+            query: z.string().min(1).max(2_000),
+            budget: z.object({
+              minimum: z.number().nonnegative().optional(),
+              maximum: z.number().positive().optional(),
+              currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+            }).optional(),
+            requirements: z.array(z.object({
+              field: z.string().regex(/^[A-Za-z0-9_.-]{1,128}$/).optional(),
+              value: z.string().min(1).max(200),
+              mode: z.enum(["must", "prefer", "exclude"]),
+              operator: z.enum(["contains", "eq", "gte", "lte"]),
+            })).max(16).default([]),
+          }),
+          execute: async ({ query, budget, requirements }) => {
+            const offers = await searchPublicStoreOffers({
+              stores: input.stores,
+              narrative: query,
+              intent: { ...(budget ? { budget } : {}), requirements },
+              limit: 6,
+            });
             recommendations = offers;
             const result = offers.map((offer) => {
               const terms = offer.terms ?? {};
@@ -391,7 +416,7 @@ export async function answerPlatformShoppingQuestion(input: {
       temperature: router.assistantTemperature,
       timeout: router.assistantTimeoutMs,
       maxRetries: 0,
-      providerOptions: { matchplane: { reasoningEffort: router.assistantReasoningEffort } },
+      ...(router.assistantReasoningEffort === "none" ? {} : { providerOptions: { matchplane: { reasoningEffort: router.assistantReasoningEffort } } }),
     });
     const text = sanitizeAssistantReply(result.text);
     if (!text) throw new Error("模型没有返回最终回答");
@@ -719,6 +744,7 @@ function buildTextProviderRequest(input: {
   userContent: string;
   maxOutputTokens: number;
   temperature: number;
+  reasoningEffort?: string;
 }): ProviderRequest {
   const headers: Record<string, string> = { accept: "application/json", "content-type": "application/json" };
   if (input.protocol === "anthropic-messages") {
@@ -756,9 +782,7 @@ function buildTextProviderRequest(input: {
       model: input.model,
       temperature: input.temperature,
       max_tokens: input.maxOutputTokens,
-      // Reasoning-capable OpenAI-compatible gateways may otherwise spend the full small answer
-      // budget on hidden reasoning and return an empty final content field.
-      reasoning_effort: "low",
+      ...(!input.reasoningEffort || input.reasoningEffort === "none" ? {} : { reasoning_effort: input.reasoningEffort }),
       messages: [
         { role: "system", content: input.systemPrompt },
         { role: "user", content: input.userContent },
@@ -778,6 +802,7 @@ function buildProviderRequest(input: {
   systemPrompt: string;
   userContent: string;
   maxOutputTokens?: number;
+  reasoningEffort?: string;
 }): ProviderRequest {
   const maxOutputTokens = input.maxOutputTokens ?? configuredMaxTokens();
   const headers: Record<string, string> = {
