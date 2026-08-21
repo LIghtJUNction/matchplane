@@ -2012,6 +2012,12 @@ main {
 .platform-ai-tools > strong { width: 100%; font-size: 0.73rem; }
 .platform-ai-tools > span { padding: 0.28rem 0.46rem; border-radius: 999px; background: var(--ivory); color: var(--ink-soft); font-size: 0.64rem; }
 .platform-ai-tools > small { width: 100%; margin-top: 0.12rem; color: var(--muted); font-size: 0.62rem; line-height: 1.45; }
+.national-identity-config { margin-top: 1rem; }
+.national-identity-endpoints { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.7rem; }
+.national-identity-endpoints label { display: grid; gap: 0.34rem; }
+.national-identity-endpoints label > span { color: var(--ink-soft); font-size: 0.68rem; font-weight: 650; }
+.national-identity-actions { margin-top: 0.2rem; }
+.national-identity-restart { margin: 0.8rem 0 0; color: var(--ink-soft); font-size: 0.7rem; line-height: 1.5; }
 .platform-access-select { min-width: min(100%, 18rem); display: grid; gap: 0.3rem; }
 .platform-access-select span,
 .platform-access-invite label > span { color: var(--ink-soft); font-size: 0.66rem; font-weight: 650; }
@@ -4104,6 +4110,7 @@ main.subplatform-fullscreen-main {
   .mall-brand-actions { align-items: stretch; flex-direction: column; }
   .mall-brand-actions .button { width: 100%; justify-content: center; }
   .platform-ai-advanced { grid-template-columns: 1fr; }
+  .national-identity-endpoints { grid-template-columns: 1fr; }
   .personal-profile-identity { grid-template-columns: auto minmax(0, 1fr); }
   .personal-profile-upload { grid-column: 1 / -1; width: 100%; justify-content: center; }
   .platform-member-row { grid-template-columns: 2.2rem minmax(0, 1fr) auto; }

@@ -28,6 +28,7 @@ import {
 import { isRootEmailAuthConfigured, sendConfiguredAuthEmail } from "./mail";
 import { sendConfiguredPhoneOtp } from "./sms";
 import { isProductionEnvironment } from "./runtime";
+import { readManagedNationalIdentityConfig } from "./national-identity-config";
 
 const database = new Pool({
   connectionString: process.env.MATCHPLANE_DATABASE_URL ?? process.env.DATABASE_URL,
@@ -563,16 +564,23 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
 
   return definitions.flatMap(({ providerId, envKey, defaultScopes }) => {
     const prefix = `MATCHPLANE_${envKey}_OAUTH_`;
-    const clientId = process.env[`${prefix}CLIENT_ID`]?.trim();
-    const clientSecret = process.env[`${prefix}CLIENT_SECRET`]?.trim();
+    const managedNationalIdentity = providerId === "national_identity"
+      ? readManagedNationalIdentityConfig()
+      : null;
+    // A saved but disabled national-identity record intentionally wins over
+    // deployment variables so an operator can turn the integration off from
+    // the mall settings without deleting credentials from the host.
+    if (managedNationalIdentity && !managedNationalIdentity.enabled) return [];
+    const clientId = managedNationalIdentity?.clientId ?? process.env[`${prefix}CLIENT_ID`]?.trim();
+    const clientSecret = managedNationalIdentity?.clientSecret ?? process.env[`${prefix}CLIENT_SECRET`]?.trim();
     // Some approved identity gateways publish OIDC discovery, while others
     // provide a fixed authorization/token/userinfo contract.  Never invent a
     // public endpoint here: operators must supply the URLs from their signed
     // application-access agreement or official SDK gateway.
-    const discoveryUrl = safeOAuthUrl(process.env[`${prefix}DISCOVERY_URL`]);
-    const authorizationUrl = safeOAuthUrl(process.env[`${prefix}AUTHORIZATION_URL`]);
-    const tokenUrl = safeOAuthUrl(process.env[`${prefix}TOKEN_URL`]);
-    const userInfoUrl = safeOAuthUrl(process.env[`${prefix}USERINFO_URL`]);
+    const discoveryUrl = safeOAuthUrl(managedNationalIdentity?.discoveryUrl ?? process.env[`${prefix}DISCOVERY_URL`]);
+    const authorizationUrl = safeOAuthUrl(managedNationalIdentity?.authorizationUrl ?? process.env[`${prefix}AUTHORIZATION_URL`]);
+    const tokenUrl = safeOAuthUrl(managedNationalIdentity?.tokenUrl ?? process.env[`${prefix}TOKEN_URL`]);
+    const userInfoUrl = safeOAuthUrl(managedNationalIdentity?.userInfoUrl ?? process.env[`${prefix}USERINFO_URL`]);
     const hasEndpointContract = Boolean(discoveryUrl || (authorizationUrl && tokenUrl && userInfoUrl));
     if (!clientId || !clientSecret || !hasEndpointContract) {
       const anyConfigured = [clientId, clientSecret, discoveryUrl, authorizationUrl, tokenUrl, userInfoUrl].some(Boolean);
@@ -600,7 +608,7 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
         // the Better Auth account table while preserving stable linking.
         return providerId === "national_identity" ? opaqueIdentitySubject(subject) : subject;
       },
-      scopes: parseOAuthScopes(process.env[`${prefix}SCOPES`], defaultScopes),
+      scopes: managedNationalIdentity?.scopes ?? parseOAuthScopes(process.env[`${prefix}SCOPES`], defaultScopes),
       mapProfileToUser: (profile: Record<string, unknown>) => {
         const subject = firstProfileString(profile, providerId === "national_identity"
           ? ["sub", "id", "network_id", "net_id", "user_id", "uid", "openid"]

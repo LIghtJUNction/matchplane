@@ -1179,6 +1179,47 @@ export async function askMallShoppingAssistant(
   return { requestId: body.requestId, answer: body.answer, recommendations: Array.isArray(body.recommendations) ? body.recommendations as RecommendedBackendListing[] : [] };
 }
 
+export interface NationalIdentityConfig {
+  enabled: boolean;
+  clientId: string;
+  scopes: string[];
+  endpointMode: "discovery" | "endpoints";
+  discoveryUrl: string;
+  authorizationUrl: string;
+  tokenUrl: string;
+  userInfoUrl: string;
+  credentialConfigured: boolean;
+}
+
+export async function getNationalIdentityConfig(): Promise<NationalIdentityConfig | null> {
+  const response = await fetch("/api/platform/national-identity/config", { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
+  const body = await response.json().catch(() => null) as { config?: NationalIdentityConfig | null; error?: string } | null;
+  if (!response.ok || !body) throw new MarketplaceApiError(response.status, body?.error || "国家网络身份认证配置读取失败");
+  return body.config ?? null;
+}
+
+export async function saveNationalIdentityConfig(input: {
+  enabled: boolean;
+  clientId: string;
+  clientSecret?: string;
+  endpointMode: "discovery" | "endpoints";
+  discoveryUrl?: string;
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  userInfoUrl?: string;
+  scopes: string[];
+}): Promise<{ config: NationalIdentityConfig; restartRequired: boolean }> {
+  const response = await fetch("/api/platform/national-identity/config", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { config?: NationalIdentityConfig; restartRequired?: boolean; error?: string } | null;
+  if (!response.ok || !body?.config) throw new MarketplaceApiError(response.status, body?.error || "国家网络身份认证配置保存失败");
+  return { config: body.config, restartRequired: body.restartRequired === true };
+}
+
 export interface ContactResponse {
   counterpart: {
     party_id: string;

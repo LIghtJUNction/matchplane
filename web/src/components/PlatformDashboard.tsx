@@ -58,6 +58,7 @@ import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
+import { NationalIdentityConfigPanel } from "./NationalIdentityConfigPanel";
 import { MallCatalogModeration } from "./MallCatalogModeration";
 import { MallBrandPanel } from "./MallBrandPanel";
 import { StoreCommercialTermsPanel } from "./StoreCommercialTermsPanel";
@@ -732,6 +733,7 @@ export function PlatformDashboard({
           <section className="platform-component-panel" aria-label="商城账号邮件服务">
             <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
           </section>
+          <NationalIdentityConfigPanel rootRole={rootRole} onNotice={onNotice} />
           <PlatformSiteSettingsPanel
             organizationId={setup?.root.organization?.id}
             platformPath="/"

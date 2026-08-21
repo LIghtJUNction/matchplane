@@ -15,7 +15,7 @@ MatchPlane 为国内用户预留国家网络身份认证公共服务作为首选
 
 ## 配置
 
-生产环境只在服务端设置以下变量，绝不把 secret 放进 `NEXT_PUBLIC_*` 或浏览器 bundle：
+商城负责人可在“商城设置 → 国家网络身份认证”填写下列同一组参数。Client Secret 会写入 Web 服务可读的受保护目录，浏览器随后不会再收到它；由于 Better Auth 在启动时加载 OAuth 插件，保存后需要重启 Web 服务才会生效。环境变量仍作为未使用商城设置时的兼容方式，绝不把 secret 放进 `NEXT_PUBLIC_*` 或浏览器 bundle：
 
 ```dotenv
 MATCHPLANE_NATIONAL_IDENTITY_OAUTH_CLIENT_ID=...
