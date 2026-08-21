@@ -662,6 +662,9 @@ function buildTextProviderRequest(input: {
       model: input.model,
       temperature: input.temperature,
       max_tokens: input.maxOutputTokens,
+      // Reasoning-capable OpenAI-compatible gateways may otherwise spend the full small answer
+      // budget on hidden reasoning and return an empty final content field.
+      reasoning_effort: "low",
       messages: [
         { role: "system", content: input.systemPrompt },
         { role: "user", content: input.userContent },

@@ -59,6 +59,7 @@ describe("platform Agent router", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.max_tokens).toBe(8);
     expect(body.response_format).toBeUndefined();
+    expect(body.reasoning_effort).toBe("low");
     expect(body.messages).toEqual([
       { role: "system", content: "Respond with one short token." },
       { role: "user", content: "healthcheck" },
