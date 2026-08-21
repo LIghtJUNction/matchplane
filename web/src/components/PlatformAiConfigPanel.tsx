@@ -26,8 +26,8 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
   const [assistantInstructions, setAssistantInstructions] = useState("");
   const [assistantMaxOutputTokens, setAssistantMaxOutputTokens] = useState("320");
   const [assistantTemperature, setAssistantTemperature] = useState("0.2");
-  const [assistantMaxSteps, setAssistantMaxSteps] = useState("4");
-  const [assistantTimeoutMs, setAssistantTimeoutMs] = useState("12000");
+  const [assistantMaxSteps, setAssistantMaxSteps] = useState("3");
+  const [assistantTimeoutMs, setAssistantTimeoutMs] = useState("20000");
   const [assistantReasoningEffort, setAssistantReasoningEffort] = useState<"low" | "medium" | "high">("low");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -91,8 +91,8 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
     setAssistantInstructions(current.assistantInstructions ?? "");
     setAssistantMaxOutputTokens(String(current.assistantMaxOutputTokens ?? 320));
     setAssistantTemperature(String(current.assistantTemperature ?? 0.2));
-    setAssistantMaxSteps(String(current.assistantMaxSteps ?? 4));
-    setAssistantTimeoutMs(String(current.assistantTimeoutMs ?? 12000));
+    setAssistantMaxSteps(String(current.assistantMaxSteps ?? 3));
+    setAssistantTimeoutMs(String(current.assistantTimeoutMs ?? 20000));
     setAssistantReasoningEffort(current.assistantReasoningEffort ?? "low");
   }
 
@@ -111,8 +111,8 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
           <label htmlFor="platform-ai-instructions"><span>补充指引（可选）</span><textarea id="platform-ai-instructions" value={assistantInstructions} disabled={!canEdit || loading} maxLength={4000} rows={4} onChange={(event) => setAssistantInstructions(event.target.value)} placeholder="例如：先确认预算和用途，再给出对比建议。" /></label>
           <label><span>单次回答上限</span><Input type="number" min={64} max={512} value={assistantMaxOutputTokens} disabled={!canEdit || loading} onChange={(event) => setAssistantMaxOutputTokens(event.target.value)} /><small>64–512 tokens</small></label>
           <label><span>回答发散度</span><Input type="number" min={0} max={1} step={0.1} value={assistantTemperature} disabled={!canEdit || loading} onChange={(event) => setAssistantTemperature(event.target.value)} /><small>0 更稳定，1 更开放</small></label>
-          <label><span>工具循环步数</span><Input type="number" min={3} max={8} value={assistantMaxSteps} disabled={!canEdit || loading} onChange={(event) => setAssistantMaxSteps(event.target.value)} /><small>3–8 步，保留最终回答</small></label>
-          <label><span>单次超时</span><Input type="number" min={4000} max={20000} step={1000} value={assistantTimeoutMs} disabled={!canEdit || loading} onChange={(event) => setAssistantTimeoutMs(event.target.value)} /><small>4000–20000 ms</small></label>
+          <label><span>工具循环步数</span><Input type="number" min={2} max={8} value={assistantMaxSteps} disabled={!canEdit || loading} onChange={(event) => setAssistantMaxSteps(event.target.value)} /><small>2–8 步，保留最终回答</small></label>
+          <label><span>单次超时</span><Input type="number" min={4000} max={30000} step={1000} value={assistantTimeoutMs} disabled={!canEdit || loading} onChange={(event) => setAssistantTimeoutMs(event.target.value)} /><small>4000–30000 ms</small></label>
           <label><span>推理强度</span><select value={assistantReasoningEffort} disabled={!canEdit || loading} onChange={(event) => setAssistantReasoningEffort(event.target.value as typeof assistantReasoningEffort)}><option value="low">低 · 优先最终回答</option><option value="medium">中 · 平衡</option><option value="high">高 · 更长推理</option></select><small>支持该参数的模型会使用它</small></label>
         </div>
         <div className="platform-ai-tools seller-upload-wide" aria-label="导购 Agent 工具">

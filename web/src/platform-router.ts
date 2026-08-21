@@ -266,7 +266,7 @@ function configuredPlatformRouter(): ConfiguredPlatformRouter | null {
     ? rawProtocol
     : DEFAULT_ROUTER_PROTOCOL;
   if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) return null;
-  return { endpoint, apiKey, model, protocol, managed: false, assistantInstructions: "", assistantMaxOutputTokens: 320, assistantTemperature: 0.2, assistantMaxSteps: 4, assistantTimeoutMs: 12_000, assistantReasoningEffort: "low" };
+  return { endpoint, apiKey, model, protocol, managed: false, assistantInstructions: "", assistantMaxOutputTokens: 320, assistantTemperature: 0.2, assistantMaxSteps: 3, assistantTimeoutMs: 20_000, assistantReasoningEffort: "low" };
 }
 
 /** True when a server-side provider credential is present and the endpoint is allowed. */

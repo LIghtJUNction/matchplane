@@ -80,8 +80,8 @@ export function saveManagedPlatformRouterConfig(input: {
     assistantInstructions: boundedOptionalText(input.assistantInstructions, "导购补充指引", 4_000),
     assistantMaxOutputTokens: boundedInteger(input.assistantMaxOutputTokens, 320, 64, 512),
     assistantTemperature: boundedNumber(input.assistantTemperature, 0.2, 0, 1),
-    assistantMaxSteps: boundedInteger(input.assistantMaxSteps, 4, 3, 8),
-    assistantTimeoutMs: boundedInteger(input.assistantTimeoutMs, 12_000, 4_000, 20_000),
+    assistantMaxSteps: boundedInteger(input.assistantMaxSteps, 3, 2, 8),
+    assistantTimeoutMs: boundedInteger(input.assistantTimeoutMs, 20_000, 4_000, 30_000),
     assistantReasoningEffort: normalizeReasoningEffort(input.assistantReasoningEffort),
   };
   if (input.apiKey !== undefined) writeProtected(KEY_PATH, input.apiKey, "API Key");
@@ -126,8 +126,8 @@ function normalizeStoredConfig(value: StoredRouterConfig): Required<StoredRouter
     assistantInstructions: boundedOptionalText(value.assistantInstructions, "导购补充指引", 4_000),
     assistantMaxOutputTokens: boundedInteger(value.assistantMaxOutputTokens, 320, 64, 512),
     assistantTemperature: boundedNumber(value.assistantTemperature, 0.2, 0, 1),
-    assistantMaxSteps: boundedInteger(value.assistantMaxSteps, 4, 3, 8),
-    assistantTimeoutMs: boundedInteger(value.assistantTimeoutMs, 12_000, 4_000, 20_000),
+    assistantMaxSteps: boundedInteger(value.assistantMaxSteps, 3, 2, 8),
+    assistantTimeoutMs: boundedInteger(value.assistantTimeoutMs, 20_000, 4_000, 30_000),
     assistantReasoningEffort: normalizeReasoningEffort(value.assistantReasoningEffort),
   };
 }
