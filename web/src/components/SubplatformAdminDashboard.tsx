@@ -17,11 +17,15 @@ import type { SubplatformConfig } from "../subplatform";
 import { SectionHeading } from "./Primitives";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
+import { SellerDashboard } from "./SellerDashboard";
+import type { InterfaceLocale } from "../lib/preferences";
 
 export function SubplatformAdminDashboard({
+  locale,
   onNotice,
   subplatform,
 }: {
+  locale: InterfaceLocale;
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
 }) {
@@ -125,15 +129,17 @@ export function SubplatformAdminDashboard({
     <div className="dashboard subplatform-admin-dashboard">
       <section className="workspace-heading">
         <div>
-          <p className="eyebrow">店铺运营 · {subplatform.label || subplatform.brandName}</p>
-          <h1>管理这家店铺的通知邮件</h1>
-          <p>该 SMTP 配置只用于本店铺通知；商城统一管理顾客账号、权限和审计。</p>
+          <h1>管理 {subplatform.label || subplatform.brandName}</h1>
+          <p>先管理商品和联系申请；店面资料、团队和通知配置在后面。</p>
         </div>
         <span className="seller-mode-note"><ShieldCheck size={16} aria-hidden="true" /> 仅当前店铺</span>
       </section>
 
+      <SellerDashboard locale={locale} onNotice={onNotice} subplatform={subplatform} />
+
       <section className="surface seller-upload" aria-labelledby="email-config-title">
-        <SectionHeading eyebrow="邮箱服务器" title="配置登录邮件与通知发送方" titleId="email-config-title" />
+        <SectionHeading title="通知邮件" titleId="email-config-title" />
+        <p className="seller-upload-intro">可选。这里只发送本店铺的通知，不会影响商城账号登录或密码重置邮件。</p>
         <form className="seller-upload-form" onSubmit={save}>
           <label htmlFor="email-provider-key"><span>发信标识</span><Input id="email-provider-key" value={providerKey} onChange={(event) => setProviderKey(event.target.value)} placeholder="店铺自己的标识" /></label>
           <label htmlFor="email-smtp-host"><span>SMTP 主机</span><Input id="email-smtp-host" value={smtpHost} onChange={(event) => setSmtpHost(event.target.value)} placeholder="smtp.example.com" /></label>

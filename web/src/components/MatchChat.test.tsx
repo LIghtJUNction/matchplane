@@ -79,4 +79,17 @@ describe("MatchChat sending state", () => {
     expect(askMallShoppingAssistant).toHaveBeenCalledWith("你可以干什么", "capability");
     expect(screen.queryByText(/暂时没有找到合适的在售商品/)).not.toBeInTheDocument();
   });
+
+  it("keeps a simple calculation in the conversational Agent path", async () => {
+    const user = userEvent.setup();
+    render(<MatchChat onNotice={vi.fn()} subplatform={subplatform} />);
+    const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
+
+    await user.type(input, "1+1等于多少");
+    await user.click(screen.getByRole("button", { name: "发送需求" }));
+
+    expect(await screen.findByText("这是模型生成的导购回答。")).toBeInTheDocument();
+    expect(searchMallCatalog).not.toHaveBeenCalled();
+    expect(askMallShoppingAssistant).toHaveBeenCalledWith("1+1等于多少", "conversation");
+  });
 });

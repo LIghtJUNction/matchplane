@@ -6,18 +6,16 @@ import {
   ChevronLeft,
   LogIn,
   LogOut,
-  Settings2,
+  Store,
   UserRound,
 } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 
 import { BuyerDashboard } from "./components/BuyerDashboard";
-import { ContactProfileCard } from "./components/ContactProfileCard";
 import { ListingSheet, ModeDialog } from "./components/Overlays";
 import { PlatformDashboard } from "./components/PlatformDashboard";
 import { PreferenceControls } from "./components/PreferenceControls";
 import { Brand, spring } from "./components/Primitives";
-import { SellerDashboard } from "./components/SellerDashboard";
 import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
 import { PluginHost } from "./components/PluginHost";
 import { MatchChat } from "./components/MatchChat";
@@ -37,11 +35,13 @@ import {
   createMarketplaceIntent,
   createMarketplaceSalesHandoff,
   getMarketplaceProfile,
+  getOwnedStores,
   requestMarketplaceContact,
   createBuyerIntroduction,
   clearPartySessionCache,
   getPaymentSetting,
   type RecommendedBackendListing,
+  type StoreSummary,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
   switchPaymentMode,
@@ -73,11 +73,15 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [myStoresOpen, setMyStoresOpen] = useState(false);
+  const [storeConsoleOpen, setStoreConsoleOpen] = useState(false);
+  const [storeConsoleRequested, setStoreConsoleRequested] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [pluginFailed, setPluginFailed] = useState(false);
+  const [ownedStores, setOwnedStores] = useState<StoreSummary[]>([]);
+  const [ownedStoresResolved, setOwnedStoresResolved] = useState(false);
   // Keep the requested destination independent from the URL that hydration normalizes to the
   // safe buyer surface. Otherwise `?role=platform` can be overwritten before Better Auth
   // resolves, which silently strands a valid administrator in the buyer workspace.
@@ -112,7 +116,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       cleanWorkspaceTarget = true;
     }
     if (url.searchParams.get("console") === "products") {
-      setSettingsOpen(true);
+      setStoreConsoleRequested(true);
       url.searchParams.delete("console");
       cleanWorkspaceTarget = true;
     }
@@ -175,6 +179,38 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     };
   }, [subplatform.slug]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!authUser?.id) {
+      setOwnedStores([]);
+      setOwnedStoresResolved(false);
+      return () => { cancelled = true; };
+    }
+    setOwnedStoresResolved(false);
+    void getOwnedStores()
+      .then((stores) => { if (!cancelled) setOwnedStores(stores); })
+      .catch(() => { if (!cancelled) setOwnedStores([]); })
+      .finally(() => { if (!cancelled) setOwnedStoresResolved(true); });
+    return () => { cancelled = true; };
+  }, [authUser?.id]);
+
+  const managesCurrentStore = subplatform.slug !== "root"
+    && ownedStores.some((store) => store.path === subplatform.path);
+
+  useEffect(() => {
+    if (!storeConsoleRequested || !ownedStoresResolved) return;
+    setStoreConsoleRequested(false);
+    if (!authUser) {
+      window.location.assign(loginHref("buyer"));
+      return;
+    }
+    if (!managesCurrentStore) {
+      setNotice("只有店主或店铺运营人员可以管理这家店");
+      return;
+    }
+    setStoreConsoleOpen(true);
+  }, [authUser, managesCurrentStore, ownedStoresResolved, storeConsoleRequested]);
+
   const openSignIn = () => {
     window.location.assign(loginHref(role));
   };
@@ -185,7 +221,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       if (result.error) throw new Error(result.error.message || "退出登录失败");
       clearPartySessionCache();
       setAuthUser(null);
-      setSettingsOpen(false);
+      setMyStoresOpen(false);
+      setStoreConsoleOpen(false);
       setAccountOpen(false);
       setProfileOpen(false);
       setAccountMenuOpen(false);
@@ -246,9 +283,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     setNotice(`支付系统已切换为${nextMode === "test" ? "测试" : "生产"}模式`);
   };
 
-  const genericWorkspace: ReactNode = role === "subplatform_admin" ? (
-    <SubplatformAdminDashboard onNotice={setNotice} subplatform={subplatform} />
-  ) : role === "platform" ? (
+  const genericWorkspace: ReactNode = role === "platform" ? (
     <PlatformDashboard
       paymentMode={paymentMode}
       rootRole={authUser?.role}
@@ -264,7 +299,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const fullscreenPlugin = subplatform.slug !== "root"
     && Boolean(subplatform.pluginArtifact)
     && !pluginFailed
-    && role === "buyer";
+    && role === "buyer"
+    && !storeConsoleOpen
+    && !storeConsoleRequested;
   const pluginWorkspace = subplatform.pluginArtifact ? (
     <PluginHost
       fullscreen={fullscreenPlugin}
@@ -294,6 +331,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             >
               <ChevronLeft size={25} strokeWidth={1.75} aria-hidden="true" />
             </a>
+            {managesCurrentStore ? (
+              <button className="subplatform-manage-link" type="button" onClick={() => setStoreConsoleOpen(true)}>
+                <Store size={16} aria-hidden="true" />{ui.manageStore}
+              </button>
+            ) : null}
           </header>
         ) : (
           <header className="app-header">
@@ -348,7 +390,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                         <div className="account-menu-links">
                           <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setProfileOpen(true); }}><UserRound size={16} aria-hidden="true" />{ui.profile}</button>
                           <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setAccountOpen(true); }}><UserRound size={16} aria-hidden="true" />{ui.account}</button>
-                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><Settings2 size={16} aria-hidden="true" />{ui.console}</button>
+                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setMyStoresOpen(true); }}><Store size={16} aria-hidden="true" />{ui.myStores}</button>
                         </div>
                         <button className="account-menu-signout" type="button" role="menuitem" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
                       </div>
@@ -392,7 +434,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     />
                   )
                 ) : null}
-                {subplatform.pluginArtifact && (role === "platform" || role === "subplatform_admin" || (role === "buyer" && listings.length > 0))
+                {subplatform.pluginArtifact && (role === "platform" || (role === "buyer" && listings.length > 0))
                   ? pluginWorkspace
                   : genericWorkspace}
               </motion.div>
@@ -402,24 +444,29 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         {fullscreenPlugin ? null : <PlatformFooter subplatform={subplatform} />}
 
         {!authUser ? null : <WorkspaceSettingsDialog
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          title={ui.console}
-          description={ui.consoleDescription}
+          open={myStoresOpen}
+          onClose={() => setMyStoresOpen(false)}
+          title={ui.myStores}
+          description={ui.myStoresDescription}
           className="workspace-settings-dialog-wide"
-          closeLabel={ui.closeConsole}
-          backdropLabel={ui.closeConsoleDialog}
+          closeLabel={ui.closeMyStores}
+          backdropLabel={ui.closeMyStoresDialog}
         >
           <div className="workspace-settings-overview">
-            {subplatform.slug === "root" ? (
-              <HostedStoreOnboarding locale={locale} onNotice={setNotice} />
-            ) : (
-              <>
-                <ContactProfileCard locale={locale} subplatform={subplatform} role="buyer" onNotice={setNotice} />
-                <SellerDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} />
-              </>
-            )}
+            <HostedStoreOnboarding locale={locale} onNotice={setNotice} />
           </div>
+        </WorkspaceSettingsDialog>}
+
+        {!authUser || !managesCurrentStore ? null : <WorkspaceSettingsDialog
+          open={storeConsoleOpen}
+          onClose={() => setStoreConsoleOpen(false)}
+          title={ui.manageStore}
+          description={subplatform.label || subplatform.brandName}
+          className="workspace-settings-dialog-wide"
+          closeLabel={ui.closeStoreConsole}
+          backdropLabel={ui.closeStoreConsoleDialog}
+        >
+          <SubplatformAdminDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} />
         </WorkspaceSettingsDialog>}
 
         {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
@@ -603,12 +650,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 function roleFromLocation(): WorkspaceRole {
   if (typeof window === "undefined") return "buyer";
   const requested = new URLSearchParams(window.location.search).get("role");
-  return requested === "platform" || requested === "subplatform_admin" ? requested : "buyer";
+  return requested === "platform" ? requested : "buyer";
 }
 
 /** Administration is authenticated; the public matching conversation remains available to visitors. */
 function requiresAuthenticatedWorkspace(role: WorkspaceRole): boolean {
-  return role === "platform" || role === "subplatform_admin";
+  return role === "platform";
 }
 
 /** Keep the intended workspace through Better Auth without trusting an external redirect. */
@@ -626,18 +673,15 @@ function parentPlatformHref(path: string, role: WorkspaceRole): string {
 }
 
 function roleLabel(role: WorkspaceRole, locale: "zh" | "en", subplatform: SubplatformConfig): string {
+  void subplatform;
   if (locale === "en") {
     return role === "buyer"
       ? "Account"
-      : role === "subplatform_admin"
-          ? subplatformCopy(subplatform, "subplatformAdminLabelEn", "Store operator")
-          : subplatformCopy(subplatform, "platformAdminLabelEn", "Mall operator");
+      : "Mall operator";
   }
   return role === "buyer"
     ? "统一账号"
-    : role === "subplatform_admin"
-        ? subplatformCopy(subplatform, "subplatformAdminLabel", "店铺运营")
-        : subplatformCopy(subplatform, "platformAdminLabel", "商城运营");
+    : "商城运营";
 }
 
 function appCopy(locale: "zh" | "en") {
@@ -646,10 +690,13 @@ function appCopy(locale: "zh" | "en") {
       skipToContent: "Skip to content",
       backToParent: "Back to mall",
       rootPlatform: "Mall",
-      console: "Console",
-      consoleDescription: "Open and manage your stores.",
-      closeConsole: "Close console",
-      closeConsoleDialog: "Close console dialog",
+      myStores: "My stores",
+      myStoresDescription: "Open a store or manage one you already run.",
+      closeMyStores: "Close my stores",
+      closeMyStoresDialog: "Close my stores dialog",
+      manageStore: "Manage this store",
+      closeStoreConsole: "Close store management",
+      closeStoreConsoleDialog: "Close store management dialog",
       account: "Account",
       accountMenu: "Account menu",
       accountDescription: "Manage your account identity and sign out.",
@@ -675,10 +722,13 @@ function appCopy(locale: "zh" | "en") {
     skipToContent: "跳到主要内容",
     backToParent: "返回商城",
     rootPlatform: "商城首页",
-    console: "控制台",
-    consoleDescription: "开设和管理你的店铺。",
-    closeConsole: "关闭控制台",
-    closeConsoleDialog: "关闭控制台对话框",
+    myStores: "我的店铺",
+    myStoresDescription: "开设店铺，或管理你已经在经营的店铺。",
+    closeMyStores: "关闭我的店铺",
+    closeMyStoresDialog: "关闭我的店铺对话框",
+    manageStore: "管理这家店",
+    closeStoreConsole: "关闭店铺管理",
+    closeStoreConsoleDialog: "关闭店铺管理对话框",
     account: "账号",
     accountMenu: "账号菜单",
     accountDescription: "管理当前账号与登录状态。",

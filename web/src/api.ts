@@ -1165,7 +1165,7 @@ export async function searchMallCatalog(input: {
 
 export async function askMallShoppingAssistant(
   question: string,
-  mode: "capability" | "shopping" = "capability",
+  mode: "capability" | "shopping" | "conversation" = "capability",
 ): Promise<{ requestId: string; answer: string }> {
   const response = await fetch("/api/mall/assistant", {
     method: "POST",

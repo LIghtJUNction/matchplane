@@ -33,7 +33,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const question = typeof body.question === "string" ? body.question.trim() : "";
   if (!question || question.length > MAX_QUESTION_LENGTH) return error("请用 1 到 2000 个字符提问", 400);
-  const mode = body.mode === "shopping" ? "shopping" : "capability";
+  const mode = body.mode === "shopping" || body.mode === "conversation" ? body.mode : "capability";
   if (!isPlatformRouterConfigured()) return error("商城 AI 导购尚未配置完整，请稍后再试。", 503);
   const tenantId = configuredTenantId();
   if (!tenantId) return error("商城尚未完成初始化", 503);

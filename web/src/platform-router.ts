@@ -280,7 +280,7 @@ export function isPlatformRouterConfigured(): boolean {
 export async function answerPlatformShoppingQuestion(input: {
   question: string;
   stores: PublicStore[];
-  mode: "capability" | "shopping";
+  mode: "capability" | "shopping" | "conversation";
   admitCall?: () => Promise<void>;
 }): Promise<PlatformAssistantReply> {
   const router = configuredPlatformRouter();
@@ -310,8 +310,10 @@ export async function answerPlatformShoppingQuestion(input: {
         router.assistantInstructions,
         input.mode === "shopping"
           ? "你是商城的 AI 导购。先读取公开店铺目录，再用公开商品检索工具核实用户的购物需求；没有匹配商品时，诚实说明并追问预算、用途、时间或不能妥协的条件。"
-          : "你是商城的 AI 导购。先读取公开店铺目录，再自然地回答用户关于你能做什么或如何使用商城的问题。",
-        "对于具体购物需求，调用 search_public_products；需要并列分析时调用 compare_products；涉及总价或数量时调用 calculate_total。只能使用工具返回的店铺、商品、价格和状态，绝不能编造商品、库存、价格、卖家或联系方式。不得调用未声明的工具，不得索取敏感信息。最终回答不使用 Markdown 标题或项目符号，控制在 180 个汉字内。",
+          : input.mode === "capability"
+            ? "你是商城的 AI 导购。先读取公开店铺目录，再自然地回答用户关于商城、你能做什么或如何使用商城的问题。"
+            : "你正在和用户正常对话。不要为了显得像导购而反复自我介绍、强行把话题带回买车，或声称不能做简单计算。普通寒暄、身份说明和非购物问题都自然简短回答；简单四则计算必须调用 calculate_numbers。只有用户明确询问商城、店铺或商品时，才调用相应查询工具。",
+        "对于具体购物需求，调用 search_public_products；需要并列分析时调用 compare_products；涉及商品总价或数量时调用 calculate_total。只能使用工具返回的店铺、商品、价格和状态，绝不能编造商品、库存、价格、卖家或联系方式。不得调用未声明的工具，不得索取敏感信息。最终回答不使用 Markdown 标题或项目符号，控制在 180 个汉字内。",
       ].filter(Boolean).join("\n\n"),
       prompt: question,
       tools: {
@@ -355,7 +357,23 @@ export async function answerPlatformShoppingQuestion(input: {
           execute: async ({ amounts, quantities }) => {
             if (amounts.length !== quantities.length) return { error: "amounts 与 quantities 长度必须一致" };
             const total = amounts.reduce((sum, amount, index) => sum + amount * quantities[index]!, 0);
-            return { totalMinor: total };
+            return { totalMinor: total, total };
+          },
+        }),
+        calculate_numbers: tool({
+          description: "计算两个数字的加、减、乘、除。用于非购物的简单算术。",
+          inputSchema: z.object({
+            left: z.number().finite(),
+            right: z.number().finite(),
+            operation: z.enum(["add", "subtract", "multiply", "divide"]),
+          }),
+          execute: async ({ left, right, operation }) => {
+            if (operation === "divide" && right === 0) return { error: "不能除以零" };
+            const result = operation === "add" ? left + right
+              : operation === "subtract" ? left - right
+                : operation === "multiply" ? left * right
+                  : left / right;
+            return { result };
           },
         }),
       },
@@ -368,7 +386,8 @@ export async function answerPlatformShoppingQuestion(input: {
         // `tool_choice: required`. Limit the available tool for the early steps and
         // make the system instruction explicit; this keeps the loop agentic without
         // turning a provider-specific limitation into a user-visible failure.
-        if (stepNumber === 0) return { activeTools: ["list_public_stores"], toolChoice: "auto" as const };
+        if (stepNumber === 0 && input.mode !== "conversation") return { activeTools: ["list_public_stores"], toolChoice: "auto" as const };
+        if (stepNumber === 0) return { activeTools: ["calculate_numbers"], toolChoice: "auto" as const };
         if (input.mode === "shopping" && stepNumber === 1) return { activeTools: ["search_public_products"], toolChoice: "auto" as const };
         return { toolChoice: "auto" as const };
       },

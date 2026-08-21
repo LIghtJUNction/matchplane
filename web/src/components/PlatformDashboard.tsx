@@ -3,8 +3,8 @@ import {
   Archive,
   BanknoteArrowDown,
   Bot,
+  ChevronLeft,
   CreditCard,
-  FileCheck2,
   GitBranch,
   HandCoins,
   Palette,
@@ -26,6 +26,7 @@ import {
   getSubplatformOrganizations,
   getRefundAdminRecords,
   createAdminRefund,
+  createRootPlatformOrganization,
   isLiveMarketplaceEnabled,
   activateSubplatform,
   createPlatformDomain,
@@ -71,7 +72,7 @@ interface PlatformDashboardProps {
   onNotice: (message: string) => void;
 }
 
-type PlatformSection = "ai" | "brand" | "tree" | "access" | "payments" | "finance" | "site";
+type PlatformSection = "home" | "ai" | "brand" | "tree" | "access" | "payments" | "finance";
 
 export function PlatformDashboard({
   paymentMode,
@@ -81,7 +82,7 @@ export function PlatformDashboard({
   onNotice,
 }: PlatformDashboardProps) {
   const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
-  const [activeSection, setActiveSection] = useState<PlatformSection>("access");
+  const [activeSection, setActiveSection] = useState<PlatformSection>("home");
   const [aiStatus, setAiStatus] = useState<PlatformAiStatus | null>(null);
   const [domains, setDomains] = useState<PlatformDomainRecord[]>([]);
   const [subplatforms, setSubplatforms] = useState<SubplatformOrganizationRecord[]>([]);
@@ -279,15 +280,39 @@ export function PlatformDashboard({
     setDomains(records);
   };
 
+  const initializeRootOrganization = async () => {
+    if (!setup?.root.tenantExists || !setup.root.tenant) {
+      onNotice("根商城尚未由部署工具创建，暂时不能在网页中继续初始化");
+      return;
+    }
+    if (rootRole !== "rootSuperAdmin") {
+      onNotice("只有商城负责人可以创建根商城组织");
+      return;
+    }
+    setSaving(true);
+    try {
+      const organization = await createRootPlatformOrganization({
+        name: setup.root.tenant.name,
+        slug: setup.root.tenant.slug,
+      });
+      await refreshDomains();
+      onNotice(`商城组织“${organization.name}”已创建`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "商城组织创建失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const submitDomain = async () => {
     const slug = domainSlug.trim().toLowerCase();
     const name = domainName.trim();
     if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) {
-      onNotice("domain slug 只能使用小写字母、数字和短横线");
+      onNotice("商品范围地址标识只能使用小写字母、数字和短横线");
       return;
     }
     if (!name || name.length > 200) {
-      onNotice("domain 名称必须为 1..200 个字符");
+      onNotice("商品范围名称必须为 1..200 个字符");
       return;
     }
     setSaving(true);
@@ -297,9 +322,9 @@ export function PlatformDashboard({
       setDomainSlug("");
       setDomainName("");
       setDomainEditorOpen(false);
-      onNotice(`domain ${slug} 已创建`);
+      onNotice(`商品范围“${name}”已创建`);
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "domain 创建失败");
+      onNotice(error instanceof Error ? error.message : "商品范围创建失败");
     } finally {
       setSaving(false);
     }
@@ -671,37 +696,42 @@ export function PlatformDashboard({
     <div className="dashboard platform-dashboard">
       <section className="workspace-heading platform-heading">
         <div>
-          <p className="eyebrow">商城运营</p>
-          <h1>商城控制台</h1>
-          <p>管理店铺接入、团队、商城外观和可选的线上支付。</p>
+          <a className="platform-back-link" href="/"><ChevronLeft size={16} aria-hidden="true" />返回商城</a>
+          <h1>商城后台</h1>
+          <p>管理商城、店铺、商品、团队与 AI 服务。</p>
         </div>
       </section>
 
       <div className="platform-admin-shell">
         <nav className="platform-admin-nav" role="tablist" aria-label="商城管理分区">
-          <button id="platform-tab-brand" type="button" role="tab" aria-selected={activeSection === "brand"} aria-controls="platform-panel-brand" className={activeSection === "brand" ? "is-active" : ""} onClick={() => setActiveSection("brand")}><Palette size={17} aria-hidden="true" /><span>品牌</span></button>
+          <button id="platform-tab-home" type="button" role="tab" aria-selected={activeSection === "home"} aria-controls="platform-panel-home" className={activeSection === "home" ? "is-active" : ""} onClick={() => setActiveSection("home")}><ShieldCheck size={17} aria-hidden="true" /><span>首页</span></button>
+          <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>店铺与商品</span></button>
+          <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>用户与团队</span></button>
           <button id="platform-tab-ai" type="button" role="tab" aria-selected={activeSection === "ai"} aria-controls="platform-panel-ai" className={activeSection === "ai" ? "is-active" : ""} onClick={() => setActiveSection("ai")}><Bot size={17} aria-hidden="true" /><span>AI</span></button>
-          <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>店铺接入</span></button>
-          <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>团队与服务</span></button>
+          <button id="platform-tab-brand" type="button" role="tab" aria-selected={activeSection === "brand"} aria-controls="platform-panel-brand" className={activeSection === "brand" ? "is-active" : ""} onClick={() => setActiveSection("brand")}><Palette size={17} aria-hidden="true" /><span>商城设置</span></button>
           <button id="platform-tab-payments" type="button" role="tab" aria-selected={activeSection === "payments"} aria-controls="platform-panel-payments" className={activeSection === "payments" ? "is-active" : ""} onClick={() => setActiveSection("payments")}><CreditCard size={17} aria-hidden="true" /><span>支付（可选）</span></button>
           <button id="platform-tab-finance" type="button" role="tab" aria-selected={activeSection === "finance"} aria-controls="platform-panel-finance" className={activeSection === "finance" ? "is-active" : ""} onClick={() => setActiveSection("finance")}><ReceiptText size={17} aria-hidden="true" /><span>财务与退款</span></button>
-          <button id="platform-tab-site" type="button" role="tab" aria-selected={activeSection === "site"} aria-controls="platform-panel-site" className={activeSection === "site" ? "is-active" : ""} onClick={() => setActiveSection("site")}><FileCheck2 size={17} aria-hidden="true" /><span>网站与合规</span></button>
         </nav>
 
         <div className="platform-admin-content">
           <div className="platform-layout">
+        <section id="platform-panel-home" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-home" hidden={activeSection !== "home"}>
+          <MallInitializationPanel
+            setup={setup}
+            rootRole={rootRole}
+            aiStatus={aiStatus}
+            saving={saving}
+            onInitializeRoot={() => void initializeRootOrganization()}
+            onOpenStores={(openScope) => { setActiveSection("tree"); if (openScope) setDomainEditorOpen(true); }}
+            onOpenSettings={() => setActiveSection("brand")}
+            onOpenAi={() => setActiveSection("ai")}
+          />
+        </section>
         <div id="platform-panel-brand" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-brand" hidden={activeSection !== "brand"}>
           <MallBrandPanel rootRole={rootRole} onBrandUpdated={onBrandUpdated} onNotice={onNotice} />
-        </div>
-        <section id="platform-panel-ai" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-ai" hidden={activeSection !== "ai"}>
-          <PlatformAiConfigPanel rootRole={rootRole} onNotice={onNotice} />
-        </section>
-
-        <section className="platform-component-panel" aria-label="账号与邮箱服务" hidden={activeSection !== "access"}>
-          <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
-        </section>
-
-        <div id="platform-panel-site" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-site" hidden={activeSection !== "site"}>
+          <section className="platform-component-panel" aria-label="商城账号邮件服务">
+            <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
+          </section>
           <PlatformSiteSettingsPanel
             organizationId={setup?.root.organization?.id}
             platformPath="/"
@@ -709,8 +739,25 @@ export function PlatformDashboard({
             onNotice={onNotice}
           />
         </div>
+        <section id="platform-panel-ai" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-ai" hidden={activeSection !== "ai"}>
+          <PlatformAiConfigPanel rootRole={rootRole} onNotice={onNotice} />
+        </section>
 
         <section id="platform-panel-tree" className="surface subplatform-panel" role="tabpanel" aria-labelledby="platform-tab-tree" hidden={activeSection !== "tree"}>
+          <section className="product-scope-panel" aria-labelledby="product-scope-title">
+            <div>
+              <h2 id="product-scope-title">商品范围</h2>
+              <p>每家店铺都归入一个商品范围，方便审核、搜索和权限管理。</p>
+            </div>
+            {domains.length ? <ul className="product-scope-list">{domains.map((domain) => <li key={domain.id}><strong>{domain.name}</strong><small>{domain.slug}</small></li>)}</ul> : <p className="product-scope-empty">还没有商品范围。先创建一个，再接入店铺。</p>}
+            {!domainEditorOpen ? <button className="button button-light" type="button" disabled={saving || !setup?.root.organization?.id} onClick={() => setDomainEditorOpen(true)}>新建商品范围</button> : (
+              <form className="product-scope-form" onSubmit={(event) => { event.preventDefault(); void submitDomain(); }}>
+                <label><span>名称</span><input value={domainName} onChange={(event) => setDomainName(event.target.value)} placeholder="例如：汽车" maxLength={200} /></label>
+                <label><span>地址标识</span><input value={domainSlug} onChange={(event) => setDomainSlug(event.target.value.toLowerCase())} placeholder="automotive" maxLength={63} /></label>
+                <div><button className="button button-dark" type="submit" disabled={saving}>{saving ? "创建中…" : "创建商品范围"}</button><button className="text-action" type="button" onClick={() => setDomainEditorOpen(false)}>取消</button></div>
+              </form>
+            )}
+          </section>
           <div className="subplatform-header">
             <div>
               <h2 id="subplatform-title">本地店铺</h2>
@@ -961,6 +1008,60 @@ export function PlatformDashboard({
         onConfirm={confirmInvoiceModeChange}
       />
     </div>
+  );
+}
+
+function MallInitializationPanel({
+  setup,
+  rootRole,
+  aiStatus,
+  saving,
+  onInitializeRoot,
+  onOpenStores,
+  onOpenSettings,
+  onOpenAi,
+}: {
+  setup: PlatformSetupStatus | null;
+  rootRole?: string | null;
+  aiStatus: PlatformAiStatus | null;
+  saving: boolean;
+  onInitializeRoot: () => void;
+  onOpenStores: (openScope: boolean) => void;
+  onOpenSettings: () => void;
+  onOpenAi: () => void;
+}) {
+  const rootReady = Boolean(setup?.root.organization);
+  const scopeReady = Boolean(setup?.domains.length);
+  const firstStoreReady = (setup?.routing.activeChildren ?? 0) > 0;
+  const aiReady = aiStatus?.router.configured === true;
+
+  return (
+    <section className="surface mall-initialization" aria-labelledby="mall-initialization-title">
+      <h2 id="mall-initialization-title">开始配置商城</h2>
+      <p>按顺序完成下面几项，访客就能浏览店铺并使用 AI 导购。</p>
+      <ol className="mall-initialization-list">
+        <li className={rootReady ? "is-complete" : ""}>
+          <div><strong>商城组织</strong><small>{rootReady ? "已就绪" : "建立商城团队和管理边界"}</small></div>
+          {rootReady ? <span>已完成</span> : setup?.root.tenantExists && rootRole === "rootSuperAdmin" ? <button type="button" disabled={saving} onClick={onInitializeRoot}>{saving ? "创建中…" : "创建"}</button> : <span>{setup?.root.tenantExists ? "需要商城负责人" : "请先完成服务器初始化"}</span>}
+        </li>
+        <li className={scopeReady ? "is-complete" : ""}>
+          <div><strong>商品范围</strong><small>{scopeReady ? `已创建 ${setup?.domains.length} 个范围` : "给店铺的商品确定审核与搜索范围"}</small></div>
+          {scopeReady ? <button type="button" onClick={() => onOpenStores(true)}>管理</button> : <button type="button" disabled={!rootReady} onClick={() => onOpenStores(true)}>创建</button>}
+        </li>
+        <li>
+          <div><strong>商城设置</strong><small>品牌、用户协议、隐私政策和账号邮件。</small></div>
+          <button type="button" disabled={!rootReady} onClick={onOpenSettings}>配置</button>
+        </li>
+        <li className={aiReady ? "is-complete" : ""}>
+          <div><strong>AI 导购</strong><small>{aiReady ? "已连接模型服务" : "连接模型后，访客即可询问和选购"}</small></div>
+          <button type="button" onClick={onOpenAi}>{aiReady ? "查看" : "配置"}</button>
+        </li>
+        <li className={firstStoreReady ? "is-complete" : ""}>
+          <div><strong>第一家店铺</strong><small>{firstStoreReady ? "已有公开可浏览的店铺" : "接入本地或远程店铺，并审核商品"}</small></div>
+          <button type="button" disabled={!scopeReady} onClick={() => onOpenStores(false)}>{firstStoreReady ? "管理" : "接入"}</button>
+        </li>
+      </ol>
+    </section>
   );
 }
 

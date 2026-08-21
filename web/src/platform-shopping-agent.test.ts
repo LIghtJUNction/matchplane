@@ -81,6 +81,7 @@ describe("platform shopping agent", () => {
       search_public_products: expect.anything(),
       compare_products: expect.anything(),
       calculate_total: expect.anything(),
+      calculate_numbers: expect.anything(),
     }));
     expect(options.stopWhen).toEqual({ count: 4 });
     expect(options.providerOptions).toEqual({ matchplane: { reasoningEffort: "low" } });

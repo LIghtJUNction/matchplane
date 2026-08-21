@@ -117,7 +117,7 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
         </div>
         <div className="platform-ai-tools seller-upload-wide" aria-label="导购 Agent 工具">
           <strong>导购 Agent 工具</strong>
-          <span>公开店铺目录</span><span>公开商品检索</span><span>商品比较</span><span>购物计算</span>
+          <span>公开店铺目录</span><span>公开商品检索</span><span>商品比较</span><span>购物计算</span><span>基础计算</span>
           <small>工具结果由服务端重新读取；模型不能读取联系方式、密钥或未审核商品。</small>
         </div>
         <div className="seller-upload-wide root-email-actions">

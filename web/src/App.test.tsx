@@ -35,7 +35,7 @@ import { authClient } from "./lib/auth-client";
 
 async function openConsoleFromAccountMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(await screen.findByRole("button", { name: "账号菜单" }));
-  await user.click(await screen.findByRole("menuitem", { name: "控制台" }));
+  await user.click(await screen.findByRole("menuitem", { name: "我的店铺" }));
 }
 
 beforeEach(() => {
@@ -135,7 +135,7 @@ describe("MatchPlane workspaces", () => {
     expect(await screen.findByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 
-  it("gives every signed-in account one console for opening and entering its stores", async () => {
+  it("keeps store opening behind the account's explicit My stores entry", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
@@ -157,14 +157,92 @@ describe("MatchPlane workspaces", () => {
           assets: { hosted: { entry: "index.html", url: "/api/platform/plugin-assets/used-car/index.html?build=test", digest: "a".repeat(64) } },
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
+      if (url === "/api/stores?mine=1") {
+        return new Response(JSON.stringify({ stores: [{
+          id: "33333333-3333-4333-8333-333333333333",
+          slug: "used-car",
+          path: "/used-car",
+          displayName: "Matx Auto",
+          description: "二手车",
+          integrationKind: "package",
+          status: "active",
+        }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ error: "test service unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+    });
+
+    render(<App initialPath="/used-car" />);
+
+    expect(await screen.findByRole("dialog", { name: "管理这家店" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "管理 Matx Auto" })).toBeInTheDocument();
+    expect(window.location.search).not.toContain("console");
+  });
+
+  it("does not expose store management from a copied product-console link", async () => {
+    window.history.replaceState(null, "", "/used-car?console=products");
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith("/api/platform/manifest?path=")) {
+        return new Response(JSON.stringify({
+          displayName: "Matx Auto",
+          assets: { hosted: { entry: "index.html", url: "/api/platform/plugin-assets/used-car/index.html?build=test", digest: "a".repeat(64) } },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url === "/api/stores?mine=1") {
+        return new Response(JSON.stringify({ stores: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
       return new Response(JSON.stringify({ error: "test service unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
     });
 
     render(<App initialPath="/used-car" />);
 
     expect(await screen.findByTitle("Matx Auto buyer 工作台")).toBeInTheDocument();
-    expect(await screen.findByRole("dialog", { name: "控制台" })).toBeInTheDocument();
-    expect(window.location.search).not.toContain("console");
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("只有店主或店铺运营人员可以管理这家店"));
+    expect(screen.queryByRole("dialog", { name: "管理这家店" })).not.toBeInTheDocument();
+  });
+
+  it("starts the mall backend with an actionable setup checklist", async () => {
+    window.history.replaceState(null, "", "/?role=platform");
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/platform/setup") {
+        return new Response(JSON.stringify({
+          status: "ok",
+          root: {
+            tenantConfigured: true,
+            tenantExists: true,
+            tenantId: "11111111-1111-4111-8111-111111111111",
+            tenant: { slug: "matchplane", name: "MatchPlane" },
+            organization: null,
+            rootAdminConfigured: true,
+            identityAccounts: 1,
+            rootAdminAccounts: 1,
+          },
+          domains: [],
+          registrations: {},
+          routing: { activeChildren: 0, ready: false },
+          hostedAgent: { configured: false, status: "fallback" },
+          builder: { configured: false, status: "unconfigured" },
+          firstRun: { needsRootAccount: false, readyForAdmin: true },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url === "/api/platform/domains") return new Response(JSON.stringify({ domains: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url === "/api/platform/ai/status") return new Response(JSON.stringify({
+        router: { configured: false, protocol: "openai-compatible", model: null, endpointOrigin: null, toolMode: "auto", maxInputCharacters: 24000, maxOutputTokens: 320, totalTimeoutMs: 20000, maxSteps: 4, maxFanout: 4 },
+        auth: { password: true, emailOtp: false, phoneOtp: false, magicLink: false, passkey: true, primary: [], fallback: [] },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ error: "test service unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "开始配置商城" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "返回商城" })).toHaveAttribute("href", "/");
+    expect(screen.getByText("商城组织")).toBeInTheDocument();
+    expect(screen.getAllByText("商品范围").length).toBeGreaterThan(0);
+    expect(screen.getByText("第一家店铺")).toBeInTheDocument();
   });
 
   it("requires an explicit administrator confirmation before changing payment mode", async () => {
@@ -173,7 +251,7 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await screen.findByRole("heading", { name: "商城控制台" });
+    await screen.findByRole("heading", { name: "商城后台" });
     await user.click(screen.getByRole("tab", { name: "支付（可选）" }));
     await user.click(screen.getByRole("button", { name: "切换支付模式" }));
 
@@ -264,8 +342,8 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     await openConsoleFromAccountMenu(user);
-    expect(screen.getByRole("dialog", { name: "控制台" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭控制台" }));
+    expect(screen.getByRole("dialog", { name: "我的店铺" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭我的店铺" }));
 
     const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
     await user.click(input);

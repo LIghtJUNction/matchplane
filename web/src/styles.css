@@ -2684,6 +2684,28 @@ body,
   transform: scale(0.94);
 }
 
+.subplatform-manage-link {
+  min-height: 2.25rem;
+  margin-left: auto;
+  padding: 0 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  border: 1px solid var(--line);
+  border-radius: 0.72rem;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+}
+
+.subplatform-manage-link:hover,
+.subplatform-manage-link:focus-visible {
+  border-color: var(--ink-soft);
+  background: var(--ivory);
+}
+
 main.subplatform-fullscreen-main {
   min-height: 0;
   padding: 0;
@@ -4907,6 +4929,20 @@ main.subplatform-fullscreen-main {
   font-size: clamp(2rem, 3.5vw, 3rem);
 }
 
+.platform-back-link {
+  width: fit-content;
+  margin-bottom: 0.68rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  text-decoration: none;
+}
+
+.platform-back-link:hover,
+.platform-back-link:focus-visible { color: var(--ink); text-decoration: underline; text-underline-offset: 0.2em; }
+
 .platform-admin-shell {
   margin-top: 1rem;
   display: grid;
@@ -4979,6 +5015,72 @@ main.subplatform-fullscreen-main {
 .platform-component-panel > .surface {
   width: 100%;
 }
+
+.mall-initialization {
+  max-width: 48rem;
+  padding: clamp(1.15rem, 3vw, 1.7rem);
+}
+
+.mall-initialization h2 {
+  font-size: clamp(1.35rem, 2.4vw, 1.8rem);
+  letter-spacing: -0.035em;
+}
+
+.mall-initialization > p {
+  max-width: 36rem;
+  margin-top: 0.42rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.mall-initialization-list {
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mall-initialization-list li {
+  min-height: 4.15rem;
+  padding: 0.72rem 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.mall-initialization-list li > div { min-width: 0; display: grid; gap: 0.16rem; }
+.mall-initialization-list strong { font-size: 0.78rem; }
+.mall-initialization-list small { color: var(--muted); font-size: 0.66rem; line-height: 1.45; }
+.mall-initialization-list > li > span { color: var(--muted); font-size: 0.66rem; white-space: nowrap; }
+.mall-initialization-list li.is-complete > span { color: var(--cactus-ink); }
+.mall-initialization-list button { min-height: 2.25rem; padding: 0 0.7rem; border: 1px solid var(--line); border-radius: 0.68rem; background: var(--paper); color: var(--ink); cursor: pointer; font: inherit; font-size: 0.68rem; }
+.mall-initialization-list button:hover:not(:disabled), .mall-initialization-list button:focus-visible { border-color: var(--ink-soft); background: var(--ivory); }
+.mall-initialization-list button:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.product-scope-panel {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1.25rem;
+  display: grid;
+  gap: 0.78rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.product-scope-panel h2 { font-size: 1.05rem; letter-spacing: -0.025em; }
+.product-scope-panel p { max-width: 38rem; margin-top: 0.28rem; color: var(--muted); font-size: 0.72rem; line-height: 1.55; }
+.product-scope-list { display: flex; flex-wrap: wrap; gap: 0.42rem; margin: 0; padding: 0; list-style: none; }
+.product-scope-list li { min-width: 9rem; padding: 0.55rem 0.65rem; display: grid; gap: 0.12rem; border: 1px solid var(--line); border-radius: 0.75rem; background: var(--paper); }
+.product-scope-list strong { font-size: 0.7rem; }
+.product-scope-list small { color: var(--muted); font-size: 0.62rem; }
+.product-scope-empty { margin: 0; }
+.product-scope-panel > .button { justify-self: start; }
+.product-scope-form { max-width: 42rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+.product-scope-form label { display: grid; gap: 0.32rem; color: var(--ink-soft); font-size: 0.66rem; font-weight: 650; }
+.product-scope-form input { width: 100%; min-height: 2.55rem; padding: 0 0.72rem; border: 1px solid var(--line); border-radius: 0.72rem; outline: 0; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.72rem; }
+.product-scope-form input:focus { border-color: var(--sky); box-shadow: 0 0 0 0.12rem rgba(106, 155, 204, 0.2); }
+.product-scope-form > div { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.8rem; }
+.product-scope-form .text-action { padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 0.68rem; }
 
 .payment-mode-control {
   margin-bottom: 1.2rem;
@@ -5514,6 +5616,8 @@ main.subplatform-fullscreen-main {
   .platform-admin-content .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .product-scope-form { grid-template-columns: minmax(0, 1fr); }
 
   .login-layout {
     min-height: 0;

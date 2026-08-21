@@ -798,8 +798,9 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     );
     setMessages((current) => [...current, { id: `${requestId}-user`, role: "user", text }]);
     try {
-      if (isShoppingAssistantQuestion(text)) {
-        const reply = await askMallShoppingAssistant(text, "capability");
+      const assistantMode = generalAssistantMode(text);
+      if (assistantMode) {
+        const reply = await askMallShoppingAssistant(text, assistantMode);
         setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: reply.answer }]);
         onNotice(reply.answer);
         return;
@@ -1066,10 +1067,14 @@ function publicAttachment(attachment: MarketplaceAttachment): Record<string, unk
   };
 }
 
-/** Capability questions use the configured conversational model; product requests keep canonical search. */
-function isShoppingAssistantQuestion(value: string): boolean {
+/** Keep normal conversation out of the shopping retrieval path without inventing a local answer. */
+function generalAssistantMode(value: string): "capability" | "conversation" | null {
   const normalized = value.trim().toLocaleLowerCase();
-  return /你会.{0,8}(什么|干什么|做什么)|你能.{0,8}(什么|干什么|做什么)|你可以.{0,8}(什么|干什么|做什么)|怎么(用|使用)|帮助|介绍一下|^(你好|嗨|hi|hello)[！!。？?\s]*$/i.test(normalized);
+  if (/你会.{0,8}(什么|干什么|做什么)|你能.{0,8}(什么|干什么|做什么)|你可以.{0,8}(什么|干什么|做什么)|怎么(用|使用)|帮助|介绍一下/.test(normalized)) return "capability";
+  if (/^(你好|嗨|hi|hello)[！!。？?\s]*$/i.test(normalized)
+    || /^(你是谁|你叫什么|在吗)[？?！!。\s]*$/i.test(normalized)
+    || /(?:等于多少|帮我算|计算一下|[0-9０-９]+\s*[+\-×xX*÷/]\s*[0-9０-９]+)/.test(normalized)) return "conversation";
+  return null;
 }
 
 /** Keep follow-up requests useful without sending an unbounded transcript to the router/model. */
