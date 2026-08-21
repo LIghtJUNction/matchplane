@@ -373,7 +373,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 {role === "buyer" ? (
                   subplatform.slug === "root" && listings.length === 0 ? (
                     <div className="mall-browse-scene">
-                      <StorefrontDirectory locale={locale} mallName={subplatform.brandName} />
+                      <StorefrontDirectory locale={locale} />
                       <MatchChat
                         role={role}
                         locale={locale}

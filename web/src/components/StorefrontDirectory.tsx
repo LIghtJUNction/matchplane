@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Sparkles, Store } from "lucide-react";
+import { ArrowUpRight, Store } from "lucide-react";
 
 import { getStores, type StoreSummary } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 
-export function StorefrontDirectory({ locale, mallName }: { locale: InterfaceLocale; mallName: string }) {
+export function StorefrontDirectory({ locale }: { locale: InterfaceLocale }) {
   const [stores, setStores] = useState<StoreSummary[]>([]);
   const [resolved, setResolved] = useState(false);
 
@@ -25,11 +25,6 @@ export function StorefrontDirectory({ locale, mallName }: { locale: InterfaceLoc
       <div className="storefront-map">
         <div className="storefront-map-road road-horizontal" aria-hidden="true" />
         <div className="storefront-map-road road-vertical" aria-hidden="true" />
-        <div className="storefront-map-hub">
-          <span aria-hidden="true"><Sparkles size={18} /></span>
-          <strong>{mallName}</strong>
-          <small>{locale === "en" ? "AI shopping desk" : "AI 导购台"}</small>
-        </div>
         {resolved && stores.length ? (
           <ul className="storefront-directory-list">
             {stores.map((store, index) => (

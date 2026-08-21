@@ -4,6 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const routePromise = vi.hoisted(() => ({ current: null as Promise<unknown> | null }));
 const resolveRoute = vi.hoisted(() => ({ current: null as (() => void) | null }));
+const searchMallCatalog = vi.hoisted(() => vi.fn(() => {
+  routePromise.current = new Promise((resolve) => { resolveRoute.current = () => resolve({
+    requestId: "11111111-1111-4111-8111-111111111111",
+    stores: [],
+    recommendations: [],
+    routing: { source: "policy_fallback", degraded: false, rationale: "none" },
+  }); });
+  return routePromise.current;
+}));
 
 vi.mock("../lib/auth-client", () => ({
   authClient: { getSession: vi.fn(async () => ({ data: { user: { id: "user-1" } } })) },
@@ -13,15 +22,7 @@ vi.mock("../lib/auth-client", () => ({
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
   isLiveMarketplaceEnabled: () => true,
-  searchMallCatalog: vi.fn(() => {
-    routePromise.current = new Promise((resolve) => { resolveRoute.current = () => resolve({
-      requestId: "11111111-1111-4111-8111-111111111111",
-      stores: [],
-      recommendations: [],
-      routing: { source: "policy_fallback", degraded: false, rationale: "none" },
-    }); });
-    return routePromise.current;
-  }),
+  searchMallCatalog,
 }));
 
 import { MatchChat } from "./MatchChat";
@@ -38,6 +39,7 @@ afterEach(() => {
   resolveRoute.current?.();
   routePromise.current = null;
   resolveRoute.current = null;
+  searchMallCatalog.mockClear();
 });
 
 describe("MatchChat sending state", () => {
@@ -56,5 +58,18 @@ describe("MatchChat sending state", () => {
     expect(document.querySelectorAll(".chat-typing-indicator span[aria-hidden='true']")).toHaveLength(3);
 
     resolveRoute.current?.();
+  });
+
+  it("answers a capability question without pretending it is an empty product search", async () => {
+    const user = userEvent.setup();
+    render(<MatchChat onNotice={vi.fn()} subplatform={subplatform} />);
+    const input = screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" });
+
+    await user.type(input, "你会干什么");
+    await user.click(screen.getByRole("button", { name: "发送需求" }));
+
+    expect(await screen.findByText(/我是商城的 AI 导购/)).toBeInTheDocument();
+    expect(searchMallCatalog).not.toHaveBeenCalled();
+    expect(screen.queryByText(/暂时没有找到合适的在售商品/)).not.toBeInTheDocument();
   });
 });

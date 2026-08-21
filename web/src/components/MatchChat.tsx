@@ -797,6 +797,12 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     );
     setMessages((current) => [...current, { id: `${requestId}-user`, role: "user", text }]);
     try {
+      const capabilityReply = shoppingAssistantCapabilityReply(text, locale);
+      if (capabilityReply) {
+        setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: capabilityReply }]);
+        onNotice(capabilityReply);
+        return;
+      }
       const result = await searchMallCatalog({
         narrative,
         ...(isRoot ? {} : { storePath: subplatform.path }),
@@ -808,8 +814,8 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
           ? `I found ${result.recommendations.length} products${storeNames.length ? ` from ${storeNames.join(", ")}` : ""}. I’ve ordered them by relevance so you can compare them below.`
           : `我找到了 ${result.recommendations.length} 件商品${storeNames.length ? `，来自${storeNames.join("、")}` : ""}。已经按相关性整理在下方，可以直接比较。`
         : locale === "en"
-          ? "I couldn’t find a matching product yet. Try adding a category, budget, brand, or must-have feature."
-          : "暂时没有找到合适的在售商品。可以补充品类、预算、品牌或必须具备的功能。";
+          ? `I couldn’t find an approved listing${storeNames.length ? ` in ${storeNames.join(", ")}` : ""} yet. Tell me the category, budget, and must-have features, and I’ll keep narrowing the search.`
+          : `我还没有找到已审核上架的商品${storeNames.length ? `（已查看${storeNames.join("、")}）` : ""}。告诉我品类、预算和不能妥协的条件，我会继续帮你缩小范围。`;
       setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: answer }]);
       onNotice(result.recommendations.length ? copy.buyerSuccess : answer);
     } catch (error) {
@@ -1064,6 +1070,16 @@ function publicAttachment(attachment: MarketplaceAttachment): Record<string, unk
     ...(attachment.duration_ms === undefined ? {} : { duration_ms: attachment.duration_ms }),
     ...(attachment.metadata === undefined ? {} : { metadata: attachment.metadata }),
   };
+}
+
+/** Keep capability questions conversational instead of falsely presenting them as an empty catalogue search. */
+function shoppingAssistantCapabilityReply(value: string, locale: InterfaceLocale): string | null {
+  const normalized = value.trim().toLocaleLowerCase();
+  const asksAboutAssistant = /你会.{0,8}(什么|干什么|做什么)|你能.{0,8}(什么|干什么|做什么)|怎么(用|使用)|帮助|介绍一下|^(你好|嗨|hi|hello)[！!。？?\s]*$/i.test(normalized);
+  if (!asksAboutAssistant) return null;
+  return locale === "en"
+    ? "I’m the mall’s shopping assistant. Tell me what you want, your budget, how you’ll use it, and any non-negotiables. I can search open stores, compare approved listings and prices, and explain the trade-offs."
+    : "我是商城的 AI 导购。告诉我想买什么、预算、用途和不能妥协的条件；我会在已上线店铺中找商品、比较价格和条件，并说明取舍。";
 }
 
 /** Keep follow-up requests useful without sending an unbounded transcript to the router/model. */

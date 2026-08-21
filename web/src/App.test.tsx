@@ -197,7 +197,7 @@ describe("MatchPlane workspaces", () => {
     await user.type(input, "我有一个需要被认真匹配的问题");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/暂时没有找到合适的在售商品/);
+    expect(await screen.findByRole("status")).toHaveTextContent(/我还没有找到已审核上架的商品/);
     expect(globalThis.fetch).toHaveBeenCalledWith("/api/mall/search", expect.objectContaining({ method: "POST" }));
   });
 
@@ -220,7 +220,7 @@ describe("MatchPlane workspaces", () => {
     expect(input).toHaveValue("第一行\n第二行");
     await user.keyboard("{Enter}");
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/暂时没有找到合适的在售商品/);
+    expect(await screen.findByRole("status")).toHaveTextContent(/我还没有找到已审核上架的商品/);
   });
 
   it("lets the user clear the visible conversation without leaving the page", async () => {
