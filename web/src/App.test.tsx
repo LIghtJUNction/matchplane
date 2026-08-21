@@ -280,7 +280,7 @@ describe("MatchPlane workspaces", () => {
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("这是模型生成的购物导购回答。");
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/mall/search", expect.objectContaining({ method: "POST" }));
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/mall/assistant", expect.objectContaining({ method: "POST" }));
   });
 
   it("submits with Enter while Shift+Enter keeps a multiline draft", async () => {

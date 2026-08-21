@@ -50,7 +50,6 @@ describe("platform shopping agent", () => {
 
     const reply = await answerPlatformShoppingQuestion({
       question: "预算 3000 元，想买通勤电脑",
-      mode: "shopping",
       stores: [{
         id: "11111111-1111-4111-8111-111111111111",
         slug: "electronics",
@@ -85,8 +84,8 @@ describe("platform shopping agent", () => {
     }));
     expect(options.stopWhen).toEqual({ count: 4 });
     expect(options.providerOptions).toEqual({ matchplane: { reasoningEffort: "low" } });
-    expect(options.prepareStep({ stepNumber: 0 })).toEqual({ activeTools: ["list_public_stores"], toolChoice: "auto" });
-    expect(options.prepareStep({ stepNumber: 1 })).toEqual({ activeTools: ["search_public_products"], toolChoice: "auto" });
+    expect(options.prepareStep({ stepNumber: 0 })).toEqual({ toolChoice: "auto" });
+    expect(options.prepareStep({ stepNumber: 1 })).toEqual({ toolChoice: "auto" });
     expect(options.prepareStep({ stepNumber: 2 })).toEqual({ toolChoice: "auto" });
     expect(options.prepareStep({ stepNumber: 3 })).toEqual({ activeTools: [], toolChoice: "none" });
   });

@@ -25,7 +25,7 @@ const GLOBAL_LIMIT = 120;
 /** Bounded, tool-calling conversational AI for the public shopping surface. */
 export async function POST(request: Request): Promise<Response> {
   if (!hasTrustedBrowserOrigin(request)) return error("请求来源未被商城信任", 403);
-  let body: { question?: unknown; mode?: unknown };
+  let body: { question?: unknown };
   try {
     body = await readJsonBody(request, 16 * 1024) as typeof body;
   } catch (cause) {
@@ -33,7 +33,6 @@ export async function POST(request: Request): Promise<Response> {
   }
   const question = typeof body.question === "string" ? body.question.trim() : "";
   if (!question || question.length > MAX_QUESTION_LENGTH) return error("请用 1 到 2000 个字符提问", 400);
-  const mode = body.mode === "shopping" || body.mode === "conversation" ? body.mode : "capability";
   if (!isPlatformRouterConfigured()) return error("商城 AI 导购尚未配置完整，请稍后再试。", 503);
   const tenantId = configuredTenantId();
   if (!tenantId) return error("商城尚未完成初始化", 503);
@@ -44,7 +43,6 @@ export async function POST(request: Request): Promise<Response> {
     const reply = await answerPlatformShoppingQuestion({
       question,
       stores,
-      mode,
       admitCall: async () => {
         const admitted = await admitPlatformAiCall({
           subject: identity.subject,
@@ -57,7 +55,7 @@ export async function POST(request: Request): Promise<Response> {
       },
     });
     await recordAssistantUsage({ requestId, subject: identity.subject, question, model: reply.model, usage: reply.usage });
-    const response = NextResponse.json({ requestId, answer: reply.text }, { headers: { "cache-control": "no-store" } });
+    const response = NextResponse.json({ requestId, answer: reply.text, recommendations: reply.recommendations }, { headers: { "cache-control": "no-store" } });
     if (identity.newCookie) response.cookies.set(GUEST_COOKIE, identity.newCookie, guestCookie());
     return response;
   } catch (cause) {

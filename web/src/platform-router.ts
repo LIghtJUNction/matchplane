@@ -15,6 +15,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { z } from "zod";
 import { searchPublicStoreOffers } from "./storefront-search";
 import type { PublicStore } from "./store-directory";
+import type { RecommendedBackendListing } from "./api";
 
 export interface PlatformRouteCandidate {
   slug: string;
@@ -64,6 +65,7 @@ export interface PlatformAssistantReply {
   text: string;
   model: string;
   usage: PlatformRouteUsage | null;
+  recommendations: RecommendedBackendListing[];
 }
 
 /** Raised when the platform's own model-call budget has no remaining admission. */
@@ -280,7 +282,6 @@ export function isPlatformRouterConfigured(): boolean {
 export async function answerPlatformShoppingQuestion(input: {
   question: string;
   stores: PublicStore[];
-  mode: "capability" | "shopping" | "conversation";
   admitCall?: () => Promise<void>;
 }): Promise<PlatformAssistantReply> {
   const router = configuredPlatformRouter();
@@ -304,16 +305,12 @@ export async function answerPlatformShoppingQuestion(input: {
       path: store.path,
     }));
     const catalog = new Map<string, { id: string; name: string; store: string; description: string; price: string; path: string }>();
+    let recommendations: RecommendedBackendListing[] = [];
     const result = await generateText({
       model: provider.chatModel(router.model),
       system: [
         router.assistantInstructions,
-        input.mode === "shopping"
-          ? "你是商城的 AI 导购。先读取公开店铺目录，再用公开商品检索工具核实用户的购物需求；没有匹配商品时，诚实说明并追问预算、用途、时间或不能妥协的条件。"
-          : input.mode === "capability"
-            ? "你是商城的 AI 导购。先读取公开店铺目录，再自然地回答用户关于商城、你能做什么或如何使用商城的问题。"
-            : "你正在和用户正常对话。不要为了显得像导购而反复自我介绍、强行把话题带回买车，或声称不能做简单计算。普通寒暄、身份说明和非购物问题都自然简短回答；简单四则计算必须调用 calculate_numbers。只有用户明确询问商城、店铺或商品时，才调用相应查询工具。",
-        "对于具体购物需求，调用 search_public_products；需要并列分析时调用 compare_products；涉及商品总价或数量时调用 calculate_total。只能使用工具返回的店铺、商品、价格和状态，绝不能编造商品、库存、价格、卖家或联系方式。不得调用未声明的工具，不得索取敏感信息。最终回答不使用 Markdown 标题或项目符号，控制在 180 个汉字内。",
+        "你是一个自然、可靠的商城助手。像正常人一样接住用户的话，不要反复自我介绍，也不要强行把闲聊带回购物。根据问题自行决定是否使用工具：查询店铺或商品时使用公开查询工具；比较时使用比较工具；算术或总价时使用计算工具。工具只提供帮助，不必向用户解释工具本身。店铺、商品、价格和库存只能依据工具结果陈述；绝不能编造这些信息，也不能透露联系方式、密钥或未审核内容。最终回答自然简洁，不使用 Markdown 标题或项目符号。",
       ].filter(Boolean).join("\n\n"),
       prompt: question,
       tools: {
@@ -327,6 +324,7 @@ export async function answerPlatformShoppingQuestion(input: {
           inputSchema: z.object({ query: z.string().min(1).max(2_000) }),
           execute: async ({ query }) => {
             const offers = await searchPublicStoreOffers({ stores: input.stores, narrative: query, limit: 6 });
+            recommendations = offers;
             const result = offers.map((offer) => {
               const terms = offer.terms ?? {};
               const price = typeof terms.amount_minor === "string" && typeof terms.currency === "string"
@@ -386,9 +384,6 @@ export async function answerPlatformShoppingQuestion(input: {
         // `tool_choice: required`. Limit the available tool for the early steps and
         // make the system instruction explicit; this keeps the loop agentic without
         // turning a provider-specific limitation into a user-visible failure.
-        if (stepNumber === 0 && input.mode !== "conversation") return { activeTools: ["list_public_stores"], toolChoice: "auto" as const };
-        if (stepNumber === 0) return { activeTools: ["calculate_numbers"], toolChoice: "auto" as const };
-        if (input.mode === "shopping" && stepNumber === 1) return { activeTools: ["search_public_products"], toolChoice: "auto" as const };
         return { toolChoice: "auto" as const };
       },
       stopWhen: stepCountIs(router.assistantMaxSteps),
@@ -408,6 +403,7 @@ export async function answerPlatformShoppingQuestion(input: {
         completionTokens: result.usage.outputTokens ?? 0,
         totalTokens: result.usage.totalTokens ?? ((result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0)),
       },
+      recommendations,
     };
   } catch (error) {
     if (error instanceof PlatformRouterQuotaExceededError) throw error;

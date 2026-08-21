@@ -1165,19 +1165,18 @@ export async function searchMallCatalog(input: {
 
 export async function askMallShoppingAssistant(
   question: string,
-  mode: "capability" | "shopping" | "conversation" = "capability",
-): Promise<{ requestId: string; answer: string }> {
+): Promise<{ requestId: string; answer: string; recommendations: RecommendedBackendListing[] }> {
   const response = await fetch("/api/mall/assistant", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ question, mode }),
+    body: JSON.stringify({ question }),
   });
-  const body = await response.json().catch(() => null) as { requestId?: string; answer?: string; error?: string } | null;
+  const body = await response.json().catch(() => null) as { requestId?: string; answer?: string; recommendations?: unknown; error?: string } | null;
   if (!response.ok || !body?.requestId || !body.answer) {
     throw new MarketplaceApiError(response.status, body?.error || "商城 AI 导购暂时不可用");
   }
-  return { requestId: body.requestId, answer: body.answer };
+  return { requestId: body.requestId, answer: body.answer, recommendations: Array.isArray(body.recommendations) ? body.recommendations as RecommendedBackendListing[] : [] };
 }
 
 export interface ContactResponse {

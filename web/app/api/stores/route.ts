@@ -229,7 +229,8 @@ async function readOwnedStores(request: Request): Promise<Response> {
             store.display_name AS "displayName",
             store.description,
             store.integration_kind AS "integrationKind",
-            store.status
+            store.status,
+            store.created_at AS "createdAt"
        FROM stores store
        JOIN store_path_aliases alias
          ON alias.tenant_id = store.tenant_id AND alias.store_id = store.id AND alias.is_canonical = true

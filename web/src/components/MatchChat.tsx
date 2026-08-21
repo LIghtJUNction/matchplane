@@ -12,7 +12,6 @@ import {
   getMarketplaceOfferMatches,
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
-  searchMallCatalog,
   uploadMarketplaceAttachment,
   querySubplatformRetrieval,
   updateMarketplaceIntent,
@@ -792,25 +791,10 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     setSending(true);
     setMessage("");
     const requestId = crypto.randomUUID();
-    const narrative = buildConversationNarrative(
-      messages.filter((item) => item.role === "user").map((item) => item.text),
-      text,
-    );
     setMessages((current) => [...current, { id: `${requestId}-user`, role: "user", text }]);
     try {
-      const assistantMode = generalAssistantMode(text);
-      if (assistantMode) {
-        const reply = await askMallShoppingAssistant(text, assistantMode);
-        setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: reply.answer }]);
-        onNotice(reply.answer);
-        return;
-      }
-      const result = await searchMallCatalog({
-        narrative,
-        ...(isRoot ? {} : { storePath: subplatform.path }),
-      });
-      onRecommendations?.(result.recommendations);
-      const reply = await askMallShoppingAssistant(text, "shopping");
+      const reply = await askMallShoppingAssistant(text);
+      onRecommendations?.(reply.recommendations);
       setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: reply.answer }]);
       onNotice(reply.answer);
     } catch (error) {
@@ -821,7 +805,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     } finally {
       setSending(false);
     }
-  }, [isRoot, messages, onNotice, onRecommendations, runtime.sendFailed, sending, subplatform.path]);
+  }, [onNotice, onRecommendations, runtime.sendFailed, sending]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1067,17 +1051,7 @@ function publicAttachment(attachment: MarketplaceAttachment): Record<string, unk
   };
 }
 
-/** Keep normal conversation out of the shopping retrieval path without inventing a local answer. */
-function generalAssistantMode(value: string): "capability" | "conversation" | null {
-  const normalized = value.trim().toLocaleLowerCase();
-  if (/你会.{0,8}(什么|干什么|做什么)|你能.{0,8}(什么|干什么|做什么)|你可以.{0,8}(什么|干什么|做什么)|怎么(用|使用)|帮助|介绍一下/.test(normalized)) return "capability";
-  if (/^(你好|嗨|hi|hello)[！!。？?\s]*$/i.test(normalized)
-    || /^(你是谁|你叫什么|在吗)[？?！!。\s]*$/i.test(normalized)
-    || /(?:等于多少|帮我算|计算一下|[0-9０-９]+\s*[+\-×xX*÷/]\s*[0-9０-９]+)/.test(normalized)) return "conversation";
-  return null;
-}
-
-/** Keep follow-up requests useful without sending an unbounded transcript to the router/model. */
+/** Keep seller-side follow-up requests useful without storing an unbounded browser transcript. */
 function buildConversationNarrative(previousRequests: string[], currentRequest: string): string {
   const recent = previousRequests
     .slice(-4)
