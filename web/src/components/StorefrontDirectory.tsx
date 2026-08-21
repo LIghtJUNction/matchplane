@@ -21,13 +21,7 @@ export function StorefrontDirectory({ locale, mallName }: { locale: InterfaceLoc
 
   return (
     <section className="storefront-directory" aria-labelledby="storefront-directory-title" aria-busy={!resolved}>
-      <div className="storefront-directory-heading">
-        <div>
-          <span>{locale === "en" ? "Store map" : "店铺地图"}</span>
-          <h2 id="storefront-directory-title">{locale === "en" ? "Browse the mall" : "在商城里逛逛"}</h2>
-        </div>
-        <p>{locale === "en" ? "Every open store can be searched and compared by the shopping assistant." : "每家营业中的店铺都能被 AI 导购检索和比价。"}</p>
-      </div>
+      <h2 id="storefront-directory-title" className="visually-hidden">{locale === "en" ? "Mall store map" : "商城店铺地图"}</h2>
       <div className="storefront-map">
         <div className="storefront-map-road road-horizontal" aria-hidden="true" />
         <div className="storefront-map-road road-vertical" aria-hidden="true" />

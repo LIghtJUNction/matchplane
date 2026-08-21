@@ -7,6 +7,7 @@ import { Input } from "@appica/ui-react/input";
 
 import {
   establishMarketplaceSession,
+  getMallLegalDocuments,
   isLiveMarketplaceEnabled,
   redeemPlatformAdminInvite,
   type BetterAuthMarketplaceRole,
@@ -68,6 +69,8 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [legalVersions, setLegalVersions] = useState<{ terms: number; privacy: number } | null>(null);
+  const [legalAccepted, setLegalAccepted] = useState(false);
   const redeemingInviteRef = useRef(false);
   const authMethodsId = useId();
 
@@ -132,6 +135,13 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
         setNationalIdentityEnabled(false);
         setSocialProviders([]);
         setCapabilities({ emailOtp: false, phoneOtp: false, magicLink: false, passkey: true });
+      });
+    void getMallLegalDocuments()
+      .then((legal) => {
+        if (!cancelled) setLegalVersions({ terms: legal.documents.terms.version, privacy: legal.documents.privacy.version });
+      })
+      .catch(() => {
+        if (!cancelled) setLegalVersions(null);
       });
     return () => {
       cancelled = true;
@@ -209,6 +219,10 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
     }
     if (authIntent === "sign-up" && method === "password" && resolvedIdentifier.kind !== "email") {
       setError(copy.registrationEmailOnly);
+      return;
+    }
+    if (authIntent === "sign-up" && !registrationPending && !passwordResetMode && (!legalAccepted || !legalVersions)) {
+      setError(copy.legalAcceptanceRequired);
       return;
     }
     if (passwordResetMode && resolvedIdentifier.kind !== "email") {
@@ -374,6 +388,8 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
 
       if (authIntent === "sign-up") {
         if (resolvedIdentifier.kind !== "email") throw new Error(copy.registrationEmailOnly);
+        const acceptedLegalVersions = legalVersions;
+        if (!acceptedLegalVersions) throw new Error(copy.legalAcceptanceRequired);
         if (superAdminBootstrapToken) {
           const claim = await fetch("/api/super-admin-bootstrap/claim", {
             method: "POST",
@@ -426,6 +442,8 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
           name: displayNameFromIdentifier(resolvedIdentifier.value),
           email: resolvedIdentifier.value,
           password,
+          legalTermsVersion: acceptedLegalVersions.terms,
+          legalPrivacyVersion: acceptedLegalVersions.privacy,
           callbackURL: authCallbackURL(next, adminInviteToken),
           fetchOptions: options,
         } as never);
@@ -605,12 +623,18 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
               </span>
             </div>
           ) : null}
+          {isRegistration && !registrationPending && !passwordResetMode ? (
+            <div className="login-legal-consent">
+              <input id="login-legal-consent" type="checkbox" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} disabled={submitting || !legalVersions} />
+              <label htmlFor="login-legal-consent">{copy.legalConsentPrefix} <a href="/terms" target="_blank" rel="noreferrer">{copy.terms}</a> {copy.legalConsentJoin} <a href="/privacy" target="_blank" rel="noreferrer">{copy.privacy}</a></label>
+            </div>
+          ) : null}
           {((method === "email-otp" && otpSent) || registrationPending || passwordResetOtpSent) ? (
             <label htmlFor="login-otp"><span>{copy.otp}</span><Input id="login-otp" inputMode="numeric" pattern="[0-9]{6}" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} autoComplete="one-time-code" placeholder={copy.otpPlaceholder} /></label>
           ) : null}
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           {notice ? <p className="login-notice" role="status">{notice}</p> : null}
-          <Button className="login-submit" type="submit" disabled={submitting}>
+          <Button className="login-submit" type="submit" disabled={submitting || (isRegistration && !registrationPending && (!legalAccepted || !legalVersions))}>
             {submitting ? copy.loading : passwordResetMode ? (passwordResetOtpSent ? copy.resetPassword : copy.sendPasswordResetOtp) : registrationPending ? copy.verifyAndCreate : method === "email-otp" ? (otpSent ? copy.verifyAndContinue : copy.sendOtp) : method === "magic-link" ? copy.sendMagicLink : authIntent === "sign-up" ? copy.sendRegistrationOtp : copy.continue}
             {!submitting ? <ArrowRight size={17} aria-hidden="true" /> : null}
           </Button>
@@ -757,6 +781,11 @@ function loginCopy(locale: "zh" | "en") {
       socialMethods: "Social sign-in",
       password: "Password",
       confirmPassword: "Confirm password",
+      terms: "Terms of Service",
+      privacy: "Privacy Policy",
+      legalConsentPrefix: "I have read and agree to the",
+      legalConsentJoin: "and",
+      legalAcceptanceRequired: "Read and agree to the Terms of Service and Privacy Policy to register.",
       emailOtp: "Code",
       magicLink: "Magic link",
       email: "Email",
@@ -832,6 +861,11 @@ function loginCopy(locale: "zh" | "en") {
     socialMethods: "第三方登录",
     password: "密码",
     confirmPassword: "确认密码",
+    terms: "用户协议",
+    privacy: "隐私政策",
+    legalConsentPrefix: "我已阅读并同意",
+    legalConsentJoin: "和",
+    legalAcceptanceRequired: "请先阅读并同意用户协议和隐私政策。",
     emailOtp: "验证码",
     magicLink: "免密链接",
     email: "邮箱",

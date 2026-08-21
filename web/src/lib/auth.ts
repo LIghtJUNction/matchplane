@@ -312,6 +312,8 @@ export const auth = betterAuth({
     user: {
       additionalFields: {
         marketplaceRole: { type: "string", required: false, input: true },
+        legalTermsVersion: { type: "number", required: false, input: true },
+        legalPrivacyVersion: { type: "number", required: false, input: true },
       },
     },
   },
@@ -319,17 +321,26 @@ export const auth = betterAuth({
     user: {
       create: {
         before: async (user) => {
+          const legal = await currentLegalVersions();
+          const acceptedTermsVersion = legalVersionFromUser(user, "legalTermsVersion");
+          const acceptedPrivacyVersion = legalVersionFromUser(user, "legalPrivacyVersion");
+          if (!legal || acceptedTermsVersion !== legal.terms || acceptedPrivacyVersion !== legal.privacy) {
+            throw new Error("请先阅读并同意当前用户协议和隐私政策");
+          }
+          const acceptedLegalData = { legalTermsVersion: legal.terms, legalPrivacyVersion: legal.privacy };
           if (await hasReservedSuperAdminInvite(user.email)) {
-            return { data: { ...user, role: "rootSuperAdmin" } };
+            return { data: { ...user, ...acceptedLegalData, role: "rootSuperAdmin" } };
           }
           if (!allowDevAuthBootstrap && !(await isRootEmailAuthConfigured())) {
             throw new Error("普通用户注册暂未开放");
           }
+          return { data: { ...user, ...acceptedLegalData } };
         },
         after: async (user) => {
           if ((user as typeof user & { role?: string | null }).role === "rootSuperAdmin") {
             await consumeReservedSuperAdminInvite(user.email, user.id);
           }
+          await recordLegalAcceptance(user);
         },
       },
     },
@@ -367,6 +378,41 @@ async function hasReservedSuperAdminInvite(email: string): Promise<boolean> {
   if (!invite?.registration_email) return false;
   return invite.registration_email.toLowerCase() === email.toLowerCase()
     && (!invite.target_email || invite.target_email.toLowerCase() === email.toLowerCase());
+}
+
+async function currentLegalVersions(): Promise<{ terms: number; privacy: number } | null> {
+  const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  if (!tenantId || !isUuid(tenantId)) return null;
+  const result = await authDatabase.query<{ kind: "terms" | "privacy"; version: string }>(
+    `SELECT kind, version::text FROM mall_legal_documents
+      WHERE tenant_id = $1::uuid AND kind = ANY($2::text[])`,
+    [tenantId, ["terms", "privacy"]],
+  );
+  const terms = result.rows.find((row) => row.kind === "terms");
+  const privacy = result.rows.find((row) => row.kind === "privacy");
+  const termsVersion = Number(terms?.version);
+  const privacyVersion = Number(privacy?.version);
+  if (!Number.isSafeInteger(termsVersion) || termsVersion < 1 || !Number.isSafeInteger(privacyVersion) || privacyVersion < 1) return null;
+  return { terms: termsVersion, privacy: privacyVersion };
+}
+
+function legalVersionFromUser(user: unknown, key: "legalTermsVersion" | "legalPrivacyVersion"): number | null {
+  const value = user && typeof user === "object" ? (user as Record<string, unknown>)[key] : undefined;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+async function recordLegalAcceptance(user: { id: string; legalTermsVersion?: unknown; legalPrivacyVersion?: unknown }): Promise<void> {
+  const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  if (!tenantId || !isUuid(tenantId)) return;
+  const termsVersion = legalVersionFromUser(user, "legalTermsVersion");
+  const privacyVersion = legalVersionFromUser(user, "legalPrivacyVersion");
+  if (!termsVersion || !privacyVersion) return;
+  await authDatabase.query(
+    `INSERT INTO user_legal_acceptances (tenant_id, user_id, terms_version, privacy_version)
+     VALUES ($1::uuid, $2::uuid, $3::bigint, $4::bigint)
+     ON CONFLICT DO NOTHING`,
+    [tenantId, user.id, termsVersion, privacyVersion],
+  );
 }
 
 async function consumeReservedSuperAdminInvite(email: string, userId: string): Promise<void> {

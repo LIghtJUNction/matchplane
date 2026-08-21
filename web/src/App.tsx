@@ -371,7 +371,18 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 transition={spring}
               >
                 {role === "buyer" ? (
-                  <>
+                  subplatform.slug === "root" && listings.length === 0 ? (
+                    <div className="mall-browse-scene">
+                      <StorefrontDirectory locale={locale} mallName={subplatform.brandName} />
+                      <MatchChat
+                        role={role}
+                        locale={locale}
+                        onNotice={setNotice}
+                        onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform, locale))}
+                        subplatform={subplatform}
+                      />
+                    </div>
+                  ) : (
                     <MatchChat
                       role={role}
                       locale={locale}
@@ -379,8 +390,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                       onRecommendations={(recommendations) => setListings(mapRecommendations(recommendations, subplatform, locale))}
                       subplatform={subplatform}
                     />
-                    {subplatform.slug === "root" && listings.length === 0 ? <StorefrontDirectory locale={locale} mallName={subplatform.brandName} /> : null}
-                  </>
+                  )
                 ) : null}
                 {subplatform.pluginArtifact && (role === "platform" || role === "subplatform_admin" || (role === "buyer" && listings.length > 0))
                   ? pluginWorkspace

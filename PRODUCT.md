@@ -69,6 +69,8 @@ server-side roles, while customer-facing copy uses plain names such as “店主
   HTTP contracts. The marketplace verifies scope, result shape, lifecycle, and commercial policy.
 - Browsing and bounded shopping assistance work without login. Saving, contacting, ordering,
   opening a store, and publishing require a valid account.
+- New account registration requires explicit acceptance of the marketplace's current public Terms
+  of Service and Privacy Policy; the accepted document versions are retained server-side.
 - Payment is optional. A marketplace may begin with consent-gated contact exchange and later enable
   checkout providers.
 - Merchant monetization may combine store subscription, active-listing fees, clearly labelled paid

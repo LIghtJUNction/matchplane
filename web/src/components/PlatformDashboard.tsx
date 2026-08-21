@@ -59,6 +59,7 @@ import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
 import { MallCatalogModeration } from "./MallCatalogModeration";
 import { MallBrandPanel } from "./MallBrandPanel";
 import { StoreCommercialTermsPanel } from "./StoreCommercialTermsPanel";
+import { RemoteStoreOnboarding } from "./RemoteStoreOnboarding";
 import { SectionHeading } from "./Primitives";
 
 interface PlatformDashboardProps {
@@ -482,6 +483,28 @@ export function PlatformDashboard({
     }
   };
 
+  const updateLocalStore = (organization: SubplatformOrganizationRecord) => {
+    const sourceKind = organization.sourceKind === "archive" ? "archive" : organization.sourceKind === "git" ? "git" : null;
+    if (!sourceKind) {
+      onNotice("只有本地部署的 Git 或压缩包店铺可以在这里更新");
+      return;
+    }
+    setSubplatformEditorOpen(true);
+    setSubplatformSourceKind(sourceKind);
+    setSubplatformDomainId(organization.domainId || setup?.domains[0]?.id || "");
+    setSubplatformPackageId("");
+    setSubplatformSlug("");
+    setSubplatformManifest("");
+    setSubplatformPinnedRevision("");
+    setSubplatformSourceDigest("");
+    setSubplatformScopes("");
+    setSubplatformMembershipPolicy("public");
+    setSubplatformArchive(null);
+    setSubplatformUpload(null);
+    setSubplatformSourceLocator(sourceKind === "git" ? organization.sourceLocator || organization.sourceRepository || "" : "");
+    setSubplatformDiscoveryState(sourceKind === "git" ? `准备检查 ${organization.name} 的 Git 更新` : `请选择 ${organization.name} 的新版本压缩包`);
+  };
+
   const submitPaymentRoute = async () => {
     const priority = Number.parseInt(routePriority, 10);
     if (!routeGatewayId) {
@@ -685,9 +708,8 @@ export function PlatformDashboard({
         <section id="platform-panel-tree" className="surface subplatform-panel" role="tabpanel" aria-labelledby="platform-tab-tree" hidden={activeSection !== "tree"}>
           <div className="subplatform-header">
             <div>
-              <p className="eyebrow">店铺</p>
-              <h2 id="subplatform-title">接入一个店铺</h2>
-              <p className="subplatform-intro">每个商家对应一个店铺。店铺可以托管在商城内，也可以通过受控接口接入并被 AI 导购检索。</p>
+              <h2 id="subplatform-title">本地店铺</h2>
+              <p className="subplatform-intro">从 Git 仓库或压缩包下载、构建并托管在商城服务器上的店铺。</p>
             </div>
             <button
               className="button button-dark"
@@ -696,17 +718,17 @@ export function PlatformDashboard({
               title={!setup?.root.organization?.id ? "商城尚未完成初始化" : !setup.domains.length ? "商城还没有可用的商品范围" : undefined}
               onClick={() => setSubplatformEditorOpen((open) => !open)}
             >
-              {subplatformEditorOpen ? "关闭" : "接入店铺"}
+              {subplatformEditorOpen ? "关闭" : "接入本地店铺"}
             </button>
           </div>
           {subplatforms.length ? (
-            <div className="subplatform-list" aria-label="已接入店铺">
+            <div className="subplatform-list" aria-label="本地店铺列表">
               {subplatforms.map((organization) => (
                 <div className="subplatform-row" key={organization.id}>
                   <span className="subplatform-row-icon" aria-hidden="true"><Archive size={18} /></span>
                   <span className="subplatform-row-copy">
                     <strong>{organization.name}</strong>
-                    <small>店铺地址 /{organization.slug}</small>
+                    <small>/{organization.slug} · {organization.sourceKind === "git" ? "Git 本地部署" : organization.sourceKind === "archive" ? "压缩包本地部署" : "其他接入"}</small>
                   </span>
                   <span className={`subplatform-state state-${organization.registrationState || "unknown"}`}>
                     {subplatformStateLabel[organization.registrationState || ""] || "未登记"}
@@ -717,22 +739,27 @@ export function PlatformDashboard({
                       上线店铺
                     </button>
                   ) : null}
+                  {organization.registrationState === "active" && (organization.sourceKind === "git" || organization.sourceKind === "archive") ? (
+                    <button className="button button-light subplatform-activate" type="button" disabled={saving} onClick={() => updateLocalStore(organization)}>
+                      {organization.sourceKind === "git" ? "检查更新" : "上传新版本"}
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </div>
           ) : (
             <div className="subplatform-empty">
               <GitBranch size={22} aria-hidden="true" />
-              <p>还没有接入店铺。</p>
+              <p>还没有本地店铺。</p>
             </div>
           )}
           {subplatformEditorOpen ? (
-            <div className="admin-editor subplatform-editor" aria-label="接入店铺">
+            <div className="admin-editor subplatform-editor" aria-label="接入本地店铺">
               <div className="admin-editor-heading">
-                <div><strong>接入店铺</strong><small>填写 Git 地址或上传接入包，系统读取店铺自己的页面与商品能力。</small></div>
+                <div><strong>接入本地店铺</strong><small>填写 Git 地址或上传压缩包，商城会在本地构建并托管它。</small></div>
                 <button type="button" onClick={() => setSubplatformEditorOpen(false)}>关闭</button>
               </div>
-              <div className="subplatform-source-switch" role="group" aria-label="店铺接入方式">
+              <div className="subplatform-source-switch" role="group" aria-label="本地店铺来源">
                 <button type="button" className={subplatformSourceKind === "git" ? "is-selected" : ""} aria-pressed={subplatformSourceKind === "git"} onClick={() => setSubplatformSourceKind("git")}><GitBranch size={16} aria-hidden="true" />Git 仓库</button>
                 <button type="button" className={subplatformSourceKind === "archive" ? "is-selected" : ""} aria-pressed={subplatformSourceKind === "archive"} onClick={() => setSubplatformSourceKind("archive")}><Upload size={16} aria-hidden="true" />上传压缩包</button>
               </div>
@@ -742,18 +769,22 @@ export function PlatformDashboard({
                 </div>
               ) : (
                 <div className="subplatform-upload-box">
-                  <label className="file-picker"><Upload size={18} aria-hidden="true" /><span>{subplatformArchive?.name || "选择店铺接入包"}</span><input type="file" accept=".tar.gz,.tgz,.tar.zst,.tzst" onChange={(event) => setSubplatformArchive(event.target.files?.[0] ?? null)} /></label>
+                  <label className="file-picker"><Upload size={18} aria-hidden="true" /><span>{subplatformArchive?.name || "选择本地店铺压缩包"}</span><input type="file" accept=".tar.gz,.tgz,.tar.zst,.tzst" onChange={(event) => setSubplatformArchive(event.target.files?.[0] ?? null)} /></label>
                   <p>{subplatformUpload ? `已上传 ${subplatformUpload.originalName} · ${(subplatformUpload.size / 1024 / 1024).toFixed(1)} MiB · digest ${subplatformUpload.sourceDigest.slice(0, 12)}…` : "限制 64 MiB；服务端只保存随机 locator，隔离构建器负责解包与验证。"}</p>
                 </div>
               )}
               <div className="subplatform-editor-footer">
-                <p><ShieldCheck size={16} aria-hidden="true" />店铺接入包会先完成隔离构建与校验，准备好后再上线。</p>
+                <p><ShieldCheck size={16} aria-hidden="true" />本地店铺会先完成隔离构建与校验，准备好后再上线。</p>
                 {subplatformDiscoveryState ? <small className="subplatform-discovery-state" role="status">{subplatformDiscoveryState}</small> : null}
-                <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup.root.organization?.id || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "接入中…" : "接入并构建"}</button>
+                <button className="button button-dark" type="button" disabled={saving || !setup?.root.tenantId || !setup.root.organization?.id || !setup?.domains.length} onClick={() => void submitSubplatform()}>{saving ? "处理中…" : "构建本地店铺"}</button>
               </div>
             </div>
           ) : null}
         </section>
+
+        <div className="platform-component-panel" hidden={activeSection !== "tree"}>
+          <RemoteStoreOnboarding domains={domains} onNotice={onNotice} />
+        </div>
 
         <div className="platform-component-panel" hidden={activeSection !== "tree"}>
           <MallCatalogModeration onNotice={onNotice} />

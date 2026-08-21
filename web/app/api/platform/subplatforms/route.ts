@@ -262,13 +262,17 @@ export async function GET(request: Request): Promise<Response> {
             node."createdAt" AS "createdAt",
             registration.id AS "registrationId",
             registration.state AS "registrationState",
+            registration.source_kind AS "sourceKind",
+            registration.source_locator AS "sourceLocator",
+            registration.pinned_revision AS "pinnedRevision",
+            registration.version::text AS "registrationVersion",
             encode(registration.build_digest, 'hex') AS "buildDigest",
             encode(registration.manifest_digest, 'hex') AS "manifestDigest",
             registration.build_attempts AS "buildAttempts",
             registration.build_error AS "buildError"
        FROM "organization" node
        LEFT JOIN LATERAL (
-         SELECT r.id, r.state, r.build_digest, r.manifest_digest,
+         SELECT r.id, r.state, r.source_kind, r.source_locator, r.pinned_revision, r.version, r.build_digest, r.manifest_digest,
                 r.build_attempts, r.build_error
            FROM subplatform_registrations r
           WHERE r.slug = node.slug

@@ -697,6 +697,48 @@ export async function uploadMallBrandLogo(input: { file: File; expectedVersion: 
   return body.mall;
 }
 
+export interface MallLegalDocument {
+  content: string;
+  version: number;
+  updatedAt: string;
+}
+
+export interface MallLegalDocuments {
+  mallName: string;
+  documents: {
+    terms: MallLegalDocument;
+    privacy: MallLegalDocument;
+  };
+}
+
+export async function getMallLegalDocuments(): Promise<MallLegalDocuments> {
+  const response = await fetch("/api/mall/legal", { headers: { accept: "application/json" }, cache: "no-store" });
+  const body = await response.json().catch(() => null) as MallLegalDocuments & { error?: string } | null;
+  if (!response.ok || !body?.documents?.terms || !body.documents.privacy) {
+    throw new MarketplaceApiError(response.status, body?.error || "法律页面读取失败");
+  }
+  return body;
+}
+
+export async function saveMallLegalDocuments(input: {
+  termsContent: string;
+  privacyContent: string;
+  termsVersion: number;
+  privacyVersion: number;
+}): Promise<MallLegalDocuments> {
+  const response = await fetch("/api/mall/legal", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as MallLegalDocuments & { error?: string } | null;
+  if (!response.ok || !body?.documents?.terms || !body.documents.privacy) {
+    throw new MarketplaceApiError(response.status, body?.error || "法律页面保存失败");
+  }
+  return body;
+}
+
 export interface AccountProfile {
   name: string;
   email: string;
@@ -824,6 +866,10 @@ export interface SubplatformOrganizationRecord {
   createdAt: string;
   registrationId: string | null;
   registrationState: string | null;
+  sourceKind?: "git" | "archive" | "remote" | string | null;
+  sourceLocator?: string | null;
+  pinnedRevision?: string | null;
+  registrationVersion?: string | null;
   buildDigest: string | null;
   manifestDigest: string | null;
   buildAttempts?: number;
