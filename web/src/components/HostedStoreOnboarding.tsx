@@ -1,13 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowRight, Store } from "lucide-react";
+import { ArrowRight, Plus, Store } from "lucide-react";
 
 import { createHostedStore, getOwnedStores, type StoreSummary } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 
 export function HostedStoreOnboarding({ locale, onNotice }: { locale: InterfaceLocale; onNotice: (message: string) => void }) {
   const [stores, setStores] = useState<StoreSummary[]>([]);
+  const [opening, setOpening] = useState(false);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
@@ -39,8 +40,8 @@ export function HostedStoreOnboarding({ locale, onNotice }: { locale: InterfaceL
       <div className="hosted-store-heading">
         <span aria-hidden="true"><Store size={20} /></span>
         <div>
-          <h2 id="hosted-store-title">{locale === "en" ? "Your stores" : "我的店铺"}</h2>
-          <p>{locale === "en" ? "Open a hosted store, then add products from its console." : "创建一个托管店铺，然后直接在店铺控制台上架商品。"}</p>
+          <h2 id="hosted-store-title">{locale === "en" ? "Stores" : "店铺"}</h2>
+          <p>{locale === "en" ? "Stores you own or help operate appear here." : "你拥有或协助运营的店铺会显示在这里。"}</p>
         </div>
       </div>
 
@@ -60,12 +61,27 @@ export function HostedStoreOnboarding({ locale, onNotice }: { locale: InterfaceL
         </ul>
       ) : null}
 
-      <form className="hosted-store-form" onSubmit={submit}>
-        <label htmlFor="hosted-store-name"><span>{locale === "en" ? "Store name" : "店铺名称"}</span><input id="hosted-store-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={200} required /></label>
-        <label htmlFor="hosted-store-slug"><span>{locale === "en" ? "Store address" : "店铺地址"}</span><div className="slug-input"><span>/</span><input id="hosted-store-slug" value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} minLength={2} maxLength={63} pattern="[a-z0-9][a-z0-9-]+" placeholder="my-store" required /></div></label>
-        <label className="hosted-store-wide" htmlFor="hosted-store-description"><span>{locale === "en" ? "Short description" : "店铺简介"}</span><textarea id="hosted-store-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={2000} placeholder={locale === "en" ? "What do you sell?" : "简单介绍你出售的商品"} /></label>
-        <button className="button button-dark hosted-store-wide" type="submit" disabled={submitting}>{submitting ? (locale === "en" ? "Creating…" : "正在创建…") : (locale === "en" ? "Create store" : "创建店铺")}<ArrowRight size={18} aria-hidden="true" /></button>
-      </form>
+      {!opening ? (
+        <div className="hosted-store-empty">
+          <p>{stores.length
+            ? (locale === "en" ? "Need a separate storefront?" : "需要经营另一家店铺？")
+            : (locale === "en" ? "You have not opened a store yet." : "你还没有店铺。")}</p>
+          <button className="button hosted-store-add" type="button" onClick={() => setOpening(true)}>
+            <Plus size={17} aria-hidden="true" />{locale === "en" ? "Open a store" : "开一家店"}
+          </button>
+        </div>
+      ) : (
+        <form className="hosted-store-form" onSubmit={submit}>
+          <div className="hosted-store-form-heading hosted-store-wide">
+            <strong>{locale === "en" ? "Open a hosted store" : "开设托管店铺"}</strong>
+            <button type="button" onClick={() => setOpening(false)}>{locale === "en" ? "Cancel" : "取消"}</button>
+          </div>
+          <label htmlFor="hosted-store-name"><span>{locale === "en" ? "Store name" : "店铺名称"}</span><input id="hosted-store-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={200} required /></label>
+          <label htmlFor="hosted-store-slug"><span>{locale === "en" ? "Store address" : "店铺地址"}</span><div className="slug-input"><span>/</span><input id="hosted-store-slug" value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} minLength={2} maxLength={63} pattern="[a-z0-9][a-z0-9-]+" placeholder="my-store" required /></div></label>
+          <label className="hosted-store-wide" htmlFor="hosted-store-description"><span>{locale === "en" ? "Short description" : "店铺简介"}</span><textarea id="hosted-store-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} maxLength={2000} placeholder={locale === "en" ? "What do you sell?" : "简单介绍你出售的商品"} /></label>
+          <button className="button button-dark hosted-store-wide" type="submit" disabled={submitting}>{submitting ? (locale === "en" ? "Creating…" : "正在创建…") : (locale === "en" ? "Create store" : "创建店铺")}<ArrowRight size={18} aria-hidden="true" /></button>
+        </form>
+      )}
     </section>
   );
 }

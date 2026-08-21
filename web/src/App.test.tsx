@@ -56,6 +56,12 @@ beforeEach(() => {
         routing: { source: "policy_fallback", degraded: false, rationale: "no stores" },
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
+    if (url === "/api/mall/assistant") {
+      return new Response(JSON.stringify({
+        requestId: crypto.randomUUID(),
+        answer: "这是模型生成的购物导购回答。",
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
     if (url === "/api/stores") {
       return new Response(JSON.stringify({ stores: [] }), { status: 200, headers: { "content-type": "application/json" } });
     }
@@ -135,11 +141,9 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     await openConsoleFromAccountMenu(user);
-    expect(await screen.findByRole("heading", { name: "我的店铺" })).toBeInTheDocument();
-    expect(screen.getByLabelText("店铺名称")).toBeInTheDocument();
-    expect(screen.getByLabelText(/^店铺地址/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "店铺" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "管理商品" })).toHaveAttribute("href", "/used-car?console=products");
-    expect(screen.queryByLabelText("商品名称")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("店铺名称")).not.toBeInTheDocument();
   });
 
   it("opens the product console over a fullscreen store from an explicit account link", async () => {
@@ -197,7 +201,7 @@ describe("MatchPlane workspaces", () => {
     await user.type(input, "我有一个需要被认真匹配的问题");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/我还没有找到已审核上架的商品/);
+    expect(await screen.findByRole("status")).toHaveTextContent("这是模型生成的购物导购回答。");
     expect(globalThis.fetch).toHaveBeenCalledWith("/api/mall/search", expect.objectContaining({ method: "POST" }));
   });
 
@@ -220,7 +224,7 @@ describe("MatchPlane workspaces", () => {
     expect(input).toHaveValue("第一行\n第二行");
     await user.keyboard("{Enter}");
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/我还没有找到已审核上架的商品/);
+    expect(await screen.findByRole("status")).toHaveTextContent("这是模型生成的购物导购回答。");
   });
 
   it("lets the user clear the visible conversation without leaving the page", async () => {

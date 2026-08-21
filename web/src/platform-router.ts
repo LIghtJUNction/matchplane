@@ -10,6 +10,11 @@
 import { isProductionEnvironment } from "./lib/runtime";
 import { readJsonResponseBody } from "./lib/body-limit";
 import { readManagedPlatformRouterConfig } from "./lib/platform-router-config";
+import { generateText, stepCountIs, tool } from "ai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { z } from "zod";
+import { searchPublicStoreOffers } from "./storefront-search";
+import type { PublicStore } from "./store-directory";
 
 export interface PlatformRouteCandidate {
   slug: string;
@@ -240,6 +245,9 @@ interface ConfiguredPlatformRouter {
   assistantInstructions: string;
   assistantMaxOutputTokens: number;
   assistantTemperature: number;
+  assistantMaxSteps: number;
+  assistantTimeoutMs: number;
+  assistantReasoningEffort: "low" | "medium" | "high";
 }
 
 function configuredPlatformRouter(): ConfiguredPlatformRouter | null {
@@ -256,7 +264,7 @@ function configuredPlatformRouter(): ConfiguredPlatformRouter | null {
     ? rawProtocol
     : DEFAULT_ROUTER_PROTOCOL;
   if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) return null;
-  return { endpoint, apiKey, model, protocol, managed: false, assistantInstructions: "", assistantMaxOutputTokens: 320, assistantTemperature: 0.2 };
+  return { endpoint, apiKey, model, protocol, managed: false, assistantInstructions: "", assistantMaxOutputTokens: 320, assistantTemperature: 0.2, assistantMaxSteps: 4, assistantTimeoutMs: 12_000, assistantReasoningEffort: "low" };
 }
 
 /** True when a server-side provider credential is present and the endpoint is allowed. */
@@ -271,46 +279,110 @@ export function isPlatformRouterConfigured(): boolean {
  */
 export async function answerPlatformShoppingQuestion(input: {
   question: string;
-  stores: Array<{ displayName: string; description: string }>;
+  stores: PublicStore[];
+  mode: "capability" | "shopping";
   admitCall?: () => Promise<void>;
 }): Promise<PlatformAssistantReply> {
   const router = configuredPlatformRouter();
   if (!router) throw new PlatformAssistantUnavailableError("商城 AI 导购尚未配置完整，请稍后再试。");
   const question = input.question.trim().slice(0, 2_000);
   if (!question) throw new PlatformAssistantUnavailableError("请告诉我你想了解什么。");
+  if (router.protocol !== "openai-compatible") {
+    throw new PlatformAssistantUnavailableError("当前导购 Agent 需要选择 OpenAI Compatible 协议。");
+  }
   try {
     await input.admitCall?.();
-    const request = buildTextProviderRequest({
-      endpoint: router.endpoint,
-      endpointIsBase: router.managed,
+    const provider = createOpenAICompatible({
+      name: "matchplane",
+      baseURL: `${router.endpoint.replace(/\/$/, "")}/v1`,
       apiKey: router.apiKey,
-      model: router.model,
-      protocol: router.protocol,
+    });
+    const visibleStores = input.stores.map((store) => ({
+      id: store.id,
+      name: store.displayName,
+      description: store.description,
+      path: store.path,
+    }));
+    const catalog = new Map<string, { id: string; name: string; store: string; description: string; price: string; path: string }>();
+    const result = await generateText({
+      model: provider.chatModel(router.model),
+      system: [
+        router.assistantInstructions,
+        input.mode === "shopping"
+          ? "你是商城的 AI 导购。先读取公开店铺目录，再用公开商品检索工具核实用户的购物需求；没有匹配商品时，诚实说明并追问预算、用途、时间或不能妥协的条件。"
+          : "你是商城的 AI 导购。先读取公开店铺目录，再自然地回答用户关于你能做什么或如何使用商城的问题。",
+        "对于具体购物需求，调用 search_public_products；需要并列分析时调用 compare_products；涉及总价或数量时调用 calculate_total。只能使用工具返回的店铺、商品、价格和状态，绝不能编造商品、库存、价格、卖家或联系方式。不得调用未声明的工具，不得索取敏感信息。最终回答不使用 Markdown 标题或项目符号，控制在 180 个汉字内。",
+      ].filter(Boolean).join("\n\n"),
+      prompt: question,
+      tools: {
+        list_public_stores: tool({
+          description: "读取当前商城中可公开浏览的店铺摘要。每次回答前先调用一次。",
+          inputSchema: z.object({}),
+          execute: async () => visibleStores.map(({ id: _id, ...store }) => store),
+        }),
+        search_public_products: tool({
+          description: "从当前公开、已审核上架的商品中检索。只在用户提出具体购物需求时调用。",
+          inputSchema: z.object({ query: z.string().min(1).max(2_000) }),
+          execute: async ({ query }) => {
+            const offers = await searchPublicStoreOffers({ stores: input.stores, narrative: query, limit: 6 });
+            const result = offers.map((offer) => {
+              const terms = offer.terms ?? {};
+              const price = typeof terms.amount_minor === "string" && typeof terms.currency === "string"
+                ? `${terms.currency} ${terms.amount_minor}`
+                : "价格未公开";
+              const item = {
+                id: offer.offer_id ?? offer.listing_id ?? offer.display_name,
+                name: offer.display_name,
+                store: typeof offer.store_name === "string" && offer.store_name.trim() ? offer.store_name.trim() : "店铺",
+                description: typeof offer.attributes?.description === "string" ? offer.attributes.description : "",
+                price,
+                path: offer.platform_path ?? "/",
+              };
+              catalog.set(item.id, item);
+              return item;
+            });
+            return result;
+          },
+        }),
+        compare_products: tool({
+          description: "比较此前 search_public_products 返回的两到四件商品。",
+          inputSchema: z.object({ productIds: z.array(z.string().min(1).max(128)).min(2).max(4) }),
+          execute: async ({ productIds }) => productIds.flatMap((id) => catalog.has(id) ? [catalog.get(id)!] : []),
+        }),
+        calculate_total: tool({
+          description: "计算公开价格的小计；金额以最小货币单位表示。",
+          inputSchema: z.object({ amounts: z.array(z.number().int().nonnegative()).min(1).max(12), quantities: z.array(z.number().int().min(1).max(100)).min(1).max(12) }),
+          execute: async ({ amounts, quantities }) => {
+            if (amounts.length !== quantities.length) return { error: "amounts 与 quantities 长度必须一致" };
+            const total = amounts.reduce((sum, amount, index) => sum + amount * quantities[index]!, 0);
+            return { totalMinor: total };
+          },
+        }),
+      },
+      toolChoice: "auto",
+      prepareStep: ({ stepNumber }) => {
+        if (stepNumber === 0) return { activeTools: ["list_public_stores"], toolChoice: "required" as const };
+        if (input.mode === "shopping" && stepNumber === 1) return { activeTools: ["search_public_products"], toolChoice: "required" as const };
+        return { toolChoice: "auto" as const };
+      },
+      stopWhen: stepCountIs(router.assistantMaxSteps),
       maxOutputTokens: router.assistantMaxOutputTokens,
       temperature: router.assistantTemperature,
-      systemPrompt: [
-        router.assistantInstructions,
-        "你是商城的 AI 导购。请自然、简短地回答用户关于你能做什么或如何使用商城的问题。你可以说明：帮助描述需求、在公开店铺中搜索已审核商品、比较商品条件与价格、解释取舍。只把提供的店铺摘要当作事实；绝不能声称某个商品、价格、库存、卖家或联系方式存在，也不能索取敏感信息。若用户想购买具体商品，提示他补充预算、用途和不能妥协的条件。不要使用 Markdown 标题或项目符号，回答不超过 180 个汉字。",
-      ].filter(Boolean).join("\n\n"),
-      userContent: JSON.stringify({
-        question,
-        publicStores: input.stores.slice(0, MAX_CANDIDATES).map((store) => ({
-          name: store.displayName.slice(0, 160),
-          description: store.description.slice(0, 400),
-        })),
-      }),
+      timeout: router.assistantTimeoutMs,
+      maxRetries: 0,
+      providerOptions: { matchplane: { reasoningEffort: router.assistantReasoningEffort } },
     });
-    const response = await fetch(request.url, {
-      method: "POST",
-      headers: request.headers,
-      body: JSON.stringify(request.body),
-      signal: AbortSignal.timeout(configuredProviderTimeoutMs()),
-    });
-    if (!response.ok) throw new Error(`模型服务返回 ${response.status}`);
-    const payload = await readJsonResponseBody<unknown>(response, MAX_ROUTER_RESPONSE_BYTES);
-    const text = sanitizeAssistantReply(readProviderText(payload, router.protocol));
-    if (!text) throw new Error("模型没有返回可读回答");
-    return { text, model: router.model, usage: readUsage(payload, router.protocol) };
+    const text = sanitizeAssistantReply(result.text);
+    if (!text) throw new Error("模型没有返回最终回答");
+    return {
+      text,
+      model: router.model,
+      usage: {
+        promptTokens: result.usage.inputTokens ?? 0,
+        completionTokens: result.usage.outputTokens ?? 0,
+        totalTokens: result.usage.totalTokens ?? ((result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0)),
+      },
+    };
   } catch (error) {
     if (error instanceof PlatformRouterQuotaExceededError) throw error;
     const reason = error instanceof Error ? error.message.slice(0, 160) : "模型服务暂时不可用";

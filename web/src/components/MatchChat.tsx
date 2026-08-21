@@ -799,7 +799,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     setMessages((current) => [...current, { id: `${requestId}-user`, role: "user", text }]);
     try {
       if (isShoppingAssistantQuestion(text)) {
-        const reply = await askMallShoppingAssistant(text);
+        const reply = await askMallShoppingAssistant(text, "capability");
         setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: reply.answer }]);
         onNotice(reply.answer);
         return;
@@ -809,16 +809,9 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         ...(isRoot ? {} : { storePath: subplatform.path }),
       });
       onRecommendations?.(result.recommendations);
-      const storeNames = result.stores.map((store) => store.displayName).slice(0, 4);
-      const answer = result.recommendations.length
-        ? locale === "en"
-          ? `I found ${result.recommendations.length} products${storeNames.length ? ` from ${storeNames.join(", ")}` : ""}. I’ve ordered them by relevance so you can compare them below.`
-          : `我找到了 ${result.recommendations.length} 件商品${storeNames.length ? `，来自${storeNames.join("、")}` : ""}。已经按相关性整理在下方，可以直接比较。`
-        : locale === "en"
-          ? `I couldn’t find an approved listing${storeNames.length ? ` in ${storeNames.join(", ")}` : ""} yet. Tell me the category, budget, and must-have features, and I’ll keep narrowing the search.`
-          : `我还没有找到已审核上架的商品${storeNames.length ? `（已查看${storeNames.join("、")}）` : ""}。告诉我品类、预算和不能妥协的条件，我会继续帮你缩小范围。`;
-      setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: answer }]);
-      onNotice(result.recommendations.length ? copy.buyerSuccess : answer);
+      const reply = await askMallShoppingAssistant(text, "shopping");
+      setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: reply.answer }]);
+      onNotice(reply.answer);
     } catch (error) {
       const detail = error instanceof Error ? error.message : runtime.sendFailed;
       setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: detail }]);
@@ -827,7 +820,7 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     } finally {
       setSending(false);
     }
-  }, [copy.buyerSuccess, isRoot, locale, messages, onNotice, onRecommendations, runtime.sendFailed, sending, subplatform.path]);
+  }, [isRoot, messages, onNotice, onRecommendations, runtime.sendFailed, sending, subplatform.path]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1076,7 +1069,7 @@ function publicAttachment(attachment: MarketplaceAttachment): Record<string, unk
 /** Capability questions use the configured conversational model; product requests keep canonical search. */
 function isShoppingAssistantQuestion(value: string): boolean {
   const normalized = value.trim().toLocaleLowerCase();
-  return /你会.{0,8}(什么|干什么|做什么)|你能.{0,8}(什么|干什么|做什么)|怎么(用|使用)|帮助|介绍一下|^(你好|嗨|hi|hello)[！!。？?\s]*$/i.test(normalized);
+  return /你会.{0,8}(什么|干什么|做什么)|你能.{0,8}(什么|干什么|做什么)|你可以.{0,8}(什么|干什么|做什么)|怎么(用|使用)|帮助|介绍一下|^(你好|嗨|hi|hello)[！!。？?\s]*$/i.test(normalized);
 }
 
 /** Keep follow-up requests useful without sending an unbounded transcript to the router/model. */

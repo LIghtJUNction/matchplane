@@ -962,6 +962,9 @@ export interface ManagedPlatformRouterConfig {
   assistantInstructions: string;
   assistantMaxOutputTokens: number;
   assistantTemperature: number;
+  assistantMaxSteps: number;
+  assistantTimeoutMs: number;
+  assistantReasoningEffort: "low" | "medium" | "high";
 }
 
 /** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
@@ -1160,12 +1163,15 @@ export async function searchMallCatalog(input: {
   return body;
 }
 
-export async function askMallShoppingAssistant(question: string): Promise<{ requestId: string; answer: string }> {
+export async function askMallShoppingAssistant(
+  question: string,
+  mode: "capability" | "shopping" = "capability",
+): Promise<{ requestId: string; answer: string }> {
   const response = await fetch("/api/mall/assistant", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, mode }),
   });
   const body = await response.json().catch(() => null) as { requestId?: string; answer?: string; error?: string } | null;
   if (!response.ok || !body?.requestId || !body.answer) {

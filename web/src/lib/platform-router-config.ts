@@ -17,6 +17,9 @@ export interface ManagedPlatformRouterConfig {
   assistantInstructions: string;
   assistantMaxOutputTokens: number;
   assistantTemperature: number;
+  assistantMaxSteps: number;
+  assistantTimeoutMs: number;
+  assistantReasoningEffort: "low" | "medium" | "high";
 }
 
 interface StoredRouterConfig {
@@ -27,6 +30,9 @@ interface StoredRouterConfig {
   assistantInstructions?: string;
   assistantMaxOutputTokens?: number;
   assistantTemperature?: number;
+  assistantMaxSteps?: number;
+  assistantTimeoutMs?: number;
+  assistantReasoningEffort?: "low" | "medium" | "high";
 }
 
 /** Reads the administrator-managed provider from host-protected files, never from the browser. */
@@ -62,6 +68,9 @@ export function saveManagedPlatformRouterConfig(input: {
   assistantInstructions?: string;
   assistantMaxOutputTokens?: number;
   assistantTemperature?: number;
+  assistantMaxSteps?: number;
+  assistantTimeoutMs?: number;
+  assistantReasoningEffort?: "low" | "medium" | "high";
 }): ManagedPlatformRouterConfig {
   const config: StoredRouterConfig = {
     endpoint: normalizeEndpoint(input.endpoint),
@@ -71,6 +80,9 @@ export function saveManagedPlatformRouterConfig(input: {
     assistantInstructions: boundedOptionalText(input.assistantInstructions, "导购补充指引", 4_000),
     assistantMaxOutputTokens: boundedInteger(input.assistantMaxOutputTokens, 320, 64, 512),
     assistantTemperature: boundedNumber(input.assistantTemperature, 0.2, 0, 1),
+    assistantMaxSteps: boundedInteger(input.assistantMaxSteps, 4, 3, 8),
+    assistantTimeoutMs: boundedInteger(input.assistantTimeoutMs, 12_000, 4_000, 20_000),
+    assistantReasoningEffort: normalizeReasoningEffort(input.assistantReasoningEffort),
   };
   if (input.apiKey !== undefined) writeProtected(KEY_PATH, input.apiKey, "API Key");
   const existingKey = readOptional(KEY_PATH);
@@ -114,6 +126,9 @@ function normalizeStoredConfig(value: StoredRouterConfig): Required<StoredRouter
     assistantInstructions: boundedOptionalText(value.assistantInstructions, "导购补充指引", 4_000),
     assistantMaxOutputTokens: boundedInteger(value.assistantMaxOutputTokens, 320, 64, 512),
     assistantTemperature: boundedNumber(value.assistantTemperature, 0.2, 0, 1),
+    assistantMaxSteps: boundedInteger(value.assistantMaxSteps, 4, 3, 8),
+    assistantTimeoutMs: boundedInteger(value.assistantTimeoutMs, 12_000, 4_000, 20_000),
+    assistantReasoningEffort: normalizeReasoningEffort(value.assistantReasoningEffort),
   };
 }
 
@@ -150,6 +165,10 @@ function boundedInteger(value: unknown, fallback: number, minimum: number, maxim
 
 function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
+}
+
+function normalizeReasoningEffort(value: unknown): "low" | "medium" | "high" {
+  return value === "medium" || value === "high" ? value : "low";
 }
 
 function readOptional(file: string): string | null {

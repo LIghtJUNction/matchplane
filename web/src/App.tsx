@@ -594,20 +594,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           onConfirm={confirmModeChange}
         />
 
-        <AnimatePresence>
-          {notice ? (
-            <motion.div
-              className="toast"
-              role="status"
-              initial={{ opacity: 0, y: 24, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.98 }}
-              transition={spring}
-            >
-              {notice}
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+        {notice ? <p className="visually-hidden" role="status">{notice}</p> : null}
       </div>
     </MotionConfig>
   );
@@ -660,7 +647,7 @@ function appCopy(locale: "zh" | "en") {
       backToParent: "Back to mall",
       rootPlatform: "Mall",
       console: "Console",
-      consoleDescription: "Manage your requests, listings, and contact details.",
+      consoleDescription: "Open and manage your stores.",
       closeConsole: "Close console",
       closeConsoleDialog: "Close console dialog",
       account: "Account",
@@ -689,7 +676,7 @@ function appCopy(locale: "zh" | "en") {
     backToParent: "返回商城",
     rootPlatform: "商城首页",
     console: "控制台",
-    consoleDescription: "管理你的需求、商品和联系方式。",
+    consoleDescription: "开设和管理你的店铺。",
     closeConsole: "关闭控制台",
     closeConsoleDialog: "关闭控制台对话框",
     account: "账号",

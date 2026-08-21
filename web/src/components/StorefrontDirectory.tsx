@@ -40,11 +40,7 @@ export function StorefrontDirectory({ locale }: { locale: InterfaceLocale }) {
               </li>
             ))}
           </ul>
-        ) : resolved ? (
-          <p className="storefront-map-empty">{locale === "en" ? "The first storefront is being prepared." : "第一家店铺正在筹备中。"}</p>
-        ) : (
-          <p className="storefront-map-empty">{locale === "en" ? "Loading the store map…" : "正在加载店铺地图…"}</p>
-        )}
+        ) : null}
       </div>
     </section>
   );

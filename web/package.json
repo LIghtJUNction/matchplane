@@ -17,10 +17,12 @@
     "preview": "node .next/standalone/server.js"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.34",
     "@appica/ui-react": "1.1.0",
     "@better-auth/api-key": "1.7.0-rc.6",
     "@better-auth/oauth-provider": "1.7.0-rc.6",
     "@better-auth/passkey": "1.7.0-rc.6",
+    "ai": "^7.0.73",
     "better-auth": "1.7.0-rc.6",
     "lucide-react": "1.31.0",
     "motion": "13.1.0",
@@ -30,7 +32,8 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "0.0.1",
-    "sharp": "0.35.3"
+    "sharp": "0.35.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "7.0.1",

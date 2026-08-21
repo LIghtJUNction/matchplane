@@ -35,6 +35,11 @@ export async function PATCH(request: Request): Promise<Response> {
       assistantInstructions: optionalText(body.assistantInstructions),
       assistantMaxOutputTokens: numberValue(body.assistantMaxOutputTokens),
       assistantTemperature: numberValue(body.assistantTemperature),
+      assistantMaxSteps: numberValue(body.assistantMaxSteps),
+      assistantTimeoutMs: numberValue(body.assistantTimeoutMs),
+      assistantReasoningEffort: body.assistantReasoningEffort === "medium" || body.assistantReasoningEffort === "high" || body.assistantReasoningEffort === "low"
+        ? body.assistantReasoningEffort
+        : undefined,
     });
     return NextResponse.json({ config }, { headers: { "cache-control": "no-store" } });
   } catch (cause) {
