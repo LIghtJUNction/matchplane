@@ -7558,3 +7558,16 @@ main > div > .match-chat.is-root.is-catalog-header {
     padding: 18px;
   }
 }
+
+.app-shell:has(.match-chat.is-root) .storefront-featured-card {
+  height: 178px !important;
+  max-height: 178px;
+  aspect-ratio: auto !important;
+}
+
+@media (max-width: 640px) {
+  .app-shell:has(.match-chat.is-root) .storefront-featured-card {
+    height: 164px !important;
+    max-height: 164px;
+  }
+}
