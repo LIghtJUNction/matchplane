@@ -7477,3 +7477,84 @@ main > div > .match-chat.is-root.is-catalog-header {
     padding: 22px 18px;
   }
 }
+
+
+/* Root store cards: compact directory, never a promotional hero. */
+.app-shell:has(.match-chat.is-root) .storefront-card-stage,
+.app-shell:has(.match-chat.is-root) .storefront-card-stage.is-single {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 360px));
+  gap: 16px;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-featured-card {
+  min-height: 178px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e1e4e1;
+  border-radius: 10px;
+  background: #fff;
+  color: #202321;
+  box-shadow: none;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-featured-card::before,
+.app-shell:has(.match-chat.is-root) .storefront-featured-card::after {
+  display: none;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-featured-top {
+  position: static;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-featured-top > span:last-child {
+  color: #818682;
+  font-size: 12px;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-featured-copy {
+  margin-top: 22px;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-featured-copy strong {
+  color: #202321;
+  font-size: 22px;
+  letter-spacing: -0.025em;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-featured-copy p {
+  margin-top: 7px;
+  overflow: hidden;
+  color: #737975;
+  font-size: 13px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-card-action {
+  margin-top: auto;
+  color: var(--root-accent-hover);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-card-aside {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .app-shell:has(.match-chat.is-root) .storefront-card-stage,
+  .app-shell:has(.match-chat.is-root) .storefront-card-stage.is-single {
+    grid-template-columns: 1fr;
+    margin-top: 12px;
+  }
+
+  .app-shell:has(.match-chat.is-root) .storefront-featured-card {
+    min-height: 164px;
+    padding: 18px;
+  }
+}

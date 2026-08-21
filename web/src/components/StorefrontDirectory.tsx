@@ -27,13 +27,13 @@ export function StorefrontDirectory({ locale }: { locale: InterfaceLocale }) {
       <div className="storefront-directory-heading">
         <div>
           <span>{locale === "en" ? "Marketplace" : "商城"}</span>
-          <h2 id="storefront-directory-title">{locale === "en" ? "All products" : "全部商品"}</h2>
+          <h2 id="storefront-directory-title">{locale === "en" ? "Stores" : "店铺"}</h2>
         </div>
         <small>{!resolved
           ? (locale === "en" ? "Loading" : "读取中")
           : stores.length
             ? (locale === "en" ? stores.length + " live" : stores.length + " 家已上线")
-            : (locale === "en" ? "No products yet" : "暂无商品")}</small>
+            : (locale === "en" ? "No stores yet" : "暂无店铺")}</small>
       </div>
 
       {!resolved ? (
@@ -82,8 +82,8 @@ export function StorefrontDirectory({ locale }: { locale: InterfaceLocale }) {
         <div className="storefront-directory-empty">
           <span className="storefront-card-mark" aria-hidden="true">MP</span>
           <div>
-            <strong>{locale === "en" ? "No products are listed yet." : "暂无上架商品"}</strong>
-            <p>{locale === "en" ? "Published products will appear here." : "商品发布并审核通过后会显示在这里。"}</p>
+            <strong>{locale === "en" ? "No stores are available yet." : "暂无可浏览店铺"}</strong>
+            <p>{locale === "en" ? "Approved stores will appear here." : "店铺审核通过后会显示在这里。"}</p>
           </div>
         </div>
       )}
