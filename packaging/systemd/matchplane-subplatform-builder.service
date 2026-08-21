@@ -28,15 +28,18 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ProtectKernelTunables=true
+# Bubblewrap must mount an isolated /proc inside its own user/PID namespaces.
+# The unprivileged builder still cannot write host kernel tunables.
+ProtectKernelTunables=false
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# Bun/Node-based static builds require JIT executable memory inside the bwrap sandbox.
+MemoryDenyWriteExecute=false
 ReadWritePaths=/var/lib/matchplane/subplatform-artifacts /var/lib/matchplane/subplatform-builder-work
 ReadOnlyPaths=/var/lib/matchplane/subplatform-uploads
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
 
 [Install]

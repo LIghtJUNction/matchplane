@@ -617,6 +617,9 @@ async fn build_one_inner(
     }
     let manifest = read_manifest(&source.root, job, &job.manifest_digest)?;
     let build_dir = workspace.join("build");
+    tokio_fs::create_dir_all(&build_dir)
+        .await
+        .context("creating build scratch directory")?;
     prepare_dependencies(&manifest, &build_dir).await?;
     run_build(&manifest, config.build_seconds, &build_dir).await?;
     let output = publish_artifact(config, &manifest, &build_dir, &job.id).await?;
