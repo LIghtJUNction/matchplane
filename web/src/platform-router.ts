@@ -361,6 +361,9 @@ export async function answerPlatformShoppingQuestion(input: {
       },
       toolChoice: "auto",
       prepareStep: ({ stepNumber }) => {
+        // Reserve the final step for prose. Without this, a tool-happy model can
+        // spend the entire bounded loop calling tools and never return an answer.
+        if (stepNumber >= router.assistantMaxSteps - 1) return { activeTools: [], toolChoice: "none" as const };
         // Several OpenAI-compatible gateways support tool calls but reject a forced
         // `tool_choice: required`. Limit the available tool for the early steps and
         // make the system instruction explicit; this keeps the loop agentic without

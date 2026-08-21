@@ -87,5 +87,6 @@ describe("platform shopping agent", () => {
     expect(options.prepareStep({ stepNumber: 0 })).toEqual({ activeTools: ["list_public_stores"], toolChoice: "auto" });
     expect(options.prepareStep({ stepNumber: 1 })).toEqual({ activeTools: ["search_public_products"], toolChoice: "auto" });
     expect(options.prepareStep({ stepNumber: 2 })).toEqual({ toolChoice: "auto" });
+    expect(options.prepareStep({ stepNumber: 3 })).toEqual({ activeTools: [], toolChoice: "none" });
   });
 });
