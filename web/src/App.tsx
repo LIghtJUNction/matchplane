@@ -115,6 +115,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       url.searchParams.delete("account");
       cleanWorkspaceTarget = true;
     }
+    if (url.searchParams.get("stores") === "1") {
+      setMyStoresOpen(true);
+      url.searchParams.delete("stores");
+      cleanWorkspaceTarget = true;
+    }
     if (url.searchParams.get("console") === "products") {
       setStoreConsoleRequested(true);
       url.searchParams.delete("console");
@@ -219,6 +224,15 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   const openSignIn = () => {
     window.location.assign(loginHref(role));
+  };
+
+  const openStoreCenter = () => {
+    setAccountMenuOpen(false);
+    if (!authUser) {
+      window.location.assign("/login?next=" + encodeURIComponent("/?stores=1"));
+      return;
+    }
+    setMyStoresOpen(true);
   };
 
   const signOut = async () => {
@@ -357,6 +371,16 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               </div>
               <div className="header-actions">
                 <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
+                <motion.button
+                  className="header-store-action"
+                  type="button"
+                  onClick={openStoreCenter}
+                  whileTap={{ scale: 0.97 }}
+                  transition={spring}
+                >
+                  <Store size={17} aria-hidden="true" />
+                  <span>{ui.storeCenter}</span>
+                </motion.button>
                 {!authUser && authResolved ? (
                   <motion.button
                     className="header-signin-action"
@@ -704,6 +728,7 @@ function appCopy(locale: "zh" | "en") {
       backToParent: "Back to mall",
       rootPlatform: "Mall",
       myStores: "My stores",
+      storeCenter: "Merchant center",
       myStoresDescription: "Open a store or manage one you already run.",
       closeMyStores: "Close my stores",
       closeMyStoresDialog: "Close my stores dialog",
@@ -736,6 +761,7 @@ function appCopy(locale: "zh" | "en") {
     backToParent: "返回商城",
     rootPlatform: "商城首页",
     myStores: "我的店铺",
+    storeCenter: "商家中心",
     myStoresDescription: "开设店铺，或管理你已经在经营的店铺。",
     closeMyStores: "关闭我的店铺",
     closeMyStoresDialog: "关闭我的店铺对话框",

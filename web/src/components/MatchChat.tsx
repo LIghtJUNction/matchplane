@@ -276,6 +276,28 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
     input.style.height = `${Math.min(input.scrollHeight, 240)}px`;
   }, []);
 
+  const shoppingPromises = locale === "en"
+    ? ["Browse publicly", "Compare across stores", "Consent before contact"]
+    : ["公开浏览", "跨店比较", "联系前征得同意"];
+  const quickPrompts = locale === "en"
+    ? [
+        "A lightweight laptop for commuting, within my budget",
+        "Compare a few suitable options and explain the trade-offs",
+        "Find a reliable store for this product",
+      ]
+    : [
+        "预算内找一台适合通勤的轻薄电脑",
+        "比较几款合适的商品，并说明取舍",
+        "帮我找一家可靠的店铺",
+      ];
+  const applyQuickPrompt = (value: string) => {
+    setMessage(value);
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      resizeInput(inputRef.current);
+    });
+  };
+
   useEffect(() => {
     resizeInput(inputRef.current);
   }, [message, resizeInput]);
@@ -898,6 +920,11 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
         <div>
           <h1 id="match-chat-title">{headline}</h1>
           <p>{isSeller ? copy.sellerDescription : copy.buyerDescription}</p>
+          {isRoot && !isSeller ? (
+            <ul className="match-chat-promises" aria-label={locale === "en" ? "Shopping assistant capabilities" : "导购能力"}>
+              {shoppingPromises.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          ) : null}
         </div>
         <div className="match-chat-actions">
           {messages.length ? (
@@ -972,6 +999,16 @@ export function MatchChat({ onNotice, subplatform, locale = "zh", role = "buyer"
             </li>
           ))}
         </ul>
+      ) : null}
+      {isRoot && !isSeller && !messages.length ? (
+        <div className="match-chat-suggestions" aria-label={locale === "en" ? "Example shopping requests" : "购物需求示例"}>
+          <span>{locale === "en" ? "Try asking" : "试着这样问"}</span>
+          <div>
+            {quickPrompts.map((prompt) => (
+              <button key={prompt} type="button" onClick={() => applyQuickPrompt(prompt)}>{prompt}</button>
+            ))}
+          </div>
+        </div>
       ) : null}
       <form className="match-chat-form" onSubmit={send}>
         {mediaUploadEnabled ? (

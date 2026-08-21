@@ -364,7 +364,7 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
             eyebrow={subplatform.ui?.chat?.listingEyebrow}
             title={`${visible.length} ${locale === "zh" && subplatform.ui?.chat?.listingLabel
               ? subplatform.ui.chat.listingLabel
-              : copy("listingCountLabel", "个可用供给", "available offers")}`}
+              : copy("listingCountLabel", "件商品", "products")}`}
           />
           {visible.length ? (
             <div className="listing-grid">
@@ -397,11 +397,11 @@ export function BuyerDashboard({ listings, locale, onOpenListing, onNotice, subp
               <Search size={28} aria-hidden="true" />
               <h3>{query
                 ? copy("searchEmptyTitle", "没有命中这次搜索", "No offers match this search")
-                : copy("noOffersTitle", "等待供给方上传资料", "Waiting for supply partners to publish")}</h3>
+                : copy("noOffersTitle", "暂无上架商品", "No published products yet")}</h3>
               <p>
                 {query
                   ? copy("searchEmptyDescription", "换一个名称、属性或地点试试。", "Try another name, attribute, or location.")
-                  : copy("noOffersDescription", "平台不预置样例内容；供给方提交并通过审核后，这里会出现真实供给。", "There are no seeded examples. Approved offers will appear here after supply partners publish them.")}
+                  : copy("noOffersDescription", "平台不预置样例内容；店铺提交并通过审核后，这里会出现真实商品。", "There are no seeded examples. Real products appear after stores publish and pass review.")}
               </p>
               {query ? <button type="button" onClick={() => setQuery("")}>{copy("clearSearchLabel", "清除搜索", "Clear search")}</button> : null}
               {!query ? <button type="button" onClick={() => { document.getElementById("match-chat-input")?.focus(); onNotice(copy("describeDemandNotice", "告诉 AI 导购你想买什么，它会在已上线店铺中寻找商品", "Tell the shopping assistant what you want and it will search live stores.")); }}>{copy("describeDemandLabel", "继续挑选", "Keep shopping")}</button> : null}
