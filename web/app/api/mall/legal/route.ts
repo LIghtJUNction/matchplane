@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(): Promise<Response> {
-  const tenantId = configuredTenantId();
+  const tenantId = await resolveTenantId();
   if (!tenantId) return jsonError("商城尚未完成初始化", 503);
   const result = await authDatabase.query<LegalRow>(
     `SELECT tenant.name AS "mallName", document.kind, document.content, document.version::text AS version,
@@ -50,7 +50,7 @@ export async function PATCH(request: Request): Promise<Response> {
   if (!termsContent || !privacyContent || !termsVersion || !privacyVersion) {
     return jsonError("请填写完整的用户协议、隐私政策及版本", 400);
   }
-  const tenantId = configuredTenantId();
+  const tenantId = await resolveTenantId();
   if (!tenantId) return jsonError("商城尚未完成初始化", 503);
 
   let client: PoolClient | undefined;
@@ -156,6 +156,25 @@ function configuredTenantId(): string | null {
   // A direct member read may be substituted during build for newly introduced route chunks.
   const value = process.env["MATCHPLANE_ROOT_TENANT_ID"]?.trim() ?? "";
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(value) ? value : null;
+}
+
+async function resolveTenantId(): Promise<string | null> {
+  const configured = configuredTenantId();
+  if (configured) return configured;
+  // This fallback is deliberately narrow: it applies only when the database has exactly one
+  // active marketplace root, which keeps a restarted worker aligned with that deployment.
+  const result = await authDatabase.query<{ id: string }>(
+    `SELECT tenant.id::text AS id
+       FROM tenants tenant
+       JOIN "organization" organization
+         ON organization."tenantId" = tenant.id::text
+        AND organization."rootPlatform" = true
+        AND organization."parentOrganizationId" IS NULL
+      WHERE tenant.status = 'active'
+      ORDER BY tenant.created_at ASC
+      LIMIT 2`,
+  );
+  return result.rows.length === 1 ? result.rows[0]?.id ?? null : null;
 }
 
 function jsonError(error: string, status: number): Response {

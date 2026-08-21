@@ -381,8 +381,8 @@ async function hasReservedSuperAdminInvite(email: string): Promise<boolean> {
 }
 
 async function currentLegalVersions(): Promise<{ terms: number; privacy: number } | null> {
-  const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  if (!tenantId || !isUuid(tenantId)) return null;
+  const tenantId = await legalTenantId();
+  if (!tenantId) return null;
   const result = await authDatabase.query<{ kind: "terms" | "privacy"; version: string }>(
     `SELECT kind, version::text FROM mall_legal_documents
       WHERE tenant_id = $1::uuid AND kind = ANY($2::text[])`,
@@ -402,8 +402,8 @@ function legalVersionFromUser(user: unknown, key: "legalTermsVersion" | "legalPr
 }
 
 async function recordLegalAcceptance(user: { id: string; legalTermsVersion?: unknown; legalPrivacyVersion?: unknown }): Promise<void> {
-  const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  if (!tenantId || !isUuid(tenantId)) return;
+  const tenantId = await legalTenantId();
+  if (!tenantId) return;
   const termsVersion = legalVersionFromUser(user, "legalTermsVersion");
   const privacyVersion = legalVersionFromUser(user, "legalPrivacyVersion");
   if (!termsVersion || !privacyVersion) return;
@@ -413,6 +413,23 @@ async function recordLegalAcceptance(user: { id: string; legalTermsVersion?: unk
      ON CONFLICT DO NOTHING`,
     [tenantId, user.id, termsVersion, privacyVersion],
   );
+}
+
+async function legalTenantId(): Promise<string | null> {
+  const configured = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+  if (configured && isUuid(configured)) return configured;
+  const result = await authDatabase.query<{ id: string }>(
+    `SELECT tenant.id::text AS id
+       FROM tenants tenant
+       JOIN "organization" organization
+         ON organization."tenantId" = tenant.id::text
+        AND organization."rootPlatform" = true
+        AND organization."parentOrganizationId" IS NULL
+      WHERE tenant.status = 'active'
+      ORDER BY tenant.created_at ASC
+      LIMIT 2`,
+  );
+  return result.rows.length === 1 ? result.rows[0]?.id ?? null : null;
 }
 
 async function consumeReservedSuperAdminInvite(email: string, userId: string): Promise<void> {
