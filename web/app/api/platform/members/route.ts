@@ -62,6 +62,9 @@ export async function POST(request: Request): Promise<Response> {
   if (role === "owner" && !access.isRootSuperAdmin) {
     return jsonError("只有根超级管理员可以转移平台所有权", 403);
   }
+  if (role === "owner" && await hasAnotherStoreOwner(organizationId)) {
+    return jsonError("每家店铺只能有一位店长；请先完成店长交接", 409);
+  }
 
   try {
     const invitation = await auth.api.createInvitation({
@@ -95,6 +98,9 @@ export async function PATCH(request: Request): Promise<Response> {
   if (access.response) return access.response;
   if (role === "owner" && !access.isRootSuperAdmin) {
     return jsonError("只有根超级管理员可以转移平台所有权", 403);
+  }
+  if (role === "owner" && await hasAnotherStoreOwner(organizationId, memberId)) {
+    return jsonError("每家店铺只能有一位店长；请先完成店长交接", 409);
   }
 
   try {
@@ -262,6 +268,26 @@ async function findOrganization(organizationId: string): Promise<OrganizationSco
     [organizationId, tenantId],
   );
   return result.rows[0] ?? null;
+}
+
+/** A store has one accountable manager; legacy root organizations retain their existing owner model. */
+async function hasAnotherStoreOwner(organizationId: string, excludeMemberId?: string): Promise<boolean> {
+  const organization = await findOrganization(organizationId);
+  if (!organization || organization.parentOrganizationId === null) return false;
+  try {
+    const result = await authDatabase.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM "member"
+        WHERE "organizationId" = $1::uuid
+          AND ($2::uuid IS NULL OR id <> $2::uuid)
+          AND 'owner' = ANY(string_to_array(role, ','))`,
+      [organizationId, excludeMemberId ?? null],
+    );
+    return Number.parseInt(result.rows[0]?.count ?? "0", 10) > 0;
+  } catch {
+    // Failing closed avoids a second manager when the membership authority is unavailable.
+    return true;
+  }
 }
 
 async function invitationBelongsToOrganization(invitationId: string, organizationId: string): Promise<boolean> {

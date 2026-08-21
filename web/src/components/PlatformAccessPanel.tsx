@@ -47,7 +47,7 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
   const [directory, setDirectory] = useState<PlatformMemberDirectory | null>(null);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("subplatform_admin");
+  const [inviteRole, setInviteRole] = useState("admin");
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<PlatformAccountRecord[]>([]);
   const [administratorLoading, setAdministratorLoading] = useState(false);
@@ -88,6 +88,7 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
   }, [accountSearch, accounts]);
 
   const ordinaryAccountCount = accounts.filter((account) => account.role === "user").length;
+  const storeOnlyScope = organizations.length === 1 && organizations[0]?.isRoot !== true;
 
   useEffect(() => {
     if (!organizationId && organizations[0]) setOrganizationId(organizations[0].id);
@@ -410,9 +411,9 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
     <section className="surface platform-access-panel" aria-labelledby="platform-access-title">
       <div className="subplatform-header">
         <div>
-          <p className="eyebrow"><Users size={14} aria-hidden="true" /> 团队与账号</p>
-          <h2 id="platform-access-title">管理团队，也看得见用户</h2>
-          <p className="subplatform-intro">账号目录用于查看商城注册用户；团队成员才拥有商城或店铺的运营权限。</p>
+          <p className="eyebrow"><Users size={14} aria-hidden="true" /> {storeOnlyScope ? "店铺团队" : "团队与账号"}</p>
+          <h2 id="platform-access-title">{storeOnlyScope ? "店长和店员" : "管理团队，也看得见用户"}</h2>
+          <p className="subplatform-intro">{storeOnlyScope ? "店长负责店铺和团队；店员可以上架商品、处理日常经营，不能管理商城。" : "账号目录用于查看商城注册用户；团队成员才拥有商城或店铺的运营权限。"}</p>
         </div>
         {organizations.length && (!isMallOperator || accessView === "team") ? (
           <label className="platform-access-select"><span>管理范围</span><select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.isRoot ? "商城" : "店铺"} · {organization.name}</option>)}</select></label>
@@ -560,15 +561,15 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
 
 function roleOptions(canAssignOwner: boolean): Array<{ value: string; label: string }> {
   const roles = [
-    { value: "admin", label: "店铺运营" },
-    { value: "subplatform_admin", label: "店铺运营" },
+    { value: "admin", label: "店员" },
     { value: "moderator", label: "内容审核" },
-    { value: "member", label: "店铺成员" },
+    { value: "member", label: "仅查看" },
   ];
-  return canAssignOwner ? [{ value: "owner", label: "店主" }, ...roles] : roles;
+  return canAssignOwner ? [{ value: "owner", label: "店长" }, ...roles] : roles;
 }
 
 function roleLabel(role: string): string {
+  if (role === "subplatform_admin") return "店员";
   return roleOptions(true).find((candidate) => candidate.value === role)?.label || role;
 }
 
