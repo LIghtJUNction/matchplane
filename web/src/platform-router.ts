@@ -361,8 +361,12 @@ export async function answerPlatformShoppingQuestion(input: {
       },
       toolChoice: "auto",
       prepareStep: ({ stepNumber }) => {
-        if (stepNumber === 0) return { activeTools: ["list_public_stores"], toolChoice: "required" as const };
-        if (input.mode === "shopping" && stepNumber === 1) return { activeTools: ["search_public_products"], toolChoice: "required" as const };
+        // Several OpenAI-compatible gateways support tool calls but reject a forced
+        // `tool_choice: required`. Limit the available tool for the early steps and
+        // make the system instruction explicit; this keeps the loop agentic without
+        // turning a provider-specific limitation into a user-visible failure.
+        if (stepNumber === 0) return { activeTools: ["list_public_stores"], toolChoice: "auto" as const };
+        if (input.mode === "shopping" && stepNumber === 1) return { activeTools: ["search_public_products"], toolChoice: "auto" as const };
         return { toolChoice: "auto" as const };
       },
       stopWhen: stepCountIs(router.assistantMaxSteps),
