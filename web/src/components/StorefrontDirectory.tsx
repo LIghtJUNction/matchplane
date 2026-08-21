@@ -26,14 +26,14 @@ export function StorefrontDirectory({ locale }: { locale: InterfaceLocale }) {
     <section className="storefront-directory" aria-labelledby="storefront-directory-title" aria-busy={!resolved}>
       <div className="storefront-directory-heading">
         <div>
-          <span>{locale === "en" ? "Explore stores" : "浏览店铺"}</span>
-          <h2 id="storefront-directory-title">{locale === "en" ? "Start with a real store." : "从真实店铺开始逛。"}</h2>
+          <span>{locale === "en" ? "Marketplace" : "商城"}</span>
+          <h2 id="storefront-directory-title">{locale === "en" ? "All products" : "全部商品"}</h2>
         </div>
         <small>{!resolved
           ? (locale === "en" ? "Loading" : "读取中")
           : stores.length
             ? (locale === "en" ? stores.length + " live" : stores.length + " 家已上线")
-            : (locale === "en" ? "No live stores yet" : "等待首家店铺")}</small>
+            : (locale === "en" ? "No products yet" : "暂无商品")}</small>
       </div>
 
       {!resolved ? (
@@ -82,14 +82,14 @@ export function StorefrontDirectory({ locale }: { locale: InterfaceLocale }) {
         <div className="storefront-directory-empty">
           <span className="storefront-card-mark" aria-hidden="true">MP</span>
           <div>
-            <strong>{locale === "en" ? "The mall is ready for its first store." : "商城正在等待第一家店铺。"}</strong>
-            <p>{locale === "en" ? "Approved stores and their real products will appear here." : "店铺通过审核后，这里会展示真实店铺与商品。"}</p>
+            <strong>{locale === "en" ? "No products are listed yet." : "暂无上架商品"}</strong>
+            <p>{locale === "en" ? "Published products will appear here." : "商品发布并审核通过后会显示在这里。"}</p>
           </div>
         </div>
       )}
 
       <p className="storefront-directory-caption">
-        {locale === "en" ? "Only approved stores and published products are shown." : "这里只展示已审核店铺与已发布商品。"}
+        {locale === "en" ? "Published products only" : "仅展示已发布商品"}
       </p>
     </section>
   );

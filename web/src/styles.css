@@ -7275,3 +7275,205 @@ main > div > .match-chat.is-root.is-catalog-header {
   .remote-store-activation { grid-column: 1 / -1; width: 100%; }
   .remote-store-activation { align-items: stretch; flex-direction: column; }
 }
+
+
+/* Root marketplace: inventory first, neutral commerce shell. */
+.app-shell:has(.match-chat.is-root) {
+  --root-accent: #16a164;
+  --root-accent-hover: #118552;
+  min-height: 100dvh;
+  background: #f6f7f5;
+  color: #202321;
+}
+
+.app-shell:has(.match-chat.is-root) .app-header {
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid #e7e9e6;
+  backdrop-filter: blur(16px);
+}
+
+.app-shell:has(.match-chat.is-root) .header-inner {
+  width: min(100% - 40px, 1240px);
+  min-height: 68px;
+}
+
+.app-shell:has(.match-chat.is-root) main > div {
+  width: min(100% - 40px, 1240px);
+  margin-inline: auto;
+}
+
+.app-shell:has(.match-chat.is-root) .match-chat.is-catalog-header {
+  display: block;
+  width: min(100%, 860px);
+  margin: 30px auto 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-shell:has(.match-chat.is-root) .match-chat-heading,
+.app-shell:has(.match-chat.is-root) .match-chat-actions,
+.app-shell:has(.match-chat.is-root) .match-chat-footnote {
+  display: none;
+}
+
+.app-shell:has(.match-chat.is-root) .match-chat-form {
+  min-height: 58px;
+  padding: 4px 4px 4px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 2px solid var(--root-accent);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(30, 45, 36, 0.08);
+}
+
+.app-shell:has(.match-chat.is-root) .match-chat-form textarea {
+  min-height: 46px;
+  height: 46px;
+  padding: 12px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  resize: none;
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.app-shell:has(.match-chat.is-root) .match-chat-form textarea:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.app-shell:has(.match-chat.is-root) .match-chat-send {
+  width: 78px;
+  min-width: 78px;
+  height: 48px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--root-accent);
+  color: #fff;
+  box-shadow: none;
+}
+
+.app-shell:has(.match-chat.is-root) .match-chat-send:hover {
+  background: var(--root-accent-hover);
+}
+
+.app-shell:has(.match-chat.is-root) .root-empty-directory {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-directory {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-directory-heading {
+  min-height: 58px;
+  margin: 0;
+  padding: 0 0 16px;
+  align-items: end;
+  border-bottom: 1px solid #dedfdd;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-directory-heading > div > span {
+  display: none;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-directory-heading h2 {
+  margin: 0;
+  color: #202321;
+  font-size: clamp(24px, 2.4vw, 32px);
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-directory-heading small {
+  color: #7b817d;
+  font-size: 12px;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-directory-empty {
+  min-height: 150px;
+  margin-top: 18px;
+  padding: 28px;
+  justify-content: center;
+  border: 1px solid #e3e5e2;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-card-mark {
+  background: #e8f5ee;
+  color: var(--root-accent-hover);
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-directory-empty strong {
+  font-size: 15px;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-directory-empty p {
+  margin-top: 5px;
+  color: #7b817d;
+  font-size: 13px;
+}
+
+.app-shell:has(.match-chat.is-root) .storefront-directory-caption {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .app-shell:has(.match-chat.is-root) .header-inner,
+  .app-shell:has(.match-chat.is-root) main > div {
+    width: min(100% - 24px, 1240px);
+  }
+
+  .app-shell:has(.match-chat.is-root) .match-chat.is-catalog-header {
+    margin-block: 18px 22px;
+  }
+
+  .app-shell:has(.match-chat.is-root) .match-chat-form {
+    min-height: 54px;
+    padding: 3px 3px 3px 13px;
+    border-radius: 8px;
+  }
+
+  .app-shell:has(.match-chat.is-root) .match-chat-form textarea {
+    min-height: 44px;
+    height: 44px;
+    padding-block: 11px;
+    font-size: 14px;
+  }
+
+  .app-shell:has(.match-chat.is-root) .match-chat-send {
+    width: 52px;
+    min-width: 52px;
+    height: 44px;
+    border-radius: 6px;
+  }
+
+  .app-shell:has(.match-chat.is-root) .storefront-directory-heading {
+    min-height: 46px;
+    padding-bottom: 12px;
+  }
+
+  .app-shell:has(.match-chat.is-root) .storefront-directory-empty {
+    min-height: 126px;
+    margin-top: 12px;
+    padding: 22px 18px;
+  }
+}
