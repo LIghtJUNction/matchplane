@@ -1998,6 +1998,15 @@ main {
 .mall-brand-legal-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .mall-brand-legal-actions small { color: var(--muted); font-size: 0.65rem; }
 .mall-brand-legal-actions .button { min-height: 2.55rem; display: inline-flex; align-items: center; gap: 0.4rem; }
+.platform-ai-config { grid-column: 1 / -1; }
+.platform-ai-advanced { padding-top: 1rem; display: grid; grid-template-columns: minmax(0, 1fr) minmax(9rem, 0.36fr) minmax(9rem, 0.36fr); gap: 0.7rem; border-top: 1px solid var(--line); }
+.platform-ai-advanced > div { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 0.42rem; }
+.platform-ai-advanced > div strong { font-size: 0.76rem; }
+.platform-ai-advanced label { position: relative; display: grid; gap: 0.34rem; }
+.platform-ai-advanced label > span { color: var(--ink-soft); font-size: 0.68rem; font-weight: 650; }
+.platform-ai-advanced textarea { width: 100%; resize: vertical; padding: 0.72rem 0.78rem; border: 1px solid var(--line); border-radius: 0.78rem; outline: 0; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.73rem; line-height: 1.5; }
+.platform-ai-advanced textarea:focus { border-color: var(--sky); box-shadow: 0 0 0 0.12rem rgba(106, 155, 204, 0.2); }
+.platform-ai-advanced small { color: var(--muted); font-size: 0.6rem; }
 .platform-access-select { min-width: min(100%, 18rem); display: grid; gap: 0.3rem; }
 .platform-access-select span,
 .platform-access-invite label > span { color: var(--ink-soft); font-size: 0.66rem; font-weight: 650; }
@@ -4059,6 +4068,7 @@ main.subplatform-fullscreen-main {
   .mall-brand-preview { width: 5.5rem; height: 5.5rem; }
   .mall-brand-actions { align-items: stretch; flex-direction: column; }
   .mall-brand-actions .button { width: 100%; justify-content: center; }
+  .platform-ai-advanced { grid-template-columns: 1fr; }
   .personal-profile-identity { grid-template-columns: auto minmax(0, 1fr); }
   .personal-profile-upload { grid-column: 1 / -1; width: 100%; justify-content: center; }
   .platform-member-row { grid-template-columns: 2.2rem minmax(0, 1fr) auto; }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Save, Send, ShieldCheck } from "lucide-react";
+import { Bot, Save, Send, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { Input } from "@appica/ui-react/input";
 
 import {
@@ -23,6 +23,9 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
   const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [enabled, setEnabled] = useState(false);
+  const [assistantInstructions, setAssistantInstructions] = useState("");
+  const [assistantMaxOutputTokens, setAssistantMaxOutputTokens] = useState("320");
+  const [assistantTemperature, setAssistantTemperature] = useState("0.2");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -40,7 +43,16 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
     if (!canEdit) return;
     setSaving(true);
     try {
-      const updated = await saveManagedPlatformRouterConfig({ endpoint, model, protocol, enabled, apiKey: apiKey || undefined });
+      const updated = await saveManagedPlatformRouterConfig({
+        endpoint,
+        model,
+        protocol,
+        enabled,
+        apiKey: apiKey || undefined,
+        assistantInstructions,
+        assistantMaxOutputTokens: Number.parseInt(assistantMaxOutputTokens, 10),
+        assistantTemperature: Number.parseFloat(assistantTemperature),
+      });
       apply(updated);
       setApiKey("");
       onNotice(updated.credentialConfigured ? "AI 配置已保存" : "请输入 API Key 后再保存");
@@ -70,18 +82,27 @@ export function PlatformAiConfigPanel({ rootRole, onNotice }: { rootRole?: strin
 
   function apply(current: ManagedPlatformRouterConfig) {
     setConfig(current); setEndpoint(current.endpoint); setModel(current.model); setModels([current.model]); setProtocol(current.protocol); setEnabled(current.enabled);
+    setAssistantInstructions(current.assistantInstructions ?? "");
+    setAssistantMaxOutputTokens(String(current.assistantMaxOutputTokens ?? 320));
+    setAssistantTemperature(String(current.assistantTemperature ?? 0.2));
   }
 
   return (
     <section className="surface root-email-config platform-ai-config" aria-labelledby="platform-ai-config-title">
-      <SectionHeading eyebrow="AI 导购" title="连接商城的购物助手" titleId="platform-ai-config-title" />
-      <p className="subplatform-intro">购物助手会理解顾客需求、挑选相关店铺并协助比较商品。API Key 只保存在服务器受保护存储中。</p>
+      <SectionHeading title="AI" titleId="platform-ai-config-title" />
+      <p className="subplatform-intro">在这里配置模型、导购行为和输出边界。API Key 只保存在服务器受保护存储中。</p>
       <div className="seller-upload-form">
         <label htmlFor="platform-ai-endpoint"><span>模型网关主机</span><Input id="platform-ai-endpoint" value={endpoint} disabled={!canEdit || loading} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://api.example.com" inputMode="url" /></label>
         <label htmlFor="platform-ai-protocol"><span>协议</span><select id="platform-ai-protocol" value={protocol} disabled={!canEdit || loading} onChange={(event) => setProtocol(event.target.value as ManagedPlatformRouterConfig["protocol"])}><option value="openai-compatible">OpenAI Compatible</option><option value="anthropic-messages">Anthropic Messages</option><option value="gemini-generate-content">Gemini Generate Content</option></select></label>
         <label htmlFor="platform-ai-key"><span>API Key</span><Input id="platform-ai-key" type="password" value={apiKey} disabled={!canEdit || loading} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" placeholder={config?.credentialConfigured ? "留空则保持当前 API Key" : "填写 API Key"} /></label>
         <div className="platform-ai-model-picker seller-upload-wide"><button className="root-email-test" type="button" disabled={!canEdit || modelsLoading || loading} onClick={() => void loadModels()}>{modelsLoading ? "获取中…" : "获取模型列表"}</button><label htmlFor="platform-ai-model"><span>模型</span><select id="platform-ai-model" value={model} disabled={!canEdit || loading || !models.length} onChange={(event) => setModel(event.target.value)}><option value="">选择模型</option>{models.map((candidate) => <option key={candidate} value={candidate}>{candidate}</option>)}</select></label></div>
         <label className="email-enabled"><input type="checkbox" checked={enabled} disabled={!canEdit || loading} onChange={(event) => setEnabled(event.target.checked)} />启用商城 AI 导购</label>
+        <div className="platform-ai-advanced seller-upload-wide">
+          <div><SlidersHorizontal size={16} aria-hidden="true" /><strong>导购行为</strong></div>
+          <label htmlFor="platform-ai-instructions"><span>补充指引（可选）</span><textarea id="platform-ai-instructions" value={assistantInstructions} disabled={!canEdit || loading} maxLength={4000} rows={4} onChange={(event) => setAssistantInstructions(event.target.value)} placeholder="例如：先确认预算和用途，再给出对比建议。" /></label>
+          <label><span>单次回答上限</span><Input type="number" min={64} max={512} value={assistantMaxOutputTokens} disabled={!canEdit || loading} onChange={(event) => setAssistantMaxOutputTokens(event.target.value)} /><small>64–512 tokens</small></label>
+          <label><span>回答发散度</span><Input type="number" min={0} max={1} step={0.1} value={assistantTemperature} disabled={!canEdit || loading} onChange={(event) => setAssistantTemperature(event.target.value)} /><small>0 更稳定，1 更开放</small></label>
+        </div>
         <div className="seller-upload-wide root-email-actions">
           <p><ShieldCheck size={16} aria-hidden="true" />API Key：{config?.credentialConfigured ? "已就绪" : "尚未写入"}</p>
           <div className="root-email-action-buttons">

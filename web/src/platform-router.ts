@@ -55,11 +55,24 @@ export interface PlatformRouteUsage {
   totalTokens: number;
 }
 
+export interface PlatformAssistantReply {
+  text: string;
+  model: string;
+  usage: PlatformRouteUsage | null;
+}
+
 /** Raised when the platform's own model-call budget has no remaining admission. */
 export class PlatformRouterQuotaExceededError extends Error {
   constructor() {
     super("商城 AI 导购额度暂时用尽，请稍后再试。");
     this.name = "PlatformRouterQuotaExceededError";
+  }
+}
+
+export class PlatformAssistantUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PlatformAssistantUnavailableError";
   }
 }
 
@@ -218,7 +231,18 @@ function stableHash(value: string): number {
   return hash >>> 0;
 }
 
-function configuredPlatformRouter(): { endpoint: string; apiKey: string; model: string; protocol: PlatformRouterProtocol; managed: boolean } | null {
+interface ConfiguredPlatformRouter {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  protocol: PlatformRouterProtocol;
+  managed: boolean;
+  assistantInstructions: string;
+  assistantMaxOutputTokens: number;
+  assistantTemperature: number;
+}
+
+function configuredPlatformRouter(): ConfiguredPlatformRouter | null {
   const managed = readManagedPlatformRouterConfig();
   if (managed?.enabled && isAllowedEndpoint(managed.endpoint)) {
     return { ...managed, managed: true };
@@ -232,12 +256,66 @@ function configuredPlatformRouter(): { endpoint: string; apiKey: string; model: 
     ? rawProtocol
     : DEFAULT_ROUTER_PROTOCOL;
   if (!endpoint || !apiKey || !model || !isAllowedEndpoint(endpoint)) return null;
-  return { endpoint, apiKey, model, protocol, managed: false };
+  return { endpoint, apiKey, model, protocol, managed: false, assistantInstructions: "", assistantMaxOutputTokens: 320, assistantTemperature: 0.2 };
 }
 
 /** True when a server-side provider credential is present and the endpoint is allowed. */
 export function isPlatformRouterConfigured(): boolean {
   return configuredPlatformRouter() !== null;
+}
+
+/**
+ * Produce a bounded natural-language answer for the public shopping assistant. The model only
+ * receives public store summaries; catalogue truth, price, contact, and ordering still remain in
+ * their deterministic routes.
+ */
+export async function answerPlatformShoppingQuestion(input: {
+  question: string;
+  stores: Array<{ displayName: string; description: string }>;
+  admitCall?: () => Promise<void>;
+}): Promise<PlatformAssistantReply> {
+  const router = configuredPlatformRouter();
+  if (!router) throw new PlatformAssistantUnavailableError("商城 AI 导购尚未配置完整，请稍后再试。");
+  const question = input.question.trim().slice(0, 2_000);
+  if (!question) throw new PlatformAssistantUnavailableError("请告诉我你想了解什么。");
+  try {
+    await input.admitCall?.();
+    const request = buildTextProviderRequest({
+      endpoint: router.endpoint,
+      endpointIsBase: router.managed,
+      apiKey: router.apiKey,
+      model: router.model,
+      protocol: router.protocol,
+      maxOutputTokens: router.assistantMaxOutputTokens,
+      temperature: router.assistantTemperature,
+      systemPrompt: [
+        router.assistantInstructions,
+        "你是商城的 AI 导购。请自然、简短地回答用户关于你能做什么或如何使用商城的问题。你可以说明：帮助描述需求、在公开店铺中搜索已审核商品、比较商品条件与价格、解释取舍。只把提供的店铺摘要当作事实；绝不能声称某个商品、价格、库存、卖家或联系方式存在，也不能索取敏感信息。若用户想购买具体商品，提示他补充预算、用途和不能妥协的条件。不要使用 Markdown 标题或项目符号，回答不超过 180 个汉字。",
+      ].filter(Boolean).join("\n\n"),
+      userContent: JSON.stringify({
+        question,
+        publicStores: input.stores.slice(0, MAX_CANDIDATES).map((store) => ({
+          name: store.displayName.slice(0, 160),
+          description: store.description.slice(0, 400),
+        })),
+      }),
+    });
+    const response = await fetch(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body: JSON.stringify(request.body),
+      signal: AbortSignal.timeout(configuredProviderTimeoutMs()),
+    });
+    if (!response.ok) throw new Error(`模型服务返回 ${response.status}`);
+    const payload = await readJsonResponseBody<unknown>(response, MAX_ROUTER_RESPONSE_BYTES);
+    const text = sanitizeAssistantReply(readProviderText(payload, router.protocol));
+    if (!text) throw new Error("模型没有返回可读回答");
+    return { text, model: router.model, usage: readUsage(payload, router.protocol) };
+  } catch (error) {
+    if (error instanceof PlatformRouterQuotaExceededError) throw error;
+    const reason = error instanceof Error ? error.message.slice(0, 160) : "模型服务暂时不可用";
+    throw new PlatformAssistantUnavailableError(`商城 AI 导购暂时不可用：${reason}`);
+  }
 }
 
 export function configuredPlatformRouterProtocol(): PlatformRouterProtocol {
@@ -284,17 +362,16 @@ export async function probePlatformRouter(options: {
     : 4_000;
   const fetcher = options.fetcher ?? fetch;
   try {
-    const providerRequest = buildProviderRequest({
+    const providerRequest = buildTextProviderRequest({
       endpoint,
       endpointIsBase: router.managed,
       apiKey,
       model,
       protocol,
-      toolMode: "disabled",
-      candidates: [],
       systemPrompt: "Respond with one short token.",
       userContent: "healthcheck",
-      maxOutputTokens: 1,
+      maxOutputTokens: 8,
+      temperature: 0,
     });
     const response = await fetcher(providerRequest.url, {
       method: "POST",
@@ -537,6 +614,62 @@ interface ProviderRequest {
   body: Record<string, unknown>;
 }
 
+/** Plain text generation for the shopping-assistant conversation and connection probe. */
+function buildTextProviderRequest(input: {
+  endpoint: string;
+  endpointIsBase: boolean;
+  apiKey: string;
+  model: string;
+  protocol: PlatformRouterProtocol;
+  systemPrompt: string;
+  userContent: string;
+  maxOutputTokens: number;
+  temperature: number;
+}): ProviderRequest {
+  const headers: Record<string, string> = { accept: "application/json", "content-type": "application/json" };
+  if (input.protocol === "anthropic-messages") {
+    headers["x-api-key"] = input.apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+    return {
+      url: input.endpointIsBase ? `${input.endpoint}/v1/messages` : input.endpoint,
+      headers,
+      body: {
+        model: input.model,
+        max_tokens: input.maxOutputTokens,
+        temperature: input.temperature,
+        system: input.systemPrompt,
+        messages: [{ role: "user", content: input.userContent }],
+      },
+    };
+  }
+  if (input.protocol === "gemini-generate-content") {
+    headers["x-goog-api-key"] = input.apiKey;
+    return {
+      url: geminiEndpoint(input.endpoint, input.model, input.endpointIsBase),
+      headers,
+      body: {
+        systemInstruction: { parts: [{ text: input.systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: input.userContent }] }],
+        generationConfig: { temperature: input.temperature, maxOutputTokens: input.maxOutputTokens },
+      },
+    };
+  }
+  headers.authorization = `Bearer ${input.apiKey}`;
+  return {
+    url: input.endpointIsBase ? `${input.endpoint}/v1/chat/completions` : input.endpoint,
+    headers,
+    body: {
+      model: input.model,
+      temperature: input.temperature,
+      max_tokens: input.maxOutputTokens,
+      messages: [
+        { role: "system", content: input.systemPrompt },
+        { role: "user", content: input.userContent },
+      ],
+    },
+  };
+}
+
 function buildProviderRequest(input: {
   endpoint: string;
   endpointIsBase: boolean;
@@ -713,6 +846,16 @@ function readProviderText(value: unknown, protocol: PlatformRouterProtocol): str
     return text;
   }
   return readProviderContent(value);
+}
+
+function sanitizeAssistantReply(value: string): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[邮箱]")
+    .replace(/(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)/g, "[手机号]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1_200);
 }
 
 function readProviderToolCall(value: unknown, protocol: PlatformRouterProtocol): string | null {

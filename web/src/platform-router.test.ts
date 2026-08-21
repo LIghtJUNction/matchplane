@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 describe("platform Agent router", () => {
-  it("probes the configured provider with a fixed one-token request", async () => {
+  it("probes the configured provider with a compact plain-text request", async () => {
     process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
     process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
     process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
@@ -57,7 +57,8 @@ describe("platform Agent router", () => {
     expect(result).toMatchObject({ status: "ready", model: "router-test", responseStatus: 200 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-    expect(body.max_tokens).toBe(1);
+    expect(body.max_tokens).toBe(8);
+    expect(body.response_format).toBeUndefined();
     expect(body.messages).toEqual([
       { role: "system", content: "Respond with one short token." },
       { role: "user", content: "healthcheck" },

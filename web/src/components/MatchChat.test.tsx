@@ -13,6 +13,10 @@ const searchMallCatalog = vi.hoisted(() => vi.fn(() => {
   }); });
   return routePromise.current;
 }));
+const askMallShoppingAssistant = vi.hoisted(() => vi.fn(async () => ({
+  requestId: "22222222-2222-4222-8222-222222222222",
+  answer: "这是模型生成的导购回答。",
+})));
 
 vi.mock("../lib/auth-client", () => ({
   authClient: { getSession: vi.fn(async () => ({ data: { user: { id: "user-1" } } })) },
@@ -23,6 +27,7 @@ vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
   isLiveMarketplaceEnabled: () => true,
   searchMallCatalog,
+  askMallShoppingAssistant,
 }));
 
 import { MatchChat } from "./MatchChat";
@@ -40,6 +45,7 @@ afterEach(() => {
   routePromise.current = null;
   resolveRoute.current = null;
   searchMallCatalog.mockClear();
+  askMallShoppingAssistant.mockClear();
 });
 
 describe("MatchChat sending state", () => {
@@ -68,8 +74,9 @@ describe("MatchChat sending state", () => {
     await user.type(input, "你会干什么");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
-    expect(await screen.findByText(/我是商城的 AI 导购/)).toBeInTheDocument();
+    expect(await screen.findByText("这是模型生成的导购回答。")).toBeInTheDocument();
     expect(searchMallCatalog).not.toHaveBeenCalled();
+    expect(askMallShoppingAssistant).toHaveBeenCalledWith("你会干什么");
     expect(screen.queryByText(/暂时没有找到合适的在售商品/)).not.toBeInTheDocument();
   });
 });

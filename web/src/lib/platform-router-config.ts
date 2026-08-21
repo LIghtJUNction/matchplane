@@ -14,6 +14,9 @@ export interface ManagedPlatformRouterConfig {
   protocol: ManagedRouterProtocol;
   enabled: boolean;
   credentialConfigured: boolean;
+  assistantInstructions: string;
+  assistantMaxOutputTokens: number;
+  assistantTemperature: number;
 }
 
 interface StoredRouterConfig {
@@ -21,15 +24,18 @@ interface StoredRouterConfig {
   model: string;
   protocol: ManagedRouterProtocol;
   enabled: boolean;
+  assistantInstructions?: string;
+  assistantMaxOutputTokens?: number;
+  assistantTemperature?: number;
 }
 
 /** Reads the administrator-managed provider from host-protected files, never from the browser. */
-export function readManagedPlatformRouterConfig(): (StoredRouterConfig & { apiKey: string }) | null {
+export function readManagedPlatformRouterConfig(): (Required<StoredRouterConfig> & { apiKey: string }) | null {
   try {
     const parsed = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as Partial<StoredRouterConfig>;
     if (!isStoredConfig(parsed)) return null;
     const apiKey = readFileSync(KEY_PATH, "utf8").trim();
-    return apiKey ? { ...parsed, apiKey } : null;
+    return apiKey ? { ...normalizeStoredConfig(parsed), apiKey } : null;
   } catch {
     return null;
   }
@@ -41,7 +47,7 @@ export function getManagedPlatformRouterConfig(): ManagedPlatformRouterConfig | 
     if (!isStoredConfig(parsed)) return null;
     let credentialConfigured = false;
     try { credentialConfigured = Boolean(readFileSync(KEY_PATH, "utf8").trim()); } catch { /* absent is a normal first-run state */ }
-    return { ...parsed, credentialConfigured };
+    return { ...normalizeStoredConfig(parsed), credentialConfigured };
   } catch {
     return null;
   }
@@ -53,18 +59,24 @@ export function saveManagedPlatformRouterConfig(input: {
   protocol: ManagedRouterProtocol;
   enabled: boolean;
   apiKey?: string;
+  assistantInstructions?: string;
+  assistantMaxOutputTokens?: number;
+  assistantTemperature?: number;
 }): ManagedPlatformRouterConfig {
   const config: StoredRouterConfig = {
     endpoint: normalizeEndpoint(input.endpoint),
     model: boundedText(input.model, "模型", 256),
     protocol: normalizeProtocol(input.protocol),
     enabled: input.enabled,
+    assistantInstructions: boundedOptionalText(input.assistantInstructions, "导购补充指引", 4_000),
+    assistantMaxOutputTokens: boundedInteger(input.assistantMaxOutputTokens, 320, 64, 512),
+    assistantTemperature: boundedNumber(input.assistantTemperature, 0.2, 0, 1),
   };
   if (input.apiKey !== undefined) writeProtected(KEY_PATH, input.apiKey, "API Key");
   const existingKey = readOptional(KEY_PATH);
   if (!existingKey) throw new Error("请输入 API Key 后再保存");
   writeProtected(CONFIG_PATH, JSON.stringify(config), "AI 配置");
-  return { ...config, credentialConfigured: true };
+  return { ...normalizeStoredConfig(config), credentialConfigured: true };
 }
 
 export async function listManagedPlatformRouterModels(input: {
@@ -96,6 +108,15 @@ function isStoredConfig(value: Partial<StoredRouterConfig>): value is StoredRout
   }
 }
 
+function normalizeStoredConfig(value: StoredRouterConfig): Required<StoredRouterConfig> {
+  return {
+    ...value,
+    assistantInstructions: boundedOptionalText(value.assistantInstructions, "导购补充指引", 4_000),
+    assistantMaxOutputTokens: boundedInteger(value.assistantMaxOutputTokens, 320, 64, 512),
+    assistantTemperature: boundedNumber(value.assistantTemperature, 0.2, 0, 1),
+  };
+}
+
 function normalizeEndpoint(value: string): string {
   try {
     const url = new URL(value.trim());
@@ -115,6 +136,20 @@ function boundedText(value: string, label: string, maximum: number): string {
   const normalized = value.trim();
   if (!normalized || normalized.length > maximum) throw new Error(`${label}必须为 1..=${maximum} 个字符`);
   return normalized;
+}
+
+function boundedOptionalText(value: string | undefined, label: string, maximum: number): string {
+  const normalized = (value ?? "").trim();
+  if (normalized.length > maximum) throw new Error(`${label}不能超过 ${maximum} 个字符`);
+  return normalized;
+}
+
+function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  return typeof value === "number" && Number.isSafeInteger(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
+}
+
+function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, value)) : fallback;
 }
 
 function readOptional(file: string): string | null {

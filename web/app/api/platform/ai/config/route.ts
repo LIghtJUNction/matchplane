@@ -32,6 +32,9 @@ export async function PATCH(request: Request): Promise<Response> {
       protocol: body.protocol as ManagedRouterProtocol,
       enabled: body.enabled === true,
       apiKey: optionalText(body.apiKey),
+      assistantInstructions: optionalText(body.assistantInstructions),
+      assistantMaxOutputTokens: numberValue(body.assistantMaxOutputTokens),
+      assistantTemperature: numberValue(body.assistantTemperature),
     });
     return NextResponse.json({ config }, { headers: { "cache-control": "no-store" } });
   } catch (cause) {
@@ -50,4 +53,5 @@ async function requireSuperAdmin(request: Request, write: boolean): Promise<true
 
 function text(value: unknown): string { return typeof value === "string" ? value : ""; }
 function optionalText(value: unknown): string | undefined { return typeof value === "string" && value.length ? value : undefined; }
+function numberValue(value: unknown): number | undefined { return typeof value === "number" && Number.isFinite(value) ? value : undefined; }
 function error(message: string, status: number): Response { return NextResponse.json({ error: message }, { status, headers: { "cache-control": "no-store" } }); }

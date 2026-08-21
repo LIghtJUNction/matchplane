@@ -959,6 +959,9 @@ export interface ManagedPlatformRouterConfig {
   protocol: "openai-compatible" | "anthropic-messages" | "gemini-generate-content";
   enabled: boolean;
   credentialConfigured: boolean;
+  assistantInstructions: string;
+  assistantMaxOutputTokens: number;
+  assistantTemperature: number;
 }
 
 /** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
@@ -1155,6 +1158,20 @@ export async function searchMallCatalog(input: {
     throw new MarketplaceApiError(response.status, body?.error || "商城搜索暂时不可用");
   }
   return body;
+}
+
+export async function askMallShoppingAssistant(question: string): Promise<{ requestId: string; answer: string }> {
+  const response = await fetch("/api/mall/assistant", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+  const body = await response.json().catch(() => null) as { requestId?: string; answer?: string; error?: string } | null;
+  if (!response.ok || !body?.requestId || !body.answer) {
+    throw new MarketplaceApiError(response.status, body?.error || "商城 AI 导购暂时不可用");
+  }
+  return { requestId: body.requestId, answer: body.answer };
 }
 
 export interface ContactResponse {

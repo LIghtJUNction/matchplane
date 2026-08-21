@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   Archive,
   BanknoteArrowDown,
+  Bot,
   CreditCard,
   FileCheck2,
   GitBranch,
@@ -70,7 +71,7 @@ interface PlatformDashboardProps {
   onNotice: (message: string) => void;
 }
 
-type PlatformSection = "brand" | "tree" | "access" | "payments" | "finance" | "site";
+type PlatformSection = "ai" | "brand" | "tree" | "access" | "payments" | "finance" | "site";
 
 export function PlatformDashboard({
   paymentMode,
@@ -679,6 +680,7 @@ export function PlatformDashboard({
       <div className="platform-admin-shell">
         <nav className="platform-admin-nav" role="tablist" aria-label="商城管理分区">
           <button id="platform-tab-brand" type="button" role="tab" aria-selected={activeSection === "brand"} aria-controls="platform-panel-brand" className={activeSection === "brand" ? "is-active" : ""} onClick={() => setActiveSection("brand")}><Palette size={17} aria-hidden="true" /><span>品牌</span></button>
+          <button id="platform-tab-ai" type="button" role="tab" aria-selected={activeSection === "ai"} aria-controls="platform-panel-ai" className={activeSection === "ai" ? "is-active" : ""} onClick={() => setActiveSection("ai")}><Bot size={17} aria-hidden="true" /><span>AI</span></button>
           <button id="platform-tab-tree" type="button" role="tab" aria-selected={activeSection === "tree"} aria-controls="platform-panel-tree" className={activeSection === "tree" ? "is-active" : ""} onClick={() => setActiveSection("tree")}><GitBranch size={17} aria-hidden="true" /><span>店铺接入</span></button>
           <button id="platform-tab-access" type="button" role="tab" aria-selected={activeSection === "access"} aria-controls="platform-panel-access" className={activeSection === "access" ? "is-active" : ""} onClick={() => setActiveSection("access")}><ShieldCheck size={17} aria-hidden="true" /><span>团队与服务</span></button>
           <button id="platform-tab-payments" type="button" role="tab" aria-selected={activeSection === "payments"} aria-controls="platform-panel-payments" className={activeSection === "payments" ? "is-active" : ""} onClick={() => setActiveSection("payments")}><CreditCard size={17} aria-hidden="true" /><span>支付（可选）</span></button>
@@ -691,8 +693,11 @@ export function PlatformDashboard({
         <div id="platform-panel-brand" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-brand" hidden={activeSection !== "brand"}>
           <MallBrandPanel rootRole={rootRole} onBrandUpdated={onBrandUpdated} onNotice={onNotice} />
         </div>
-        <section className="platform-component-panel" aria-label="AI 与登录配置" hidden={activeSection !== "access"}>
+        <section id="platform-panel-ai" className="platform-component-panel" role="tabpanel" aria-labelledby="platform-tab-ai" hidden={activeSection !== "ai"}>
           <PlatformAiConfigPanel rootRole={rootRole} onNotice={onNotice} />
+        </section>
+
+        <section className="platform-component-panel" aria-label="账号与邮箱服务" hidden={activeSection !== "access"}>
           <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
         </section>
 
