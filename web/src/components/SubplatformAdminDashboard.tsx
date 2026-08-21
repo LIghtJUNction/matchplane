@@ -11,24 +11,32 @@ import {
   saveSubplatformEmailConfig,
   type SubplatformEmailConfig,
   type SubplatformOrganizationRecord,
+  type StoreSummary,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import type { SubplatformConfig } from "../subplatform";
 import { SectionHeading } from "./Primitives";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
-import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import { SellerDashboard } from "./SellerDashboard";
 import type { InterfaceLocale } from "../lib/preferences";
+import { StoreManagementPanel } from "./StoreManagementPanel";
 
 export function SubplatformAdminDashboard({
   locale,
   onNotice,
   subplatform,
+  store,
+  canManageStore,
+  onStoreUpdated,
 }: {
   locale: InterfaceLocale;
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
+  store: StoreSummary;
+  canManageStore: boolean;
+  onStoreUpdated: (store: StoreSummary) => void;
 }) {
+  const [section, setSection] = useState<"products" | "store" | "team" | "notifications">("products");
   const [config, setConfig] = useState<SubplatformEmailConfig | null>(null);
   const [providerKey, setProviderKey] = useState("");
   const [smtpHost, setSmtpHost] = useState("");
@@ -74,6 +82,10 @@ export function SubplatformAdminDashboard({
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!canManageStore) {
+      onNotice("只有店长或商城后台可以修改店铺通知配置");
+      return;
+    }
     if (!isLiveMarketplaceEnabled()) {
       onNotice("当前环境未启用真实店铺 API，邮箱配置没有写入系统");
       return;
@@ -130,41 +142,40 @@ export function SubplatformAdminDashboard({
       <section className="workspace-heading">
         <div>
           <h1>管理 {subplatform.label || subplatform.brandName}</h1>
-          <p>先管理商品和联系申请；店面资料、团队和通知配置在后面。</p>
+          <p>{canManageStore ? "管理商品、店铺资料和团队。" : "管理商品、提交审核并处理联系申请。"}</p>
         </div>
-        <span className="seller-mode-note"><ShieldCheck size={16} aria-hidden="true" /> 仅当前店铺</span>
+        <span className="seller-mode-note"><ShieldCheck size={16} aria-hidden="true" /> {canManageStore ? "店长权限" : "店员权限"}</span>
       </section>
 
-      <SellerDashboard locale={locale} onNotice={onNotice} subplatform={subplatform} />
+      <nav className="store-management-tabs" role="tablist" aria-label="店铺管理分区">
+        <button type="button" role="tab" aria-selected={section === "products"} className={section === "products" ? "is-active" : ""} onClick={() => setSection("products")}>商品管理</button>
+        {canManageStore ? <button type="button" role="tab" aria-selected={section === "store"} className={section === "store" ? "is-active" : ""} onClick={() => setSection("store")}>店铺管理</button> : null}
+        {canManageStore ? <button type="button" role="tab" aria-selected={section === "team"} className={section === "team" ? "is-active" : ""} onClick={() => setSection("team")}>店员管理</button> : null}
+        {canManageStore ? <button type="button" role="tab" aria-selected={section === "notifications"} className={section === "notifications" ? "is-active" : ""} onClick={() => setSection("notifications")}>通知</button> : null}
+      </nav>
 
-      <section className="surface seller-upload" aria-labelledby="email-config-title">
-        <SectionHeading title="通知邮件" titleId="email-config-title" />
-        <p className="seller-upload-intro">可选。这里只发送本店铺的通知，不会影响商城账号登录或密码重置邮件。</p>
-        <form className="seller-upload-form" onSubmit={save}>
-          <label htmlFor="email-provider-key"><span>发信标识</span><Input id="email-provider-key" value={providerKey} onChange={(event) => setProviderKey(event.target.value)} placeholder="店铺自己的标识" /></label>
-          <label htmlFor="email-smtp-host"><span>SMTP 主机</span><Input id="email-smtp-host" value={smtpHost} onChange={(event) => setSmtpHost(event.target.value)} placeholder="smtp.example.com" /></label>
-          <label htmlFor="email-smtp-port"><span>端口</span><Input id="email-smtp-port" value={smtpPort} onChange={(event) => setSmtpPort(event.target.value)} inputMode="numeric" /></label>
-          <label htmlFor="email-tls-mode"><span>TLS 模式</span><select id="email-tls-mode" value={tlsMode} onChange={(event) => setTlsMode(event.target.value as "starttls" | "tls" | "plain")}><option value="starttls">STARTTLS</option><option value="tls">TLS</option><option value="plain">明文（仅受控内网）</option></select></label>
-          <label htmlFor="email-username"><span>SMTP 用户名</span><Input id="email-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
-          <label htmlFor="email-secret-ref"><span>Secret reference（不填密码）</span><Input id="email-secret-ref" value={credentialSecretRef} onChange={(event) => setCredentialSecretRef(event.target.value)} placeholder="secret://subplatform/&lt;tenant&gt;/&lt;domain&gt;/smtp-password" /></label>
-          <label htmlFor="email-from"><span>发件人地址</span><Input id="email-from" type="email" value={fromAddress} onChange={(event) => setFromAddress(event.target.value)} /></label>
-          <label htmlFor="email-reply-to"><span>回复地址（可选）</span><Input id="email-reply-to" type="email" value={replyTo} onChange={(event) => setReplyTo(event.target.value)} /></label>
-          <label htmlFor="email-mode"><span>发送模式</span><select id="email-mode" value={mode} onChange={(event) => setMode(event.target.value as "test" | "production")}><option value="test">测试</option><option value="production">生产</option></select></label>
-          <label className="email-enabled"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用当前邮箱路由</label>
-          <div className="seller-upload-actions seller-upload-wide"><p><Mail size={17} aria-hidden="true" /> {config?.credential_configured ? "服务器密钥已配置" : "尚未配置服务器密钥"}</p><Button type="submit" disabled={saving}><Save size={17} aria-hidden="true" />{saving ? "保存中…" : "保存邮箱配置"}</Button></div>
-        </form>
-      </section>
-      <PlatformSiteSettingsPanel
-        organizationId={subplatform.organizationId}
-        platformPath={subplatform.path}
-        platformName={subplatform.brandName}
-        onNotice={onNotice}
-      />
-      <PlatformAccessPanel
-        organizations={subplatform.organizationId ? [scopedOrganization(subplatform)] : []}
-        rootRole="subplatform_admin"
-        onNotice={onNotice}
-      />
+      <div hidden={section !== "products"}><SellerDashboard locale={locale} onNotice={onNotice} subplatform={subplatform} /></div>
+      {canManageStore ? <div hidden={section !== "store"}><StoreManagementPanel store={store} canManageStore={canManageStore} onNotice={onNotice} onUpdated={onStoreUpdated} /></div> : null}
+      {canManageStore ? <div hidden={section !== "team"}><PlatformAccessPanel organizations={subplatform.organizationId ? [scopedOrganization(subplatform)] : []} rootRole="subplatform_admin" onNotice={onNotice} /></div> : null}
+      {canManageStore ? <div hidden={section !== "notifications"}>
+        <section className="surface seller-upload" aria-labelledby="email-config-title">
+          <SectionHeading title="通知邮件" titleId="email-config-title" />
+          <p className="seller-upload-intro">可选。这里只发送本店铺的通知，不会影响商城账号登录或密码重置邮件。</p>
+          <form className="seller-upload-form" onSubmit={save}>
+            <label htmlFor="email-provider-key"><span>发信标识</span><Input id="email-provider-key" value={providerKey} onChange={(event) => setProviderKey(event.target.value)} placeholder="店铺自己的标识" /></label>
+            <label htmlFor="email-smtp-host"><span>SMTP 主机</span><Input id="email-smtp-host" value={smtpHost} onChange={(event) => setSmtpHost(event.target.value)} placeholder="smtp.example.com" /></label>
+            <label htmlFor="email-smtp-port"><span>端口</span><Input id="email-smtp-port" value={smtpPort} onChange={(event) => setSmtpPort(event.target.value)} inputMode="numeric" /></label>
+            <label htmlFor="email-tls-mode"><span>TLS 模式</span><select id="email-tls-mode" value={tlsMode} onChange={(event) => setTlsMode(event.target.value as "starttls" | "tls" | "plain")}><option value="starttls">STARTTLS</option><option value="tls">TLS</option><option value="plain">明文（仅受控内网）</option></select></label>
+            <label htmlFor="email-username"><span>SMTP 用户名</span><Input id="email-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
+            <label htmlFor="email-secret-ref"><span>Secret reference（不填密码）</span><Input id="email-secret-ref" value={credentialSecretRef} onChange={(event) => setCredentialSecretRef(event.target.value)} placeholder="secret://subplatform/&lt;tenant&gt;/&lt;domain&gt;/smtp-password" /></label>
+            <label htmlFor="email-from"><span>发件人地址</span><Input id="email-from" type="email" value={fromAddress} onChange={(event) => setFromAddress(event.target.value)} /></label>
+            <label htmlFor="email-reply-to"><span>回复地址（可选）</span><Input id="email-reply-to" type="email" value={replyTo} onChange={(event) => setReplyTo(event.target.value)} /></label>
+            <label htmlFor="email-mode"><span>发送模式</span><select id="email-mode" value={mode} onChange={(event) => setMode(event.target.value as "test" | "production")}><option value="test">测试</option><option value="production">生产</option></select></label>
+            <label className="email-enabled"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用当前邮箱路由</label>
+            <div className="seller-upload-actions seller-upload-wide"><p><Mail size={17} aria-hidden="true" /> {config?.credential_configured ? "服务器密钥已配置" : "尚未配置服务器密钥"}</p><Button type="submit" disabled={saving}><Save size={17} aria-hidden="true" />{saving ? "保存中…" : "保存邮箱配置"}</Button></div>
+          </form>
+        </section>
+      </div> : null}
     </div>
   );
 }

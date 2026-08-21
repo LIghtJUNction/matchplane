@@ -3985,6 +3985,21 @@ main.subplatform-fullscreen-main {
 .hosted-store-form-heading strong { font-size: 0.78rem; }
 .hosted-store-form-heading button { padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 0.68rem; }
 .hosted-store-form-heading button:hover, .hosted-store-form-heading button:focus-visible { color: var(--ink); }
+.store-management-tabs { margin: 1.25rem 0; padding: 0.25rem; display: flex; flex-wrap: wrap; gap: 0.25rem; border: 1px solid var(--line); border-radius: 0.9rem; background: var(--paper); }
+.store-management-tabs button { min-height: 2.4rem; padding: 0 0.8rem; border: 0; border-radius: 0.65rem; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 0.72rem; }
+.store-management-tabs button.is-active { background: var(--ivory); color: var(--ink); box-shadow: var(--shadow-small); }
+.store-management-panel { max-width: 48rem; }
+.store-management-heading { display: flex; align-items: flex-start; gap: 0.65rem; }
+.store-management-heading > span { width: 2.35rem; height: 2.35rem; display: grid; place-items: center; border-radius: 0.72rem; background: var(--cactus); }
+.store-management-heading h2 { font-size: 1.1rem; letter-spacing: -0.03em; }
+.store-management-heading p { margin-top: 0.22rem; color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
+.store-management-form { margin-top: 1.1rem; display: grid; gap: 0.8rem; }
+.store-management-form label { display: grid; gap: 0.32rem; color: var(--ink-soft); font-size: 0.68rem; font-weight: 650; }
+.store-management-form input, .store-management-form textarea { width: 100%; padding: 0.72rem 0.78rem; border: 1px solid var(--line); border-radius: 0.78rem; outline: 0; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.75rem; }
+.store-management-form textarea { resize: vertical; line-height: 1.5; }
+.store-management-form input:focus, .store-management-form textarea:focus { border-color: var(--sky); box-shadow: 0 0 0 0.12rem rgba(106, 155, 204, 0.2); }
+.store-management-meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; color: var(--muted); font-size: 0.67rem; }
+.store-management-readonly { margin: 0; color: var(--muted); font-size: 0.72rem; }
 .slug-input { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 0.8rem; background: var(--ivory); overflow: hidden; }
 .slug-input > span { padding-left: 0.8rem; color: var(--muted); }
 .slug-input input { border: 0; background: transparent; }

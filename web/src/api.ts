@@ -644,6 +644,8 @@ export interface StoreSummary {
   description: string;
   integrationKind: "hosted" | "package" | "external";
   status?: "pending" | "active" | "suspended" | "closed";
+  version?: number;
+  membershipRole?: "owner" | "admin" | "subplatform_admin" | "mall_operator";
   commercialTerms?: {
     pricingModel: "none" | "subscription" | "commission" | "hybrid";
     recurringFeeMinor: string;
@@ -841,6 +843,25 @@ export async function createHostedStore(input: { name: string; slug: string; des
   });
   const body = await response.json().catch(() => null) as { store?: StoreSummary; error?: string } | null;
   if (!response.ok || !body?.store) throw new MarketplaceApiError(response.status, body?.error || "店铺创建失败");
+  return body.store;
+}
+
+export async function getStoreManagement(storeId: string): Promise<{ store: StoreSummary; canManageStore: boolean }> {
+  const response = await fetch(`/api/stores/${encodeURIComponent(storeId)}`, { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
+  const body = await response.json().catch(() => null) as { store?: StoreSummary; canManageStore?: boolean; error?: string } | null;
+  if (!response.ok || !body?.store) throw new MarketplaceApiError(response.status, body?.error || "店铺资料读取失败");
+  return { store: body.store, canManageStore: body.canManageStore === true };
+}
+
+export async function updateStoreManagement(input: { storeId: string; displayName: string; description: string; expectedVersion: number }): Promise<StoreSummary> {
+  const response = await fetch(`/api/stores/${encodeURIComponent(input.storeId)}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { store?: StoreSummary; error?: string } | null;
+  if (!response.ok || !body?.store) throw new MarketplaceApiError(response.status, body?.error || "店铺资料保存失败");
   return body.store;
 }
 

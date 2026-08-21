@@ -230,7 +230,9 @@ async function readOwnedStores(request: Request): Promise<Response> {
             store.description,
             store.integration_kind AS "integrationKind",
             store.status,
-            store.created_at AS "createdAt"
+            store.version,
+            store.created_at AS "createdAt",
+            CASE WHEN $3::boolean IS TRUE THEN 'mall_operator' ELSE membership.role END AS "membershipRole"
        FROM stores store
        JOIN store_path_aliases alias
          ON alias.tenant_id = store.tenant_id AND alias.store_id = store.id AND alias.is_canonical = true

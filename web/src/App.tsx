@@ -194,8 +194,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     return () => { cancelled = true; };
   }, [authUser?.id]);
 
-  const managesCurrentStore = subplatform.slug !== "root"
-    && ownedStores.some((store) => store.path === subplatform.path);
+  const currentManagedStore = subplatform.slug === "root"
+    ? null
+    : ownedStores.find((store) => store.path === subplatform.path) ?? null;
+  const managesCurrentStore = currentManagedStore !== null;
+  const canManageCurrentStore = authUser?.role === "rootSuperAdmin"
+    || authUser?.role === "rootAdmin"
+    || currentManagedStore?.membershipRole === "owner"
+    || currentManagedStore?.membershipRole === "mall_operator";
 
   useEffect(() => {
     if (!storeConsoleRequested || !ownedStoresResolved) return;
@@ -466,7 +472,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           closeLabel={ui.closeStoreConsole}
           backdropLabel={ui.closeStoreConsoleDialog}
         >
-          <SubplatformAdminDashboard locale={locale} onNotice={setNotice} subplatform={subplatform} />
+          <SubplatformAdminDashboard
+            locale={locale}
+            onNotice={setNotice}
+            subplatform={subplatform}
+            store={currentManagedStore!}
+            canManageStore={canManageCurrentStore}
+            onStoreUpdated={(updated) => setOwnedStores((current) => current.map((store) => store.id === updated.id ? { ...store, ...updated } : store))}
+          />
         </WorkspaceSettingsDialog>}
 
         {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
