@@ -152,7 +152,9 @@ function positiveInteger(value: unknown): number | null {
 }
 
 function configuredTenantId(): string | null {
-  const value = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
+  // Bracket access keeps this deployment-owned value runtime-bound in Next's production bundle.
+  // A direct member read may be substituted during build for newly introduced route chunks.
+  const value = process.env["MATCHPLANE_ROOT_TENANT_ID"]?.trim() ?? "";
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(value) ? value : null;
 }
 
