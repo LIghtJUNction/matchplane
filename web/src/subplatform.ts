@@ -46,6 +46,8 @@ export interface SubplatformConfig {
   /** Canonical mounted path. The root node is `/`; children may be nested. */
   path: string;
   brandName: string;
+  /** Public mall logo. Store packages keep their own visual identity. */
+  brandLogoUrl?: string;
   label: string;
   description: string;
   /** Better Auth organization id for an active child; supplied by the root manifest endpoint. */
@@ -139,11 +141,14 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       const response = await fetch("/api/mall/settings", { headers: { accept: "application/json" } });
       if (!response.ok) return base;
       const body = await response.json() as {
-        mall?: { name?: unknown } | null;
+        mall?: { name?: unknown; logoUrl?: unknown } | null;
       };
       const name = body.mall?.name;
+      const brandLogoUrl = typeof body.mall?.logoUrl === "string" && body.mall.logoUrl.startsWith("/api/mall/logo")
+        ? body.mall.logoUrl
+        : undefined;
       return typeof name === "string" && name.trim()
-        ? { ...base, brandName: name.trim(), label: name.trim() }
+        ? { ...base, brandName: name.trim(), label: name.trim(), brandLogoUrl }
         : base;
     } catch {
       return base;

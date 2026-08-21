@@ -13,13 +13,14 @@ export const dynamic = "force-dynamic";
 export async function GET(): Promise<Response> {
   const tenantId = configuredTenantId();
   if (!tenantId) return jsonError("商城尚未完成初始化", 503);
-  const result = await authDatabase.query<{ name: string; slug: string; version: string }>(
-    `SELECT name, slug, version::text FROM tenants WHERE id = $1::uuid AND status = 'active' LIMIT 1`,
+  const result = await authDatabase.query<MallRow>(
+    `SELECT name, slug, version::text, brand_logo_key AS "logoKey"
+       FROM tenants WHERE id = $1::uuid AND status = 'active' LIMIT 1`,
     [tenantId],
   );
   const mall = result.rows[0];
   return mall
-    ? NextResponse.json({ mall: { ...mall, version: Number(mall.version) } }, { headers: { "cache-control": "no-store" } })
+    ? NextResponse.json({ mall: toPublicMall(mall) }, { headers: { "cache-control": "no-store" } })
     : jsonError("商城不存在", 404);
 }
 
@@ -53,11 +54,11 @@ export async function PATCH(request: Request): Promise<Response> {
       `SELECT name FROM tenants WHERE id = $1::uuid FOR UPDATE`,
       [tenantId],
     );
-    const updated = await client.query<{ name: string; slug: string; version: string }>(
+    const updated = await client.query<MallRow>(
       `UPDATE tenants
           SET name = $2, version = version + 1, updated_at = clock_timestamp()
         WHERE id = $1::uuid AND version = $3::bigint AND status = 'active'
-        RETURNING name, slug, version::text`,
+        RETURNING name, slug, version::text, brand_logo_key AS "logoKey"`,
       [tenantId, name, expectedVersion],
     );
     if (updated.rowCount !== 1) {
@@ -77,7 +78,7 @@ export async function PATCH(request: Request): Promise<Response> {
     );
     await client.query("COMMIT");
     const mall = updated.rows[0];
-    return NextResponse.json({ mall: { ...mall, version: Number(mall.version) } }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json({ mall: toPublicMall(mall) }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
     console.error("mall settings update failed", error);
@@ -85,6 +86,23 @@ export async function PATCH(request: Request): Promise<Response> {
   } finally {
     client?.release();
   }
+}
+
+interface MallRow {
+  name: string;
+  slug: string;
+  version: string;
+  logoKey: string | null;
+}
+
+function toPublicMall(row: MallRow) {
+  const version = Number(row.version);
+  return {
+    name: row.name,
+    slug: row.slug,
+    version,
+    logoUrl: row.logoKey ? `/api/mall/logo?v=${version}` : null,
+  };
 }
 
 function configuredTenantId(): string | null {

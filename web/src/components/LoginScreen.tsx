@@ -555,7 +555,7 @@ export function LoginScreen({ intent = "sign-in" }: { intent?: "sign-in" | "sign
       <div className="login-layout">
         <section className="login-card" aria-labelledby="login-form-title">
           <div className="login-card-header">
-            <Brand label={subplatform.brandName} homeHref="/" />
+            <Brand label={subplatform.brandName} logoUrl={subplatform.slug === "root" ? subplatform.brandLogoUrl : undefined} homeHref="/" />
             <h1 id="login-form-title">{passwordResetMode ? copy.passwordResetTitle : isRegistration ? copy.registrationTitle : copy.formTitle}</h1>
             <p>{passwordResetMode ? copy.passwordResetDescription : isRegistration ? copy.registrationDescription : copy.formDescription}</p>
           </div>

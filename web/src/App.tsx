@@ -24,6 +24,7 @@ import { MatchChat } from "./components/MatchChat";
 import { IdentityBindingsPanel } from "./components/IdentityBindingsPanel";
 import { PasskeyPanel } from "./components/PasskeyPanel";
 import { SessionPanel } from "./components/SessionPanel";
+import { PersonalProfilePanel } from "./components/PersonalProfilePanel";
 import { PlatformFooter } from "./components/PlatformFooter";
 import { PlatformMenu } from "./components/PlatformMenu";
 import { StorefrontDirectory } from "./components/StorefrontDirectory";
@@ -54,6 +55,7 @@ interface AuthenticatedUser {
   id: string;
   name?: string | null;
   email?: string | null;
+  image?: string | null;
   role?: string | null;
 }
 
@@ -73,6 +75,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [authResolved, setAuthResolved] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [pluginFailed, setPluginFailed] = useState(false);
   // Keep the requested destination independent from the URL that hydration normalizes to the
@@ -100,6 +103,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     let cleanWorkspaceTarget = false;
     if (accountTarget === "identity") {
       setAccountOpen(true);
+      url.searchParams.delete("account");
+      cleanWorkspaceTarget = true;
+    }
+    if (accountTarget === "profile") {
+      setProfileOpen(true);
       url.searchParams.delete("account");
       cleanWorkspaceTarget = true;
     }
@@ -179,6 +187,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       setAuthUser(null);
       setSettingsOpen(false);
       setAccountOpen(false);
+      setProfileOpen(false);
       setAccountMenuOpen(false);
       setRole("buyer");
       requestedRoleRef.current = "buyer";
@@ -244,6 +253,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       paymentMode={paymentMode}
       rootRole={authUser?.role}
       onRequestModeChange={() => setModeDialogOpen(true)}
+      onBrandUpdated={(brand) => setSubplatform((current) => current.slug === "root"
+        ? { ...current, brandName: brand.name, label: brand.name, brandLogoUrl: brand.logoUrl ?? undefined }
+        : current)}
       onNotice={setNotice}
     />
   ) : (
@@ -289,6 +301,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               <div className="brand-cluster">
                 <Brand
                   label={subplatform.brandName}
+                  logoUrl={subplatform.slug === "root" ? subplatform.brandLogoUrl : undefined}
                   homeHref={subplatform.slug === "root" ? "#top" : subplatform.path}
                 />
                 {subplatform.slug === "root" ? <PlatformMenu locale={locale} /> : null}
@@ -326,13 +339,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                       whileTap={{ scale: 0.95 }}
                       transition={spring}
                     >
-                      <span><UserRound size={18} aria-hidden="true" /></span>
+                      <span className="profile-button-avatar">{authUser.image ? <img src={authUser.image} alt="" /> : <UserRound size={18} aria-hidden="true" />}</span>
                       <span className="profile-copy"><strong>{authUser.name || ui.user}</strong><small>{roleLabel(role, locale, subplatform)}</small></span>
                     </motion.button>
                     {accountMenuOpen ? (
                       <div className="account-menu" role="menu" aria-label={ui.accountMenu}>
                         <div className="account-menu-identity"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></div>
                         <div className="account-menu-links">
+                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setProfileOpen(true); }}><UserRound size={16} aria-hidden="true" />{ui.profile}</button>
                           <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setAccountOpen(true); }}><UserRound size={16} aria-hidden="true" />{ui.account}</button>
                           <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setSettingsOpen(true); }}><Settings2 size={16} aria-hidden="true" />{ui.console}</button>
                         </div>
@@ -399,6 +413,20 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         </WorkspaceSettingsDialog>}
 
         {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
+          open={profileOpen}
+          onClose={() => setProfileOpen(false)}
+          title={ui.profile}
+          description={ui.profileDescription}
+          closeLabel={ui.closeProfile}
+          backdropLabel={ui.closeProfileDialog}
+        >
+          <PersonalProfilePanel
+            onNotice={setNotice}
+            onAvatarChanged={(image) => setAuthUser((current) => current ? { ...current, image } : current)}
+          />
+        </WorkspaceSettingsDialog>}
+
+        {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
           open={accountOpen}
           onClose={() => setAccountOpen(false)}
           title={ui.account}
@@ -413,7 +441,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 <span>{roleLabel(role, locale, subplatform)}</span>
               </div>
               <div className="workspace-account-row">
-                <span className="workspace-account-avatar"><UserRound size={19} aria-hidden="true" /></span>
+                <span className="workspace-account-avatar">{authUser.image ? <img src={authUser.image} alt="" /> : <UserRound size={19} aria-hidden="true" />}</span>
                 <span className="workspace-account-copy"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></span>
                 <button className="workspace-account-action" type="button" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
               </div>
@@ -628,6 +656,10 @@ function appCopy(locale: "zh" | "en") {
       account: "Account",
       accountMenu: "Account menu",
       accountDescription: "Manage your account identity and sign out.",
+      profile: "Profile",
+      profileDescription: "Choose your avatar and introduce yourself.",
+      closeProfile: "Close profile",
+      closeProfileDialog: "Close profile dialog",
       closeAccount: "Close account",
       closeAccountDialog: "Close account dialog",
       appearance: "Display & language",
@@ -653,6 +685,10 @@ function appCopy(locale: "zh" | "en") {
     account: "账号",
     accountMenu: "账号菜单",
     accountDescription: "管理当前账号与登录状态。",
+    profile: "个人资料",
+    profileDescription: "设置头像和个人简介。",
+    closeProfile: "关闭个人资料",
+    closeProfileDialog: "关闭个人资料对话框",
     closeAccount: "关闭账号",
     closeAccountDialog: "关闭账号对话框",
     appearance: "显示与语言",

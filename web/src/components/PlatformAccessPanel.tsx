@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Globe2, MailPlus, ShieldCheck, UserMinus, Users } from "lucide-react";
+import { Globe2, MailPlus, Search, ShieldCheck, UserMinus, Users } from "lucide-react";
 
 import {
   createPlatformApiKey,
@@ -9,7 +9,7 @@ import {
   createFederationInvite,
   getFederationBindings,
   getPlatformDomains,
-  getPlatformAdministrators,
+  getPlatformAccounts,
   getPlatformApiKeys,
   getPlatformMembers,
   getPlatformOidcClients,
@@ -21,7 +21,7 @@ import {
   updatePlatformMember,
   updatePlatformApiKey,
   updatePlatformOidcClient,
-  type PlatformAdministratorRecord,
+  type PlatformAccountRecord,
   type PlatformAdminInvite,
   type PlatformApiKeyRecord,
   type PlatformOidcClientRecord,
@@ -42,14 +42,17 @@ interface PlatformAccessPanelProps {
  * second login table: Better Auth owns the account, invitation, membership and role state.
  */
 export function PlatformAccessPanel({ organizations, rootRole, onNotice }: PlatformAccessPanelProps) {
+  const isMallOperator = rootRole === "rootSuperAdmin" || rootRole === "rootAdmin";
   const [organizationId, setOrganizationId] = useState("");
   const [directory, setDirectory] = useState<PlatformMemberDirectory | null>(null);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("subplatform_admin");
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
-  const [administrators, setAdministrators] = useState<PlatformAdministratorRecord[]>([]);
+  const [accounts, setAccounts] = useState<PlatformAccountRecord[]>([]);
   const [administratorLoading, setAdministratorLoading] = useState(false);
+  const [accountSearch, setAccountSearch] = useState("");
+  const [accessView, setAccessView] = useState<"accounts" | "team">(isMallOperator ? "accounts" : "team");
   const [administratorInviteEmail, setAdministratorInviteEmail] = useState("");
   const [newAdministratorInvite, setNewAdministratorInvite] = useState<PlatformAdminInvite | null>(null);
   const [apiKeys, setApiKeys] = useState<PlatformApiKeyRecord[]>([]);
@@ -76,12 +79,26 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
     [organizationId, organizations],
   );
 
+  const filteredAccounts = useMemo(() => {
+    const needle = accountSearch.trim().toLocaleLowerCase();
+    const byRole = (account: PlatformAccountRecord) => account.role === "rootSuperAdmin" ? 0 : account.role === "rootAdmin" ? 1 : 2;
+    return accounts
+      .filter((account) => !needle || `${account.name} ${account.email}`.toLocaleLowerCase().includes(needle))
+      .sort((left, right) => byRole(left) - byRole(right) || right.createdAt.localeCompare(left.createdAt));
+  }, [accountSearch, accounts]);
+
+  const ordinaryAccountCount = accounts.filter((account) => account.role === "user").length;
+
   useEffect(() => {
     if (!organizationId && organizations[0]) setOrganizationId(organizations[0].id);
     if (organizationId && !organizations.some((organization) => organization.id === organizationId)) {
       setOrganizationId(organizations[0]?.id ?? "");
     }
   }, [organizationId, organizations]);
+
+  useEffect(() => {
+    if (!isMallOperator) setAccessView("team");
+  }, [isMallOperator]);
 
   useEffect(() => {
     if (!organizationId) {
@@ -139,15 +156,18 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
   }, [onNotice, organizationId]);
 
   useEffect(() => {
-    if (rootRole !== "rootSuperAdmin" && rootRole !== "rootAdmin") return;
+    if (!isMallOperator) {
+      setAccounts([]);
+      return;
+    }
     let mounted = true;
     setAdministratorLoading(true);
-    void getPlatformAdministrators()
-      .then((next) => { if (mounted) setAdministrators(next); })
+    void getPlatformAccounts()
+      .then((next) => { if (mounted) setAccounts(next); })
       .catch((error) => { if (mounted) onNotice(error instanceof Error ? error.message : "账号列表读取失败"); })
       .finally(() => { if (mounted) setAdministratorLoading(false); });
     return () => { mounted = false; };
-  }, [onNotice, rootRole]);
+  }, [isMallOperator, onNotice]);
 
   const refresh = async () => {
     if (!organizationId) return;
@@ -390,14 +410,56 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
     <section className="surface platform-access-panel" aria-labelledby="platform-access-title">
       <div className="subplatform-header">
         <div>
-          <p className="eyebrow"><Users size={14} aria-hidden="true" /> 团队与权限</p>
-          <h2 id="platform-access-title">一个账号，管理商城和店铺</h2>
-          <p className="subplatform-intro">在这里邀请商城运营或店铺成员、调整职责并收回权限。</p>
+          <p className="eyebrow"><Users size={14} aria-hidden="true" /> 团队与账号</p>
+          <h2 id="platform-access-title">管理团队，也看得见用户</h2>
+          <p className="subplatform-intro">账号目录用于查看商城注册用户；团队成员才拥有商城或店铺的运营权限。</p>
         </div>
-        {organizations.length ? (
+        {organizations.length && (!isMallOperator || accessView === "team") ? (
           <label className="platform-access-select"><span>管理范围</span><select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)}>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.isRoot ? "商城" : "店铺"} · {organization.name}</option>)}</select></label>
         ) : null}
       </div>
+      {isMallOperator ? (
+        <div className="platform-access-view-tabs" role="tablist" aria-label="商城账号与团队">
+          <button id="platform-access-tab-accounts" type="button" role="tab" aria-selected={accessView === "accounts"} aria-controls="platform-access-accounts" className={accessView === "accounts" ? "is-active" : ""} onClick={() => setAccessView("accounts")}>商城账号</button>
+          <button id="platform-access-tab-team" type="button" role="tab" aria-selected={accessView === "team"} aria-controls="platform-access-team" className={accessView === "team" ? "is-active" : ""} onClick={() => setAccessView("team")}>团队成员</button>
+        </div>
+      ) : null}
+      {isMallOperator && accessView === "accounts" ? (
+        <section id="platform-access-accounts" className="mall-account-directory" role="tabpanel" aria-labelledby="platform-access-tab-accounts">
+          <div className="mall-account-directory-heading">
+            <div>
+              <p className="eyebrow">商城账号</p>
+              <h3>所有已注册用户</h3>
+              <p>普通顾客、店主和商城运营人员都会显示在这里。查看账号不会授予店铺权限。</p>
+            </div>
+            <small>{administratorLoading ? "正在读取…" : `${accounts.length} 个账号`}</small>
+          </div>
+          <div className="mall-account-summary" aria-label="账号统计">
+            <span><strong>{ordinaryAccountCount}</strong>普通用户</span>
+            <span><strong>{accounts.filter((account) => account.role === "rootAdmin").length}</strong>商城运营</span>
+            <span><strong>{accounts.filter((account) => account.role === "rootSuperAdmin").length}</strong>商城负责人</span>
+          </div>
+          <label className="mall-account-search">
+            <Search size={16} aria-hidden="true" />
+            <span>查找账号</span>
+            <input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder="按姓名或邮箱搜索" autoComplete="off" />
+          </label>
+          <div className="root-administrator-list" aria-label="商城账号目录">
+            {filteredAccounts.length ? filteredAccounts.map((account) => (
+              <div className="root-administrator-row" key={account.id}>
+                <span><strong>{account.name || account.email}</strong><small>{account.email}{account.emailVerified ? " · 邮箱已验证" : " · 邮箱待验证"}{account.createdAt ? ` · 注册于 ${new Date(account.createdAt).toLocaleDateString()}` : ""}</small></span>
+                <b className={account.role === "rootSuperAdmin" || account.role === "rootAdmin" ? "status-chip is-on" : "status-chip"}>{accountRoleLabel(account.role)}</b>
+              </div>
+            )) : <p className="platform-access-empty">{administratorLoading ? "正在读取账号…" : accountSearch.trim() ? "没有匹配的账号。" : "还没有注册账号。"}</p>}
+          </div>
+          <div className="root-administrator-panel">
+            <div className="subsection-heading"><div><p className="eyebrow">商城团队</p><strong>邀请商城运营</strong></div><small>{rootRole === "rootSuperAdmin" ? "商城运营通过一次性注册链接加入" : "只有商城负责人可以创建邀请"}</small></div>
+            {rootRole === "rootSuperAdmin" ? <div className="platform-access-invite"><label><span>运营人员邮箱</span><input type="email" value={administratorInviteEmail} onChange={(event) => setAdministratorInviteEmail(event.target.value)} placeholder="operator@example.com" /></label><button className="button button-dark" type="button" disabled={administratorLoading} onClick={() => void issueAdministratorInvite()}>创建注册链接</button></div> : null}
+            {newAdministratorInvite ? <div className="api-key-secret"><div><strong>仅发给 {newAdministratorInvite.email}</strong><code>{newAdministratorInvite.registrationUrl}</code><small>到期 {new Date(newAdministratorInvite.expiresAt).toLocaleString()}</small></div><button type="button" onClick={() => void copySecret(newAdministratorInvite.registrationUrl)}>复制</button><button type="button" onClick={() => setNewAdministratorInvite(null)}>关闭</button></div> : null}
+          </div>
+        </section>
+      ) : (
+        <div id="platform-access-team" role={isMallOperator ? "tabpanel" : undefined} aria-labelledby={isMallOperator ? "platform-access-tab-team" : undefined}>
       {!organizations.length ? (
         <div className="subplatform-empty"><ShieldCheck size={22} aria-hidden="true" /><p>还没有可管理的商城团队或店铺。</p></div>
       ) : (
@@ -476,21 +538,8 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
           ) : null}
         </>
       )}
-      {rootRole === "rootSuperAdmin" || rootRole === "rootAdmin" ? (
-        <div className="root-administrator-panel">
-          <div className="subsection-heading"><div><p className="eyebrow">商城团队</p><strong>运营权限</strong></div><small>{administratorLoading ? "读取中…" : rootRole === "rootSuperAdmin" ? "商城运营必须通过一次性邀请链接加入" : "只有商城负责人可以创建邀请"}</small></div>
-          {rootRole === "rootSuperAdmin" ? <div className="platform-access-invite"><label><span>运营人员邮箱</span><input type="email" value={administratorInviteEmail} onChange={(event) => setAdministratorInviteEmail(event.target.value)} placeholder="operator@example.com" /></label><button className="button button-dark" type="button" disabled={administratorLoading} onClick={() => void issueAdministratorInvite()}>创建注册链接</button></div> : null}
-          {newAdministratorInvite ? <div className="api-key-secret"><div><strong>仅发给 {newAdministratorInvite.email}</strong><code>{newAdministratorInvite.registrationUrl}</code><small>到期 {new Date(newAdministratorInvite.expiresAt).toLocaleString()}</small></div><button type="button" onClick={() => void copySecret(newAdministratorInvite.registrationUrl)}>复制</button><button type="button" onClick={() => setNewAdministratorInvite(null)}>关闭</button></div> : null}
-          <div className="root-administrator-list" aria-label="商城运营账号列表">
-            {administrators.length ? administrators.map((administrator) => (
-              <div className="root-administrator-row" key={administrator.id}>
-                <span><strong>{administrator.name || administrator.email}</strong><small>{administrator.email}{administrator.emailVerified ? " · 已验证" : " · 待验证"}</small></span>
-                <b className={administrator.role === "rootSuperAdmin" || administrator.role === "rootAdmin" ? "status-chip is-on" : "status-chip"}>{administrator.role === "rootSuperAdmin" ? "商城负责人" : administrator.role === "rootAdmin" ? "商城运营" : "普通账号"}</b>
-              </div>
-            )) : <p className="platform-access-empty">{administratorLoading ? "正在读取账号…" : "还没有可管理的账号"}</p>}
-          </div>
         </div>
-      ) : null}
+      )}
     </section>
   );
 
@@ -521,6 +570,12 @@ function roleOptions(canAssignOwner: boolean): Array<{ value: string; label: str
 
 function roleLabel(role: string): string {
   return roleOptions(true).find((candidate) => candidate.value === role)?.label || role;
+}
+
+function accountRoleLabel(role: string): string {
+  if (role === "rootSuperAdmin") return "商城负责人";
+  if (role === "rootAdmin") return "商城运营";
+  return "普通用户";
 }
 
 async function copySecret(secret: string): Promise<void> {

@@ -359,7 +359,9 @@ export async function removePlatformMember(input: {
   }
 }
 
-export interface PlatformAdministratorRecord {
+/** A browser-safe account summary for the mall account directory. It deliberately excludes
+ * phone numbers, identity-provider subjects, sessions, and contact preferences. */
+export interface PlatformAccountRecord {
   id: string;
   name: string;
   email: string;
@@ -369,27 +371,30 @@ export interface PlatformAdministratorRecord {
   banned?: boolean;
 }
 
-export async function getPlatformAdministrators(): Promise<PlatformAdministratorRecord[]> {
+export async function getPlatformAccounts(): Promise<PlatformAccountRecord[]> {
   const response = await fetch("/api/platform/administrators", {
     credentials: "include",
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null) as { administrators?: unknown; error?: string } | null;
+  const body = await response.json().catch(() => null) as { accounts?: unknown; administrators?: unknown; error?: string } | null;
   if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "账号列表读取失败");
-  return Array.isArray(body?.administrators) ? body.administrators as PlatformAdministratorRecord[] : [];
+  // `administrators` is retained by the server for callers deployed before the account-directory
+  // rename. New surfaces must use `accounts`: it includes ordinary registered customers too.
+  const accounts = body?.accounts ?? body?.administrators;
+  return Array.isArray(accounts) ? accounts as PlatformAccountRecord[] : [];
 }
 
 export async function updatePlatformAdministrator(input: {
   userId: string;
   role: "rootAdmin" | "user";
-}): Promise<PlatformAdministratorRecord> {
+}): Promise<PlatformAccountRecord> {
   const response = await fetch("/api/platform/administrators", {
     method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { administrator?: PlatformAdministratorRecord; error?: string } | null;
+  const body = await response.json().catch(() => null) as { administrator?: PlatformAccountRecord; error?: string } | null;
   if (!response.ok || !body?.administrator) throw new MarketplaceApiError(response.status, body?.error || "根管理员权限更新失败");
   return body.administrator;
 }
@@ -654,6 +659,7 @@ export interface MallSettings {
   name: string;
   slug: string;
   version: number;
+  logoUrl?: string | null;
 }
 
 export async function getMallSettings(): Promise<MallSettings> {
@@ -673,6 +679,62 @@ export async function saveMallSettings(input: { name: string; expectedVersion: n
   const body = await response.json().catch(() => null) as { mall?: MallSettings; error?: string } | null;
   if (!response.ok || !body?.mall) throw new MarketplaceApiError(response.status, body?.error || "商城名称保存失败");
   return body.mall;
+}
+
+export async function uploadMallBrandLogo(input: { file: File; expectedVersion: number }): Promise<MallSettings> {
+  if (input.file.size < 1 || input.file.size > 4 * 1024 * 1024) {
+    throw new MarketplaceApiError(413, "Logo 图片不能超过 4 MiB");
+  }
+  const dataBase64 = bytesToBase64(new Uint8Array(await input.file.arrayBuffer()));
+  const response = await fetch("/api/mall/logo", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ dataBase64, expectedVersion: input.expectedVersion }),
+  });
+  const body = await response.json().catch(() => null) as { mall?: MallSettings; error?: string } | null;
+  if (!response.ok || !body?.mall) throw new MarketplaceApiError(response.status, body?.error || "商城 Logo 保存失败");
+  return body.mall;
+}
+
+export interface AccountProfile {
+  name: string;
+  email: string;
+  image: string | null;
+  bio: string;
+}
+
+export async function getAccountProfile(): Promise<AccountProfile> {
+  const response = await fetch("/api/account/profile", { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
+  const body = await response.json().catch(() => null) as { profile?: AccountProfile; error?: string } | null;
+  if (!response.ok || !body?.profile) throw new MarketplaceApiError(response.status, body?.error || "个人资料读取失败");
+  return body.profile;
+}
+
+export async function saveAccountProfile(input: { bio: string }): Promise<AccountProfile> {
+  const response = await fetch("/api/account/profile", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as { profile?: AccountProfile; error?: string } | null;
+  if (!response.ok || !body?.profile) throw new MarketplaceApiError(response.status, body?.error || "个人资料保存失败");
+  return body.profile;
+}
+
+export async function uploadAccountAvatar(file: File): Promise<string> {
+  if (file.size < 1 || file.size > 4 * 1024 * 1024) throw new MarketplaceApiError(413, "头像图片不能超过 4 MiB");
+  const dataBase64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
+  const response = await fetch("/api/account/avatar", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ dataBase64 }),
+  });
+  const body = await response.json().catch(() => null) as { image?: string; error?: string } | null;
+  if (!response.ok || !body?.image) throw new MarketplaceApiError(response.status, body?.error || "头像保存失败");
+  return body.image;
 }
 
 export async function getStores(): Promise<StoreSummary[]> {

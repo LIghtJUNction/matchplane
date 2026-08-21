@@ -6,7 +6,10 @@ import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Root-platform user-role control plane. Better Auth owns the user and role records. */
+/**
+ * Root-scoped account directory. Better Auth owns the user and role records; this route only
+ * returns the small profile needed to distinguish registered customers from mall operators.
+ */
 export async function GET(request: Request): Promise<Response> {
   const guard = await requireRootManager(request);
   if (guard.response) return guard.response;
@@ -15,8 +18,15 @@ export async function GET(request: Request): Promise<Response> {
       query: { limit: 1000, offset: 0, sortBy: "createdAt", sortDirection: "desc" },
       headers: request.headers,
     });
+    const accounts = result.users.map(toPublicUser);
     return NextResponse.json(
-      { administrators: result.users.map(toPublicUser), total: result.total },
+      {
+        accounts,
+        // Compatibility for the pre-storefront console. Callers must prefer `accounts`: this
+        // directory contains every registered account, not only mall operators.
+        administrators: accounts,
+        total: result.total,
+      },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {

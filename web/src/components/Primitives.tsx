@@ -10,7 +10,7 @@ import type { Accent, ActivityItem } from "../types";
 export const spring = { type: "spring" as const, bounce: 0, duration: 0.38 };
 export const momentumSpring = { type: "spring" as const, bounce: 0.18, duration: 0.4 };
 
-export function Brand({ label = "MatchPlane", homeHref = "#top" }: { label?: string; homeHref?: string }) {
+export function Brand({ label = "MatchPlane", logoUrl, homeHref = "#top" }: { label?: string; logoUrl?: string; homeHref?: string }) {
   const clickState = useRef({ count: 0, lastAt: 0 });
 
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -28,8 +28,7 @@ export function Brand({ label = "MatchPlane", homeHref = "#top" }: { label?: str
   return (
     <a className="brand" href={homeHref} aria-label={`${label} 首页`} onClick={handleClick}>
       <span className="brand-mark" aria-hidden="true">
-        <span />
-        <span />
+        {logoUrl ? <img src={logoUrl} alt="" /> : <><span /><span /></>}
       </span>
       <span>{label}</span>
     </a>

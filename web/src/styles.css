@@ -425,6 +425,8 @@ p {
   background: var(--cactus);
 }
 
+.brand-mark img { width: 100%; height: 100%; display: block; object-fit: contain; background: var(--ivory); }
+
 .header-actions {
   position: relative;
   justify-self: end;
@@ -465,6 +467,10 @@ p {
   border-radius: 0.68rem;
   background: var(--heather);
 }
+
+.profile-button-avatar { overflow: hidden; }
+.profile-button-avatar img,
+.workspace-account-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
 
 .profile-copy {
   display: grid;
@@ -1991,6 +1997,37 @@ main {
 
 .platform-access-panel { grid-column: 1 / -1; }
 .platform-access-panel .eyebrow { display: inline-flex; align-items: center; gap: 0.35rem; }
+.platform-access-view-tabs { margin-top: 1rem; padding: 0.25rem; display: inline-grid; grid-template-columns: 1fr 1fr; border-radius: 0.85rem; background: var(--paper); }
+.platform-access-view-tabs button { min-height: 2.35rem; padding: 0 0.85rem; border: 0; border-radius: 0.65rem; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 0.72rem; }
+.platform-access-view-tabs button.is-active { background: var(--ivory); color: var(--ink); box-shadow: var(--shadow-small); }
+.mall-account-directory { margin-top: 1rem; }
+.mall-account-directory-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.mall-account-directory-heading h3 { margin-top: 0.32rem; font-size: 1.15rem; letter-spacing: -0.04em; }
+.mall-account-directory-heading p { max-width: 34rem; margin-top: 0.4rem; color: var(--muted); font-size: 0.72rem; line-height: 1.55; }
+.mall-account-directory-heading > small { padding: 0.43rem 0.6rem; border-radius: 999px; background: var(--paper); color: var(--muted); font-size: 0.64rem; white-space: nowrap; }
+.mall-account-summary { margin-top: 0.8rem; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45rem; }
+.mall-account-summary span { min-height: 3.45rem; padding: 0.55rem 0.7rem; display: grid; align-content: center; gap: 0.1rem; border: 1px solid var(--line); border-radius: 0.82rem; background: var(--paper); color: var(--muted); font-size: 0.65rem; }
+.mall-account-summary strong { color: var(--ink); font-size: 1rem; letter-spacing: -0.04em; }
+.mall-account-search { margin-top: 0.8rem; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.48rem; padding: 0 0.72rem; border: 1px solid var(--line); border-radius: 0.82rem; background: var(--paper); color: var(--muted); }
+.mall-account-search > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.mall-account-search input { min-width: 0; min-height: 2.65rem; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 0.74rem; }
+.mall-brand-panel { grid-column: 1 / -1; }
+.mall-brand-intro { max-width: 44rem; margin-top: 0.62rem; color: var(--muted); font-size: 0.74rem; line-height: 1.6; }
+.mall-brand-form { margin-top: 1.15rem; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1rem; }
+.mall-brand-preview { width: 6.5rem; height: 6.5rem; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 1.25rem; background: var(--paper); color: var(--ink); font-size: 2rem; font-weight: 740; }
+.mall-brand-preview img { width: 100%; height: 100%; object-fit: contain; background: var(--ivory); }
+.mall-brand-fields { display: grid; gap: 0.85rem; align-content: start; }
+.mall-brand-fields label { display: grid; gap: 0.35rem; }
+.mall-brand-fields label > span { color: var(--ink-soft); font-size: 0.68rem; font-weight: 650; }
+.mall-brand-fields input:not([type="file"]) { width: 100%; min-height: 2.65rem; padding: 0 0.75rem; border: 1px solid var(--line); border-radius: 0.78rem; outline: 0; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.75rem; }
+.mall-brand-fields input:focus { border-color: var(--sky); box-shadow: 0 0 0 0.12rem rgba(106, 155, 204, 0.2); }
+.mall-brand-upload { position: relative; justify-items: start; }
+.mall-brand-upload input[type="file"], .personal-profile-upload input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.mall-brand-upload .button, .personal-profile-upload { min-height: 2.5rem; display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.mall-brand-upload small { color: var(--muted); font-size: 0.62rem; }
+.mall-brand-actions { grid-column: 1 / -1; padding-top: 0.95rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--line); }
+.mall-brand-actions p { color: var(--muted); font-size: 0.68rem; line-height: 1.5; }
+.mall-brand-actions .button { min-height: 2.55rem; display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
 .platform-access-select { min-width: min(100%, 18rem); display: grid; gap: 0.3rem; }
 .platform-access-select span,
 .platform-access-invite label > span { color: var(--ink-soft); font-size: 0.66rem; font-weight: 650; }
@@ -4041,6 +4078,13 @@ main.subplatform-fullscreen-main {
   .subplatform-editor-footer { align-items: stretch; flex-direction: column; }
   .platform-access-invite { grid-template-columns: 1fr; align-items: stretch; }
   .platform-access-invite .button { width: 100%; }
+  .mall-account-summary { grid-template-columns: 1fr; }
+  .mall-brand-form { grid-template-columns: 1fr; }
+  .mall-brand-preview { width: 5.5rem; height: 5.5rem; }
+  .mall-brand-actions { align-items: stretch; flex-direction: column; }
+  .mall-brand-actions .button { width: 100%; justify-content: center; }
+  .personal-profile-identity { grid-template-columns: auto minmax(0, 1fr); }
+  .personal-profile-upload { grid-column: 1 / -1; width: 100%; justify-content: center; }
   .platform-member-row { grid-template-columns: 2.2rem minmax(0, 1fr) auto; }
   .platform-member-row select { grid-column: 2 / -1; }
   .platform-api-key-form { grid-template-columns: 1fr; align-items: stretch; }
@@ -4670,6 +4714,25 @@ main.subplatform-fullscreen-main {
 }
 
 .workspace-signin-action { width: fit-content; background: var(--ink); color: var(--ivory); }
+
+.personal-profile-panel { display: grid; gap: 1.1rem; }
+.personal-profile-heading h3 { margin-top: 0.34rem; font-size: 1.25rem; letter-spacing: -0.045em; }
+.personal-profile-heading p:not(.eyebrow) { max-width: 32rem; margin-top: 0.42rem; color: var(--muted); font-size: 0.73rem; line-height: 1.55; }
+.personal-profile-identity { min-height: 5.5rem; padding: 0.8rem; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.78rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--paper); }
+.personal-profile-avatar { width: 3.65rem; height: 3.65rem; display: grid; place-items: center; overflow: hidden; border-radius: 1rem; background: var(--heather); color: var(--ink); }
+.personal-profile-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.personal-profile-identity > span:nth-child(2) { min-width: 0; display: grid; gap: 0.16rem; }
+.personal-profile-identity strong, .personal-profile-identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.personal-profile-identity strong { font-size: 0.82rem; }
+.personal-profile-identity small { color: var(--muted); font-size: 0.68rem; }
+.personal-profile-form { display: grid; gap: 0.72rem; }
+.personal-profile-form label { display: grid; gap: 0.36rem; }
+.personal-profile-form label > span { color: var(--ink-soft); font-size: 0.7rem; font-weight: 650; }
+.personal-profile-form textarea { width: 100%; resize: vertical; padding: 0.72rem 0.78rem; border: 1px solid var(--line); border-radius: 0.85rem; outline: 0; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.76rem; line-height: 1.55; }
+.personal-profile-form textarea:focus { border-color: var(--sky); box-shadow: 0 0 0 0.12rem rgba(106, 155, 204, 0.2); }
+.personal-profile-form > div { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.personal-profile-form > div > small { color: var(--muted); font-size: 0.66rem; }
+.personal-profile-form .button { min-height: 2.55rem; display: inline-flex; align-items: center; gap: 0.4rem; }
 
 .workspace-role-switch {
   padding: 0.25rem;
