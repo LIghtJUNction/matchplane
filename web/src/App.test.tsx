@@ -732,7 +732,7 @@ describe("MatchPlane workspaces", () => {
     expect(screen.getByRole("status")).toHaveTextContent("已退出当前账号");
   });
 
-  it("keeps theme and language controls in the header", async () => {
+  it("keeps theme and language controls near the shopping aid", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
@@ -765,8 +765,8 @@ describe("MatchPlane workspaces", () => {
 
     expect(
       screen.getByRole("heading", {
-        level: 1,
-        name: "Where should we start?",
+        level: 2,
+        name: "Products",
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText("More entry points")).not.toBeInTheDocument();

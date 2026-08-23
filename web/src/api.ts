@@ -881,20 +881,12 @@ export interface MallSettings {
 }
 
 export async function getMallSettings(): Promise<MallSettings> {
-  const response = await fetch("/api/mall/settings", {
-    credentials: "include",
-    headers: { accept: "application/json" },
+  const body = await apiJson<{ mall: MallSettings }>(`/api/mall/settings`, {
     cache: "no-store",
+    fallbackError: "商城设置读取失败",
+    ok: (value) =>
+      Boolean(value && typeof value === "object" && "mall" in value && value.mall),
   });
-  const body = (await response.json().catch(() => null)) as {
-    mall?: MallSettings;
-    error?: string;
-  } | null;
-  if (!response.ok || !body?.mall)
-    throw new MarketplaceApiError(
-      response.status,
-      body?.error || "商城设置读取失败",
-    );
   return body.mall;
 }
 
@@ -904,21 +896,13 @@ export async function saveMallSettings(input: {
   placeholderPhrases?: string[];
   includeActiveProductTitles?: boolean;
 }): Promise<MallSettings> {
-  const response = await fetch("/api/mall/settings", {
+  const body = await apiJson<{ mall: MallSettings }>(`/api/mall/settings`, {
     method: "PATCH",
-    credentials: "include",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: input,
+    fallbackError: "商城名称保存失败",
+    ok: (value) =>
+      Boolean(value && typeof value === "object" && "mall" in value && value.mall),
   });
-  const body = (await response.json().catch(() => null)) as {
-    mall?: MallSettings;
-    error?: string;
-  } | null;
-  if (!response.ok || !body?.mall)
-    throw new MarketplaceApiError(
-      response.status,
-      body?.error || "商城名称保存失败",
-    );
   return body.mall;
 }
 
@@ -1633,20 +1617,13 @@ export async function browseMallCatalog(
   const query = input.storePath
     ? `?storePath=${encodeURIComponent(input.storePath)}`
     : "";
-  const response = await fetch(`/api/mall/search${query}`, {
-    credentials: "include",
-    headers: { accept: "application/json" },
-    cache: "no-store",
-  });
-  const body = (await response.json().catch(() => null)) as
-    | (MallBrowseResponse & { error?: string })
-    | null;
-  if (!response.ok || !body) {
-    throw new MarketplaceApiError(
-      response.status,
-      body?.error || "商品目录暂时不可用",
-    );
-  }
+  const body = await apiJson<MallBrowseResponse & { error?: string }>(
+    `/api/mall/search${query}`,
+    {
+      cache: "no-store",
+      fallbackError: "商品目录暂时不可用",
+    },
+  );
   return {
     stores: Array.isArray(body.stores) ? body.stores : [],
     recommendations: Array.isArray(body.recommendations)
@@ -1659,60 +1636,43 @@ export async function searchMallCatalog(input: {
   narrative: string;
   storePath?: string;
 }): Promise<MallSearchResponse> {
-  const response = await fetch("/api/mall/search", {
+  return apiJson<MallSearchResponse>("/api/mall/search", {
     method: "POST",
-    credentials: "include",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: input,
+    fallbackError: "商城搜索暂时不可用",
   });
-  const body = (await response.json().catch(() => null)) as
-    | (MallSearchResponse & { error?: string })
-    | null;
-  if (!response.ok || !body) {
-    throw new MarketplaceApiError(
-      response.status,
-      body?.error || "商城搜索暂时不可用",
-    );
-  }
-  return body;
 }
 
 export async function getShoppingMemory(): Promise<ShoppingMemorySnapshot> {
-  const response = await fetch("/api/mall/memory", {
-    credentials: "include",
-    headers: { accept: "application/json" },
-    cache: "no-store",
-  });
-  const body = (await response.json().catch(() => null)) as {
-    memory?: ShoppingMemorySnapshot;
-    error?: string;
-  } | null;
-  if (!response.ok || !body?.memory)
-    throw new MarketplaceApiError(
-      response.status,
-      body?.error || "购物记忆读取失败",
-    );
+  const body = await apiJson<{ memory: ShoppingMemorySnapshot }>(
+    "/api/mall/memory",
+    {
+      cache: "no-store",
+      fallbackError: "购物记忆读取失败",
+      ok: (value) =>
+        Boolean(
+          value && typeof value === "object" && "memory" in value && value.memory,
+        ),
+    },
+  );
   return body.memory;
 }
 
 export async function saveShoppingMemory(
   input: ShoppingMemoryMutation,
 ): Promise<ShoppingMemorySnapshot> {
-  const response = await fetch("/api/mall/memory", {
-    method: "PUT",
-    credentials: "include",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const body = (await response.json().catch(() => null)) as {
-    memory?: ShoppingMemorySnapshot;
-    error?: string;
-  } | null;
-  if (!response.ok || !body?.memory)
-    throw new MarketplaceApiError(
-      response.status,
-      body?.error || "购物记忆保存失败",
-    );
+  const body = await apiJson<{ memory: ShoppingMemorySnapshot }>(
+    "/api/mall/memory",
+    {
+      method: "PUT",
+      body: input,
+      fallbackError: "购物记忆保存失败",
+      ok: (value) =>
+        Boolean(
+          value && typeof value === "object" && "memory" in value && value.memory,
+        ),
+    },
+  );
   return body.memory;
 }
 
@@ -2139,6 +2099,41 @@ function readApiError(value: unknown): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const error = (value as { error?: unknown }).error;
   return typeof error === "string" && error.trim() ? error.slice(0, 500) : null;
+}
+
+interface ApiJsonOptions {
+  method?: string;
+  body?: unknown;
+  cache?: RequestCache;
+  headers?: HeadersInit;
+  fallbackError: string;
+  ok?: (body: unknown) => boolean;
+}
+
+async function apiJson<T>(path: string, options: ApiJsonOptions): Promise<T> {
+  const response = await fetch(path, {
+    method: options.method ?? "GET",
+    credentials: "include",
+    cache: options.cache,
+    headers: {
+      accept: "application/json",
+      ...(options.body !== undefined
+        ? { "content-type": "application/json" }
+        : {}),
+      ...options.headers,
+    },
+    body:
+      options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+  const body = await readJson<T & { error?: string }>(response);
+  const valid = options.ok ? options.ok(body) : Boolean(body);
+  if (!response.ok || !valid) {
+    throw new MarketplaceApiError(
+      response.status,
+      readApiError(body) || options.fallbackError,
+    );
+  }
+  return body as T;
 }
 
 /** Redeem a one-time CLI-issued administrator invitation after Better Auth sign-in. */

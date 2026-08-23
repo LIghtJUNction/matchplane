@@ -40,8 +40,6 @@ import {
   createMarketplaceIntroduction,
   createMarketplaceIntent,
   createMarketplaceSalesHandoff,
-  browseMallCatalog,
-  getMarketplaceOfferLikes,
   getMarketplaceProfile,
   getOwnedStores,
   requestMarketplaceContact,
@@ -52,15 +50,13 @@ import {
   type StoreSummary,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
-  MarketplaceApiError,
   notifyStoreCustomerHandoff,
-  setMarketplaceOfferLikeCount,
   switchPaymentMode,
 } from "./api";
 import { getMarketplaceSession } from "./lib/marketplace-session";
 import { authClient, authFetchOptions } from "./lib/auth-client";
 import { useInterfacePreferences } from "./lib/preferences";
-import { mapRecommendations } from "./marketplace-listings";
+import { useMarketplaceCatalog } from "./hooks/useMarketplaceCatalog";
 import type { AssetListing, WorkspaceRole } from "./types";
 
 const AUTH_PENDING_KEY = "matchplane.auth.pending";
@@ -87,9 +83,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() =>
     resolveSubplatform(initialPath),
   );
-  const [listings, setListings] = useState<AssetListing[]>([]);
-  const [catalogResolved, setCatalogResolved] = useState(false);
-  const [listing, setListing] = useState<AssetListing | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
   const [paymentModeVersion, setPaymentModeVersion] = useState(1);
@@ -112,14 +105,31 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   // safe buyer surface. Otherwise `?role=platform` can be overwritten before Better Auth
   // resolves, which silently strands a valid administrator in the buyer workspace.
   const requestedRoleRef = useRef<WorkspaceRole>(roleFromLocation());
-  const catalogInteractionRef = useRef(false);
-  const catalogPathRef = useRef(subplatform.path);
+  const openSignIn = useCallback(() => {
+    window.location.assign(loginHref(role));
+  }, [role]);
+  const {
+    listings,
+    setListings,
+    catalogResolved,
+    listing,
+    setListing,
+    closeListing,
+    likeListing,
+    replaceFromRecommendations,
+  } = useMarketplaceCatalog({
+    hydrated,
+    locale,
+    subplatform,
+    authUserId: authUser?.id,
+    onAuthRequired: openSignIn,
+    onNotice: setNotice,
+  });
 
   useEffect(() => {
     setPluginFailed(false);
   }, [subplatform.path, subplatform.pluginArtifact?.url]);
 
-  const closeListing = useCallback(() => setListing(null), []);
   const closeModeDialog = useCallback(() => setModeDialogOpen(false), []);
 
   useEffect(() => {
@@ -274,83 +284,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     };
   }, [authUser?.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!hydrated) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    if (catalogPathRef.current !== subplatform.path) {
-      catalogPathRef.current = subplatform.path;
-      catalogInteractionRef.current = false;
-    }
-    setCatalogResolved(false);
-    void browseMallCatalog(
-      subplatform.slug === "root" ? {} : { storePath: subplatform.path },
-    )
-      .then(({ recommendations }) => {
-        if (!cancelled && !catalogInteractionRef.current) {
-          setListings(mapRecommendations(recommendations, subplatform, locale));
-        }
-      })
-      .catch(() => {
-        // The live store directory remains available when the product feed is temporarily down.
-      })
-      .finally(() => {
-        if (!cancelled) setCatalogResolved(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [hydrated, locale, subplatform.path, subplatform.slug]);
-
-  const listingOfferIds = listings
-    .flatMap((item) => item.offerId ?? listingIdFromBackend(item) ?? [])
-    .filter((offerId, position, all) => all.indexOf(offerId) === position)
-    .sort((left, right) => left.localeCompare(right))
-    .join(",");
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!authUser?.id || !listingOfferIds) {
-      if (!authUser?.id) {
-        setListings((current) =>
-          current.map((item) =>
-            item.viewerLikeCount ? { ...item, viewerLikeCount: 0 } : item,
-          ),
-        );
-      }
-      return () => {
-        cancelled = true;
-      };
-    }
-    void getMarketplaceOfferLikes(listingOfferIds.split(","))
-      .then((states) => {
-        if (cancelled) return;
-        const byOfferId = new Map(
-          states.map((state) => [state.offerId, state]),
-        );
-        setListings((current) =>
-          current.map((item) => {
-            const offerId = item.offerId ?? listingIdFromBackend(item);
-            const state = offerId ? byOfferId.get(offerId) : undefined;
-            return state
-              ? {
-                  ...item,
-                  likeTotal: state.likeTotal,
-                  viewerLikeCount: state.viewerLikeCount,
-                }
-              : item;
-          }),
-        );
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [authUser?.id, listingOfferIds]);
-
   const currentManagedStore =
     subplatform.slug === "root"
       ? null
@@ -466,66 +399,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       return;
     }
     setAccountSettingsSection("stores");
-  };
-
-  const openSignIn = () => {
-    window.location.assign(loginHref(role));
-  };
-
-  const likeListing = async (target: AssetListing) => {
-    if (!authUser) {
-      openSignIn();
-      return;
-    }
-    const offerId = target.offerId ?? listingIdFromBackend(target);
-    if (!offerId) {
-      setNotice("这个商品暂不支持点赞");
-      return;
-    }
-    const expectedCount = target.viewerLikeCount ?? 0;
-    if (expectedCount >= 5) return;
-    try {
-      const state = await setMarketplaceOfferLikeCount({
-        offerId,
-        count: expectedCount + 1,
-        expectedCount,
-      });
-      const applyState = (item: AssetListing) =>
-        (item.offerId ?? listingIdFromBackend(item)) === offerId
-          ? {
-              ...item,
-              likeTotal: state.likeTotal,
-              viewerLikeCount: state.viewerLikeCount,
-            }
-          : item;
-      setListings((current) => current.map(applyState));
-      setListing((current) => (current ? applyState(current) : current));
-    } catch (error) {
-      if (error instanceof MarketplaceApiError && error.status === 401) {
-        openSignIn();
-        return;
-      }
-      if (error instanceof MarketplaceApiError && error.status === 409) {
-        const [state] = await getMarketplaceOfferLikes([offerId]).catch(
-          () => [],
-        );
-        if (state) {
-          setListings((current) =>
-            current.map((item) =>
-              (item.offerId ?? listingIdFromBackend(item)) === offerId
-                ? {
-                    ...item,
-                    likeTotal: state.likeTotal,
-                    viewerLikeCount: state.viewerLikeCount,
-                  }
-                : item,
-            ),
-          );
-          return;
-        }
-      }
-      setNotice(error instanceof Error ? error.message : "点赞失败");
-    }
   };
 
   const requestStoreContactConsent = async (
@@ -894,12 +767,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 )}
               </div>
               <div className="header-actions">
-                <PreferenceControls
-                  theme={theme}
-                  locale={locale}
-                  onThemeChange={setTheme}
-                  onLocaleChange={setLocale}
-                />
+                {role === "buyer" && subplatform.slug === "root" ? null : (
+                  <PreferenceControls
+                    theme={theme}
+                    locale={locale}
+                    onThemeChange={setTheme}
+                    onLocaleChange={setLocale}
+                  />
+                )}
                 <motion.button
                   className="header-store-action"
                   type="button"
@@ -1056,20 +931,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     catalogResolved={catalogResolved}
                     listings={listings}
                     locale={locale}
+                    theme={theme}
+                    onLocaleChange={setLocale}
+                    onThemeChange={setTheme}
                     onNotice={setNotice}
                     onOpenListing={setListing}
                     onLikeListing={likeListing}
                     onPublishProduct={publishProduct}
-                    onRecommendations={(recommendations) => {
-                      catalogInteractionRef.current = true;
-                      setListings(
-                        mapRecommendations(
-                          recommendations,
-                          subplatform,
-                          locale,
-                        ),
-                      );
-                    }}
+                    onRecommendations={replaceFromRecommendations}
                     subplatform={subplatform}
                   />
                 ) : subplatform.pluginArtifact && role === "platform" ? (
@@ -1214,6 +1083,24 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                       {ui.signOut}
                     </button>
                   </div>
+                </section>
+                <section
+                  className="workspace-settings-section"
+                  aria-labelledby="workspace-preferences-title"
+                >
+                  <div className="workspace-settings-section-heading">
+                    <h3 id="workspace-preferences-title">
+                      {locale === "en"
+                        ? "Display and language"
+                        : "显示与语言"}
+                    </h3>
+                  </div>
+                  <PreferenceControls
+                    theme={theme}
+                    locale={locale}
+                    onThemeChange={setTheme}
+                    onLocaleChange={setLocale}
+                  />
                 </section>
                 <ChangePasswordPanel
                   email={authUser.email}
