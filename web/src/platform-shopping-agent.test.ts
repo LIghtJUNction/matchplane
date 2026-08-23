@@ -265,7 +265,7 @@ describe("platform shopping agent", () => {
     expect(reply.modelCalls).toBe(1);
   });
 
-  it("confirms a completed memory update when the model omits final prose", async () => {
+  it("rejects an empty model response instead of fabricating memory confirmation", async () => {
     const updateMemory = vi.fn(async (facts) => ({
       enabled: true,
       facts,
@@ -286,17 +286,18 @@ describe("platform shopping agent", () => {
       };
     });
 
-    const reply = await answerPlatformShoppingQuestion({
-      question: "把长期预算改成 9000 元",
-      messages: [{ role: "user", content: "把长期预算改成 9000 元" }],
-      stores: [],
-      memory: { enabled: true, facts: [], version: 3, updatedAt: null },
-      updateMemory,
-    });
+    await expect(
+      answerPlatformShoppingQuestion({
+        question: "把长期预算改成 9000 元",
+        messages: [{ role: "user", content: "把长期预算改成 9000 元" }],
+        stores: [],
+        memory: { enabled: true, facts: [], version: 3, updatedAt: null },
+        updateMemory,
+      }),
+    ).rejects.toThrow("AI 模型未返回有效回答");
 
     expect(updateMemory).toHaveBeenCalledOnce();
-    expect(reply.text).toBe("购物记忆已按你刚才的要求更新。");
-    expect(reply.modelCalls).toBe(1);
+    expect(generateText).toHaveBeenCalledOnce();
   });
 
   it("returns a bounded choice UI when AI asks the user for a key condition", async () => {
@@ -335,27 +336,24 @@ describe("platform shopping agent", () => {
     expect(reply.recommendations).toEqual([]);
   });
 
-  it("keeps choice UI available when a compatible model answers without a tool call", async () => {
+  it("rejects a model that omits the required choice tool instead of inventing options", async () => {
     generateText.mockResolvedValueOnce({
       text: "先确认一个方向。",
+      finishReason: "stop",
       usage: { inputTokens: 8, outputTokens: 5, totalTokens: 13 },
       steps: [{ toolCalls: [] }],
     });
 
-    const reply = await answerPlatformShoppingQuestion({
-      question: "先问我一个问题并给我几个选项",
-      messages: [{ role: "user", content: "先问我一个问题并给我几个选项" }],
-      stores: [],
-    });
-
-    expect(reply.toolCalls).toEqual(["ask_user"]);
-    expect(reply.uiActions[0]).toEqual(
-      expect.objectContaining({
-        type: "choice",
-        question: "你想先从哪一项开始缩小范围？",
+    await expect(
+      answerPlatformShoppingQuestion({
+        question: "先问我一个问题并给我几个选项",
+        messages: [
+          { role: "user", content: "先问我一个问题并给我几个选项" },
+        ],
+        stores: [],
       }),
-    );
-    expect(reply.recommendations).toEqual([]);
+    ).rejects.toThrow("AI 模型未返回有效的澄清选项");
+    expect(generateText).toHaveBeenCalledOnce();
   });
 
   it("performs precise multi-product retrieval across multiple tool-using turns", async () => {
@@ -539,7 +537,48 @@ describe("platform shopping agent", () => {
     expect(generateText).toHaveBeenCalledTimes(1);
   });
 
-  it("uses retrieved products when the model finishes without prose", async () => {
+  it("rejects comparison prose when the model skips the deterministic comparison tool", async () => {
+    searchPublicStoreOffers.mockResolvedValue([
+      {
+        offer_id: "offer-a",
+        display_name: "通勤轻薄本 A",
+        store_name: "电子店",
+        attributes: {},
+        terms: { amount_minor: "499900", currency: "CNY", currency_scale: 2 },
+        platform_path: "/electronics",
+      },
+      {
+        offer_id: "offer-b",
+        display_name: "通勤轻薄本 B",
+        store_name: "电子店",
+        attributes: {},
+        terms: { amount_minor: "599900", currency: "CNY", currency_scale: 2 },
+        platform_path: "/electronics",
+      },
+    ]);
+    generateText.mockImplementation(async (options) => {
+      await options.tools.search_public_products.execute({
+        query: "通勤轻薄本",
+        requirements: [],
+      });
+      return {
+        text: "A 更便宜。",
+        finishReason: "stop",
+        usage: { inputTokens: 20, outputTokens: 4, totalTokens: 24 },
+        steps: [{ toolCalls: [{ toolName: "search_public_products" }] }],
+      };
+    });
+
+    await expect(
+      answerPlatformShoppingQuestion({
+        question: "对比两款通勤轻薄本",
+        messages: [{ role: "user", content: "对比两款通勤轻薄本" }],
+        stores: [],
+      }),
+    ).rejects.toThrow("AI 模型未按协议完成商品计算");
+  });
+
+  it("rejects an empty model response instead of synthesizing a product answer", async () => {
     searchPublicStoreOffers.mockResolvedValue([
       {
         offer_id: "offer-a",
@@ -563,22 +602,17 @@ describe("platform shopping agent", () => {
       };
     });
 
-    const reply = await answerPlatformShoppingQuestion({
-      question: "帮我找通勤轻薄本",
-      messages: [{ role: "user", content: "帮我找通勤轻薄本" }],
-      stores: [],
-    });
-
-    expect(reply.text).toContain("通勤轻薄本 A（CNY 4999.00）");
-    expect(reply.recommendations).toHaveLength(1);
-    expect(reply.toolCalls).toEqual([
-      "search_public_products",
-      "show_products",
-    ]);
-    expect(reply.modelCalls).toBe(1);
+    await expect(
+      answerPlatformShoppingQuestion({
+        question: "帮我找通勤轻薄本",
+        messages: [{ role: "user", content: "帮我找通勤轻薄本" }],
+        stores: [],
+      }),
+    ).rejects.toThrow("AI 模型未返回有效回答");
+    expect(generateText).toHaveBeenCalledOnce();
   });
 
-  it("turns an empty final completion after product search into an honest no-results reply", async () => {
+  it("returns the model response without replacing it with a canned no-results answer", async () => {
     searchPublicStoreOffers.mockResolvedValue([]);
     generateText.mockImplementation(async (options) => {
       await options.tools.search_public_products.execute({
@@ -601,8 +635,7 @@ describe("platform shopping agent", () => {
       admitCall,
     });
 
-    expect(reply.text).toContain("暂时没有找到匹配的公开在售商品");
-    expect(reply.text).not.toContain("二手车");
+    expect(reply.text).toBe("不如看看无关的二手车。");
     expect(reply.recommendations).toEqual([]);
     expect(reply.modelCalls).toBe(1);
     expect(admitCall).toHaveBeenCalledTimes(1);
@@ -759,8 +792,7 @@ describe("platform shopping agent", () => {
       storeContext: { path: "/test-store", name: "测试小店" },
     });
 
-    expect(reply.text).toContain("已通知店员介入");
-    expect(reply.text).toContain("未经你确认不会交换");
+    expect(reply.text).toBe("请再具体一点。");
     expect(reply.uiActions).toEqual([
       {
         type: "human_handoff",

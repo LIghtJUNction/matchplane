@@ -407,75 +407,6 @@ export function isPlatformRouterConfigured(): boolean {
   return configuredPlatformRouter() !== null;
 }
 
-function fallbackComparisonReply(
-  recommendations: RecommendedBackendListing[],
-  question: string,
-): string {
-  const selected = recommendations.slice(0, 6);
-  const comparison = selected
-    .map(
-      (item) =>
-        `${item.display_name}（${formatPublicPrice(item.terms ?? {})}）`,
-    )
-    .join("、");
-  if (!/合计|总价/.test(question)) return `对比结果：${comparison}。`;
-  const priceRows = selected.map((item) => item.terms ?? {});
-  const currency = priceRows[0]?.currency;
-  const scale = priceRows[0]?.currency_scale;
-  if (
-    typeof currency !== "string" ||
-    !priceRows.every(
-      (terms) =>
-        terms.currency === currency &&
-        terms.currency_scale === scale &&
-        /^\d+$/.test(String(terms.amount_minor ?? "")),
-    )
-  ) {
-    return `对比结果：${comparison}。价格币种或精度不同，不能直接合计。`;
-  }
-  const totalMinor = priceRows.reduce(
-    (total, terms) => total + BigInt(String(terms.amount_minor)),
-    0n,
-  );
-  return `对比结果：${comparison}。各买一件合计 ${formatPublicPrice({
-    amount_minor: totalMinor.toString(),
-    currency,
-    currency_scale: scale,
-  })}。`;
-}
-
-function fallbackShoppingReply(
-  recommendations: RecommendedBackendListing[],
-): string {
-  if (!recommendations.length) return "";
-  const labels = recommendations.slice(0, 6).map((recommendation) => {
-    const price = formatPublicPrice(recommendation.terms ?? {});
-    return price
-      ? `${recommendation.display_name}（${price}）`
-      : recommendation.display_name;
-  });
-  return `找到 ${recommendations.length} 个符合条件的商品：${labels.join("、")}。`;
-}
-
-function fallbackAssistantReply(input: {
-  question: string;
-  choiceActions: PlatformAssistantChoiceAction[];
-  recommendations: RecommendedBackendListing[];
-  toolCalls: string[];
-  memoryUpdated: boolean;
-}): string {
-  const lastChoice = input.choiceActions.at(-1);
-  if (lastChoice?.question.trim()) return lastChoice.question.trim();
-  if (input.memoryUpdated) return "购物记忆已按你刚才的要求更新。";
-  const productReply = fallbackShoppingReply(input.recommendations);
-  if (productReply) return productReply;
-  if (input.toolCalls.includes("search_public_products"))
-    return "暂时没有找到匹配的公开在售商品。你可以补充商品类型、预算或使用场景，我再继续找。";
-  if (/人|someone|person/i.test(input.question))
-    return "可以。你希望我按什么标准推荐这个人？";
-  return "请再具体一点：你希望我帮你找什么，或者完成什么？";
-}
-
 function formatPublicPrice(terms: Record<string, unknown>): string {
   const amount = terms.amount_minor;
   const currency = terms.currency;
@@ -672,11 +603,9 @@ export async function answerPlatformShoppingQuestion(input: {
       conversationIntent,
     );
     let activeMemory = input.memory;
-    let memoryUpdated = false;
     const initialSearchCompleted = Boolean(
       inferredIntent.budget || inferredIntent.requirements.length,
     );
-    let productSearchCompleted = initialSearchCompleted;
     let recommendations: RecommendedBackendListing[] = initialSearchCompleted
       ? await searchPublicStoreOffers({
           stores: input.stores,
@@ -793,39 +722,18 @@ export async function answerPlatformShoppingQuestion(input: {
         timeout: router.assistantTimeoutMs,
         maxRetries: 0,
       });
-      if (!choiceActions.length) {
-        choiceActions.push({
-          type: "choice",
-          id: "choice-1",
-          question: "你想先从哪一项开始缩小范围？",
-          options: [
-            {
-              id: "option-1",
-              label: "商品类型",
-              value: "我想先确定商品类型",
-            },
-            {
-              id: "option-2",
-              label: "预算范围",
-              value: "我想先确定预算范围",
-            },
-            {
-              id: "option-3",
-              label: "使用场景",
-              value: "我想先确定使用场景",
-            },
-            {
-              id: "option-4",
-              label: "先看热门",
-              value: "先给我看看热门商品",
-            },
-          ],
-        });
+      const modelChoice = choiceActions.at(-1);
+      if (!modelChoice) {
+        process.stderr.write(
+          `[mall-assistant] model omitted required ask_user tool; finish=${String(choiceResult.finishReason ?? "unknown")}\n`,
+        );
+        throw new PlatformAssistantUnavailableError(
+          "AI 模型未返回有效的澄清选项，请重试。",
+        );
       }
       return {
         text:
-          sanitizeAssistantReply(choiceResult.text) ||
-          "请选择一个最接近你的选项。",
+          sanitizeAssistantReply(choiceResult.text) || modelChoice.question,
         model: router.model,
         usage: {
           promptTokens: choiceResult.usage.inputTokens ?? 0,
@@ -937,7 +845,6 @@ export async function answerPlatformShoppingQuestion(input: {
                       }),
                       execute: async ({ facts }) => {
                         activeMemory = await input.updateMemory!(facts);
-                        memoryUpdated = true;
                         return {
                           updated: true,
                           facts: memoryFactsForModel(activeMemory),
@@ -996,7 +903,6 @@ export async function answerPlatformShoppingQuestion(input: {
               limit: 6,
             });
             recommendations = offers;
-            productSearchCompleted = true;
             return rememberOffers(offers);
           },
         }),
@@ -1092,48 +998,31 @@ export async function answerPlatformShoppingQuestion(input: {
     const modelToolCalls = (result.steps ?? [])
       .flatMap((step) => (step.toolCalls ?? []).map((call) => call?.toolName))
       .filter((name): name is string => typeof name === "string");
-    const requestedDeterministicTools = [
+    const requiredDeterministicTools = [
       ...(/比较|对比/.test(question) ? ["compare_products"] : []),
       ...(/合计|总价/.test(question) ? ["calculate_total"] : []),
     ];
-    const missingRequestedTools = requestedDeterministicTools.filter(
+    const missingRequiredTools = requiredDeterministicTools.filter(
       (name) => !modelToolCalls.includes(name),
     );
-    const deterministicReply =
-      missingRequestedTools.length && recommendations.length >= 2
-        ? fallbackComparisonReply(recommendations, question)
-        : "";
-    const modelText = sanitizeAssistantReply(result.text);
-    const emptySearchReply =
-      productSearchCompleted && recommendations.length === 0
-        ? fallbackAssistantReply({
-            question,
-            choiceActions,
-            recommendations,
-            toolCalls: ["search_public_products"],
-            memoryUpdated,
-          })
-        : "";
-    const explicitHandoffReply = explicitStoreHandoff
-      ? explicitlyRequestsContactConsent(question)
-        ? "已通知店员介入。请在下方确认是否同意使用账号中已验证的联系方式；未经你确认不会交换。我仍在线，你可以继续问我。"
-        : "已通知店员介入，本次没有交换联系方式。我仍在线，你可以继续问我。"
-      : "";
-    const text =
-      explicitHandoffReply ||
-      deterministicReply ||
-      emptySearchReply ||
-      modelText ||
-      fallbackAssistantReply({
-        question,
-        choiceActions,
-        recommendations,
-        toolCalls: modelToolCalls,
-        memoryUpdated,
-      });
-    if (!modelText && !deterministicReply) {
+    if (recommendations.length >= 2 && missingRequiredTools.length) {
+      process.stderr.write(
+        `[mall-assistant] model omitted required deterministic tools; missing=${missingRequiredTools.join(",")}\n`,
+      );
+      throw new PlatformAssistantUnavailableError(
+        "AI 模型未按协议完成商品计算，请重试。",
+      );
+    }
+    const modelText =
+      sanitizeAssistantReply(result.text) ||
+      choiceActions.at(-1)?.question.trim() ||
+      "";
+    if (!modelText) {
       process.stderr.write(
         `[mall-assistant] model returned no final text; finish=${String(result.finishReason ?? "unknown")} steps=${String(result.steps?.length ?? 0)} tools=${modelToolCalls.join(",") || "none"}\n`,
+      );
+      throw new PlatformAssistantUnavailableError(
+        "AI 模型未返回有效回答，请重试。",
       );
     }
     const shouldShowSearchResults =
@@ -1149,7 +1038,6 @@ export async function answerPlatformShoppingQuestion(input: {
     const toolCalls = [
       ...new Set([
         ...modelToolCalls,
-        ...missingRequestedTools,
         ...(shouldShowSearchResults && !usedShowProducts
           ? ["show_products"]
           : []),
@@ -1163,7 +1051,7 @@ export async function answerPlatformShoppingQuestion(input: {
         )
       : [];
     return {
-      text,
+      text: modelText,
       model: router.model,
       usage: {
         promptTokens: result.usage.inputTokens ?? 0,
@@ -1190,7 +1078,11 @@ export async function answerPlatformShoppingQuestion(input: {
       ],
     };
   } catch (error) {
-    if (error instanceof PlatformRouterQuotaExceededError) throw error;
+    if (
+      error instanceof PlatformRouterQuotaExceededError ||
+      error instanceof PlatformAssistantUnavailableError
+    )
+      throw error;
     const reason =
       error instanceof Error
         ? error.message.slice(0, 160)
