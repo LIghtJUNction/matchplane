@@ -1,5 +1,25 @@
 # MatchPlane architecture
 
+## Layer boundaries
+
+The backend is organized into four layers that separate transport, orchestration, domain rules, and infrastructure:
+
+```text
+Interface (services)     gateway, payment-service, federation-hub, ...
+        |
+Application (crates)     matchplane-application — use cases, ports, auth orchestration
+        |
+Domain (crates)          matchplane-domain, matchplane-engine — pure types and deterministic rules
+        |
+Infrastructure           matchplane-storage, matchplane-cache, matchplane-payments, ...
+```
+
+Shared HTTP adapters live in `matchplane-http`: structured `{ code, error }` responses, bearer authentication helpers, and an optional `storage` feature that maps `StorageError` into HTTP errors. Service binaries should parse and serialize requests only; business orchestration belongs in `matchplane-application`.
+
+External capabilities (OAuth, AI, payment, notification) register through `matchplane-config::ProviderRegistry`. Application services own runtime loading so configuration changes do not require recompiling core domain code. The payment service's `GatewayFactory` is the reference implementation for payment providers; future OAuth/AI admin APIs should align with it.
+
+See `docs/backend-refactor-plan.md` for the migration sequence. Completed so far: shared HTTP layer, order-book application service, provider registry builder, and a thinner gateway adapter for order placement.
+
 ## Authority and consistency
 
 PostgreSQL is the final source of truth. Every externally visible command is first persisted with
