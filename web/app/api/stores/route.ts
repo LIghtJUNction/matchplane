@@ -58,12 +58,16 @@ async function readManagedStores(request: Request): Promise<Response> {
   if (!tenantId) return jsonError("商城尚未完成初始化", 503);
   const result = await authDatabase.query(
     `SELECT store.id::text,
+            store.tenant_id::text AS "tenantId",
             store.slug,
             alias.path,
             store.display_name AS "displayName",
             store.description,
             store.integration_kind AS "integrationKind",
             store.status,
+            store.version,
+            store.domain_id::text AS "domainId",
+            store.organization_id::text AS "organizationId",
             jsonb_build_object(
               'pricingModel', terms.pricing_model,
               'recurringFeeMinor', terms.recurring_fee_minor::text,
@@ -79,7 +83,6 @@ async function readManagedStores(request: Request): Promise<Response> {
        JOIN store_commercial_terms terms
          ON terms.tenant_id = store.tenant_id AND terms.store_id = store.id
       WHERE store.tenant_id = $1::uuid
-        AND store.status <> 'closed'
       ORDER BY store.created_at DESC`,
     [tenantId],
   );
@@ -145,7 +148,7 @@ export async function POST(request: Request): Promise<Response> {
     recent: number;
   }>(
     `SELECT
-       (SELECT count(*)::int FROM stores WHERE tenant_id = $1::uuid AND created_by = $2 AND integration_kind = 'hosted' AND status <> 'closed') AS owned,
+       (SELECT count(*)::int FROM stores WHERE tenant_id = $1::uuid AND created_by = $2 AND integration_kind = 'hosted') AS owned,
        (SELECT count(*)::int FROM stores WHERE tenant_id = $1::uuid AND created_by = $2 AND integration_kind = 'hosted' AND created_at > clock_timestamp() - interval '1 hour') AS recent`,
     [tenantId, session.user.id],
   );
@@ -184,7 +187,7 @@ export async function POST(request: Request): Promise<Response> {
     ]);
     const count = await client.query<{ count: number }>(
       `SELECT count(*)::int AS count FROM stores
-        WHERE tenant_id = $1::uuid AND created_by = $2 AND integration_kind = 'hosted' AND status <> 'closed'`,
+        WHERE tenant_id = $1::uuid AND created_by = $2 AND integration_kind = 'hosted'`,
       [tenantId, session.user.id],
     );
     if (Number(count.rows[0]?.count ?? 0) >= 5)
@@ -284,12 +287,16 @@ export async function POST(request: Request): Promise<Response> {
     {
       store: {
         id: storeId,
+        tenantId,
         slug,
         path: `/${slug}`,
         displayName: name,
         description,
         integrationKind: "hosted",
         status: "active",
+        version: 1,
+        domainId,
+        organizationId: organization.id,
         membershipRole: "owner",
       },
     },
@@ -308,6 +315,7 @@ async function readOwnedStores(request: Request): Promise<Response> {
   if (!tenantId) return jsonError("商城尚未完成初始化", 503);
   const result = await authDatabase.query(
     `SELECT DISTINCT store.id::text,
+            store.tenant_id::text AS "tenantId",
             store.slug,
             alias.path,
             store.display_name AS "displayName",
@@ -315,6 +323,8 @@ async function readOwnedStores(request: Request): Promise<Response> {
             store.integration_kind AS "integrationKind",
             store.status,
             store.version,
+            store.domain_id::text AS "domainId",
+            store.organization_id::text AS "organizationId",
             store.created_at AS "createdAt",
             CASE WHEN $3::boolean IS TRUE THEN 'mall_operator' ELSE membership.role END AS "membershipRole"
        FROM stores store
@@ -325,7 +335,6 @@ async function readOwnedStores(request: Request): Promise<Response> {
         AND membership."userId" = $2::uuid
       WHERE store.tenant_id = $1::uuid
         AND ($3::boolean IS TRUE OR membership.role = ANY($4::text[]))
-        AND store.status <> 'closed'
       ORDER BY store.created_at DESC`,
     [
       tenantId,

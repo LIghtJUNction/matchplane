@@ -95,6 +95,7 @@ export async function PATCH(
           AND store.id = $2::uuid
           AND store.version = $5
         RETURNING store.id::text,
+                  store.tenant_id::text AS "tenantId",
                   store.slug,
                   ('/' || store.slug) AS path,
                   store.display_name AS "displayName",
@@ -134,13 +135,16 @@ export async function PATCH(
 function responseStore(store: StoreAccessRow) {
   return {
     id: store.id,
+    tenantId: store.tenantId,
     slug: store.slug,
     path: store.path,
     displayName: store.displayName,
     description: store.description,
     integrationKind: store.integrationKind,
     status: store.status,
-    version: store.version,
+    version: Number(store.version),
+    domainId: store.domainId,
+    organizationId: store.organizationId,
   };
 }
 

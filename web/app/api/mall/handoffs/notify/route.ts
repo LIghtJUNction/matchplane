@@ -60,6 +60,8 @@ export async function POST(request: Request): Promise<Response> {
          ON ('/' || store.slug) = $1
         AND store.tenant_id = handoff.tenant_id
         AND store.domain_id = handoff.domain_id
+        AND store.status = 'active'
+        AND store.visibility = 'public'
        JOIN marketplace_party_auth_links party_link
          ON party_link.tenant_id = handoff.tenant_id
         AND party_link.party_id = handoff.participant_id

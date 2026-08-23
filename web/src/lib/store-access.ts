@@ -5,6 +5,7 @@ export { isUuid } from "./uuid";
 
 export interface StoreAccessRow {
   id: string;
+  tenantId: string;
   slug: string;
   path: string;
   displayName: string;
@@ -34,6 +35,7 @@ export async function readStoreAccess(
     StoreAccessRow & { membershipRole: string | null }
   >(
     `SELECT store.id::text,
+            store.tenant_id::text AS "tenantId",
             store.slug,
             ('/' || store.slug) AS path,
             store.display_name AS "displayName",
