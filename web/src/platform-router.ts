@@ -685,7 +685,64 @@ export async function answerPlatformShoppingQuestion(input: {
           limit: 6,
         })
       : [];
-    const forceChoiceTool = shouldForceChoiceTool(question);
+    const explicitStoreHandoff = Boolean(
+      input.storeContext && explicitlyRequestsStoreHandoff(question),
+    );
+    const rememberOffers = (offers: RecommendedBackendListing[]) =>
+      offers.map((offer) => {
+        const item = {
+          id: offer.offer_id ?? offer.listing_id ?? offer.display_name,
+          name: offer.display_name,
+          store:
+            typeof offer.store_name === "string" && offer.store_name.trim()
+              ? offer.store_name.trim()
+              : "店铺",
+          description:
+            typeof offer.attributes?.description === "string"
+              ? offer.attributes.description
+              : "",
+          price: formatPublicPrice(offer.terms ?? {}),
+          path: offer.platform_path ?? "/",
+        };
+        catalog.set(item.id, item);
+        return item;
+      });
+    if (explicitStoreHandoff) {
+      if (!recommendations.length) {
+        recommendations = await searchPublicStoreOffers({
+          stores: input.stores,
+          narrative: conversation.olderUserContext
+            ? `${conversation.olderUserContext}\n${question}`
+            : question,
+          intent: inferredIntent,
+          limit: 6,
+        });
+      }
+      const products = rememberOffers(recommendations);
+      const productIds = products.slice(0, 6).map((product) => product.id);
+      handoffActions.push({
+        type: "human_handoff",
+        id: "human-handoff-1",
+        summary: question.slice(0, 600),
+        intent: /马上|立刻|紧急|urgent|immediately/i.test(question)
+          ? "urgent"
+          : "high",
+        productIds,
+      });
+      shownProductIds = productIds;
+      if (explicitlyRequestsContactConsent(question) && productIds[0]) {
+        contactConsentActions.push({
+          type: "contact_consent",
+          id: "contact-consent-1",
+          reason: question.slice(0, 300),
+          productId: productIds[0],
+        });
+      }
+    }
+    // A store-scoped AI manager already has a bounded catalog and must be able to
+    // honor explicit staff/contact requests without the root mall's discovery gate.
+    const forceChoiceTool =
+      !input.storeContext && shouldForceChoiceTool(question);
     const askUserTool = tool({
       description:
         "缺少会显著改变推荐结果的关键条件时，在聊天中展示一个单选问题。已有足够条件时不要调用。",
@@ -940,28 +997,7 @@ export async function answerPlatformShoppingQuestion(input: {
             });
             recommendations = offers;
             productSearchCompleted = true;
-            const result = offers.map((offer) => {
-              const terms = offer.terms ?? {};
-              const price = formatPublicPrice(terms);
-              const item = {
-                id: offer.offer_id ?? offer.listing_id ?? offer.display_name,
-                name: offer.display_name,
-                store:
-                  typeof offer.store_name === "string" &&
-                  offer.store_name.trim()
-                    ? offer.store_name.trim()
-                    : "店铺",
-                description:
-                  typeof offer.attributes?.description === "string"
-                    ? offer.attributes.description
-                    : "",
-                price,
-                path: offer.platform_path ?? "/",
-              };
-              catalog.set(item.id, item);
-              return item;
-            });
-            return result;
+            return rememberOffers(offers);
           },
         }),
         show_products: tool({
@@ -1078,7 +1114,13 @@ export async function answerPlatformShoppingQuestion(input: {
             memoryUpdated,
           })
         : "";
+    const explicitHandoffReply = explicitStoreHandoff
+      ? explicitlyRequestsContactConsent(question)
+        ? "已通知店员介入。请在下方确认是否同意使用账号中已验证的联系方式；未经你确认不会交换。我仍在线，你可以继续问我。"
+        : "已通知店员介入，本次没有交换联系方式。我仍在线，你可以继续问我。"
+      : "";
     const text =
+      explicitHandoffReply ||
       deterministicReply ||
       emptySearchReply ||
       modelText ||
@@ -2044,6 +2086,18 @@ function readProviderText(
     return text;
   }
   return readProviderContent(value);
+}
+
+function explicitlyRequestsStoreHandoff(question: string): boolean {
+  return /(?:请|想|要|让|找|联系|通知).{0,10}(?:真人|人工|店员|店主|商家)|(?:真人|人工|店员|店主|商家).{0,10}(?:介入|联系|回复|确认|处理|沟通)|(?:human|staff|store manager|real person).{0,18}(?:join|contact|reply|help|handle)|(?:contact|notify|bring in).{0,18}(?:human|staff|store manager)/i.test(
+    question,
+  );
+}
+
+function explicitlyRequestsContactConsent(question: string): boolean {
+  return /(?:同意|确认|交换|提供|分享).{0,10}(?:联系方式|邮箱|手机)|(?:联系方式|邮箱|手机).{0,10}(?:同意|确认|交换|提供|分享)|(?:consent|agree|confirm|share).{0,18}(?:contact|email|phone)|(?:contact details|email|phone).{0,18}(?:consent|agree|confirm|share)/i.test(
+    question,
+  );
 }
 
 function shouldForceChoiceTool(question: string): boolean {

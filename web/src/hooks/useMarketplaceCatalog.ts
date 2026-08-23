@@ -61,6 +61,7 @@ export function useMarketplaceCatalog({
         }
       })
       .catch(() => {
+        // The live store directory remains available when the product feed is temporarily down.
         if (!cancelled && !catalogInteractionRef.current) {
           setListings([]);
           setCatalogError(true);

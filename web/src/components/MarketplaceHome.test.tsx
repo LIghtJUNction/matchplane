@@ -82,6 +82,9 @@ describe("MarketplaceHome actions", () => {
         catalogResolved
         listings={[]}
         locale="zh"
+        theme="light"
+        onLocaleChange={vi.fn()}
+        onThemeChange={vi.fn()}
         onLikeListing={vi.fn(async () => undefined)}
         onNotice={vi.fn()}
         onOpenListing={vi.fn()}

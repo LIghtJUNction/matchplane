@@ -50,7 +50,7 @@ export function MarketplaceListingCard({
 
   return (
     <article
-      className={`marketplace-product-card grid min-w-0 grid-cols-[7.5rem_1fr] gap-4 py-5 lg:block lg:py-0${compact ? " is-chat-recommendation" : ""}`}
+      className={`marketplace-product-card grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] gap-3 py-5 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-4 lg:block lg:py-0${compact ? " is-chat-recommendation" : ""}`}
     >
       <div className="relative aspect-[3/2] overflow-hidden rounded-xl bg-background-muted">
         {listing.imageUrl && !imageFailed ? (
@@ -120,12 +120,12 @@ export function MarketplaceListingCard({
             {listing.subtitle}
           </p>
         ) : null}
-        <div className="mt-auto flex items-end justify-between gap-3 pt-3">
-          <strong className="text-lg font-semibold text-foreground-intense">
+        <div className="mt-auto flex flex-col items-start gap-1 pt-3 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+          <strong className="break-words text-base font-semibold text-foreground-intense sm:text-lg">
             {listing.price}
           </strong>
           <button
-            className="inline-flex items-center gap-1 text-xs text-foreground-muted underline-offset-4 hover:underline"
+            className="inline-flex items-center gap-1 whitespace-nowrap text-xs text-foreground-muted underline-offset-4 hover:underline"
             type="button"
             onClick={onOpen}
           >

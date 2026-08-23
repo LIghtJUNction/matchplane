@@ -11,7 +11,7 @@ import {
 import { useMemo, useState, type ReactNode } from "react";
 
 import type { RecommendedBackendListing } from "../api";
-import type { InterfaceLocale } from "../lib/preferences";
+import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
 import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 import { MatchChat } from "./MatchChat";
@@ -24,6 +24,9 @@ interface MarketplaceHomeProps {
   catalogError?: boolean;
   listings: AssetListing[];
   locale: InterfaceLocale;
+  theme: InterfaceTheme;
+  onLocaleChange: (locale: InterfaceLocale) => void;
+  onThemeChange: (theme: InterfaceTheme) => void;
   onNotice: (message: string) => void;
   onOpenListing: (listing: AssetListing) => void;
   onLikeListing: (listing: AssetListing) => Promise<void>;
@@ -320,6 +323,9 @@ export function MarketplaceHome({
   catalogError = false,
   listings,
   locale,
+  theme,
+  onLocaleChange,
+  onThemeChange,
   onNotice,
   onOpenListing,
   onLikeListing,

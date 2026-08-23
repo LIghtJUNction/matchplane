@@ -28,7 +28,7 @@ const customerRow = {
   summary: {
     analysis: "询问交付时间，购买意向高。",
     intent_strength: "high",
-    product_ids: ["44444444-4444-4444-8444-444444444444"],
+    product_ids: ["01a0291f-e2d6-7ff0-8e03-8560fb2ef34f"],
   },
   handoffStatus: "requested",
   stage: "qualified",
@@ -62,7 +62,7 @@ describe("store customers route", () => {
       .mockResolvedValueOnce({
         rows: [
           {
-            id: "44444444-4444-4444-8444-444444444444",
+            id: "01a0291f-e2d6-7ff0-8e03-8560fb2ef34f",
             displayName: "测试商品",
             attributes: { image_url: "https://cdn.example.com/product.webp" },
             terms: { display_price: "CNY 99.00" },

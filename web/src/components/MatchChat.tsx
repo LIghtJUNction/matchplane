@@ -642,6 +642,8 @@ export function MatchChat({
       : isSeller
         ? copy.sellerDescription
         : copy.buyerDescription;
+  const showCompactMarketplaceHeading = compact && isRoot && !isSeller;
+  const hideMarketingHeading = home && !showCompactMarketplaceHeading;
   const homePlaceholder = useHomePlaceholder(
     locale,
     home && isRoot && !isSeller && !message && !composerFocused,
@@ -1902,10 +1904,10 @@ export function MatchChat({
     >
       <div
         className={
-          home ? "home-chat-a11y-heading sr-only" : "match-chat-heading"
+          hideMarketingHeading ? "home-chat-a11y-heading sr-only" : "match-chat-heading"
         }
       >
-        <div className={home ? "sr-only" : undefined}>
+        <div className={hideMarketingHeading ? "sr-only" : undefined}>
           {home ? (
             <h2 id="match-chat-title">{visibleHeadline}</h2>
           ) : (

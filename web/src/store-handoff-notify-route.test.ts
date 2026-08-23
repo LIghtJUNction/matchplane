@@ -36,7 +36,7 @@ describe("store AI handoff notification route", () => {
       .mockResolvedValueOnce({
         rows: [
           {
-            handoffId: "11111111-1111-4111-8111-111111111111",
+            handoffId: "01a02d51-8ca8-7ad3-824f-7f8fbaa1799d",
             storeId: "22222222-2222-4222-8222-222222222222",
             storePath: "/test-store",
             storeName: "测试小店",
@@ -55,7 +55,7 @@ describe("store AI handoff notification route", () => {
     const response = await POST(
       request({
         storePath: "/test-store",
-        handoffId: "11111111-1111-4111-8111-111111111111",
+        handoffId: "01a02d51-8ca8-7ad3-824f-7f8fbaa1799d",
       }),
     );
 
@@ -65,7 +65,7 @@ describe("store AI handoff notification route", () => {
       expect.arrayContaining([
         "staff-1",
         "/test-store",
-        "11111111-1111-4111-8111-111111111111",
+        "01a02d51-8ca8-7ad3-824f-7f8fbaa1799d",
         expect.stringContaining("测试小店"),
         "客户询问交付时间。",
         "/?storeConsole=22222222-2222-4222-8222-222222222222&storeConsoleSection=customers",
@@ -78,7 +78,7 @@ describe("store AI handoff notification route", () => {
     const response = await POST(
       request({
         storePath: "/test-store",
-        handoffId: "11111111-1111-4111-8111-111111111111",
+        handoffId: "01a02d51-8ca8-7ad3-824f-7f8fbaa1799d",
       }),
     );
     expect(response.status).toBe(404);

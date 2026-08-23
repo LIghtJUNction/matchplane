@@ -8122,6 +8122,9 @@ main > div > .match-chat.is-root.is-catalog-header {
   .marketplace-product-card:hover { transform: none; }
 }
 .marketplace-product-card:hover { border: 0 !important; box-shadow: none; transform: translateY(-2px); }
+@media (prefers-reduced-motion: reduce) {
+  .marketplace-product-card:hover { transform: none; }
+}
 .marketplace-product-card > div:first-child { aspect-ratio: 4 / 3; }
 .marketplace-like-button { min-width: 2.5rem; min-height: 2.5rem; padding: 0 0.65rem; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; border: 0 !important; border-radius: 999px; background: color-mix(in srgb, var(--background-subtle) 88%, transparent) !important; color: var(--foreground-strong); box-shadow: none !important; backdrop-filter: blur(0.5rem); }
 .marketplace-like-button svg { width: 1rem; height: 1rem; }

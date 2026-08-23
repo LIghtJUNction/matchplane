@@ -732,7 +732,7 @@ describe("MatchPlane workspaces", () => {
     expect(screen.getByRole("status")).toHaveTextContent("已退出当前账号");
   });
 
-  it("keeps theme and language controls in the header", async () => {
+  it("keeps theme and language controls near the shopping aid", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
