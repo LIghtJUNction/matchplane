@@ -161,3 +161,22 @@ pub fn consumer(
     consumer.subscribe(subscriptions)?;
     Ok(consumer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_librdkafka_accepts_ssl_protocol() {
+        let result = KafkaPublisher::new(
+            "localhost:9092",
+            "matchplane-events-tls-feature-test",
+            &KafkaSecurityConfig {
+                protocol: "SSL".to_owned(),
+                ..KafkaSecurityConfig::default()
+            },
+        );
+
+        assert!(result.is_ok(), "SSL Kafka client failed: {result:?}");
+    }
+}
