@@ -11,20 +11,12 @@
 - 领域层：市场规则和不变量。
 - 基础设施层：PostgreSQL、Kafka、Valkey、外部提供商。
 
-## 需要改进
-
-- 集中式身份验证和授权中间件。
-- OAuth 和 AI 模型集成的提供商注册表。
-- 显式管理配置服务。
-- 审核安全敏感操作的事件。
-- 跨服务的一致错误模型。
-- 健康/就绪检查与业务 API 分离。
-- 外部集成的依赖注入。
-
 ## 迁移顺序
 
-1. 提取应用服务。
-2. 将配置访问移至接口后面。
-3. 引入提供商注册。
-4. 添加管理配置API。
-5.添加集成测试。
+1. ~~提取应用服务~~（`matchplane-application` 已承载订单簿与 generic marketplace 用例）
+2. ~~引入提供商注册中心~~（`ProviderRegistry` + builder 已就绪，运行时加载待接）
+3. 创建管理配置 API
+4. 迁移 legacy marketplace 适配器与 party 注册流程
+5. 添加集成测试
+
+共享 HTTP 层、gateway 结构化错误、以及 generic marketplace 薄适配器改造已落地。。

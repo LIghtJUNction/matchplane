@@ -11,6 +11,7 @@ axum.workspace = true
 matchplane-config.workspace = true
 matchplane-storage = { workspace = true, optional = true }
 serde.workspace = true
+sha2.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
