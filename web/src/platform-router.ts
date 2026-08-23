@@ -685,7 +685,10 @@ export async function answerPlatformShoppingQuestion(input: {
           limit: 6,
         })
       : [];
-    const forceChoiceTool = shouldForceChoiceTool(question);
+    // A store-scoped AI manager already has a bounded catalog and must be able to
+    // honor explicit staff/contact requests without the root mall's discovery gate.
+    const forceChoiceTool =
+      !input.storeContext && shouldForceChoiceTool(question);
     const askUserTool = tool({
       description:
         "缺少会显著改变推荐结果的关键条件时，在聊天中展示一个单选问题。已有足够条件时不要调用。",
