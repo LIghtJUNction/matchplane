@@ -13,15 +13,22 @@ export function StorefrontDirectory({
 }) {
   const [stores, setStores] = useState<StoreSummary[]>([]);
   const [resolved, setResolved] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
     void getStores()
       .then((items) => {
-        if (active) setStores(items);
+        if (active) {
+          setStores(items);
+          setFailed(false);
+        }
       })
       .catch(() => {
-        if (active) setStores([]);
+        if (active) {
+          setStores([]);
+          setFailed(true);
+        }
       })
       .finally(() => {
         if (active) setResolved(true);
@@ -67,7 +74,7 @@ export function StorefrontDirectory({
         <div className="grid gap-x-8 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
           {stores.map((store) => (
             <a
-              className="group flex min-h-40 flex-col py-2 transition-transform duration-150 hover:-translate-y-0.5"
+              className="group flex min-h-40 flex-col py-2 transition-transform duration-150 hover:-translate-y-0.5 motion-reduce:transition-none motion-reduce:hover:transform-none"
               href={store.path}
               key={store.id}
             >
@@ -79,7 +86,7 @@ export function StorefrontDirectory({
                   {storeInitials(store.displayName)}
                 </span>
                 <ArrowUpRight
-                  className="size-4 text-foreground-muted transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
+                  className="size-4 text-foreground-muted transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 motion-reduce:transition-none"
                   aria-hidden="true"
                 />
               </div>
@@ -97,6 +104,12 @@ export function StorefrontDirectory({
               </span>
             </a>
           ))}
+        </div>
+      ) : failed ? (
+        <div className="py-10 text-sm text-foreground-muted" role="alert">
+          {locale === "en"
+            ? "Store directory is temporarily unavailable. Please try again later."
+            : "店铺目录暂时不可用，请稍后再试。"}
         </div>
       ) : (
         <div className="py-10 text-sm text-foreground-muted">

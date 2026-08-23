@@ -33,6 +33,7 @@ export function useMarketplaceCatalog({
 }: UseMarketplaceCatalogOptions) {
   const [listings, setListings] = useState<AssetListing[]>([]);
   const [catalogResolved, setCatalogResolved] = useState(false);
+  const [catalogError, setCatalogError] = useState(false);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const catalogInteractionRef = useRef(false);
   const catalogPathRef = useRef(subplatform.path);
@@ -49,16 +50,22 @@ export function useMarketplaceCatalog({
       catalogInteractionRef.current = false;
     }
     setCatalogResolved(false);
+    setCatalogError(false);
     void browseMallCatalog(
       subplatform.slug === "root" ? {} : { storePath: subplatform.path },
     )
       .then(({ recommendations }) => {
         if (!cancelled && !catalogInteractionRef.current) {
           setListings(mapRecommendations(recommendations, subplatform, locale));
+          setCatalogError(false);
         }
       })
       .catch(() => {
         // The live store directory remains available when the product feed is temporarily down.
+        if (!cancelled && !catalogInteractionRef.current) {
+          setListings([]);
+          setCatalogError(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setCatalogResolved(true);
@@ -187,6 +194,7 @@ export function useMarketplaceCatalog({
     listings,
     setListings,
     catalogResolved,
+    catalogError,
     listing,
     setListing,
     closeListing,

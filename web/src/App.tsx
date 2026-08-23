@@ -112,6 +112,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     listings,
     setListings,
     catalogResolved,
+    catalogError,
     listing,
     setListing,
     closeListing,
@@ -767,14 +768,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 )}
               </div>
               <div className="header-actions">
-                {role === "buyer" && subplatform.slug === "root" ? null : (
-                  <PreferenceControls
-                    theme={theme}
-                    locale={locale}
-                    onThemeChange={setTheme}
-                    onLocaleChange={setLocale}
-                  />
-                )}
+                <PreferenceControls
+                  theme={theme}
+                  locale={locale}
+                  onThemeChange={setTheme}
+                  onLocaleChange={setLocale}
+                />
                 <motion.button
                   className="header-store-action"
                   type="button"
@@ -929,6 +928,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 {role === "buyer" && subplatform.slug === "root" ? (
                   <MarketplaceHome
                     catalogResolved={catalogResolved}
+                    catalogError={catalogError}
                     listings={listings}
                     locale={locale}
                     theme={theme}
@@ -1184,23 +1184,24 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             const selectedDomainId =
               selected.domainId || selectedSubplatform.domainId;
             if (!isLiveMarketplaceEnabled()) {
-              setNotice("当前环境未连接真实撮合 API，未发送联系申请");
-              return;
+              throw new Error("当前环境未连接真实撮合 API，未发送联系申请");
             }
             const isGenericOffer = Boolean(selected.offerId);
             const listingId = isGenericOffer
               ? null
               : listingIdFromBackend(selected);
             if (!isGenericOffer && !listingId) {
-              setNotice("商品必须来自已接入店铺的真实目录；当前未发送申请");
-              return;
+              throw new Error(
+                "商品必须来自已接入店铺的真实目录；当前未发送申请",
+              );
             }
             if (
               !selectedDomainId ||
               (!isGenericOffer && !selectedSubplatform.currency)
             ) {
-              setNotice("当前店铺尚未完成身份与价格配置；当前未发送申请");
-              return;
+              throw new Error(
+                "当前店铺尚未完成身份与价格配置；当前未发送申请",
+              );
             }
             try {
               const session = await getMarketplaceSession({
@@ -1215,7 +1216,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 window.location.assign(
                   `/login?next=${encodeURIComponent(next)}`,
                 );
-                return;
+                throw new Error("请先登录后再申请联系");
               }
               if (isGenericOffer && selected.offerId) {
                 const selectedIntentId =
@@ -1313,11 +1314,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 "联系申请已写入撮合系统，等待供给方明确同意后交换联系方式",
               );
             } catch (error) {
-              setNotice(
+              const message =
                 error instanceof Error
                   ? error.message
-                  : "联系申请未发送，请稍后重试",
-              );
+                  : "联系申请未发送，请稍后重试";
+              setNotice(message);
+              throw error instanceof Error ? error : new Error(message);
             }
           }}
         />

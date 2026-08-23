@@ -1191,12 +1191,21 @@ export function SellerDashboard({
                 type="submit"
                 disabled={
                   submitting ||
-                  (isLiveMarketplaceEnabled() &&
-                    (!subplatform.domainId ||
-                      (usesLegacyMarketplace &&
-                        (!subplatform.assetSchemaId ||
-                          !pricingCurrency ||
-                          !Number.isInteger(pricingScale)))))
+                  !isLiveMarketplaceEnabled() ||
+                  !subplatform.domainId ||
+                  (usesLegacyMarketplace &&
+                    (!subplatform.assetSchemaId ||
+                      !pricingCurrency ||
+                      !Number.isInteger(pricingScale)))
+                }
+                title={
+                  !isLiveMarketplaceEnabled()
+                    ? copy(
+                        "supplyApiUnavailableNotice",
+                        "当前环境未启用真实供给 API，资料不会写入系统",
+                        "The live supply API is disabled; nothing will be saved",
+                      )
+                    : undefined
                 }
                 whileTap={{ scale: 0.97 }}
                 transition={spring}

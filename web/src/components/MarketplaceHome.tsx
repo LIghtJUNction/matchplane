@@ -16,12 +16,12 @@ import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 import { MatchChat } from "./MatchChat";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
-import { PreferenceControls } from "./PreferenceControls";
 import { Brand } from "./Primitives";
 import { StorefrontDirectory } from "./StorefrontDirectory";
 
 interface MarketplaceHomeProps {
   catalogResolved: boolean;
+  catalogError?: boolean;
   listings: AssetListing[];
   locale: InterfaceLocale;
   theme: InterfaceTheme;
@@ -221,6 +221,7 @@ function MarketplaceSearchPanel({
 
 function MarketplaceProducts({
   catalogResolved,
+  catalogError,
   listings,
   locale,
   onOpenListing,
@@ -228,6 +229,7 @@ function MarketplaceProducts({
   onPublishProduct,
 }: {
   catalogResolved: boolean;
+  catalogError: boolean;
   listings: AssetListing[];
   locale: InterfaceLocale;
   onOpenListing: (listing: AssetListing) => void;
@@ -248,6 +250,14 @@ function MarketplaceProducts({
             key={listing.id}
           />
         ))}
+      </div>
+    );
+  else if (catalogError)
+    content = (
+      <div className="py-10 text-sm leading-6 text-foreground-muted" role="alert">
+        {locale === "en"
+          ? "Product catalog is temporarily unavailable. You can still try describing what you need above."
+          : "商品目录暂时不可用。你仍可在上方描述需求，稍后再试。"}
       </div>
     );
   else
@@ -310,6 +320,7 @@ function MarketplaceProducts({
 
 export function MarketplaceHome({
   catalogResolved,
+  catalogError = false,
   listings,
   locale,
   theme,
@@ -352,14 +363,6 @@ export function MarketplaceHome({
       />
       <div className="root-marketplace-main">
         <section className="root-marketplace-stage" id="marketplace-chat">
-          <div className="root-marketplace-prefs">
-            <PreferenceControls
-              theme={theme}
-              locale={locale}
-              onThemeChange={onThemeChange}
-              onLocaleChange={onLocaleChange}
-            />
-          </div>
           <MarketplaceSearchPanel
             categories={categories}
             category={effectiveCategory}
@@ -374,6 +377,7 @@ export function MarketplaceHome({
         </section>
         <MarketplaceProducts
           catalogResolved={catalogResolved}
+          catalogError={catalogError}
           listings={visibleListings}
           locale={locale}
           onOpenListing={onOpenListing}

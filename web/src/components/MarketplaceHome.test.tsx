@@ -55,7 +55,21 @@ describe("MarketplaceListingCard likes", () => {
       screen.getByRole("button", {
         name: "测试商品：已点 5 个赞，达到上限，共 15 个赞",
       }),
-    ).toHaveAttribute("aria-disabled", "true");
+    ).toBeDisabled();
+  });
+
+  it("does not render a like control when liking is unavailable", () => {
+    render(
+      <MarketplaceListingCard
+        listing={{ ...listing, offerId: undefined, id: "demo-listing" }}
+        locale="zh"
+        onOpen={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /点赞/ }),
+    ).not.toBeInTheDocument();
   });
 });
 
