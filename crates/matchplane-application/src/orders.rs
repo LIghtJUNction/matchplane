@@ -144,9 +144,7 @@ fn reservation_amount(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use matchplane_domain::{
-        CorrelationId, EventId, OrderId, OrderSide, Price, Quantity, TenantId,
-    };
+    use matchplane_domain::{EventId, OrderId, OrderSide, TenantId};
     use matchplane_storage::{StorageError, StoredOrder, SubmitOrder, SubmitOrderOutcome};
     use time::OffsetDateTime;
 
