@@ -56,6 +56,44 @@ afterEach(() => {
 });
 
 describe("platform shopping agent", () => {
+  it("instructs the model to resolve short follow-ups from the active conversation", async () => {
+    generateText.mockResolvedValueOnce({
+      text: "你是想了解李泰阳的近况、职业信息，还是想联系或邀请他？",
+      usage: { inputTokens: 30, outputTokens: 18, totalTokens: 48 },
+      steps: [{ toolCalls: [] }],
+    });
+    const messages = [
+      { role: "user" as const, content: "李泰阳怎么卖" },
+      {
+        role: "assistant" as const,
+        content: "你说的是商品还是人？",
+      },
+      { role: "user" as const, content: "人" },
+      {
+        role: "assistant" as const,
+        content: "你想了解这个人的哪一方面？",
+      },
+      { role: "user" as const, content: "现在有什么" },
+    ];
+
+    const reply = await answerPlatformShoppingQuestion({
+      question: "现在有什么",
+      messages,
+      stores: [],
+    });
+
+    expect(reply.text).toContain("李泰阳");
+    const options = generateText.mock.calls[0]?.[0];
+    expect(options.messages).toEqual(messages);
+    expect(options.system).toContain(
+      "短回答、省略句和纠正必须优先解释为对上一个问题的回答",
+    );
+    expect(options.system).toContain(
+      "同一个模糊点不要连续问两次泛化的“请再具体一点”",
+    );
+    expect(options.system).toContain("不能帮助交易人");
+  });
+
   it("uses AI SDK pruning and folds older user facts into bounded context", () => {
     const messages = Array.from({ length: 15 }, (_, index) => ({
       role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
