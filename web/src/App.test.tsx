@@ -242,6 +242,38 @@ describe("MatchPlane workspaces", () => {
     ).toBeInTheDocument();
   });
 
+  it("resumes the publish action encoded by the login return URL", async () => {
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    window.history.replaceState(null, "", "/?publish=1");
+    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url === "/api/stores?mine=1") {
+        return new Response(JSON.stringify({ stores: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (!defaultFetch) throw new Error("missing default fetch mock");
+      return defaultFetch(input, init);
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("dialog", { name: /^我的店铺/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "你的店铺" }),
+    ).toBeInTheDocument();
+    expect(window.location.search).not.toContain("publish");
+  });
+
   it("opens a single owned store in place instead of losing the session on a login redirect", async () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
@@ -272,10 +304,10 @@ describe("MatchPlane workspaces", () => {
         );
       }
       if (url.startsWith("/api/platform/manifest?path=")) {
-        return new Response(
-          JSON.stringify({ displayName: "Matx Auto" }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
+        return new Response(JSON.stringify({ displayName: "Matx Auto" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
       if (!defaultFetch) throw new Error("missing default fetch mock");
       return defaultFetch(input, init);

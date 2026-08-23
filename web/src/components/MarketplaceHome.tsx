@@ -5,10 +5,11 @@ import {
   History,
   MessageSquarePlus,
   PackageOpen,
+  RefreshCw,
   ShoppingBag,
   Store,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { RecommendedBackendListing } from "../api";
 import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
@@ -31,6 +32,7 @@ interface MarketplaceHomeProps {
   onOpenListing: (listing: AssetListing) => void;
   onLikeListing: (listing: AssetListing) => Promise<void>;
   onPublishProduct: () => void;
+  onRetryCatalog: () => void;
   onRecommendations: (recommendations: RecommendedBackendListing[]) => void;
   subplatform: SubplatformConfig;
 }
@@ -51,20 +53,37 @@ function listingCategory(listing: AssetListing) {
 }
 
 function MarketplaceLoading({ locale }: { locale: InterfaceLocale }) {
+  const [showLongWait, setShowLongWait] = useState(false);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setShowLongWait(true), 2_000);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
   return (
-    <div
-      className="grid gap-3 lg:grid-cols-4"
+    <section
+      className="root-marketplace-loading-state"
       role="status"
       aria-label={locale === "en" ? "Loading products" : "商品读取中"}
       aria-busy="true"
     >
-      {[0, 1, 2, 3].map((item) => (
-        <div
-          className="h-40 animate-pulse rounded-xl bg-background-muted motion-reduce:animate-none"
-          key={item}
-        />
-      ))}
-    </div>
+      <div className="root-marketplace-loading" aria-hidden="true">
+        {[0, 1, 2, 3].map((item) => (
+          <div className="root-marketplace-loading-box" key={item}>
+            <span />
+            <span />
+            <span />
+          </div>
+        ))}
+      </div>
+      {showLongWait ? (
+        <p>
+          {locale === "en"
+            ? "Reading the live catalog. This can take a moment."
+            : "正在读取实时商品目录，请稍候。"}
+        </p>
+      ) : null}
+    </section>
   );
 }
 
@@ -101,6 +120,9 @@ function MarketplaceSidebar({
         logoUrl={subplatform.brandLogoUrl}
         homeHref="#top"
       />
+      <p className="root-marketplace-sidebar-kicker">
+        {locale === "en" ? "OPEN ARCHIVE · 001" : "开放档案 · 001"}
+      </p>
       <nav className="root-marketplace-sidebar-nav">
         <button
           type="button"
@@ -137,7 +159,7 @@ function MarketplaceSidebar({
       </nav>
       {categories.length > 1 ? (
         <section className="root-marketplace-sidebar-categories">
-          <h2>{locale === "en" ? "Categories" : "分类"}</h2>
+          <h2>{locale === "en" ? "Category index" : "品类索引"}</h2>
           <div>
             {categories.map((item) => (
               <button
@@ -152,15 +174,17 @@ function MarketplaceSidebar({
           </div>
         </section>
       ) : null}
+      <p className="root-marketplace-sidebar-footer">
+        {locale === "en"
+          ? "REAL GOODS · CONSENT BEFORE CONTACT"
+          : "真实商品 · 同意后联系"}
+      </p>
     </aside>
   );
 }
 
 interface MarketplaceSearchPanelProps {
-  categories: string[];
-  category: string;
   locale: InterfaceLocale;
-  onCategoryChange: (category: string) => void;
   onLikeListing: (listing: AssetListing) => Promise<void>;
   onNotice: (message: string) => void;
   onOpenListing: (listing: AssetListing) => void;
@@ -169,10 +193,7 @@ interface MarketplaceSearchPanelProps {
 }
 
 function MarketplaceSearchPanel({
-  categories,
-  category,
   locale,
-  onCategoryChange,
   onLikeListing,
   onNotice,
   onOpenListing,
@@ -196,24 +217,6 @@ function MarketplaceSearchPanel({
           onRecommendations={onRecommendations}
           subplatform={subplatform}
         />
-        {categories.length > 1 ? (
-          <fieldset className="root-marketplace-inline-categories">
-            <legend className="sr-only">
-              {locale === "en" ? "Product categories" : "商品分类"}
-            </legend>
-            {categories.map((item) => (
-              <button
-                className="root-marketplace-category"
-                key={item}
-                type="button"
-                aria-pressed={category === item}
-                onClick={() => onCategoryChange(item)}
-              >
-                {item}
-              </button>
-            ))}
-          </fieldset>
-        ) : null}
       </div>
     </section>
   );
@@ -227,6 +230,7 @@ function MarketplaceProducts({
   onOpenListing,
   onLikeListing,
   onPublishProduct,
+  onRetryCatalog,
 }: {
   catalogResolved: boolean;
   catalogError: boolean;
@@ -235,6 +239,7 @@ function MarketplaceProducts({
   onOpenListing: (listing: AssetListing) => void;
   onLikeListing: (listing: AssetListing) => Promise<void>;
   onPublishProduct: () => void;
+  onRetryCatalog: () => void;
 }) {
   let content: ReactNode;
   if (!catalogResolved) content = <MarketplaceLoading locale={locale} />;
@@ -254,10 +259,22 @@ function MarketplaceProducts({
     );
   else if (catalogError)
     content = (
-      <div className="py-10 text-sm leading-6 text-foreground-muted" role="alert">
-        {locale === "en"
-          ? "Product catalog is temporarily unavailable. You can still try describing what you need above."
-          : "商品目录暂时不可用。你仍可在上方描述需求，稍后再试。"}
+      <div className="root-marketplace-error" role="alert">
+        <PackageOpen aria-hidden="true" />
+        <strong>
+          {locale === "en"
+            ? "The product shelf did not load"
+            : "商品货架读取失败"}
+        </strong>
+        <p>
+          {locale === "en"
+            ? "The clerk is still available beside the shelf."
+            : "选货员仍在货架旁，可以直接说说你的需要。"}
+        </p>
+        <button type="button" onClick={onRetryCatalog}>
+          <RefreshCw aria-hidden="true" />
+          {locale === "en" ? "Retry catalog" : "重新读取商品"}
+        </button>
       </div>
     );
   else
@@ -275,8 +292,8 @@ function MarketplaceProducts({
           </strong>
           <p className="mt-1 text-sm leading-6 text-foreground-muted">
             {locale === "en"
-              ? "You can still describe what you need above, or browse the live stores below."
-              : "现在仍可在上方描述需求，或继续浏览下方已营业店铺。"}
+              ? "Ask the clerk what you need, or browse the live stores below."
+              : "问问选货员，或继续浏览下方已营业店铺。"}
           </p>
         </div>
         <button
@@ -296,21 +313,23 @@ function MarketplaceProducts({
       id="products"
       aria-labelledby="marketplace-products-title"
     >
-      <div className="mb-8 flex items-end justify-between gap-4">
+      <div className="root-marketplace-products-heading">
         <div>
-          <h2
-            className="text-2xl font-semibold tracking-[-0.03em] text-foreground-intense"
-            id="marketplace-products-title"
-          >
+          <p>{locale === "en" ? "SHELF 01 · LIVE" : "货架 01 · 实时上架"}</p>
+          <h2 id="marketplace-products-title">
             {locale === "en" ? "Products" : "商品"}
           </h2>
+          <span>
+            {locale === "en"
+              ? "Pull a box to inspect the real listing."
+              : "抽出一个档案盒，查看真实商品。"}
+          </span>
         </div>
         {listings.length ? (
-          <span className="text-sm text-foreground-muted">
-            {locale === "en"
-              ? `${listings.length} listed`
-              : `${listings.length} 件`}
-          </span>
+          <strong className="root-marketplace-inventory-count">
+            <span>{String(listings.length).padStart(2, "0")}</span>
+            {locale === "en" ? " boxes" : " 件"}
+          </strong>
         ) : null}
       </div>
       {content}
@@ -323,18 +342,17 @@ export function MarketplaceHome({
   catalogError = false,
   listings,
   locale,
-  theme,
-  onLocaleChange,
-  onThemeChange,
   onNotice,
   onOpenListing,
   onLikeListing,
   onPublishProduct,
+  onRetryCatalog,
   onRecommendations,
   subplatform,
 }: MarketplaceHomeProps) {
   const allLabel = locale === "en" ? "All" : "全部";
   const [category, setCategory] = useState(allLabel);
+  const [clerkOpen, setClerkOpen] = useState(false);
   const categories = useMemo(
     () => [
       allLabel,
@@ -350,8 +368,19 @@ export function MarketplaceHome({
           (listing) => listingCategory(listing) === effectiveCategory,
         );
 
+  useEffect(() => {
+    if (!clerkOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setClerkOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [clerkOpen]);
+
   return (
-    <div className="root-marketplace-page min-h-screen bg-background-subtle text-foreground">
+    <div
+      className={`root-marketplace-page min-h-screen bg-background-subtle text-foreground${clerkOpen ? " is-clerk-open" : ""}`}
+    >
       <div className="root-marketplace-atmosphere" aria-hidden="true" />
       <MarketplaceSidebar
         categories={categories}
@@ -362,32 +391,109 @@ export function MarketplaceHome({
         subplatform={subplatform}
       />
       <div className="root-marketplace-main">
-        <section className="root-marketplace-stage" id="marketplace-chat">
-          <MarketplaceSearchPanel
-            categories={categories}
-            category={effectiveCategory}
+        <div className="root-marketplace-catalog">
+          <header className="root-marketplace-catalog-intro">
+            <p>
+              {locale === "en"
+                ? "MATCHPLANE MARKET · OPEN"
+                : "MATCHPLANE 商城 · 营业中"}
+            </p>
+            <h1>
+              {locale === "en"
+                ? "Browse and ask, side by side."
+                : "边逛，边问。"}
+            </h1>
+            <span>
+              {locale === "en"
+                ? "Real listings stay on the shelf while the clerk helps you narrow the choice."
+                : "货架上是真实在售商品；选货员在旁边，随时帮你缩小范围。"}
+            </span>
+          </header>
+          {categories.length > 1 ? (
+            <fieldset className="root-marketplace-inline-categories">
+              <legend className="sr-only">
+                {locale === "en" ? "Product categories" : "商品分类"}
+              </legend>
+              {categories.map((item) => (
+                <button
+                  className="root-marketplace-category"
+                  key={item}
+                  type="button"
+                  aria-pressed={effectiveCategory === item}
+                  onClick={() => setCategory(item)}
+                >
+                  {item}
+                </button>
+              ))}
+            </fieldset>
+          ) : null}
+          <MarketplaceProducts
+            catalogResolved={catalogResolved}
+            catalogError={catalogError}
+            listings={visibleListings}
             locale={locale}
-            onCategoryChange={setCategory}
+            onOpenListing={onOpenListing}
+            onLikeListing={onLikeListing}
+            onPublishProduct={onPublishProduct}
+            onRetryCatalog={onRetryCatalog}
+          />
+          <div className="root-marketplace-stores" id="stores">
+            <StorefrontDirectory locale={locale} />
+          </div>
+        </div>
+        <aside
+          className="root-marketplace-stage"
+          id="marketplace-chat"
+          aria-label={locale === "en" ? "Shopping clerk" : "选货员"}
+        >
+          <header className="root-marketplace-clerk-heading">
+            <div>
+              <p>{locale === "en" ? "COUNTER 01" : "柜台 01"}</p>
+              <h2>{locale === "en" ? "Shopping clerk" : "选货员"}</h2>
+              <span>
+                <i aria-hidden="true" />
+                {locale === "en"
+                  ? "Ready beside the shelf"
+                  : "在货架旁，随时可以问"}
+              </span>
+            </div>
+            <button
+              className="root-marketplace-clerk-close"
+              type="button"
+              aria-label={locale === "en" ? "Close clerk" : "关闭选货员"}
+              onClick={() => setClerkOpen(false)}
+            >
+              ×
+            </button>
+          </header>
+          <MarketplaceSearchPanel
+            locale={locale}
             onLikeListing={onLikeListing}
             onNotice={onNotice}
             onOpenListing={onOpenListing}
             onRecommendations={onRecommendations}
             subplatform={subplatform}
           />
-        </section>
-        <MarketplaceProducts
-          catalogResolved={catalogResolved}
-          catalogError={catalogError}
-          listings={visibleListings}
-          locale={locale}
-          onOpenListing={onOpenListing}
-          onLikeListing={onLikeListing}
-          onPublishProduct={onPublishProduct}
-        />
-        <div className="root-marketplace-stores" id="stores">
-          <StorefrontDirectory locale={locale} />
-        </div>
+        </aside>
       </div>
+      <button
+        className="root-marketplace-clerk-toggle"
+        type="button"
+        aria-expanded={clerkOpen}
+        aria-controls="marketplace-chat"
+        onClick={() => setClerkOpen(true)}
+      >
+        <MessageSquarePlus aria-hidden="true" />
+        <span>{locale === "en" ? "Ask the clerk" : "问选货员"}</span>
+      </button>
+      {clerkOpen ? (
+        <button
+          className="root-marketplace-clerk-scrim"
+          type="button"
+          aria-label={locale === "en" ? "Close clerk" : "关闭选货员"}
+          onClick={() => setClerkOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -14,6 +14,8 @@ import { mapRecommendations } from "../marketplace-listings";
 import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 
+const CATALOG_TIMEOUT_MS = 10_000;
+
 interface UseMarketplaceCatalogOptions {
   hydrated: boolean;
   locale: InterfaceLocale;
@@ -34,12 +36,14 @@ export function useMarketplaceCatalog({
   const [listings, setListings] = useState<AssetListing[]>([]);
   const [catalogResolved, setCatalogResolved] = useState(false);
   const [catalogError, setCatalogError] = useState(false);
+  const [catalogRequestVersion, setCatalogRequestVersion] = useState(0);
   const [listing, setListing] = useState<AssetListing | null>(null);
   const catalogInteractionRef = useRef(false);
   const catalogPathRef = useRef(subplatform.path);
 
   useEffect(() => {
     let cancelled = false;
+    let timeoutId: number | undefined;
     if (!hydrated) {
       return () => {
         cancelled = true;
@@ -51,9 +55,18 @@ export function useMarketplaceCatalog({
     }
     setCatalogResolved(false);
     setCatalogError(false);
-    void browseMallCatalog(
-      subplatform.slug === "root" ? {} : { storePath: subplatform.path },
-    )
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = window.setTimeout(
+        () => reject(new Error("catalog request timed out")),
+        CATALOG_TIMEOUT_MS,
+      );
+    });
+    void Promise.race([
+      browseMallCatalog(
+        subplatform.slug === "root" ? {} : { storePath: subplatform.path },
+      ),
+      timeout,
+    ])
       .then(({ recommendations }) => {
         if (!cancelled && !catalogInteractionRef.current) {
           setListings(mapRecommendations(recommendations, subplatform, locale));
@@ -68,12 +81,21 @@ export function useMarketplaceCatalog({
         }
       })
       .finally(() => {
+        if (timeoutId !== undefined) window.clearTimeout(timeoutId);
         if (!cancelled) setCatalogResolved(true);
       });
     return () => {
       cancelled = true;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [hydrated, locale, subplatform, subplatform.path, subplatform.slug]);
+  }, [
+    catalogRequestVersion,
+    hydrated,
+    locale,
+    subplatform,
+    subplatform.path,
+    subplatform.slug,
+  ]);
 
   const listingOfferIds = listings
     .flatMap((item) => item.offerId ?? listingIdFromBackend(item) ?? [])
@@ -189,12 +211,17 @@ export function useMarketplaceCatalog({
   );
 
   const closeListing = useCallback(() => setListing(null), []);
+  const retryCatalog = useCallback(() => {
+    catalogInteractionRef.current = false;
+    setCatalogRequestVersion((current) => current + 1);
+  }, []);
 
   return {
     listings,
     setListings,
     catalogResolved,
     catalogError,
+    retryCatalog,
     listing,
     setListing,
     closeListing,

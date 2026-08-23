@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Store,
   UserRound,
+  X,
 } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 
@@ -110,9 +111,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   }, [role]);
   const {
     listings,
-    setListings,
     catalogResolved,
     catalogError,
+    retryCatalog,
     listing,
     setListing,
     closeListing,
@@ -347,7 +348,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     const requested = new URLSearchParams(window.location.search).get(
       "accountSection",
     );
-    if (requested === "account" || requested === "profile" || requested === "stores")
+    if (
+      requested === "account" ||
+      requested === "profile" ||
+      requested === "stores"
+    )
       setAccountSettingsSection(requested);
   }, [authResolved, authUser]);
 
@@ -425,7 +430,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     if (!session) {
       const next = `${window.location.pathname}${window.location.search}`;
       window.location.assign(`/login?next=${encodeURIComponent(next)}`);
-      throw new Error("请先登录再确认联系方式交换");
+      throw new Error("登录后才能确认联系方式交换");
     }
     const intent = await createMarketplaceIntent({
       session,
@@ -507,7 +512,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     if (!session) {
       const next = `${window.location.pathname}${window.location.search}`;
       window.location.assign(`/login?next=${encodeURIComponent(next)}`);
-      throw new Error("请先登录再请求人工介入");
+      throw new Error("登录后才能请求人工介入");
     }
     const signalKey = stableIdempotencyPart(
       [
@@ -706,7 +711,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     <MotionConfig reducedMotion="user" transition={spring}>
       <div
         id="top"
-        className={`app-shell${fullscreenPlugin ? " is-subplatform-fullscreen" : ""}`}
+        className={`app-shell archive-app-shell${fullscreenPlugin ? " is-subplatform-fullscreen" : ""}`}
+        data-workspace={role}
+        data-platform={subplatform.slug}
       >
         <a className="skip-link" href="#main-content">
           {ui.skipToContent}
@@ -930,6 +937,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     catalogResolved={catalogResolved}
                     catalogError={catalogError}
                     listings={listings}
+                    onRetryCatalog={retryCatalog}
                     locale={locale}
                     theme={theme}
                     onLocaleChange={setLocale}
@@ -1090,9 +1098,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 >
                   <div className="workspace-settings-section-heading">
                     <h3 id="workspace-preferences-title">
-                      {locale === "en"
-                        ? "Display and language"
-                        : "显示与语言"}
+                      {locale === "en" ? "Display and language" : "显示与语言"}
                     </h3>
                   </div>
                   <PreferenceControls
@@ -1199,9 +1205,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               !selectedDomainId ||
               (!isGenericOffer && !selectedSubplatform.currency)
             ) {
-              throw new Error(
-                "当前店铺尚未完成身份与价格配置；当前未发送申请",
-              );
+              throw new Error("当前店铺尚未完成身份与价格配置；当前未发送申请");
             }
             try {
               const session = await getMarketplaceSession({
@@ -1216,7 +1220,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 window.location.assign(
                   `/login?next=${encodeURIComponent(next)}`,
                 );
-                throw new Error("请先登录后再申请联系");
+                throw new Error("登录后才能申请联系");
               }
               if (isGenericOffer && selected.offerId) {
                 const selectedIntentId =
@@ -1330,11 +1334,29 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           onConfirm={confirmModeChange}
         />
 
-        {notice ? (
-          <p className="visually-hidden" role="status">
-            {notice}
-          </p>
-        ) : null}
+        <AnimatePresence>
+          {notice ? (
+            <motion.div
+              className="app-notice"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              initial={{ opacity: 0, y: 18, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.98 }}
+            >
+              <i aria-hidden="true" />
+              <span>{notice}</span>
+              <button
+                type="button"
+                aria-label={locale === "en" ? "Dismiss message" : "关闭消息"}
+                onClick={() => setNotice(null)}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
     </MotionConfig>
   );
