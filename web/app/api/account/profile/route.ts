@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { jsonError } from "../../../../src/lib/json-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +52,3 @@ async function readProfile(userId: string): Promise<{ name: string; email: strin
   return result.rows[0] ?? null;
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } });
-}

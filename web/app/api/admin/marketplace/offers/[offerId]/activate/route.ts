@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 
-import { auth, authDatabase } from "../../../../../../../src/lib/auth";
+import { authDatabase } from "../../../../../../../src/lib/auth";
 import {
   readJsonBody,
   readResponseTextBody,
 } from "../../../../../../../src/lib/body-limit";
 import { loadInternalBearer } from "../../../../../../../src/lib/internal-auth";
-import { hasTrustedBrowserOrigin } from "../../../../../../../src/lib/request-origin";
+import { jsonError } from "../../../../../../../src/lib/json-error";
+import { requireRootManager } from "../../../../../../../src/lib/session";
+import { configuredTenantId } from "../../../../../../../src/lib/store-access";
 import { notifyPartyUsers } from "../../../../../../../src/lib/user-notifications";
 import { syncCanonicalMarketplaceOffer } from "../../../../../../../src/catalog-sync";
 import { validateStorefrontPublication } from "../../../../../../../src/storefront-publication";
@@ -26,19 +28,16 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ offerId: string }> },
 ): Promise<Response> {
-  if (!hasTrustedBrowserOrigin(request))
-    return jsonError("请求来源未被平台信任", 403);
-  const session = await auth.api.getSession({ headers: request.headers });
-  const role = (session?.user as { role?: unknown } | undefined)?.role;
-  if (!session || (role !== "rootSuperAdmin" && role !== "rootAdmin")) {
-    return jsonError("当前账号没有商城商品审核权限", 403);
-  }
+  const denied = await requireRootManager(
+    request,
+    "当前账号没有商城商品审核权限",
+  );
+  if (denied) return denied;
 
   const { offerId } = await context.params;
   if (!isUuid(offerId)) return jsonError("offerId 必须是 UUID", 400);
-  const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  if (!tenantId || !isUuid(tenantId))
-    return jsonError("根平台 tenant 尚未配置", 503);
+  const tenantId = configuredTenantId();
+  if (!tenantId) return jsonError("根平台 tenant 尚未配置", 503);
 
   let body: Record<string, unknown> = {};
   try {
@@ -232,15 +231,6 @@ async function readPublicationCandidate(tenantId: string, offerId: string) {
   return row ? { ...row, version: Number(row.version) } : null;
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json(
-    { error },
-    {
-      status,
-      headers: { "cache-control": "no-store" },
-    },
-  );
-}
 
 function readError(payload: Record<string, unknown>): string | null {
   return typeof payload.error === "string" && payload.error.length <= 500

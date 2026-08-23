@@ -4,6 +4,7 @@ import { authDatabase } from "../../../../../../src/lib/auth";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../../../src/lib/body-limit";
 import { hasValidConfiguredSubplatformBuilderToken } from "../../../../../../src/subplatform-builder";
 import { isUuid } from "../../../../../../src/lib/uuid";
+import { jsonError } from "../../../../../../src/lib/json-error";
 
 export const runtime = "nodejs";
 
@@ -33,4 +34,3 @@ export async function POST(request: Request): Promise<Response> {
   return NextResponse.json(result.rows[0], { headers: { "cache-control": "no-store" } });
 }
 
-function jsonError(error: string, status: number): Response { return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } }); }

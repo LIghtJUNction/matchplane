@@ -1,7 +1,8 @@
 import { auth, authDatabase } from "./lib/auth";
+import { jsonError } from "./lib/json-error";
 import { hasTrustedBrowserOrigin } from "./lib/request-origin";
 import { isUuid } from "./lib/uuid";
-export { isUuid };
+export { isUuid, jsonError };
 
 export interface FederationAdmin {
   userId: string;
@@ -64,8 +65,4 @@ export async function validateFederationParent(
     [tenantId, domainId],
   );
   return domain.rowCount === 1 ? null : "domain 不存在、停用或不属于当前 root tenant";
-}
-
-export function jsonError(error: string, status: number): Response {
-  return Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
 }

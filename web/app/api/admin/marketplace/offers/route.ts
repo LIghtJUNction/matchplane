@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { auth, authDatabase } from "../../../../../src/lib/auth";
-import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
+import { authDatabase } from "../../../../../src/lib/auth";
+import { jsonError } from "../../../../../src/lib/json-error";
 import { requestSearchParams } from "../../../../../src/lib/request-url";
+import { requireRootManager } from "../../../../../src/lib/session";
+import { configuredTenantId } from "../../../../../src/lib/store-access";
 import { isUuid } from "../../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
@@ -17,7 +19,7 @@ export const dynamic = "force-dynamic";
  * different seller's draft records.
  */
 export async function GET(request: Request): Promise<Response> {
-  const guard = await requireRootManager(request);
+  const guard = await requireRootManager(request, "当前账号没有商城商品审核权限");
   if (guard) return guard;
   const tenantId = configuredTenantId();
   if (!tenantId) return jsonError("根平台 tenant 尚未配置", 503);
@@ -188,28 +190,5 @@ const OFFER_STATUSES = new Set([
   "expired",
 ]);
 
-async function requireRootManager(request: Request): Promise<Response | null> {
-  if (!hasTrustedBrowserOrigin(request))
-    return jsonError("请求来源未被平台信任", 403);
-  const session = await auth.api.getSession({ headers: request.headers });
-  const role = (session?.user as { role?: unknown } | undefined)?.role;
-  if (!session || (role !== "rootSuperAdmin" && role !== "rootAdmin")) {
-    return jsonError("当前账号没有商城商品审核权限", 403);
-  }
-  return null;
-}
 
-function configuredTenantId(): string | null {
-  const value = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  return value && isUuid(value) ? value : null;
-}
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json(
-    { error },
-    {
-      status,
-      headers: { "cache-control": "no-store" },
-    },
-  );
-}

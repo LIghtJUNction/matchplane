@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
 import { executeAuthenticatedChildTool } from "../../../../../src/platform-child-tool";
+import { jsonError } from "../../../../../src/lib/json-error";
 import {
   extractMcpRetrievalResult,
   parseRetrievalQuery,
@@ -119,9 +120,3 @@ function readError(payload: Record<string, unknown>): string | null {
   return typeof payload.error === "string" && payload.error.length <= 500 ? payload.error : null;
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, {
-    status,
-    headers: { "cache-control": "no-store" },
-  });
-}

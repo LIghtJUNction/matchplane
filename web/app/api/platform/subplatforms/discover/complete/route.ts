@@ -6,6 +6,7 @@ import { authDatabase } from "../../../../../../src/lib/auth";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../../../src/lib/body-limit";
 import { hasValidConfiguredSubplatformBuilderToken } from "../../../../../../src/subplatform-builder";
 import { isUuid } from "../../../../../../src/lib/uuid";
+import { jsonError } from "../../../../../../src/lib/json-error";
 
 export const runtime = "nodejs";
 
@@ -69,4 +70,3 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
-function jsonError(error: string, status: number): Response { return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } }); }

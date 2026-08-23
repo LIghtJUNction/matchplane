@@ -9,6 +9,8 @@ import {
   RequestBodyTooLargeError,
 } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { jsonError } from "../../../../src/lib/json-error";
+import { configuredTenantId } from "../../../../src/lib/store-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -211,16 +213,6 @@ function positiveInteger(value: unknown): number | null {
     : null;
 }
 
-function configuredTenantId(): string | null {
-  // Bracket access keeps this deployment-owned value runtime-bound in Next's production bundle.
-  // A direct member read may be substituted during build for newly introduced route chunks.
-  const value = process.env["MATCHPLANE_ROOT_TENANT_ID"]?.trim() ?? "";
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  )
-    ? value
-    : null;
-}
 
 async function resolveTenantId(): Promise<string | null> {
   const configured = configuredTenantId();
@@ -241,9 +233,3 @@ async function resolveTenantId(): Promise<string | null> {
   return result.rows.length === 1 ? (result.rows[0]?.id ?? null) : null;
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json(
-    { error },
-    { status, headers: { "cache-control": "no-store" } },
-  );
-}

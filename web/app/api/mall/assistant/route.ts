@@ -17,6 +17,7 @@ import {
   RequestBodyTooLargeError,
 } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { configuredTenantId } from "../../../../src/lib/store-access";
 import {
   parseShoppingMemoryMutation,
   readShoppingMemory,
@@ -282,14 +283,6 @@ function normalizeStorePath(value: unknown): string | null {
   return /^\/[a-z0-9][a-z0-9-]{1,62}$/.test(normalized) ? normalized : null;
 }
 
-function configuredTenantId(): string | null {
-  const value = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  )
-    ? value
-    : null;
-}
 
 function minimizeQuestion(value: string): string {
   return value

@@ -21,7 +21,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
-use matchplane_observability::init;
+use matchplane_observability::{init, shutdown_signal};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -199,11 +199,11 @@ async fn main() -> Result<()> {
         .context("builder HTTP client initialization failed")?;
 
     info!(web_url = %config.web_url, "static subplatform builder ready");
-    let mut shutdown = Box::pin(tokio::signal::ctrl_c());
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
     loop {
         let discovery_claim = tokio::select! {
-            signal = &mut shutdown => {
-                signal.context("builder shutdown signal failed")?;
+            () = &mut shutdown => {
                 info!("static subplatform builder shutting down");
                 break;
             }
@@ -228,8 +228,7 @@ async fn main() -> Result<()> {
             Err(error) => {
                 warn!(error = %error, "source discovery claim failed; backing off");
                 tokio::select! {
-                    signal = &mut shutdown => {
-                        signal.context("builder shutdown signal failed")?;
+                    () = &mut shutdown => {
                         info!("static subplatform builder shutting down");
                         break;
                     }
@@ -239,8 +238,7 @@ async fn main() -> Result<()> {
             }
         }
         let claim = tokio::select! {
-            signal = &mut shutdown => {
-                signal.context("builder shutdown signal failed")?;
+            () = &mut shutdown => {
                 info!("static subplatform builder shutting down");
                 break;
             }
@@ -262,8 +260,7 @@ async fn main() -> Result<()> {
             }
             Ok(None) => {
                 tokio::select! {
-                    signal = &mut shutdown => {
-                        signal.context("builder shutdown signal failed")?;
+                    () = &mut shutdown => {
                         info!("static subplatform builder shutting down");
                         break;
                     }
@@ -273,8 +270,7 @@ async fn main() -> Result<()> {
             Err(error) => {
                 warn!(error = %error, "builder claim failed; backing off");
                 tokio::select! {
-                    signal = &mut shutdown => {
-                        signal.context("builder shutdown signal failed")?;
+                    () = &mut shutdown => {
                         info!("static subplatform builder shutting down");
                         break;
                     }

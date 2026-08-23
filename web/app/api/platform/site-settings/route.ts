@@ -13,6 +13,8 @@ import {
 } from "../../../../src/platform-mount";
 import { isActivePlatformPathVisible } from "../../../../src/platform-visibility";
 import { isUuid } from "../../../../src/lib/uuid";
+import { jsonError } from "../../../../src/lib/json-error";
+import { configuredTenantId } from "../../../../src/lib/store-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -565,10 +567,6 @@ function readUuid(value: unknown): string | null {
     : null;
 }
 
-function configuredTenantId(): string | null {
-  const value = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  return value && isUuid(value) ? value : null;
-}
 
 async function parseJson(request: Request): Promise<Record<string, unknown>> {
   try {
@@ -594,6 +592,3 @@ function noStore(): { headers: { "cache-control": string } } {
   return { headers: { "cache-control": "no-store" } };
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, { status, ...noStore() });
-}

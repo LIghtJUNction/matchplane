@@ -3,10 +3,10 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Context;
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use matchplane_config::{AppConfig, BearerToken, Environment};
-use matchplane_observability::{Telemetry, init};
+use matchplane_observability::{Telemetry, init, shutdown_signal};
 use serde::Serialize;
 use sqlx::PgPool;
-use tokio::{net::TcpListener, signal};
+use tokio::net::TcpListener;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     compression::CompressionLayer,
@@ -226,25 +226,4 @@ async fn ready(State(state): State<Arc<AppState>>) -> (StatusCode, Json<HealthRe
 
 async fn metrics(State(state): State<Arc<AppState>>) -> String {
     state.telemetry.render_metrics()
-}
-
-async fn shutdown_signal() {
-    let control_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-    tokio::select! {
-        () = control_c => {},
-        () = terminate => {},
-    }
 }

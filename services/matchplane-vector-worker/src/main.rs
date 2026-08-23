@@ -1,6 +1,6 @@
 use anyhow::Context;
 use matchplane_config::{AppConfig, Environment};
-use matchplane_observability::init;
+use matchplane_observability::{init, shutdown_signal};
 use matchplane_storage::PgStore;
 use tracing::info;
 
@@ -34,10 +34,4 @@ async fn main() -> anyhow::Result<()> {
         .shutdown()
         .context("vector worker telemetry shutdown failed")?;
     Ok(())
-}
-
-async fn shutdown_signal() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        tracing::error!(%error, "failed to listen for shutdown signal");
-    }
 }

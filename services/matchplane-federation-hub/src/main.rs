@@ -5,7 +5,7 @@ use matchplane_config::{AppConfig, Environment, ValidatedConfig};
 use matchplane_domain::{
     CausationId, CorrelationId, EventId, FederationNodeId, PayloadHash, Quantity, ShardId,
 };
-use matchplane_observability::init;
+use matchplane_observability::{init, shutdown_signal};
 use matchplane_protocol::{timestamp_from_proto, timestamp_to_proto, v1};
 use matchplane_storage::{
     FederationReservation, FederationTransition, PgStore, ReserveFederated, StorageError,
@@ -351,12 +351,6 @@ fn storage_status(error: StorageError) -> Status {
         | StorageError::Wire(_)
         | StorageError::Engine(_)
         | StorageError::Json(_) => Status::internal("federation persistence failed"),
-    }
-}
-
-async fn shutdown_signal() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        tracing::error!(%error, "failed to listen for shutdown signal");
     }
 }
 

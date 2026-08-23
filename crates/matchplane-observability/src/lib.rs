@@ -95,3 +95,32 @@ pub fn init(
         tracer_provider,
     })
 }
+
+/// Waits until the process receives Ctrl+C or, on Unix, SIGTERM.
+///
+/// Service entrypoints share this helper so graceful shutdown behaves the same
+/// across HTTP, gRPC, and worker binaries.
+pub async fn shutdown_signal() {
+    let control_c = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            tracing::error!(%error, "failed to listen for Ctrl+C");
+        }
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut stream) => {
+                stream.recv().await;
+            }
+            Err(error) => {
+                tracing::error!(%error, "failed to listen for SIGTERM");
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = control_c => {},
+        () = terminate => {},
+    }
+}

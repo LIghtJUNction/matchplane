@@ -20,6 +20,19 @@ import {
   RequestBodyTooLargeError,
 } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { jsonError as sharedJsonError } from "../../../../src/lib/json-error";
+import { configuredTenantId } from "../../../../src/lib/store-access";
+
+function jsonError(
+  error: string,
+  status: number,
+  headers: Record<string, string> = {},
+): NextResponse {
+  return sharedJsonError(error, status, {
+    "cache-control": "private, no-store",
+    ...headers,
+  });
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -193,14 +206,6 @@ async function requestContext(
   return { tenantId, authUserId: session.user.id };
 }
 
-function configuredTenantId(): string | null {
-  const value = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  )
-    ? value
-    : null;
-}
 
 function response(body: { memory: ShoppingMemorySnapshot }) {
   return NextResponse.json(body, {
@@ -250,18 +255,4 @@ function boundedInteger(
   return Number.isFinite(parsed) && parsed > 0
     ? Math.min(parsed, maximum)
     : fallback;
-}
-
-function jsonError(
-  message: string,
-  status: number,
-  headers: Record<string, string> = {},
-) {
-  return NextResponse.json(
-    { error: message },
-    {
-      status,
-      headers: { "cache-control": "private, no-store", ...headers },
-    },
-  );
 }

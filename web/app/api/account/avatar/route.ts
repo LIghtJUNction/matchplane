@@ -4,6 +4,7 @@ import { auth, authDatabase } from "../../../../src/lib/auth";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { ManagedImageError, persistManagedImage, readManagedImage, removeManagedImage } from "../../../../src/lib/managed-image";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { jsonError } from "../../../../src/lib/json-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,6 +65,3 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } });
-}

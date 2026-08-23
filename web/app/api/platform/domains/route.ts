@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { auth, authDatabase } from "../../../../src/lib/auth";
+import { authDatabase } from "../../../../src/lib/auth";
 import { readJsonBody } from "../../../../src/lib/body-limit";
-import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { jsonError } from "../../../../src/lib/json-error";
+import { requireRootManager } from "../../../../src/lib/session";
+import { configuredTenantId } from "../../../../src/lib/store-access";
 import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
@@ -15,7 +17,7 @@ export const dynamic = "force-dynamic";
  * lifecycle here lets a first-run deployment add a child mount without rerunning the CLI.
  */
 export async function GET(request: Request): Promise<Response> {
-  const guard = await requireRootManager(request);
+  const guard = await requireRootManager(request, "只有根平台管理员可以管理 domain");
   if (guard) return guard;
   const tenantId = configuredTenantId();
   if (!tenantId) return jsonError("根平台 tenant 尚未配置", 503);
@@ -30,7 +32,7 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const guard = await requireRootManager(request);
+  const guard = await requireRootManager(request, "只有根平台管理员可以管理 domain");
   if (guard) return guard;
   const tenantId = configuredTenantId();
   if (!tenantId) return jsonError("根平台 tenant 尚未配置", 503);
@@ -56,7 +58,7 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function PATCH(request: Request): Promise<Response> {
-  const guard = await requireRootManager(request);
+  const guard = await requireRootManager(request, "只有根平台管理员可以管理 domain");
   if (guard) return guard;
   const tenantId = configuredTenantId();
   if (!tenantId) return jsonError("根平台 tenant 尚未配置", 503);
@@ -90,19 +92,7 @@ interface DomainRow {
   updated_at: string;
 }
 
-async function requireRootManager(request: Request): Promise<Response | null> {
-  if (!hasTrustedBrowserOrigin(request)) return jsonError("请求来源未被平台信任", 403);
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return jsonError("Better Auth session is required", 401);
-  const role = (session.user as { role?: unknown }).role;
-  if (role !== "rootSuperAdmin" && role !== "rootAdmin") return jsonError("只有根平台管理员可以管理 domain", 403);
-  return null;
-}
 
-function configuredTenantId(): string | null {
-  const value = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  return value && isUuid(value) ? value : null;
-}
 
 async function parseJson(request: Request): Promise<Record<string, unknown>> {
   try {
@@ -129,6 +119,3 @@ function isUniqueViolation(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "23505");
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } });
-}

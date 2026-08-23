@@ -13,7 +13,7 @@ use matchplane_config::{AppConfig, BearerToken, Environment};
 use matchplane_domain::{
     AccountId, AssetId, CorrelationId, MarketId, OrderId, OrderIntent, OrderSide, Price, Quantity,
 };
-use matchplane_observability::{Telemetry, init};
+use matchplane_observability::{Telemetry, init, shutdown_signal};
 use matchplane_storage::{
     CandidateMatch, PgStore, StorageError, StoredOrder, StoredTrade, SubmitOrder,
     SubmitOrderOutcome, VectorRecord,
@@ -688,11 +688,5 @@ impl From<StorageError> for ApiError {
             },
             other => Self::internal(other.to_string()),
         }
-    }
-}
-
-async fn shutdown_signal() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        tracing::error!(%error, "failed to listen for shutdown signal");
     }
 }

@@ -9,6 +9,7 @@ import {
 } from "../../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
 import { isUuid } from "../../../../../src/lib/uuid";
+import { jsonError } from "../../../../../src/lib/json-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -260,9 +261,3 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json(
-    { error },
-    { status, headers: { "cache-control": "no-store" } },
-  );
-}

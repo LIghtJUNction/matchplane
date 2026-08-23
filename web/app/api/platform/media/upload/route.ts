@@ -19,6 +19,7 @@ import {
 } from "../../../../../src/platform-mount";
 import { authenticatePlatformRequest } from "../../../../../src/platform-request-auth";
 import { isProductionEnvironment } from "../../../../../src/lib/runtime";
+import { jsonError } from "../../../../../src/lib/json-error";
 import {
   DEFAULT_MAX_MEDIA_BYTES,
   MAX_MEDIA_BYTES,
@@ -394,12 +395,3 @@ function readError(payload: Record<string, unknown>): string | null {
     : null;
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json(
-    { error },
-    {
-      status,
-      headers: { "cache-control": "no-store" },
-    },
-  );
-}

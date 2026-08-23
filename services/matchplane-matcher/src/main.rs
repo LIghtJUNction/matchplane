@@ -4,7 +4,7 @@ use anyhow::Context;
 use matchplane_config::{AppConfig, Environment};
 use matchplane_engine::OrderBook;
 use matchplane_events::{KafkaSecurityConfig, consumer, topics};
-use matchplane_observability::init;
+use matchplane_observability::{init, shutdown_signal};
 use matchplane_protocol::decode_command_envelope;
 use matchplane_storage::{MatchCommitOutcome, PgStore};
 use rdkafka::{
@@ -106,10 +106,4 @@ async fn main() -> anyhow::Result<()> {
         .shutdown()
         .context("matcher telemetry shutdown failed")?;
     Ok(())
-}
-
-async fn shutdown_signal() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        tracing::error!(%error, "failed to listen for shutdown signal");
-    }
 }

@@ -23,6 +23,7 @@ import {
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 import { requestSearchParams } from "../../../../src/lib/request-url";
 import { isUuid } from "../../../../src/lib/uuid";
+import { jsonError } from "../../../../src/lib/json-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -352,15 +353,4 @@ function boundedInteger(
   return Number.isSafeInteger(parsed)
     ? Math.max(1, Math.min(maximum, parsed))
     : fallback;
-}
-
-function jsonError(
-  error: string,
-  status: number,
-  headers: Record<string, string> = {},
-): Response {
-  return NextResponse.json(
-    { error },
-    { status, headers: { "cache-control": "no-store", ...headers } },
-  );
 }

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "../../../../src/lib/auth";
-import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { jsonError } from "../../../../src/lib/json-error";
+import { requireRootManager } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,8 +12,8 @@ export const dynamic = "force-dynamic";
  * returns the small profile needed to distinguish registered customers from mall operators.
  */
 export async function GET(request: Request): Promise<Response> {
-  const guard = await requireRootManager(request);
-  if (guard.response) return guard.response;
+  const denied = await requireRootManager(request, "只有根平台管理员可以查看账号");
+  if (denied) return denied;
   try {
     const result = await auth.api.listUsers({
       query: { limit: 1000, offset: 0, sortBy: "createdAt", sortDirection: "desc" },
@@ -57,15 +58,4 @@ function toPublicUser(user: PublicUser) {
   };
 }
 
-async function requireRootManager(request: Request): Promise<{ response?: undefined } | { response: Response }> {
-  if (!hasTrustedBrowserOrigin(request)) return { response: jsonError("请求来源未被平台信任", 403) };
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return { response: jsonError("Better Auth session is required", 401) };
-  const role = (session.user as { role?: unknown }).role;
-  if (role !== "rootSuperAdmin" && role !== "rootAdmin") return { response: jsonError("只有根平台管理员可以查看账号", 403) };
-  return {};
-}
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } });
-}

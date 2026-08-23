@@ -1,7 +1,7 @@
 use anyhow::Context;
 use matchplane_config::{AppConfig, Environment};
 use matchplane_events::{KafkaPublisher, KafkaSecurityConfig};
-use matchplane_observability::init;
+use matchplane_observability::{init, shutdown_signal};
 use matchplane_storage::PgStore;
 use tokio::time::{Duration, sleep};
 use tracing::{info, warn};
@@ -82,10 +82,4 @@ async fn relay_once(store: &PgStore, publisher: &KafkaPublisher) -> anyhow::Resu
         }
     }
     Ok(())
-}
-
-async fn shutdown_signal() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        tracing::error!(%error, "failed to listen for shutdown signal");
-    }
 }

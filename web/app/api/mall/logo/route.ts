@@ -15,6 +15,8 @@ import {
   removeManagedImage,
 } from "../../../../src/lib/managed-image";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { jsonError } from "../../../../src/lib/json-error";
+import { configuredTenantId } from "../../../../src/lib/store-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -144,21 +146,7 @@ interface MallRow {
   version: string;
 }
 
-function configuredTenantId(): string | null {
-  const value = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  )
-    ? value
-    : null;
-}
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json(
-    { error },
-    { status, headers: { "cache-control": "no-store" } },
-  );
-}
 
 function notFound(): Response {
   return NextResponse.json(

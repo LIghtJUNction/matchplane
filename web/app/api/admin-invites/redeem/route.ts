@@ -13,6 +13,7 @@ import {
   RequestBodyTooLargeError,
 } from "../../../../src/lib/body-limit";
 import { isUuid } from "../../../../src/lib/uuid";
+import { jsonError } from "../../../../src/lib/json-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -216,12 +217,3 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json(
-    { error },
-    {
-      status,
-      headers: { "cache-control": "no-store" },
-    },
-  );
-}

@@ -5,7 +5,7 @@ use matchplane_cache::{CachedBook, CachedLevel, ProjectionOutcome, ValkeyCache};
 use matchplane_config::AppConfig;
 use matchplane_domain::StreamKind;
 use matchplane_events::{KafkaSecurityConfig, consumer, topics};
-use matchplane_observability::init;
+use matchplane_observability::{init, shutdown_signal};
 use matchplane_protocol::{decode_event_envelope, v1};
 use prost::Message;
 use rdkafka::{
@@ -113,10 +113,4 @@ fn levels(levels: Vec<v1::PriceLevel>) -> Vec<CachedLevel> {
             quantity: level.quantity,
         })
         .collect()
-}
-
-async fn shutdown_signal() {
-    if let Err(error) = tokio::signal::ctrl_c().await {
-        tracing::error!(%error, "failed to listen for shutdown signal");
-    }
 }

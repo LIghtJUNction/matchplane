@@ -1,11 +1,25 @@
 import { NextResponse } from "next/server";
 
+import { authDatabase } from "../../../../src/lib/auth";
 import {
   RequestBodyTooLargeError,
   readJsonBody,
 } from "../../../../src/lib/body-limit";
-import { auth, authDatabase } from "../../../../src/lib/auth";
+import { jsonError as sharedJsonError } from "../../../../src/lib/json-error";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { authenticatedUserId } from "../../../../src/lib/session";
+import { isUuid } from "../../../../src/lib/uuid";
+
+function jsonError(
+  error: string,
+  status: number,
+  headers: Record<string, string> = {},
+): NextResponse {
+  return sharedJsonError(error, status, {
+    "cache-control": "private, no-store",
+    ...headers,
+  });
+}
 
 interface NotificationRow {
   id: string;
@@ -18,7 +32,10 @@ interface NotificationRow {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const userId = await authenticatedUserId(request);
+  const userId = await authenticatedUserId(
+    request,
+    "notification session verification failed",
+  );
   if (userId === "unavailable") return jsonError("通知服务暂时不可用", 503);
   if (!userId) return jsonError("请先登录", 401);
   let requestedLimit = 20;
@@ -74,7 +91,10 @@ export async function GET(request: Request): Promise<Response> {
 export async function PATCH(request: Request): Promise<Response> {
   if (!hasTrustedBrowserOrigin(request))
     return jsonError("请求来源不可信", 403);
-  const userId = await authenticatedUserId(request);
+  const userId = await authenticatedUserId(
+    request,
+    "notification session verification failed",
+  );
   if (userId === "unavailable") return jsonError("通知服务暂时不可用", 503);
   if (!userId) return jsonError("请先登录", 401);
 
@@ -95,7 +115,7 @@ export async function PATCH(request: Request): Promise<Response> {
   }
   const markAll = input.all === true;
   const id =
-    typeof input.id === "string" && UUID_PATTERN.test(input.id)
+    typeof input.id === "string" && isUuid(input.id)
       ? input.id
       : null;
   if (!markAll && !id) return jsonError("通知编号无效", 400);
@@ -132,28 +152,3 @@ export async function PATCH(request: Request): Promise<Response> {
     return jsonError("通知状态保存失败", 500);
   }
 }
-
-async function authenticatedUserId(
-  request: Request,
-): Promise<string | null | "unavailable"> {
-  try {
-    const session = await auth.api.getSession({ headers: request.headers });
-    return typeof session?.user?.id === "string" &&
-      UUID_PATTERN.test(session.user.id)
-      ? session.user.id
-      : null;
-  } catch (error) {
-    console.error("notification session verification failed", error);
-    return "unavailable";
-  }
-}
-
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json(
-    { error },
-    { status, headers: { "cache-control": "private, no-store" } },
-  );
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

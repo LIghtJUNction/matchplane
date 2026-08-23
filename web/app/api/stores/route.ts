@@ -9,8 +9,9 @@ import {
   RequestBodyTooLargeError,
 } from "../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../src/lib/request-origin";
+import { jsonError } from "../../../src/lib/json-error";
+import { configuredTenantId } from "../../../src/lib/store-access";
 import { readPublicStores } from "../../../src/store-directory";
-import { isUuid } from "../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -339,10 +340,6 @@ async function readOwnedStores(request: Request): Promise<Response> {
   );
 }
 
-function configuredTenantId(): string | null {
-  const value = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
-  return isUuid(value) ? value : null;
-}
 
 function normalizeName(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -379,9 +376,3 @@ class StoreCreationConflict extends Error {
   }
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json(
-    { error },
-    { status, headers: { "cache-control": "no-store" } },
-  );
-}

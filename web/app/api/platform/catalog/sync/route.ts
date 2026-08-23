@@ -4,6 +4,7 @@ import { readJsonBody, RequestBodyTooLargeError } from "../../../../../src/lib/b
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
 import { parseCatalogSyncRequest } from "../../../../../src/catalog-protocol";
 import { syncCanonicalMarketplaceOffer } from "../../../../../src/catalog-sync";
+import { jsonError } from "../../../../../src/lib/json-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,3 @@ export async function POST(request: Request): Promise<Response> {
   });
 }
 
-function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } });
-}
