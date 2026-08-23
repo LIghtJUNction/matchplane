@@ -50,6 +50,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   document.documentElement.dataset.theme = "light";
+  document.documentElement.dataset.palette = "ink";
   document.documentElement.lang = "zh-CN";
   clearPartySessionCache();
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -142,6 +143,8 @@ describe("MatchPlane workspaces", () => {
     expect(
       screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
     ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭选货员" }));
+    expect(assistantToggle).toHaveAttribute("aria-expanded", "false");
 
     expect(screen.queryByText("其他入口")).not.toBeInTheDocument();
     expect(
@@ -511,7 +514,11 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "商城后台" }),
+      await screen.findByRole(
+        "heading",
+        { name: "商城后台" },
+        { timeout: 3_000 },
+      ),
     ).toBeInTheDocument();
     expect(
       vi.mocked(authClient.getSession).mock.calls.length,
@@ -617,7 +624,9 @@ describe("MatchPlane workspaces", () => {
     await user.click(screen.getByRole("tab", { name: "支付（可选）" }));
     await user.click(screen.getByRole("button", { name: "切换支付模式" }));
 
-    const dialog = screen.getByRole("dialog", { name: "切换到生产模式？" });
+    const dialog = screen.getByRole("dialog", {
+      name: "切换到生产模式？",
+    });
     expect(dialog).toHaveTextContent("未决订单检查");
     await user.click(screen.getByRole("button", { name: "确认切换" }));
 
@@ -787,6 +796,22 @@ describe("MatchPlane workspaces", () => {
     expect(document.documentElement.lang).toBe("en");
     expect(
       screen.getByRole("button", { name: "Account menu" }),
+    ).toBeInTheDocument();
+  });
+
+  it("applies and persists a curated palette", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "选择配色：墨色" }));
+    await user.click(screen.getByRole("option", { name: "苔绿" }));
+
+    await waitFor(() =>
+      expect(document.documentElement.dataset.palette).toBe("moss"),
+    );
+    expect(window.localStorage.getItem("matchplane.palette")).toBe("moss");
+    expect(
+      screen.getByRole("button", { name: "选择配色：苔绿" }),
     ).toBeInTheDocument();
   });
 

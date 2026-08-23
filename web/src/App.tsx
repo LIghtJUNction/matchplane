@@ -78,7 +78,8 @@ interface StoreConsoleContext {
 }
 
 export function App({ initialPath = "/" }: { initialPath?: string }) {
-  const { theme, locale, setTheme, setLocale } = useInterfacePreferences();
+  const { theme, locale, palette, setTheme, setLocale, setPalette } =
+    useInterfacePreferences();
   const ui = appCopy(locale);
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() =>
@@ -599,7 +600,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   };
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !authResolved) return;
     const searchParams = new URLSearchParams(window.location.search);
     if (role === "buyer") searchParams.delete("role");
     else searchParams.set("role", role);
@@ -608,7 +609,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       "",
       relativeBrowserLocation(searchParams),
     );
-  }, [hydrated, role]);
+  }, [authResolved, hydrated, role]);
 
   useEffect(() => {
     if (!hydrated || role !== "platform" || !isLiveMarketplaceEnabled()) return;
@@ -778,8 +779,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 <PreferenceControls
                   theme={theme}
                   locale={locale}
+                  palette={palette}
                   onThemeChange={setTheme}
                   onLocaleChange={setLocale}
+                  onPaletteChange={setPalette}
                 />
                 <motion.button
                   className="header-store-action"
@@ -1104,8 +1107,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   <PreferenceControls
                     theme={theme}
                     locale={locale}
+                    palette={palette}
                     onThemeChange={setTheme}
                     onLocaleChange={setLocale}
+                    onPaletteChange={setPalette}
                   />
                 </section>
                 <ChangePasswordPanel
