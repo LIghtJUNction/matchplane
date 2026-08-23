@@ -525,6 +525,19 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
             .map_err(ApplicationError::from)
     }
 
+    /// Rejects a draft offer as an operator action.
+    pub async fn reject_offer(
+        &self,
+        tenant_id: TenantId,
+        offer_id: MarketplaceOfferId,
+        expected_version: i64,
+    ) -> Result<MarketplaceOffer, ApplicationError> {
+        self.writer
+            .reject_marketplace_offer(tenant_id, offer_id, expected_version)
+            .await
+            .map_err(ApplicationError::from)
+    }
+
     /// Creates an introduction for a demand-side participant.
     pub async fn create_introduction(
         &self,

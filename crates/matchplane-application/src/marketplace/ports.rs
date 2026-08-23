@@ -132,6 +132,13 @@ pub trait MarketplaceWriter: Send + Sync {
         expected_version: i64,
     ) -> Result<MarketplaceOffer, StorageError>;
 
+    async fn reject_marketplace_offer(
+        &self,
+        tenant_id: TenantId,
+        offer_id: MarketplaceOfferId,
+        expected_version: i64,
+    ) -> Result<MarketplaceOffer, StorageError>;
+
     async fn create_marketplace_introduction(
         &self,
         request: &CreateMarketplaceIntroduction,
@@ -325,6 +332,16 @@ impl MarketplaceWriter for PgStore {
         expected_version: i64,
     ) -> Result<MarketplaceOffer, StorageError> {
         self.activate_marketplace_offer(tenant_id, offer_id, expected_version)
+            .await
+    }
+
+    async fn reject_marketplace_offer(
+        &self,
+        tenant_id: TenantId,
+        offer_id: MarketplaceOfferId,
+        expected_version: i64,
+    ) -> Result<MarketplaceOffer, StorageError> {
+        self.reject_marketplace_offer(tenant_id, offer_id, expected_version)
             .await
     }
 

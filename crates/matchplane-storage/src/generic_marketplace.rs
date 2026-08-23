@@ -954,6 +954,53 @@ impl PgStore {
         Ok(offer)
     }
 
+    /// Rejects one draft offer without deleting its moderation or projection history.
+    pub async fn reject_marketplace_offer(
+        &self,
+        tenant_id: TenantId,
+        offer_id: MarketplaceOfferId,
+        expected_version: i64,
+    ) -> Result<MarketplaceOffer, StorageError> {
+        if expected_version < 1 {
+            return Err(StorageError::InvalidData(
+                "marketplace offer version must be positive".to_owned(),
+            ));
+        }
+        let mut transaction = self.pool().begin().await?;
+        let row = sqlx::query(
+            "UPDATE marketplace_offers offer
+             SET status = 'withdrawn', version = version + 1,
+                 updated_at = clock_timestamp()
+             WHERE offer.tenant_id = $1
+               AND offer.id = $2
+               AND offer.version = $3
+               AND offer.status = 'draft'
+             RETURNING offer.id, offer.tenant_id, offer.domain_id, offer.supply_party_id,
+                       offer.asset_id, offer.external_key, offer.display_name, offer.attributes,
+                       offer.terms, offer.status, offer.published_at, offer.expires_at,
+                       offer.version, offer.created_at, offer.updated_at",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(offer_id.into_uuid())
+        .bind(expected_version)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(StorageError::Conflict(
+            "marketplace offer is not awaiting moderation".to_owned(),
+        ))?;
+        let offer = offer_from_row(&row)?;
+        enqueue_marketplace_offer_projection(
+            &mut transaction,
+            tenant_id,
+            offer.domain_id,
+            offer_id,
+            offer.version,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(offer)
+    }
+
     /// Searches active offers with a deterministic, domain-neutral attribute fallback.  A
     /// subplatform retrieval Agent can use the same canonical offer IDs and bypass this method;
     /// this fallback exists so the kernel remains useful without a model or vector database.

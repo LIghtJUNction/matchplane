@@ -221,6 +221,10 @@ async fn main() -> anyhow::Result<()> {
             post(generic_marketplace::activate_offer),
         )
         .route(
+            "/v1/admin/marketplace/offers/{offer_id}/reject",
+            post(generic_marketplace::reject_offer),
+        )
+        .route(
             "/v1/marketplace/introductions",
             get(generic_marketplace::introductions).post(generic_marketplace::create_introduction),
         )

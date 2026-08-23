@@ -720,6 +720,24 @@ pub(super) async fn activate_offer(
     Ok(Json(offer))
 }
 
+pub(super) async fn reject_offer(
+    State(state): State<Arc<AppState>>,
+    Path(offer_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<ActivateOfferRequest>,
+) -> Result<Json<matchplane_storage::MarketplaceOffer>, ApiError> {
+    require_operator(&state, &headers)?;
+    let offer = state
+        .marketplace
+        .reject_offer(
+            parse_id::<TenantId>(&request.tenant_id)?,
+            parse_id::<MarketplaceOfferId>(&offer_id)?,
+            request.expected_version,
+        )
+        .await?;
+    Ok(Json(offer))
+}
+
 pub(super) async fn create_introduction(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
