@@ -16,6 +16,7 @@ result/
 /web/dist/
 /web/.next/
 /web/out/
+/web/.env.local
 /web/web/
 /.playwright-cli/
 /.scratch/
