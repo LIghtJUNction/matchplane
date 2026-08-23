@@ -7,7 +7,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{get, patch, post},
 };
-use matchplane_application::{OrderService, PlaceOrderCommand};
+use matchplane_application::{MarketplaceService, OrderService, PlaceOrderCommand};
 use matchplane_cache::{CachedBook, ValkeyCache};
 use matchplane_config::{AppConfig, BearerToken, Environment};
 use matchplane_domain::{AccountId, AssetId, MarketId, OrderId, OrderSide};
@@ -40,6 +40,7 @@ pub(crate) use matchplane_http::parse_exact;
 struct AppState {
     store: PgStore,
     orders: OrderService<PgStore>,
+    marketplace: MarketplaceService<PgStore>,
     cache: Mutex<ValkeyCache>,
     telemetry: Telemetry,
     node_id: matchplane_domain::FederationNodeId,
@@ -132,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
         .context("gateway could not connect to Valkey")?;
     let state = Arc::new(AppState {
         orders: OrderService::new(store.clone(), config.node_id),
+        marketplace: MarketplaceService::new(store.clone()),
         store,
         cache: Mutex::new(cache),
         telemetry,

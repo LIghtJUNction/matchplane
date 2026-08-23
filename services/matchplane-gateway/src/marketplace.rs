@@ -1304,26 +1304,8 @@ pub(super) async fn authenticate_domain(
         .map_err(Into::into)
 }
 
-fn platform_path_from_headers(
-    headers: &HeaderMap,
-    required: bool,
-) -> Result<Option<String>, ApiError> {
-    matchplane_http::platform_path_from_headers(headers, required).map_err(Into::into)
-}
-
 pub(super) fn require_role(party: &AuthenticatedParty, role: &str) -> Result<(), ApiError> {
     MarketplaceService::<matchplane_storage::PgStore>::ensure_role(party, role).map_err(Into::into)
-}
-
-/// Generic marketplace APIs use neutral demand/supply sides. The legacy party projection keeps
-/// buyer/seller role codes for compatibility, so the mapping lives in this adapter boundary and
-/// is not repeated throughout the domain-neutral handlers.
-pub(super) fn require_marketplace_side(
-    party: &AuthenticatedParty,
-    side: &str,
-) -> Result<(), ApiError> {
-    MarketplaceService::<matchplane_storage::PgStore>::ensure_marketplace_side(party, side)
-        .map_err(Into::into)
 }
 
 fn default_promotion_policy() -> String {

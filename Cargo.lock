@@ -1864,9 +1864,11 @@ name = "matchplane-application"
 version = "0.1.10"
 dependencies = [
  "async-trait",
+ "axum",
  "matchplane-domain",
  "matchplane-http",
  "matchplane-storage",
+ "serde_json",
  "thiserror 2.0.20",
  "time",
  "tokio",
@@ -2000,6 +2002,7 @@ dependencies = [
  "matchplane-config",
  "matchplane-storage",
  "serde",
+ "sha2 0.11.0",
  "tracing",
  "uuid",
 ]
