@@ -1,5 +1,25 @@
 # 匹配平面架构
 
+## 分层边界
+
+MatchPlane 后端采用四层结构，将传输、编排、领域规则与基础设施解耦：
+
+```text
+Interface (services)     gateway, payment-service, federation-hub, ...
+        |
+Application (crates)   matchplane-application — 用例、端口、授权编排
+        |
+Domain (crates)        matchplane-domain, matchplane-engine — 纯类型与确定性规则
+        |
+Infrastructure         matchplane-storage, matchplane-cache, matchplane-payments, ...
+```
+
+共享 HTTP 适配器集中在 `matchplane-http`：结构化 `{ code, error }` 响应、Bearer 认证辅助函数，以及可选的 `storage` 特性（将 `StorageError` 映射为 HTTP 错误）。服务二进制文件应只做请求解析与序列化，业务编排下沉到 `matchplane-application`。
+
+外部能力（OAuth、AI、支付、通知）通过 `matchplane-config::ProviderRegistry` 注册；运行时加载由应用服务负责，配置变更不应要求重新编译核心领域代码。支付服务中的 `GatewayFactory` 是支付类 provider 的参考实现，后续 OAuth/AI 管理 API 应与之对齐。
+
+迁移顺序见 `docs/backend-refactor-plan.zh-CN.md`。当前已完成：共享 HTTP 层、订单簿应用服务、provider registry builder，以及 gateway 订单路径的薄适配器改造。
+
 ## 权威性和一致性
 
 PostgreSQL 是最终的事实来源。每个外部可见的命令首先被持久化

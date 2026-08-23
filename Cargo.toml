@@ -1,11 +1,13 @@
 [workspace]
 members = [
+  "crates/matchplane-application",
   "crates/matchplane-cache",
   "crates/matchplane-config",
   "crates/matchplane-domain",
   "crates/matchplane-engine",
   "crates/matchplane-events",
   "crates/matchplane-agent-runtime",
+  "crates/matchplane-http",
   "crates/matchplane-oauth-bridge",
   "crates/matchplane-observability",
   "crates/matchplane-payments",
@@ -86,10 +88,12 @@ zstd = "0.13.2"
 url = "2.5.8"
 
 matchplane-cache = { path = "crates/matchplane-cache" }
+matchplane-application = { path = "crates/matchplane-application" }
 matchplane-config = { path = "crates/matchplane-config" }
 matchplane-domain = { path = "crates/matchplane-domain" }
 matchplane-engine = { path = "crates/matchplane-engine" }
 matchplane-events = { path = "crates/matchplane-events" }
+matchplane-http = { path = "crates/matchplane-http" }
 matchplane-observability = { path = "crates/matchplane-observability" }
 matchplane-payments = { path = "crates/matchplane-payments" }
 matchplane-protocol = { path = "crates/matchplane-protocol" }

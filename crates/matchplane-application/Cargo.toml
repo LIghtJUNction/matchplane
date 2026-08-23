@@ -1,0 +1,19 @@
+[package]
+name = "matchplane-application"
+description = "Application-layer use cases and ports for MatchPlane"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+matchplane-domain.workspace = true
+matchplane-http = { workspace = true, features = ["storage"] }
+matchplane-storage.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

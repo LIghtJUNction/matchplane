@@ -1,22 +1,20 @@
-use std::{path::Path as FsPath, str::FromStr, sync::Arc, time::Duration};
+use std::{path::Path as FsPath, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    http::{HeaderMap, StatusCode},
     routing::{get, patch, post},
 };
+use matchplane_application::{OrderService, PlaceOrderCommand};
 use matchplane_cache::{CachedBook, ValkeyCache};
 use matchplane_config::{AppConfig, BearerToken, Environment};
-use matchplane_domain::{
-    AccountId, AssetId, CorrelationId, MarketId, OrderId, OrderIntent, OrderSide, Price, Quantity,
-};
+use matchplane_domain::{AccountId, AssetId, MarketId, OrderId, OrderSide};
+use matchplane_http::{parse_id, require_operator_bearer};
 use matchplane_observability::{Telemetry, init, shutdown_signal};
 use matchplane_storage::{
-    CandidateMatch, PgStore, StorageError, StoredOrder, StoredTrade, SubmitOrder,
-    SubmitOrderOutcome, VectorRecord,
+    CandidateMatch, PgStore, StoredOrder, StoredTrade, SubmitOrderOutcome, VectorRecord,
 };
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -29,15 +27,19 @@ use tower_http::{
     timeout::TimeoutLayer,
     trace::TraceLayer,
 };
-use tracing::{error, info};
+use tracing::info;
 
 mod generic_marketplace;
 mod marketplace;
 mod privacy;
 
+pub(crate) use matchplane_http::ApiError;
+pub(crate) use matchplane_http::parse_exact;
+
 #[derive(Debug)]
 struct AppState {
     store: PgStore,
+    orders: OrderService<PgStore>,
     cache: Mutex<ValkeyCache>,
     telemetry: Telemetry,
     node_id: matchplane_domain::FederationNodeId,
@@ -93,29 +95,6 @@ struct AcceptedResponse {
     outcome: SubmitOrderOutcome,
 }
 
-#[derive(Debug, Serialize)]
-struct ErrorResponse {
-    error: String,
-}
-
-#[derive(Debug)]
-struct ApiError {
-    status: StatusCode,
-    message: String,
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        (
-            self.status,
-            Json(ErrorResponse {
-                error: self.message,
-            }),
-        )
-            .into_response()
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load().context("gateway configuration is invalid")?;
@@ -152,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("gateway could not connect to Valkey")?;
     let state = Arc::new(AppState {
+        orders: OrderService::new(store.clone(), config.node_id),
         store,
         cache: Mutex::new(cache),
         telemetry,
@@ -397,66 +377,31 @@ async fn place_order(
     Json(request): Json<PlaceOrderRequest>,
 ) -> Result<(StatusCode, Json<AcceptedResponse>), ApiError> {
     require_operator(&state, &headers)?;
-    let order_id = request
-        .order_id
-        .as_deref()
-        .map(parse_id::<OrderId>)
-        .transpose()?
-        .unwrap_or_default();
-    let side = parse_side(&request.side)?;
-    let price = Price::new(parse_exact(&request.price)?)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    let quantity = Quantity::new(parse_exact(&request.quantity)?)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    let reservation_amount = match side {
-        OrderSide::Buy => Quantity::new(
-            price
-                .checked_mul(quantity)
-                .map_err(|error| ApiError::bad_request(error.to_string()))?
-                .value(),
-        ),
-        OrderSide::Sell => Ok(quantity),
-    }
-    .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    let submitted_at = request.submitted_at.unwrap_or_else(OffsetDateTime::now_utc);
-    if request
-        .expires_at
-        .is_some_and(|expiry| expiry <= submitted_at)
-    {
-        return Err(ApiError::bad_request(
-            "expires_at must be later than submitted_at".to_owned(),
-        ));
-    }
-    let command = SubmitOrder {
-        intent: OrderIntent {
-            order_id,
-            tenant_id: parse_id(&request.tenant_id)?,
-            domain_id: parse_id(&request.domain_id)?,
-            market_id: parse_id(&request.market_id)?,
-            side,
-            price,
-            quantity,
-            submitted_at,
-            expires_at: request.expires_at,
-        },
+    let command = PlaceOrderCommand {
+        order_id: request
+            .order_id
+            .as_deref()
+            .map(parse_id::<OrderId>)
+            .transpose()?,
+        tenant_id: parse_id(&request.tenant_id)?,
+        domain_id: parse_id(&request.domain_id)?,
+        market_id: parse_id(&request.market_id)?,
+        side: parse_side(&request.side)?,
+        price: request.price,
+        quantity: request.quantity,
         idempotency_key: request.idempotency_key,
         reservation_account_id: parse_id(&request.reservation_account_id)?,
         settlement_account_id: parse_id(&request.settlement_account_id)?,
-        reservation_amount,
-        source_node_id: state.node_id,
-        correlation_id: CorrelationId::new(),
+        submitted_at: request.submitted_at,
+        expires_at: request.expires_at,
     };
-    let outcome = state
-        .store
-        .submit_order(&command)
-        .await
-        .map_err(ApiError::from)?;
-    let status = if outcome.duplicate {
+    let result = state.orders.place_order(command).await?;
+    let status = if result.duplicate {
         StatusCode::OK
     } else {
         StatusCode::ACCEPTED
     };
-    Ok((status, Json(AcceptedResponse { outcome })))
+    Ok((status, Json(AcceptedResponse { outcome: result.outcome })))
 }
 
 async fn order(
@@ -573,120 +518,13 @@ fn legacy_marketplace_adapter_enabled() -> bool {
 }
 
 fn require_operator(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
-    let authorization = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok());
-    if state.operator_auth.verify_bearer(authorization) {
-        Ok(())
-    } else {
-        Err(ApiError::unauthorized(
-            "gateway operator bearer token is required",
-        ))
-    }
-}
-
-fn parse_id<T>(value: &str) -> Result<T, ApiError>
-where
-    T: FromStr<Err = uuid::Error>,
-{
-    value
-        .parse()
-        .map_err(|error: uuid::Error| ApiError::bad_request(format!("invalid UUID: {error}")))
-}
-
-fn parse_exact(value: &str) -> Result<i128, ApiError> {
-    value.parse().map_err(|_| {
-        ApiError::bad_request("exact values must be base-10 integer strings".to_owned())
-    })
+    require_operator_bearer(&state.operator_auth, headers)
 }
 
 fn parse_side(value: &str) -> Result<OrderSide, ApiError> {
     match value {
         "buy" => Ok(OrderSide::Buy),
         "sell" => Ok(OrderSide::Sell),
-        _ => Err(ApiError::bad_request(
-            "side must be either buy or sell".to_owned(),
-        )),
-    }
-}
-
-impl ApiError {
-    fn bad_request(message: String) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            message,
-        }
-    }
-
-    fn not_found(message: &str) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            message: message.to_owned(),
-        }
-    }
-
-    fn unauthorized(message: &str) -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            message: message.to_owned(),
-        }
-    }
-
-    fn forbidden(message: String) -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            message,
-        }
-    }
-
-    fn internal(message: String) -> Self {
-        error!(%message, "HTTP request failed internally");
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: "internal service error".to_owned(),
-        }
-    }
-
-    fn service_unavailable(message: String) -> Self {
-        error!(%message, "HTTP dependency unavailable");
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            message: "service temporarily unavailable".to_owned(),
-        }
-    }
-
-    fn too_many_requests(message: &str) -> Self {
-        Self {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            message: message.to_owned(),
-        }
-    }
-}
-
-impl From<StorageError> for ApiError {
-    fn from(error: StorageError) -> Self {
-        match error {
-            StorageError::IdempotencyConflict => Self {
-                status: StatusCode::CONFLICT,
-                message: error.to_string(),
-            },
-            StorageError::NotFound(_) => Self {
-                status: StatusCode::NOT_FOUND,
-                message: error.to_string(),
-            },
-            StorageError::Forbidden(_) => Self {
-                status: StatusCode::FORBIDDEN,
-                message: error.to_string(),
-            },
-            StorageError::Conflict(_) => Self {
-                status: StatusCode::CONFLICT,
-                message: error.to_string(),
-            },
-            StorageError::InsufficientBalance | StorageError::InvalidData(_) => Self {
-                status: StatusCode::UNPROCESSABLE_ENTITY,
-                message: error.to_string(),
-            },
-            other => Self::internal(other.to_string()),
-        }
+        _ => Err(ApiError::bad_request("side must be either buy or sell")),
     }
 }

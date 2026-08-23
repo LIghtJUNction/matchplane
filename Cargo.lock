@@ -1860,6 +1860,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "matchplane-application"
+version = "0.1.10"
+dependencies = [
+ "async-trait",
+ "matchplane-domain",
+ "matchplane-http",
+ "matchplane-storage",
+ "thiserror 2.0.20",
+ "time",
+ "tokio",
+]
+
+[[package]]
 name = "matchplane-cache"
 version = "0.1.10"
 dependencies = [
@@ -1961,9 +1974,11 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "hex",
+ "matchplane-application",
  "matchplane-cache",
  "matchplane-config",
  "matchplane-domain",
+ "matchplane-http",
  "matchplane-observability",
  "matchplane-storage",
  "serde",
@@ -1973,6 +1988,18 @@ dependencies = [
  "time",
  "tokio",
  "tower-http 0.7.0",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "matchplane-http"
+version = "0.1.10"
+dependencies = [
+ "axum",
+ "matchplane-config",
+ "matchplane-storage",
+ "serde",
  "tracing",
  "uuid",
 ]
