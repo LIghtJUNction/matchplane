@@ -10,11 +10,19 @@ import {
   PlatformRouterQuotaExceededError,
   type PlatformRouteDecision,
 } from "../../../../src/platform-router";
-import { readPublicStores, storeRouteCandidates } from "../../../../src/store-directory";
+import {
+  readPublicStores,
+  storeRouteCandidates,
+} from "../../../../src/store-directory";
 import { searchPublicStoreOffers } from "../../../../src/storefront-search";
 import { auth, authDatabase } from "../../../../src/lib/auth";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  RequestBodyTooLargeError,
+} from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { requestSearchParams } from "../../../../src/lib/request-url";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,20 +41,34 @@ interface MallSearchInput {
 export async function GET(request: Request): Promise<Response> {
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
   if (!isUuid(rootTenantId)) return jsonError("商城尚未完成初始化", 503);
-  const requestedStorePath = normalizeStorePath(new URL(request.url).searchParams.get("storePath") ?? undefined);
+  const requestedStorePath = normalizeStorePath(
+    requestSearchParams(request).get("storePath") ?? undefined,
+  );
 
   try {
     let stores = await readPublicStores(rootTenantId);
-    if (requestedStorePath) stores = stores.filter((store) => store.path === requestedStorePath);
-    const recommendations = await searchPublicStoreOffers({ stores, narrative: "", limit: 24 });
-    return NextResponse.json({
-      stores: stores.map((store) => ({
-        slug: store.slug,
-        path: store.path,
-        displayName: store.displayName,
-      })),
-      recommendations,
-    }, { headers: { "cache-control": "public, max-age=30, stale-while-revalidate=120" } });
+    if (requestedStorePath)
+      stores = stores.filter((store) => store.path === requestedStorePath);
+    const recommendations = await searchPublicStoreOffers({
+      stores,
+      narrative: "",
+      limit: 24,
+    });
+    return NextResponse.json(
+      {
+        stores: stores.map((store) => ({
+          slug: store.slug,
+          path: store.path,
+          displayName: store.displayName,
+        })),
+        recommendations,
+      },
+      {
+        headers: {
+          "cache-control": "public, max-age=30, stale-while-revalidate=120",
+        },
+      },
+    );
   } catch (error) {
     console.error("mall browse feed failed", error);
     return jsonError("商品目录暂时不可用，请稍后重试", 503);
@@ -61,14 +83,17 @@ export async function GET(request: Request): Promise<Response> {
  * price, product image, offer identity, or contact detail.
  */
 export async function POST(request: Request): Promise<Response> {
-  if (!hasTrustedBrowserOrigin(request)) return jsonError("请求来源未被商城信任", 403);
+  if (!hasTrustedBrowserOrigin(request))
+    return jsonError("请求来源未被商城信任", 403);
 
   let input: MallSearchInput;
   try {
     input = await readJsonBody<MallSearchInput>(request, 64 * 1024);
   } catch (error) {
     return jsonError(
-      error instanceof RequestBodyTooLargeError ? "请求体不能超过 64 KiB" : "请求体必须是有效 JSON",
+      error instanceof RequestBodyTooLargeError
+        ? "请求体不能超过 64 KiB"
+        : "请求体必须是有效 JSON",
       error instanceof RequestBodyTooLargeError ? 413 : 400,
     );
   }
@@ -77,7 +102,8 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError("请用 1 到 8000 个字符描述想买的商品", 400);
   }
   const requestedStorePath = normalizeStorePath(input.storePath);
-  if (input.storePath !== undefined && !requestedStorePath) return jsonError("店铺地址无效", 400);
+  if (input.storePath !== undefined && !requestedStorePath)
+    return jsonError("店铺地址无效", 400);
 
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
   if (!isUuid(rootTenantId)) return jsonError("商城尚未完成初始化", 503);
@@ -106,13 +132,16 @@ export async function POST(request: Request): Promise<Response> {
           candidates: storeRouteCandidates(stores),
           admitCall: isPlatformRouterConfigured()
             ? async () => {
-                if (!(await admitPlatformAiCall({
-                  subject: identity.subject,
-                  requestId,
-                  platformPath: "/",
-                  perSubjectLimit: configuredGuestAiRequestsPerHour(),
-                  globalLimit: configuredGlobalAiRequestsPerHour(),
-                }))) throw new PlatformRouterQuotaExceededError();
+                if (
+                  !(await admitPlatformAiCall({
+                    subject: identity.subject,
+                    requestId,
+                    platformPath: "/",
+                    perSubjectLimit: configuredGuestAiRequestsPerHour(),
+                    globalLimit: configuredGlobalAiRequestsPerHour(),
+                  }))
+                )
+                  throw new PlatformRouterQuotaExceededError();
               }
             : undefined,
         });
@@ -129,27 +158,40 @@ export async function POST(request: Request): Promise<Response> {
     : stores.filter((store) => routing.selectedSlugs.includes(store.slug));
   let recommendations;
   try {
-    recommendations = await searchPublicStoreOffers({ stores: selected, narrative, limit: 12 });
-    await recordSearch({ requestId, subject: identity.subject, narrative, selected, routing });
+    recommendations = await searchPublicStoreOffers({
+      stores: selected,
+      narrative,
+      limit: 12,
+    });
+    await recordSearch({
+      requestId,
+      subject: identity.subject,
+      narrative,
+      selected,
+      routing,
+    });
   } catch (error) {
     console.error("mall product search failed", error);
     return jsonError("商品搜索暂时不可用，请稍后重试", 503);
   }
 
-  const response = NextResponse.json({
-    requestId,
-    stores: selected.map((store) => ({
-      slug: store.slug,
-      path: store.path,
-      displayName: store.displayName,
-    })),
-    recommendations,
-    routing: {
-      source: routing.source,
-      degraded: routing.degraded,
-      rationale: routing.rationale,
+  const response = NextResponse.json(
+    {
+      requestId,
+      stores: selected.map((store) => ({
+        slug: store.slug,
+        path: store.path,
+        displayName: store.displayName,
+      })),
+      recommendations,
+      routing: {
+        source: routing.source,
+        degraded: routing.degraded,
+        rationale: routing.rationale,
+      },
     },
-  }, { headers: { "cache-control": "no-store" } });
+    { headers: { "cache-control": "no-store" } },
+  );
   if (identity.newCookie) {
     response.cookies.set(GUEST_COOKIE, identity.newCookie, {
       httpOnly: true,
@@ -162,12 +204,20 @@ export async function POST(request: Request): Promise<Response> {
   return response;
 }
 
-async function shoppingIdentity(request: Request): Promise<{ subject: string; newCookie: string | null }> {
-  const session = await auth.api.getSession({ headers: request.headers }).catch(() => null);
+async function shoppingIdentity(
+  request: Request,
+): Promise<{ subject: string; newCookie: string | null }> {
+  const session = await auth.api
+    .getSession({ headers: request.headers })
+    .catch(() => null);
   const userId = session?.user?.id;
-  if (typeof userId === "string" && userId.length > 0) return { subject: userId, newCookie: null };
+  if (typeof userId === "string" && userId.length > 0)
+    return { subject: userId, newCookie: null };
   const existing = readCookie(request.headers.get("cookie"), GUEST_COOKIE);
-  const token = existing && /^[A-Za-z0-9_-]{32,128}$/.test(existing) ? existing : randomUUID().replaceAll("-", "");
+  const token =
+    existing && /^[A-Za-z0-9_-]{32,128}$/.test(existing)
+      ? existing
+      : randomUUID().replaceAll("-", "");
   return {
     subject: `guest:${createHash("sha256").update(token).digest("hex")}`,
     newCookie: token === existing ? null : token,
@@ -278,22 +328,39 @@ function readCookie(header: string | null, name: string): string | null {
 }
 
 function configuredGuestAiRequestsPerHour(): number {
-  return boundedInteger(process.env.MATCHPLANE_GUEST_AI_REQUESTS_PER_HOUR, DEFAULT_GUEST_AI_REQUESTS_PER_HOUR, 1_000);
+  return boundedInteger(
+    process.env.MATCHPLANE_GUEST_AI_REQUESTS_PER_HOUR,
+    DEFAULT_GUEST_AI_REQUESTS_PER_HOUR,
+    1_000,
+  );
 }
 
 function configuredGlobalAiRequestsPerHour(): number {
-  return boundedInteger(process.env.MATCHPLANE_ROUTER_AI_GLOBAL_REQUESTS_PER_HOUR, DEFAULT_GLOBAL_AI_REQUESTS_PER_HOUR, 100_000);
+  return boundedInteger(
+    process.env.MATCHPLANE_ROUTER_AI_GLOBAL_REQUESTS_PER_HOUR,
+    DEFAULT_GLOBAL_AI_REQUESTS_PER_HOUR,
+    100_000,
+  );
 }
 
-function boundedInteger(value: string | undefined, fallback: number, maximum: number): number {
+function boundedInteger(
+  value: string | undefined,
+  fallback: number,
+  maximum: number,
+): number {
   const parsed = Number.parseInt(value ?? String(fallback), 10);
-  return Number.isSafeInteger(parsed) ? Math.max(1, Math.min(maximum, parsed)) : fallback;
+  return Number.isSafeInteger(parsed)
+    ? Math.max(1, Math.min(maximum, parsed))
+    : fallback;
 }
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function jsonError(error: string, status: number, headers: Record<string, string> = {}): Response {
-  return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store", ...headers } });
+function jsonError(
+  error: string,
+  status: number,
+  headers: Record<string, string> = {},
+): Response {
+  return NextResponse.json(
+    { error },
+    { status, headers: { "cache-control": "no-store", ...headers } },
+  );
 }

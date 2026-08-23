@@ -23,7 +23,7 @@ use matchplane_storage::{
     MarketplaceOfferPreference, MarketplaceSalesHandoff, MatchMarketplaceDemands,
     MatchMarketplaceOffers, RecordMarketplaceBehaviorEvent, RequestMarketplaceContact,
     SetMarketplaceOfferPreference, UpdateMarketplaceDemandDiscovery, UpdateMarketplaceIntent,
-    UpsertMarketplaceIntentProfile,
+    UpdateMarketplaceOffer, UpsertMarketplaceIntentProfile, WithdrawMarketplaceOffer,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -64,6 +64,7 @@ pub(super) struct OfferQuery {
     tenant_id: String,
     domain_id: String,
     supply_party_id: String,
+    domain_wide: Option<bool>,
     limit: Option<u16>,
     offset: Option<u32>,
 }
@@ -173,8 +174,28 @@ pub(super) struct CreateOfferRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct UpdateOfferRequest {
+    tenant_id: String,
+    domain_id: String,
+    supply_party_id: String,
+    display_name: String,
+    attributes: Value,
+    terms: Value,
+    expected_version: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct WithdrawOfferRequest {
+    tenant_id: String,
+    domain_id: String,
+    supply_party_id: String,
+    expected_version: i64,
+}
+
+#[derive(Debug, Deserialize)]
 pub(super) struct ActivateOfferRequest {
     tenant_id: String,
+    expected_version: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -719,6 +740,79 @@ pub(super) async fn create_offer(
     Ok((status, Json(outcome)))
 }
 
+pub(super) async fn update_offer(
+    State(state): State<Arc<AppState>>,
+    Path(offer_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateOfferRequest>,
+) -> Result<Json<matchplane_storage::MarketplaceOffer>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let actor_party_id = parse_id::<MarketplacePartyId>(&request.supply_party_id)?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        actor_party_id,
+        domain_id,
+    )
+    .await?;
+    super::marketplace::require_marketplace_side(&party, "supply")?;
+    let offer = state
+        .store
+        .update_marketplace_offer(&UpdateMarketplaceOffer {
+            tenant_id,
+            domain_id,
+            actor_party_id,
+            can_manage_domain: matches!(party.role.as_str(), "admin" | "both"),
+            platform_path: party.platform_path,
+            request_id: request_id_from_headers(&headers),
+            offer_id: parse_id::<MarketplaceOfferId>(&offer_id)?,
+            display_name: request.display_name,
+            attributes: request.attributes,
+            terms: request.terms,
+            expected_version: request.expected_version,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(offer))
+}
+
+pub(super) async fn withdraw_offer(
+    State(state): State<Arc<AppState>>,
+    Path(offer_id): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<WithdrawOfferRequest>,
+) -> Result<Json<matchplane_storage::MarketplaceOffer>, ApiError> {
+    let tenant_id = parse_id::<TenantId>(&request.tenant_id)?;
+    let domain_id = parse_id::<DomainId>(&request.domain_id)?;
+    let actor_party_id = parse_id::<MarketplacePartyId>(&request.supply_party_id)?;
+    let party = super::marketplace::authenticate_domain(
+        &state,
+        &headers,
+        tenant_id,
+        actor_party_id,
+        domain_id,
+    )
+    .await?;
+    super::marketplace::require_marketplace_side(&party, "supply")?;
+    let offer = state
+        .store
+        .withdraw_marketplace_offer(&WithdrawMarketplaceOffer {
+            tenant_id,
+            domain_id,
+            actor_party_id,
+            can_manage_domain: matches!(party.role.as_str(), "admin" | "both"),
+            platform_path: party.platform_path,
+            request_id: request_id_from_headers(&headers),
+            offer_id: parse_id::<MarketplaceOfferId>(&offer_id)?,
+            expected_version: request.expected_version,
+        })
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(offer))
+}
+
 pub(super) async fn offers(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -748,17 +842,31 @@ pub(super) async fn offers(
     )
     .await?;
     super::marketplace::require_marketplace_side(&party, "supply")?;
-    let offers = state
-        .store
-        .marketplace_offers_for_party(
-            tenant_id,
-            domain_id,
-            supply_party_id,
-            i64::from(limit),
-            i64::from(offset),
-        )
-        .await
-        .map_err(ApiError::from)?;
+    let offers = if query.domain_wide.unwrap_or(false) {
+        super::marketplace::require_role(&party, "admin")?;
+        state
+            .store
+            .marketplace_offers_for_domain(
+                tenant_id,
+                domain_id,
+                i64::from(limit),
+                i64::from(offset),
+            )
+            .await
+            .map_err(ApiError::from)?
+    } else {
+        state
+            .store
+            .marketplace_offers_for_party(
+                tenant_id,
+                domain_id,
+                supply_party_id,
+                i64::from(limit),
+                i64::from(offset),
+            )
+            .await
+            .map_err(ApiError::from)?
+    };
     let mut response_headers = HeaderMap::new();
     response_headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok((response_headers, Json(offers)))
@@ -776,6 +884,7 @@ pub(super) async fn activate_offer(
         .activate_marketplace_offer(
             parse_id::<TenantId>(&request.tenant_id)?,
             parse_id::<MarketplaceOfferId>(&offer_id)?,
+            request.expected_version,
         )
         .await
         .map_err(ApiError::from)?;
@@ -971,4 +1080,13 @@ pub(super) async fn release_contact(
 
 fn empty_object() -> Value {
     Value::Object(Map::new())
+}
+
+fn request_id_from_headers(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 200)
+        .map(str::to_owned)
 }

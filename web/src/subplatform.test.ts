@@ -19,7 +19,7 @@ describe("nested subplatform paths", () => {
     expect(config.slug).toBe("root");
     expect(config.marketplaceContract).toBe("generic-v1");
     expect(config.manifestUrl).toBeUndefined();
-    expect(config.ui?.contactFields?.map((field) => field.key)).toEqual(["phone", "wechat"]);
+    expect(config.ui).toBeUndefined();
   });
 
   it("uses the registry-backed manifest endpoint for a direct child", () => {

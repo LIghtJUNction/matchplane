@@ -46,7 +46,7 @@ for compatibility, but new product behavior must not expose or create a recursiv
 The marketplace is served at `/`. Active stores use one-segment paths such as `/matx-auto` and are
 also discoverable from the marketplace assistant. A hosted store uses the shared product editor;
 an integrated store may supply its own storefront, catalog retrieval, media, and fulfilment tools.
-Both types remain ordinary stores in the public experience.
+Both types remain ordinary stores in the public experience. Catalogs are empty by default: MatchPlane does not seed merchant products or copy third-party listings. A signed-in merchant enters product details and images through the store editor; the product becomes public only after platform review.
 
 Better Auth owns accounts and sessions. A single account can browse, buy, open a store, and publish
 products; buyer and seller are actions, not account types. Store and marketplace permissions remain

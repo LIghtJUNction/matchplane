@@ -6,10 +6,17 @@ import {
   type MarketplaceAttachment,
 } from "./media-attachment";
 import type { RetrievalResult } from "./retrieval-protocol";
+import type { StoreFinanceReport } from "./store-finance";
+import type {
+  ShoppingMemoryMutation,
+  ShoppingMemorySnapshot,
+} from "./shopping-memory-contract";
 
 export type { MarketplaceAttachment } from "./media-attachment";
 
-const apiBase = (process.env.NEXT_PUBLIC_MATCHPLANE_API_BASE_URL ?? "/api").replace(/\/$/, "");
+const apiBase = (
+  process.env.NEXT_PUBLIC_MATCHPLANE_API_BASE_URL ?? "/api"
+).replace(/\/$/, "");
 
 export interface PartySession {
   tenantId: string;
@@ -23,7 +30,11 @@ export interface PartySession {
   accessTokenExpiresAt: string;
 }
 
-export type BetterAuthMarketplaceRole = "buyer" | "seller" | "subplatform_admin" | "platform";
+export type BetterAuthMarketplaceRole =
+  | "buyer"
+  | "seller"
+  | "subplatform_admin"
+  | "platform";
 
 export interface PaymentSetting {
   tenant_id: string;
@@ -37,7 +48,14 @@ export interface PaymentGatewayRecord {
   gateway_id: string;
   tenant_id: string;
   name: string;
-  kind: "test" | "epay" | "waffo_pancake" | "wechat_pay_v3" | "alipay_openapi" | "custom" | string;
+  kind:
+    | "test"
+    | "epay"
+    | "waffo_pancake"
+    | "wechat_pay_v3"
+    | "alipay_openapi"
+    | "custom"
+    | string;
   mode: "test" | "production" | string;
   settings: Record<string, unknown>;
   credential_configured: boolean;
@@ -172,14 +190,20 @@ export interface PlatformSetupStatus {
   registrations: Record<string, number>;
   routing: { activeChildren: number; ready: boolean };
   hostedAgent: { configured: boolean; status: "ready" | "fallback" };
-  builder: { configured: boolean; status: "ready" | "degraded" | "unconfigured" };
+  builder: {
+    configured: boolean;
+    status: "ready" | "degraded" | "unconfigured";
+  };
   firstRun: { needsRootAccount: boolean; readyForAdmin: boolean };
 }
 
 export interface PlatformAiStatus {
   router: {
     configured: boolean;
-    protocol: "openai-compatible" | "anthropic-messages" | "gemini-generate-content";
+    protocol:
+      | "openai-compatible"
+      | "anthropic-messages"
+      | "gemini-generate-content";
     model: string | null;
     endpointOrigin: string | null;
     toolMode: "auto" | "required" | "disabled";
@@ -248,9 +272,15 @@ export async function createRootPlatformOrganization(input?: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input ?? {}),
   });
-  const body = await response.json().catch(() => null) as { organization?: RootPlatformOrganization; error?: string } | null;
+  const body = (await response.json().catch(() => null)) as {
+    organization?: RootPlatformOrganization;
+    error?: string;
+  } | null;
   if (!response.ok || !body?.organization) {
-    throw new MarketplaceApiError(response.status, body?.error || "根平台组织初始化失败");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "根平台组织初始化失败",
+    );
   }
   return body.organization;
 }
@@ -297,14 +327,24 @@ export interface PlatformMemberDirectory {
   canAssignOwner: boolean;
 }
 
-export async function getPlatformMembers(organizationId: string): Promise<PlatformMemberDirectory> {
-  const response = await fetch(`/api/platform/members?organizationId=${encodeURIComponent(organizationId)}`, {
-    credentials: "include",
-    headers: { accept: "application/json" },
-  });
-  const body = await response.json().catch(() => null) as Partial<PlatformMemberDirectory> & { error?: string } | null;
+export async function getPlatformMembers(
+  organizationId: string,
+): Promise<PlatformMemberDirectory> {
+  const response = await fetch(
+    `/api/platform/members?organizationId=${encodeURIComponent(organizationId)}`,
+    {
+      credentials: "include",
+      headers: { accept: "application/json" },
+    },
+  );
+  const body = (await response.json().catch(() => null)) as
+    | (Partial<PlatformMemberDirectory> & { error?: string })
+    | null;
   if (!response.ok || !body?.organization) {
-    throw new MarketplaceApiError(response.status, body?.error || "成员列表读取失败");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "成员列表读取失败",
+    );
   }
   return body as PlatformMemberDirectory;
 }
@@ -321,8 +361,15 @@ export async function invitePlatformMember(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { invitation?: PlatformInvitationRecord; error?: string } | null;
-  if (!response.ok || !body?.invitation) throw new MarketplaceApiError(response.status, body?.error || "成员邀请失败");
+  const body = (await response.json().catch(() => null)) as {
+    invitation?: PlatformInvitationRecord;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.invitation)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "成员邀请失败",
+    );
   return body.invitation;
 }
 
@@ -337,8 +384,15 @@ export async function updatePlatformMember(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { member?: PlatformMemberRecord; error?: string } | null;
-  if (!response.ok || !body?.member) throw new MarketplaceApiError(response.status, body?.error || "成员权限更新失败");
+  const body = (await response.json().catch(() => null)) as {
+    member?: PlatformMemberRecord;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.member)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "成员权限更新失败",
+    );
   return body.member;
 }
 
@@ -354,8 +408,13 @@ export async function removePlatformMember(input: {
     body: JSON.stringify(input),
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
-    throw new MarketplaceApiError(response.status, body?.error || "成员移除失败");
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "成员移除失败",
+    );
   }
 }
 
@@ -376,12 +435,20 @@ export async function getPlatformAccounts(): Promise<PlatformAccountRecord[]> {
     credentials: "include",
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null) as { accounts?: unknown; administrators?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "账号列表读取失败");
+  const body = (await response.json().catch(() => null)) as {
+    accounts?: unknown;
+    administrators?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "账号列表读取失败",
+    );
   // `administrators` is retained by the server for callers deployed before the account-directory
   // rename. New surfaces must use `accounts`: it includes ordinary registered customers too.
   const accounts = body?.accounts ?? body?.administrators;
-  return Array.isArray(accounts) ? accounts as PlatformAccountRecord[] : [];
+  return Array.isArray(accounts) ? (accounts as PlatformAccountRecord[]) : [];
 }
 
 export async function updatePlatformAdministrator(input: {
@@ -394,8 +461,15 @@ export async function updatePlatformAdministrator(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { administrator?: PlatformAccountRecord; error?: string } | null;
-  if (!response.ok || !body?.administrator) throw new MarketplaceApiError(response.status, body?.error || "根管理员权限更新失败");
+  const body = (await response.json().catch(() => null)) as {
+    administrator?: PlatformAccountRecord;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.administrator)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "根管理员权限更新失败",
+    );
   return body.administrator;
 }
 
@@ -414,14 +488,28 @@ export interface PlatformApiKeyRecord {
   key?: string;
 }
 
-export async function getPlatformApiKeys(organizationId: string): Promise<PlatformApiKeyRecord[]> {
-  const response = await fetch(`/api/platform/api-keys?organizationId=${encodeURIComponent(organizationId)}`, {
-    credentials: "include",
-    headers: { accept: "application/json" },
-  });
-  const body = await response.json().catch(() => null) as { apiKeys?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "API Key 列表读取失败");
-  return Array.isArray(body?.apiKeys) ? body.apiKeys as PlatformApiKeyRecord[] : [];
+export async function getPlatformApiKeys(
+  organizationId: string,
+): Promise<PlatformApiKeyRecord[]> {
+  const response = await fetch(
+    `/api/platform/api-keys?organizationId=${encodeURIComponent(organizationId)}`,
+    {
+      credentials: "include",
+      headers: { accept: "application/json" },
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    apiKeys?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "API Key 列表读取失败",
+    );
+  return Array.isArray(body?.apiKeys)
+    ? (body.apiKeys as PlatformApiKeyRecord[])
+    : [];
 }
 
 export async function createPlatformApiKey(input: {
@@ -437,24 +525,43 @@ export async function createPlatformApiKey(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as PlatformApiKeyRecord & { error?: string } | null;
-  if (!response.ok || !body?.id) throw new MarketplaceApiError(response.status, body?.error || "API Key 创建失败");
+  const body = (await response.json().catch(() => null)) as
+    | (PlatformApiKeyRecord & { error?: string })
+    | null;
+  if (!response.ok || !body?.id)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "API Key 创建失败",
+    );
   return body;
 }
 
-export async function updatePlatformApiKey(input: { organizationId: string; keyId: string; enabled: boolean }): Promise<PlatformApiKeyRecord> {
+export async function updatePlatformApiKey(input: {
+  organizationId: string;
+  keyId: string;
+  enabled: boolean;
+}): Promise<PlatformApiKeyRecord> {
   const response = await fetch("/api/platform/api-keys", {
     method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as PlatformApiKeyRecord & { error?: string } | null;
-  if (!response.ok || !body?.id) throw new MarketplaceApiError(response.status, body?.error || "API Key 更新失败");
+  const body = (await response.json().catch(() => null)) as
+    | (PlatformApiKeyRecord & { error?: string })
+    | null;
+  if (!response.ok || !body?.id)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "API Key 更新失败",
+    );
   return body;
 }
 
-export async function revokePlatformApiKey(input: { organizationId: string; keyId: string }): Promise<void> {
+export async function revokePlatformApiKey(input: {
+  organizationId: string;
+  keyId: string;
+}): Promise<void> {
   const response = await fetch("/api/platform/api-keys", {
     method: "DELETE",
     credentials: "include",
@@ -462,8 +569,13 @@ export async function revokePlatformApiKey(input: { organizationId: string; keyI
     body: JSON.stringify(input),
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
-    throw new MarketplaceApiError(response.status, body?.error || "API Key 撤销失败");
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "API Key 撤销失败",
+    );
   }
 }
 
@@ -479,39 +591,75 @@ export interface PlatformOidcClientRecord {
   matchplane?: Record<string, unknown>;
 }
 
-export async function getPlatformOidcClients(): Promise<PlatformOidcClientRecord[]> {
-  const response = await fetch("/api/platform/oidc/clients", { credentials: "include", headers: { accept: "application/json" } });
-  const body = await response.json().catch(() => null) as { clients?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "OIDC 客户端列表读取失败");
-  return Array.isArray(body?.clients) ? body.clients as PlatformOidcClientRecord[] : [];
+export async function getPlatformOidcClients(): Promise<
+  PlatformOidcClientRecord[]
+> {
+  const response = await fetch("/api/platform/oidc/clients", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = (await response.json().catch(() => null)) as {
+    clients?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "OIDC 客户端列表读取失败",
+    );
+  return Array.isArray(body?.clients)
+    ? (body.clients as PlatformOidcClientRecord[])
+    : [];
 }
 
 export async function createPlatformOidcClient(input: {
   subplatformRegistrationId: string;
   clientName: string;
   redirectUris: string[];
-}): Promise<PlatformOidcClientRecord & { clientSecret?: string; client_secret?: string }> {
+}): Promise<
+  PlatformOidcClientRecord & { clientSecret?: string; client_secret?: string }
+> {
   const response = await fetch("/api/platform/oidc/clients", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as PlatformOidcClientRecord & { client_id?: string; clientSecret?: string; client_secret?: string; error?: string } | null;
+  const body = (await response.json().catch(() => null)) as
+    | (PlatformOidcClientRecord & {
+        client_id?: string;
+        clientSecret?: string;
+        client_secret?: string;
+        error?: string;
+      })
+    | null;
   const clientId = body?.clientId || body?.client_id;
-  if (!response.ok || !clientId) throw new MarketplaceApiError(response.status, body?.error || "OIDC 客户端创建失败");
+  if (!response.ok || !clientId)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "OIDC 客户端创建失败",
+    );
   return { ...body, clientId };
 }
 
-export async function updatePlatformOidcClient(input: { clientId: string; action: "enable" | "disable" | "rotate-secret" }): Promise<Record<string, unknown>> {
+export async function updatePlatformOidcClient(input: {
+  clientId: string;
+  action: "enable" | "disable" | "rotate-secret";
+}): Promise<Record<string, unknown>> {
   const response = await fetch("/api/platform/oidc/clients", {
     method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as Record<string, unknown> & { error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "OIDC 客户端更新失败");
+  const body = (await response.json().catch(() => null)) as
+    | (Record<string, unknown> & { error?: string })
+    | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "OIDC 客户端更新失败",
+    );
   return body || {};
 }
 
@@ -535,14 +683,25 @@ export interface FederationBindingRecord {
   activatedAt?: string | null;
 }
 
-export async function getFederationBindings(): Promise<FederationBindingRecord[]> {
+export async function getFederationBindings(): Promise<
+  FederationBindingRecord[]
+> {
   const response = await fetch("/api/platform/federation/bindings", {
     credentials: "include",
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null) as { bindings?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "联邦节点列表读取失败");
-  return Array.isArray(body?.bindings) ? body.bindings as FederationBindingRecord[] : [];
+  const body = (await response.json().catch(() => null)) as {
+    bindings?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "联邦节点列表读取失败",
+    );
+  return Array.isArray(body?.bindings)
+    ? (body.bindings as FederationBindingRecord[])
+    : [];
 }
 
 export async function createFederationInvite(input: {
@@ -563,7 +722,7 @@ export async function createFederationInvite(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as {
+  const body = (await response.json().catch(() => null)) as {
     inviteId?: string;
     domainId?: string;
     parentOrganizationId?: string;
@@ -572,8 +731,16 @@ export async function createFederationInvite(input: {
     enrollmentUrl?: string;
     error?: string;
   } | null;
-  if (!response.ok || !body?.inviteId || !body.enrollmentToken || !body.enrollmentUrl) {
-    throw new MarketplaceApiError(response.status, body?.error || "联邦入驻邀请创建失败");
+  if (
+    !response.ok ||
+    !body?.inviteId ||
+    !body.enrollmentToken ||
+    !body.enrollmentUrl
+  ) {
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "联邦入驻邀请创建失败",
+    );
   }
   return body as {
     inviteId: string;
@@ -596,12 +763,29 @@ export async function activateFederationBinding(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as FederationBindingRecord & { bindingId?: string; routing?: string; error?: string } | null;
-  if (!response.ok || !body?.bindingId) throw new MarketplaceApiError(response.status, body?.error || "联邦节点激活失败");
-  return { ...body, id: body.bindingId, bindingId: body.bindingId, routing: body.routing || "enabled" };
+  const body = (await response.json().catch(() => null)) as
+    | (FederationBindingRecord & {
+        bindingId?: string;
+        routing?: string;
+        error?: string;
+      })
+    | null;
+  if (!response.ok || !body?.bindingId)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "联邦节点激活失败",
+    );
+  return {
+    ...body,
+    id: body.bindingId,
+    bindingId: body.bindingId,
+    routing: body.routing || "enabled",
+  };
 }
 
-export async function revokeFederationBinding(bindingId: string): Promise<void> {
+export async function revokeFederationBinding(
+  bindingId: string,
+): Promise<void> {
   const response = await fetch("/api/platform/federation/bindings", {
     method: "PATCH",
     credentials: "include",
@@ -609,21 +793,43 @@ export async function revokeFederationBinding(bindingId: string): Promise<void> 
     body: JSON.stringify({ bindingId, status: "revoked" }),
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
-    throw new MarketplaceApiError(response.status, body?.error || "联邦节点撤销失败");
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "联邦节点撤销失败",
+    );
   }
 }
 
-export async function probeFederationBinding(bindingId: string): Promise<{ status: string; lastHealthAt?: string; lastError?: string | null }> {
+export async function probeFederationBinding(bindingId: string): Promise<{
+  status: string;
+  lastHealthAt?: string;
+  lastError?: string | null;
+}> {
   const response = await fetch("/api/platform/federation/bindings/health", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({ bindingId }),
   });
-  const body = await response.json().catch(() => null) as { status?: string; lastHealthAt?: string; lastError?: string | null; error?: string } | null;
-  if (!response.ok || !body?.status) throw new MarketplaceApiError(response.status, body?.error || "联邦节点健康检查失败");
-  return { status: body.status, lastHealthAt: body.lastHealthAt, lastError: body.lastError };
+  const body = (await response.json().catch(() => null)) as {
+    status?: string;
+    lastHealthAt?: string;
+    lastError?: string | null;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.status)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "联邦节点健康检查失败",
+    );
+  return {
+    status: body.status,
+    lastHealthAt: body.lastHealthAt,
+    lastError: body.lastError,
+  };
 }
 
 export interface PlatformChildSummary {
@@ -657,45 +863,93 @@ export interface StoreSummary {
   };
 }
 
+export interface StoreCollaboratorInvite {
+  storeId: string;
+  registrationUrl: string;
+  expiresAt: string;
+}
+
 export interface MallSettings {
   name: string;
   slug: string;
   version: number;
   logoUrl?: string | null;
+  customPlaceholderPhrases?: string[];
+  includeActiveProductTitles?: boolean;
+  activeProductTitleCount?: number;
+  placeholderPhrases?: string[];
 }
 
 export async function getMallSettings(): Promise<MallSettings> {
-  const response = await fetch("/api/mall/settings", { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
-  const body = await response.json().catch(() => null) as { mall?: MallSettings; error?: string } | null;
-  if (!response.ok || !body?.mall) throw new MarketplaceApiError(response.status, body?.error || "商城设置读取失败");
+  const response = await fetch("/api/mall/settings", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    mall?: MallSettings;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.mall)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "商城设置读取失败",
+    );
   return body.mall;
 }
 
-export async function saveMallSettings(input: { name: string; expectedVersion: number }): Promise<MallSettings> {
+export async function saveMallSettings(input: {
+  name: string;
+  expectedVersion: number;
+  placeholderPhrases?: string[];
+  includeActiveProductTitles?: boolean;
+}): Promise<MallSettings> {
   const response = await fetch("/api/mall/settings", {
     method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { mall?: MallSettings; error?: string } | null;
-  if (!response.ok || !body?.mall) throw new MarketplaceApiError(response.status, body?.error || "商城名称保存失败");
+  const body = (await response.json().catch(() => null)) as {
+    mall?: MallSettings;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.mall)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "商城名称保存失败",
+    );
   return body.mall;
 }
 
-export async function uploadMallBrandLogo(input: { file: File; expectedVersion: number }): Promise<MallSettings> {
+export async function uploadMallBrandLogo(input: {
+  file: File;
+  expectedVersion: number;
+}): Promise<MallSettings> {
   if (input.file.size < 1 || input.file.size > 4 * 1024 * 1024) {
     throw new MarketplaceApiError(413, "Logo 图片不能超过 4 MiB");
   }
-  const dataBase64 = bytesToBase64(new Uint8Array(await input.file.arrayBuffer()));
+  const dataBase64 = bytesToBase64(
+    new Uint8Array(await input.file.arrayBuffer()),
+  );
   const response = await fetch("/api/mall/logo", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ dataBase64, expectedVersion: input.expectedVersion }),
+    body: JSON.stringify({
+      dataBase64,
+      expectedVersion: input.expectedVersion,
+    }),
   });
-  const body = await response.json().catch(() => null) as { mall?: MallSettings; error?: string } | null;
-  if (!response.ok || !body?.mall) throw new MarketplaceApiError(response.status, body?.error || "商城 Logo 保存失败");
+  const body = (await response.json().catch(() => null)) as {
+    mall?: MallSettings;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.mall)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "商城 Logo 保存失败",
+    );
   return body.mall;
 }
 
@@ -714,10 +968,18 @@ export interface MallLegalDocuments {
 }
 
 export async function getMallLegalDocuments(): Promise<MallLegalDocuments> {
-  const response = await fetch("/api/mall/legal", { headers: { accept: "application/json" }, cache: "no-store" });
-  const body = await response.json().catch(() => null) as MallLegalDocuments & { error?: string } | null;
+  const response = await fetch("/api/mall/legal", {
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as
+    | (MallLegalDocuments & { error?: string })
+    | null;
   if (!response.ok || !body?.documents?.terms || !body.documents.privacy) {
-    throw new MarketplaceApiError(response.status, body?.error || "法律页面读取失败");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "法律页面读取失败",
+    );
   }
   return body;
 }
@@ -734,9 +996,14 @@ export async function saveMallLegalDocuments(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as MallLegalDocuments & { error?: string } | null;
+  const body = (await response.json().catch(() => null)) as
+    | (MallLegalDocuments & { error?: string })
+    | null;
   if (!response.ok || !body?.documents?.terms || !body.documents.privacy) {
-    throw new MarketplaceApiError(response.status, body?.error || "法律页面保存失败");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "法律页面保存失败",
+    );
   }
   return body;
 }
@@ -749,26 +1016,47 @@ export interface AccountProfile {
 }
 
 export async function getAccountProfile(): Promise<AccountProfile> {
-  const response = await fetch("/api/account/profile", { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
-  const body = await response.json().catch(() => null) as { profile?: AccountProfile; error?: string } | null;
-  if (!response.ok || !body?.profile) throw new MarketplaceApiError(response.status, body?.error || "个人资料读取失败");
+  const response = await fetch("/api/account/profile", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    profile?: AccountProfile;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.profile)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "个人资料读取失败",
+    );
   return body.profile;
 }
 
-export async function saveAccountProfile(input: { bio: string }): Promise<AccountProfile> {
+export async function saveAccountProfile(input: {
+  bio: string;
+}): Promise<AccountProfile> {
   const response = await fetch("/api/account/profile", {
     method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { profile?: AccountProfile; error?: string } | null;
-  if (!response.ok || !body?.profile) throw new MarketplaceApiError(response.status, body?.error || "个人资料保存失败");
+  const body = (await response.json().catch(() => null)) as {
+    profile?: AccountProfile;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.profile)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "个人资料保存失败",
+    );
   return body.profile;
 }
 
 export async function uploadAccountAvatar(file: File): Promise<string> {
-  if (file.size < 1 || file.size > 4 * 1024 * 1024) throw new MarketplaceApiError(413, "头像图片不能超过 4 MiB");
+  if (file.size < 1 || file.size > 4 * 1024 * 1024)
+    throw new MarketplaceApiError(413, "头像图片不能超过 4 MiB");
   const dataBase64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
   const response = await fetch("/api/account/avatar", {
     method: "POST",
@@ -776,8 +1064,15 @@ export async function uploadAccountAvatar(file: File): Promise<string> {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({ dataBase64 }),
   });
-  const body = await response.json().catch(() => null) as { image?: string; error?: string } | null;
-  if (!response.ok || !body?.image) throw new MarketplaceApiError(response.status, body?.error || "头像保存失败");
+  const body = (await response.json().catch(() => null)) as {
+    image?: string;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.image)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "头像保存失败",
+    );
   return body.image;
 }
 
@@ -786,9 +1081,16 @@ export async function getStores(): Promise<StoreSummary[]> {
     credentials: "include",
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null) as { stores?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "店铺目录读取失败");
-  return Array.isArray(body?.stores) ? body.stores as StoreSummary[] : [];
+  const body = (await response.json().catch(() => null)) as {
+    stores?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "店铺目录读取失败",
+    );
+  return Array.isArray(body?.stores) ? (body.stores as StoreSummary[]) : [];
 }
 
 export async function getOwnedStores(): Promise<StoreSummary[]> {
@@ -797,9 +1099,16 @@ export async function getOwnedStores(): Promise<StoreSummary[]> {
     headers: { accept: "application/json" },
     cache: "no-store",
   });
-  const body = await response.json().catch(() => null) as { stores?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "我的店铺读取失败");
-  return Array.isArray(body?.stores) ? body.stores as StoreSummary[] : [];
+  const body = (await response.json().catch(() => null)) as {
+    stores?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "我的店铺读取失败",
+    );
+  return Array.isArray(body?.stores) ? (body.stores as StoreSummary[]) : [];
 }
 
 export async function getManagedStores(): Promise<StoreSummary[]> {
@@ -808,9 +1117,16 @@ export async function getManagedStores(): Promise<StoreSummary[]> {
     headers: { accept: "application/json" },
     cache: "no-store",
   });
-  const body = await response.json().catch(() => null) as { stores?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "店铺计费读取失败");
-  return Array.isArray(body?.stores) ? body.stores as StoreSummary[] : [];
+  const body = (await response.json().catch(() => null)) as {
+    stores?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "店铺计费读取失败",
+    );
+  return Array.isArray(body?.stores) ? (body.stores as StoreSummary[]) : [];
 }
 
 export async function saveStoreCommercialTerms(input: {
@@ -823,56 +1139,178 @@ export async function saveStoreCommercialTerms(input: {
   status: "draft" | "active" | "paused";
   expectedVersion: number;
 }): Promise<NonNullable<StoreSummary["commercialTerms"]>> {
-  const response = await fetch(`/api/stores/${encodeURIComponent(input.storeId)}/commercial-terms`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const body = await response.json().catch(() => null) as { commercialTerms?: NonNullable<StoreSummary["commercialTerms"]>; error?: string } | null;
-  if (!response.ok || !body?.commercialTerms) throw new MarketplaceApiError(response.status, body?.error || "店铺计费保存失败");
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(input.storeId)}/commercial-terms`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    commercialTerms?: NonNullable<StoreSummary["commercialTerms"]>;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.commercialTerms)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "店铺计费保存失败",
+    );
   return body.commercialTerms;
 }
 
-export async function createHostedStore(input: { name: string; slug: string; description: string }): Promise<StoreSummary> {
+export async function createHostedStore(input: {
+  name: string;
+  description: string;
+}): Promise<StoreSummary> {
   const response = await fetch("/api/stores", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { store?: StoreSummary; error?: string } | null;
-  if (!response.ok || !body?.store) throw new MarketplaceApiError(response.status, body?.error || "店铺创建失败");
+  const body = (await response.json().catch(() => null)) as {
+    store?: StoreSummary;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.store)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "店铺创建失败",
+    );
   return body.store;
 }
 
-export async function getStoreManagement(storeId: string): Promise<{ store: StoreSummary; canManageStore: boolean }> {
-  const response = await fetch(`/api/stores/${encodeURIComponent(storeId)}`, { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
-  const body = await response.json().catch(() => null) as { store?: StoreSummary; canManageStore?: boolean; error?: string } | null;
-  if (!response.ok || !body?.store) throw new MarketplaceApiError(response.status, body?.error || "店铺资料读取失败");
+export async function createStoreCollaboratorInvite(
+  storeId: string,
+): Promise<StoreCollaboratorInvite> {
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(storeId)}/invites`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { accept: "application/json" },
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    invite?: StoreCollaboratorInvite;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.invite)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "邀请链接创建失败",
+    );
+  return body.invite;
+}
+
+export async function getStoreManagement(
+  storeId: string,
+): Promise<{ store: StoreSummary; canManageStore: boolean }> {
+  const response = await fetch(`/api/stores/${encodeURIComponent(storeId)}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    store?: StoreSummary;
+    canManageStore?: boolean;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.store)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "店铺资料读取失败",
+    );
   return { store: body.store, canManageStore: body.canManageStore === true };
 }
 
-export async function updateStoreManagement(input: { storeId: string; displayName: string; description: string; expectedVersion: number }): Promise<StoreSummary> {
-  const response = await fetch(`/api/stores/${encodeURIComponent(input.storeId)}`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const body = await response.json().catch(() => null) as { store?: StoreSummary; error?: string } | null;
-  if (!response.ok || !body?.store) throw new MarketplaceApiError(response.status, body?.error || "店铺资料保存失败");
+export async function getStoreFinanceReport(input: {
+  storeId: string;
+  from: string;
+  to: string;
+  signal?: AbortSignal;
+}): Promise<StoreFinanceReport> {
+  const query = new URLSearchParams({ from: input.from, to: input.to });
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(input.storeId)}/finance?${query}`,
+    {
+      credentials: "include",
+      headers: { accept: "application/json" },
+      cache: "no-store",
+      signal: input.signal,
+    },
+  );
+  const body = (await response.json().catch(() => null)) as
+    | (StoreFinanceReport & { error?: string })
+    | null;
+  if (!response.ok || !body)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "财务报表读取失败",
+    );
+  if (body.source_type !== "store" || body.source_ref !== input.storeId) {
+    throw new MarketplaceApiError(502, "财务报表店铺范围校验失败");
+  }
+  return body;
+}
+
+export async function updateStoreManagement(input: {
+  storeId: string;
+  displayName: string;
+  description: string;
+  expectedVersion: number;
+}): Promise<StoreSummary> {
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(input.storeId)}`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    store?: StoreSummary;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.store)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "店铺资料保存失败",
+    );
   return body.store;
 }
 
-export async function getPlatformChildren(path = "/"): Promise<PlatformChildSummary[]> {
-  const response = await fetch(`/api/platform/children?path=${encodeURIComponent(path)}`, {
-    credentials: "include",
-    headers: { accept: "application/json" },
-  });
-  const body = await response.json().catch(() => null) as { children?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "平台节点读取失败");
-  return Array.isArray(body?.children) ? body.children as PlatformChildSummary[] : [];
+export async function getPlatformChildren(
+  path = "/",
+): Promise<PlatformChildSummary[]> {
+  const response = await fetch(
+    `/api/platform/children?path=${encodeURIComponent(path)}`,
+    {
+      credentials: "include",
+      headers: { accept: "application/json" },
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    children?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "平台节点读取失败",
+    );
+  return Array.isArray(body?.children)
+    ? (body.children as PlatformChildSummary[])
+    : [];
 }
 
 export interface SubplatformOrganizationRecord {
@@ -977,7 +1415,10 @@ export interface PlatformAdminInvite {
 export interface ManagedPlatformRouterConfig {
   endpoint: string;
   model: string;
-  protocol: "openai-compatible" | "anthropic-messages" | "gemini-generate-content";
+  protocol:
+    | "openai-compatible"
+    | "anthropic-messages"
+    | "gemini-generate-content";
   enabled: boolean;
   credentialConfigured: boolean;
   assistantInstructions: string;
@@ -1042,7 +1483,14 @@ export interface MarketplaceOffer {
   display_name: string;
   attributes: Record<string, unknown>;
   terms: Record<string, unknown>;
-  status: "draft" | "active" | "reserved" | "sold" | "withdrawn" | "expired" | string;
+  status:
+    | "draft"
+    | "active"
+    | "reserved"
+    | "sold"
+    | "withdrawn"
+    | "expired"
+    | string;
   published_at?: string | null;
   expires_at?: string | null;
   version: number;
@@ -1153,6 +1601,7 @@ export interface RecommendedBackendListing {
   currency_scale?: number;
   platform_path?: string;
   subplatform?: string;
+  like_total?: string;
   commission_bps?: number;
   commission_collection?: string;
   status?: string;
@@ -1178,20 +1627,31 @@ export interface MallBrowseResponse {
   recommendations: RecommendedBackendListing[];
 }
 
-export async function browseMallCatalog(input: { storePath?: string } = {}): Promise<MallBrowseResponse> {
-  const query = input.storePath ? `?storePath=${encodeURIComponent(input.storePath)}` : "";
+export async function browseMallCatalog(
+  input: { storePath?: string } = {},
+): Promise<MallBrowseResponse> {
+  const query = input.storePath
+    ? `?storePath=${encodeURIComponent(input.storePath)}`
+    : "";
   const response = await fetch(`/api/mall/search${query}`, {
     credentials: "include",
     headers: { accept: "application/json" },
     cache: "no-store",
   });
-  const body = await response.json().catch(() => null) as (MallBrowseResponse & { error?: string }) | null;
+  const body = (await response.json().catch(() => null)) as
+    | (MallBrowseResponse & { error?: string })
+    | null;
   if (!response.ok || !body) {
-    throw new MarketplaceApiError(response.status, body?.error || "商品目录暂时不可用");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "商品目录暂时不可用",
+    );
   }
   return {
     stores: Array.isArray(body.stores) ? body.stores : [],
-    recommendations: Array.isArray(body.recommendations) ? body.recommendations : [],
+    recommendations: Array.isArray(body.recommendations)
+      ? body.recommendations
+      : [],
   };
 }
 
@@ -1205,27 +1665,309 @@ export async function searchMallCatalog(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as (MallSearchResponse & { error?: string }) | null;
+  const body = (await response.json().catch(() => null)) as
+    | (MallSearchResponse & { error?: string })
+    | null;
   if (!response.ok || !body) {
-    throw new MarketplaceApiError(response.status, body?.error || "商城搜索暂时不可用");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "商城搜索暂时不可用",
+    );
   }
   return body;
 }
 
+export async function getShoppingMemory(): Promise<ShoppingMemorySnapshot> {
+  const response = await fetch("/api/mall/memory", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    memory?: ShoppingMemorySnapshot;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.memory)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "购物记忆读取失败",
+    );
+  return body.memory;
+}
+
+export async function saveShoppingMemory(
+  input: ShoppingMemoryMutation,
+): Promise<ShoppingMemorySnapshot> {
+  const response = await fetch("/api/mall/memory", {
+    method: "PUT",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    memory?: ShoppingMemorySnapshot;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.memory)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "购物记忆保存失败",
+    );
+  return body.memory;
+}
+
+export async function deleteShoppingMemory(): Promise<ShoppingMemorySnapshot> {
+  const response = await fetch("/api/mall/memory", {
+    method: "DELETE",
+    credentials: "include",
+    headers: { accept: "application/json" },
+  });
+  const body = (await response.json().catch(() => null)) as {
+    memory?: ShoppingMemorySnapshot;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.memory)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "购物记忆删除失败",
+    );
+  return body.memory;
+}
+
+export interface MallAssistantMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface MallAssistantChoiceAction {
+  type: "choice";
+  id: string;
+  question: string;
+  options: Array<{ id: string; label: string; value: string }>;
+}
+
+export interface MallAssistantProductsAction {
+  type: "products";
+  productIds: string[];
+}
+
+export interface MallAssistantHumanHandoffAction {
+  type: "human_handoff";
+  id: string;
+  summary: string;
+  intent: "warm" | "high" | "urgent";
+  productIds: string[];
+}
+
+export interface MallAssistantContactConsentAction {
+  type: "contact_consent";
+  id: string;
+  reason: string;
+  productId: string;
+}
+
+export type MallAssistantUiAction =
+  | MallAssistantChoiceAction
+  | MallAssistantProductsAction
+  | MallAssistantHumanHandoffAction
+  | MallAssistantContactConsentAction;
+
+export interface VerifiedContactChannel {
+  type: "email" | "phone";
+  value: string;
+}
+
+export async function getVerifiedContactChannels(): Promise<
+  VerifiedContactChannel[]
+> {
+  const response = await fetch("/api/account/contact-channels", {
+    cache: "no-store",
+    credentials: "include",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    channels?: VerifiedContactChannel[];
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "已验证联系方式暂时无法读取",
+    );
+  return Array.isArray(body?.channels) ? body.channels : [];
+}
+
+export interface StoreCustomerRecord {
+  id: string;
+  participantId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  analysis: string;
+  intent: "warm" | "high" | "urgent";
+  productIds: string[];
+  products: Array<{
+    id: string;
+    name: string;
+    imageUrl: string | null;
+    price: string;
+  }>;
+  handoffStatus: string;
+  stage:
+    | "new"
+    | "discovering"
+    | "qualified"
+    | "contact_requested"
+    | "contact_exchanged"
+    | "won"
+    | "lost";
+  favorite: boolean;
+  contactConsentStatus: "not_requested" | "pending" | "accepted" | "declined";
+  staffNotes: string | null;
+  lastActivityAt: string;
+  createdAt: string;
+  version: number;
+}
+
+export async function getStoreCustomers(
+  storeId: string,
+): Promise<StoreCustomerRecord[]> {
+  const response = await fetch(`/api/stores/${encodeURIComponent(storeId)}/customers`, {
+    cache: "no-store",
+    credentials: "include",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    customers?: StoreCustomerRecord[];
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(response.status, body?.error || "客户列表暂时无法读取");
+  return Array.isArray(body?.customers) ? body.customers : [];
+}
+
+export async function notifyStoreCustomerHandoff(
+  storePath: string,
+  handoffId: string,
+): Promise<number> {
+  const response = await fetch(
+    "/api/mall/handoffs/notify",
+    {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ handoffId, storePath }),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    notified?: number;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "店员通知发送失败",
+    );
+  return Number(body?.notified ?? 0);
+}
+
+export async function updateStoreCustomer(input: {
+  storeId: string;
+  customerId: string;
+  expectedVersion: number;
+  favorite?: boolean;
+  stage?: StoreCustomerRecord["stage"];
+  staffNotes?: string | null;
+}): Promise<StoreCustomerRecord> {
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(input.storeId)}/customers`,
+    {
+      method: "PATCH",
+      cache: "no-store",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: input.customerId,
+        expectedVersion: input.expectedVersion,
+        ...(input.favorite !== undefined ? { favorite: input.favorite } : {}),
+        ...(input.stage !== undefined ? { stage: input.stage } : {}),
+        ...(input.staffNotes !== undefined
+          ? { staffNotes: input.staffNotes }
+          : {}),
+      }),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    customer?: StoreCustomerRecord;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.customer)
+    throw new MarketplaceApiError(response.status, body?.error || "客户记录更新失败");
+  return body.customer;
+}
+
 export async function askMallShoppingAssistant(
-  question: string,
-): Promise<{ requestId: string; answer: string; recommendations: RecommendedBackendListing[] }> {
+  messages: MallAssistantMessage[],
+  context: { storePath?: string } = {},
+): Promise<{
+  requestId: string;
+  answer: string;
+  recommendations: RecommendedBackendListing[];
+  uiActions: MallAssistantUiAction[];
+}> {
   const response = await fetch("/api/mall/assistant", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({
+      messages: messages.slice(-24),
+      ...(context.storePath ? { storePath: context.storePath } : {}),
+    }),
   });
-  const body = await response.json().catch(() => null) as { requestId?: string; answer?: string; recommendations?: unknown; error?: string } | null;
+  const body = (await response.json().catch(() => null)) as {
+    requestId?: string;
+    answer?: string;
+    recommendations?: unknown;
+    uiActions?: unknown;
+    error?: string;
+  } | null;
   if (!response.ok || !body?.requestId || !body.answer) {
-    throw new MarketplaceApiError(response.status, body?.error || "商城 AI 导购暂时不可用");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "商城 AI 导购暂时不可用",
+    );
   }
-  return { requestId: body.requestId, answer: body.answer, recommendations: Array.isArray(body.recommendations) ? body.recommendations as RecommendedBackendListing[] : [] };
+  return {
+    requestId: body.requestId,
+    answer: body.answer,
+    recommendations: Array.isArray(body.recommendations)
+      ? (body.recommendations as RecommendedBackendListing[])
+      : [],
+    uiActions: Array.isArray(body.uiActions)
+      ? (body.uiActions as MallAssistantUiAction[])
+      : [],
+  };
+}
+
+export async function reviseShoppingMemory(input: {
+  suggestion: string;
+  expectedVersion: number;
+}): Promise<{ memory: ShoppingMemorySnapshot; message: string }> {
+  const response = await fetch("/api/mall/memory", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    memory?: ShoppingMemorySnapshot;
+    message?: string;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.memory || !body.message)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "AI 暂时无法修改购物记忆",
+    );
+  return { memory: body.memory, message: body.message };
 }
 
 export interface NationalIdentityConfig {
@@ -1241,9 +1983,20 @@ export interface NationalIdentityConfig {
 }
 
 export async function getNationalIdentityConfig(): Promise<NationalIdentityConfig | null> {
-  const response = await fetch("/api/platform/national-identity/config", { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
-  const body = await response.json().catch(() => null) as { config?: NationalIdentityConfig | null; error?: string } | null;
-  if (!response.ok || !body) throw new MarketplaceApiError(response.status, body?.error || "国家网络身份认证配置读取失败");
+  const response = await fetch("/api/platform/national-identity/config", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: NationalIdentityConfig | null;
+    error?: string;
+  } | null;
+  if (!response.ok || !body)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "国家网络身份认证配置读取失败",
+    );
   return body.config ?? null;
 }
 
@@ -1264,9 +2017,20 @@ export async function saveNationalIdentityConfig(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { config?: NationalIdentityConfig; restartRequired?: boolean; error?: string } | null;
-  if (!response.ok || !body?.config) throw new MarketplaceApiError(response.status, body?.error || "国家网络身份认证配置保存失败");
-  return { config: body.config, restartRequired: body.restartRequired === true };
+  const body = (await response.json().catch(() => null)) as {
+    config?: NationalIdentityConfig;
+    restartRequired?: boolean;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.config)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "国家网络身份认证配置保存失败",
+    );
+  return {
+    config: body.config,
+    restartRequired: body.restartRequired === true,
+  };
 }
 
 export interface ContactResponse {
@@ -1341,22 +2105,31 @@ function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunkSize = 0x8000;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, offset + chunkSize),
+    );
   }
   return btoa(binary);
 }
 
-function inferBrowserMediaKind(mediaType: string): "image" | "document" | "video" | "audio" | "file" {
+function inferBrowserMediaKind(
+  mediaType: string,
+): "image" | "document" | "video" | "audio" | "file" {
   if (mediaType.startsWith("image/")) return "image";
   if (mediaType.startsWith("video/")) return "video";
   if (mediaType.startsWith("audio/")) return "audio";
-  if (mediaType === "application/pdf" || mediaType === "application/json" || mediaType === "text/plain") return "document";
+  if (
+    mediaType === "application/pdf" ||
+    mediaType === "application/json" ||
+    mediaType === "text/plain"
+  )
+    return "document";
   return "file";
 }
 
 async function readJson<T>(response: Response): Promise<T | null> {
   try {
-    return await response.json() as T;
+    return (await response.json()) as T;
   } catch {
     return null;
   }
@@ -1380,14 +2153,22 @@ export async function redeemPlatformAdminInvite(token: string): Promise<{
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({ token }),
   });
-  const body = await response.json().catch(() => null) as {
+  const body = (await response.json().catch(() => null)) as {
     redeemed?: boolean;
     organizationId?: string;
     role?: "rootAdmin" | "subplatform_admin";
     error?: string;
   } | null;
-  if (!response.ok || body?.redeemed !== true || !body.organizationId || !body.role) {
-    throw new MarketplaceApiError(response.status, body?.error || "管理员注册链接兑换失败");
+  if (
+    !response.ok ||
+    body?.redeemed !== true ||
+    !body.organizationId ||
+    !body.role
+  ) {
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "管理员注册链接兑换失败",
+    );
   }
   return {
     redeemed: true,
@@ -1409,18 +2190,23 @@ function authorization(session: PartySession): string {
   return `Bearer ${session.accessToken}`;
 }
 
-async function request<T>(path: string, init: RequestInit = {}, session?: PartySession): Promise<T> {
+async function request<T>(
+  path: string,
+  init: RequestInit = {},
+  session?: PartySession,
+): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("accept", "application/json");
   if (init.body) headers.set("content-type", "application/json");
   if (session) headers.set("authorization", authorization(session));
-  if (session?.platformPath) headers.set("x-matchplane-platform-path", session.platformPath);
+  if (session?.platformPath)
+    headers.set("x-matchplane-platform-path", session.platformPath);
   const response = await fetch(`${apiBase}${path}`, { ...init, headers });
   if (!response.ok) {
     let message = `请求失败（${response.status}）`;
     try {
       const body = (await response.json()) as { error?: string };
-      if (body.error) message = body.error;
+      if (body.error) message = presentMarketplaceError(body.error);
     } catch {
       // Preserve the HTTP status when an upstream error is not JSON.
     }
@@ -1430,18 +2216,45 @@ async function request<T>(path: string, init: RequestInit = {}, session?: PartyS
   return (await response.json()) as T;
 }
 
+function presentMarketplaceError(message: string): string {
+  if (
+    message === "party bearer token is invalid" ||
+    message === "party bearer token is required"
+  )
+    return "登录状态已过期，请重新读取";
+  if (
+    message.includes("marketplace offer version is stale") ||
+    message.includes("marketplace offer cannot be edited") ||
+    message.includes("marketplace offer cannot be withdrawn")
+  )
+    return "商品已被其他会话更新或当前状态不允许此操作，请重新读取后重试";
+  if (message.includes("marketplace offer belongs to another"))
+    return "当前账号无权管理这件商品";
+  return message;
+}
+
 async function paymentRequest<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  return paymentAdminRequest<T>(`payment-mode${path.includes("?") ? path.slice(path.indexOf("?")) : ""}`, init);
+  return paymentAdminRequest<T>(
+    `payment-mode${path.includes("?") ? path.slice(path.indexOf("?")) : ""}`,
+    init,
+  );
 }
 
-async function paymentAdminRequest<T>(resource: string, init: RequestInit = {}): Promise<T> {
+async function paymentAdminRequest<T>(
+  resource: string,
+  init: RequestInit = {},
+): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("accept", "application/json");
   if (init.body) headers.set("content-type", "application/json");
-  const response = await fetch(`/api/admin/${resource}`, { ...init, headers, credentials: "include" });
+  const response = await fetch(`/api/admin/${resource}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
   if (!response.ok) {
     let message = `支付服务请求失败（${response.status}）`;
     try {
@@ -1469,8 +2282,14 @@ export async function getPlatformSetupStatus(): Promise<PlatformSetupStatus> {
     credentials: "include",
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null) as Partial<PlatformSetupStatus> | null;
-  if (!response.ok || !body || (body.status !== "ok" && body.status !== "degraded")) {
+  const body = (await response
+    .json()
+    .catch(() => null)) as Partial<PlatformSetupStatus> | null;
+  if (
+    !response.ok ||
+    !body ||
+    (body.status !== "ok" && body.status !== "degraded")
+  ) {
     throw new MarketplaceApiError(response.status, "平台初始化状态暂时不可用");
   }
   return body as PlatformSetupStatus;
@@ -1482,9 +2301,14 @@ export async function getPlatformAiStatus(): Promise<PlatformAiStatus> {
     headers: { accept: "application/json" },
     cache: "no-store",
   });
-  const body = await response.json().catch(() => null) as PlatformAiStatus & { error?: string } | null;
+  const body = (await response.json().catch(() => null)) as
+    | (PlatformAiStatus & { error?: string })
+    | null;
   if (!response.ok || !body?.router || !body.auth) {
-    throw new MarketplaceApiError(response.status, body?.error || "AI 与登录配置读取失败");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "AI 与登录配置读取失败",
+    );
   }
   return body;
 }
@@ -1496,35 +2320,79 @@ export async function testPlatformAi(): Promise<PlatformAiProbeResult> {
     credentials: "include",
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null) as (PlatformAiProbeResult & { error?: string }) | null;
+  const body = (await response.json().catch(() => null)) as
+    | (PlatformAiProbeResult & { error?: string })
+    | null;
   if (!response.ok || !body?.status) {
-    throw new MarketplaceApiError(response.status, body?.message || body?.error || "AI 连接测试失败");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.message || body?.error || "AI 连接测试失败",
+    );
   }
   return body;
 }
 
 export async function getManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterConfig | null> {
-  const response = await fetch("/api/platform/ai/config", { credentials: "include", headers: { accept: "application/json" }, cache: "no-store" });
-  const body = await response.json().catch(() => null) as { config?: ManagedPlatformRouterConfig | null; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "AI 配置读取失败");
+  const response = await fetch("/api/platform/ai/config", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: ManagedPlatformRouterConfig | null;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "AI 配置读取失败",
+    );
   return body?.config ?? null;
 }
 
-export async function saveManagedPlatformRouterConfig(input: Omit<ManagedPlatformRouterConfig, "credentialConfigured"> & { apiKey?: string }): Promise<ManagedPlatformRouterConfig> {
+export async function saveManagedPlatformRouterConfig(
+  input: Omit<ManagedPlatformRouterConfig, "credentialConfigured"> & {
+    apiKey?: string;
+  },
+): Promise<ManagedPlatformRouterConfig> {
   const response = await fetch("/api/platform/ai/config", {
-    method: "PATCH", credentials: "include", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(input),
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { config?: ManagedPlatformRouterConfig; error?: string } | null;
-  if (!response.ok || !body?.config) throw new MarketplaceApiError(response.status, body?.error || "AI 配置保存失败");
+  const body = (await response.json().catch(() => null)) as {
+    config?: ManagedPlatformRouterConfig;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.config)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "AI 配置保存失败",
+    );
   return body.config;
 }
 
-export async function listManagedPlatformRouterModels(input: { endpoint: string; protocol: ManagedPlatformRouterConfig["protocol"]; apiKey?: string }): Promise<ManagedPlatformRouterModel[]> {
+export async function listManagedPlatformRouterModels(input: {
+  endpoint: string;
+  protocol: ManagedPlatformRouterConfig["protocol"];
+  apiKey?: string;
+}): Promise<ManagedPlatformRouterModel[]> {
   const response = await fetch("/api/platform/ai/models", {
-    method: "POST", credentials: "include", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(input),
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { models?: ManagedPlatformRouterModel[]; error?: string } | null;
-  if (!response.ok || !body?.models) throw new MarketplaceApiError(response.status, body?.error || "模型列表读取失败");
+  const body = (await response.json().catch(() => null)) as {
+    models?: ManagedPlatformRouterModel[];
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.models)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "模型列表读取失败",
+    );
   return body.models;
 }
 
@@ -1534,20 +2402,39 @@ export async function getRootEmailConfig(): Promise<RootEmailConfig | null> {
     headers: { accept: "application/json" },
     cache: "no-store",
   });
-  const body = await response.json().catch(() => null) as { config?: RootEmailConfig | null; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "根邮箱配置读取失败");
+  const body = (await response.json().catch(() => null)) as {
+    config?: RootEmailConfig | null;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "根邮箱配置读取失败",
+    );
   return body?.config ?? null;
 }
 
-export async function saveRootEmailConfig(input: Omit<RootEmailConfig, "credentialConfigured" | "version" | "updatedBy" | "createdAt" | "updatedAt"> & { smtpPassword?: string; expectedVersion?: number }): Promise<RootEmailConfig> {
+export async function saveRootEmailConfig(
+  input: Omit<
+    RootEmailConfig,
+    "credentialConfigured" | "version" | "updatedBy" | "createdAt" | "updatedAt"
+  > & { smtpPassword?: string; expectedVersion?: number },
+): Promise<RootEmailConfig> {
   const response = await fetch("/api/platform/email-config", {
     method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { config?: RootEmailConfig; error?: string } | null;
-  if (!response.ok || !body?.config) throw new MarketplaceApiError(response.status, body?.error || "根邮箱配置保存失败");
+  const body = (await response.json().catch(() => null)) as {
+    config?: RootEmailConfig;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.config)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "根邮箱配置保存失败",
+    );
   return body.config;
 }
 
@@ -1557,40 +2444,79 @@ export async function testRootEmailConfig(): Promise<void> {
     credentials: "include",
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null) as { error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "根邮箱测试失败");
+  const body = (await response.json().catch(() => null)) as {
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "根邮箱测试失败",
+    );
 }
 
-export async function createPlatformAdminInvite(input: { email: string; expiresHours?: number }): Promise<PlatformAdminInvite> {
+export async function createPlatformAdminInvite(input: {
+  email: string;
+  expiresHours?: number;
+}): Promise<PlatformAdminInvite> {
   const response = await fetch("/api/platform/admin-invites", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as (PlatformAdminInvite & { error?: string }) | null;
-  if (!response.ok || !body?.registrationUrl) throw new MarketplaceApiError(response.status, body?.error || "平台管理员邀请创建失败");
+  const body = (await response.json().catch(() => null)) as
+    | (PlatformAdminInvite & { error?: string })
+    | null;
+  if (!response.ok || !body?.registrationUrl)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "平台管理员邀请创建失败",
+    );
   return body;
 }
 
-export async function getPublicPlatformSiteSettings(platformPath = "/"): Promise<PlatformSiteSettings> {
-  const response = await fetch(`/api/platform/site-settings?platformPath=${encodeURIComponent(platformPath)}`, {
-    headers: { accept: "application/json" },
-    cache: "no-store",
-  });
-  const body = await response.json().catch(() => null) as { settings?: PlatformSiteSettings; error?: string } | null;
-  if (!response.ok || !body?.settings) throw new MarketplaceApiError(response.status, body?.error || "平台备案信息读取失败");
+export async function getPublicPlatformSiteSettings(
+  platformPath = "/",
+): Promise<PlatformSiteSettings> {
+  const response = await fetch(
+    `/api/platform/site-settings?platformPath=${encodeURIComponent(platformPath)}`,
+    {
+      headers: { accept: "application/json" },
+      cache: "no-store",
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    settings?: PlatformSiteSettings;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.settings)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "平台备案信息读取失败",
+    );
   return body.settings;
 }
 
-export async function getPlatformSiteSettings(organizationId: string): Promise<PlatformSiteSettings> {
-  const response = await fetch(`/api/platform/site-settings?organizationId=${encodeURIComponent(organizationId)}`, {
-    credentials: "include",
-    headers: { accept: "application/json" },
-    cache: "no-store",
-  });
-  const body = await response.json().catch(() => null) as { settings?: PlatformSiteSettings; error?: string } | null;
-  if (!response.ok || !body?.settings) throw new MarketplaceApiError(response.status, body?.error || "平台备案设置读取失败");
+export async function getPlatformSiteSettings(
+  organizationId: string,
+): Promise<PlatformSiteSettings> {
+  const response = await fetch(
+    `/api/platform/site-settings?organizationId=${encodeURIComponent(organizationId)}`,
+    {
+      credentials: "include",
+      headers: { accept: "application/json" },
+      cache: "no-store",
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    settings?: PlatformSiteSettings;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.settings)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "平台备案设置读取失败",
+    );
   return body.settings;
 }
 
@@ -1614,11 +2540,20 @@ export async function savePlatformSiteSettings(input: {
       icpRecordUrl: input.icpRecordUrl.trim() || null,
       publicSecurityNumber: input.publicSecurityNumber.trim() || null,
       publicSecurityUrl: input.publicSecurityUrl.trim() || null,
-      ...(input.expectedVersion ? { expectedVersion: input.expectedVersion } : {}),
+      ...(input.expectedVersion
+        ? { expectedVersion: input.expectedVersion }
+        : {}),
     }),
   });
-  const body = await response.json().catch(() => null) as { settings?: PlatformSiteSettings; error?: string } | null;
-  if (!response.ok || !body?.settings) throw new MarketplaceApiError(response.status, body?.error || "平台备案设置保存失败");
+  const body = (await response.json().catch(() => null)) as {
+    settings?: PlatformSiteSettings;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.settings)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "平台备案设置保存失败",
+    );
   return body.settings;
 }
 
@@ -1633,8 +2568,15 @@ export async function lookupPlatformSiteSettings(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({ action: "lookup", ...input }),
   });
-  const body = await response.json().catch(() => null) as { settings?: PlatformSiteSettingsLookup; error?: string } | null;
-  if (!response.ok || !body?.settings) throw new MarketplaceApiError(response.status, body?.error || "平台备案自动查询失败");
+  const body = (await response.json().catch(() => null)) as {
+    settings?: PlatformSiteSettingsLookup;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.settings)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "平台备案自动查询失败",
+    );
   return body.settings;
 }
 
@@ -1643,36 +2585,68 @@ export async function getPlatformDomains(): Promise<PlatformDomainRecord[]> {
     credentials: "include",
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null) as { domains?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "domain 列表读取失败");
-  return Array.isArray(body?.domains) ? body.domains as PlatformDomainRecord[] : [];
+  const body = (await response.json().catch(() => null)) as {
+    domains?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "domain 列表读取失败",
+    );
+  return Array.isArray(body?.domains)
+    ? (body.domains as PlatformDomainRecord[])
+    : [];
 }
 
-export async function createPlatformDomain(input: { slug: string; name: string }): Promise<PlatformDomainRecord> {
+export async function createPlatformDomain(input: {
+  slug: string;
+  name: string;
+}): Promise<PlatformDomainRecord> {
   const response = await fetch("/api/platform/domains", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { domain?: PlatformDomainRecord; error?: string } | null;
-  if (!response.ok || !body?.domain) throw new MarketplaceApiError(response.status, body?.error || "domain 创建失败");
+  const body = (await response.json().catch(() => null)) as {
+    domain?: PlatformDomainRecord;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.domain)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "domain 创建失败",
+    );
   return body.domain;
 }
 
-export async function updatePlatformDomain(input: { id: string; name?: string; status?: "active" | "disabled" }): Promise<PlatformDomainRecord> {
+export async function updatePlatformDomain(input: {
+  id: string;
+  name?: string;
+  status?: "active" | "disabled";
+}): Promise<PlatformDomainRecord> {
   const response = await fetch("/api/platform/domains", {
     method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { domain?: PlatformDomainRecord; error?: string } | null;
-  if (!response.ok || !body?.domain) throw new MarketplaceApiError(response.status, body?.error || "domain 更新失败");
+  const body = (await response.json().catch(() => null)) as {
+    domain?: PlatformDomainRecord;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.domain)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "domain 更新失败",
+    );
   return body.domain;
 }
 
-export async function getSubplatformOrganizations(parentOrganizationId?: string): Promise<SubplatformOrganizationRecord[]> {
+export async function getSubplatformOrganizations(
+  parentOrganizationId?: string,
+): Promise<SubplatformOrganizationRecord[]> {
   const query = parentOrganizationId
     ? `?parentOrganizationId=${encodeURIComponent(parentOrganizationId)}`
     : "";
@@ -1680,25 +2654,43 @@ export async function getSubplatformOrganizations(parentOrganizationId?: string)
     credentials: "include",
     headers: { accept: "application/json" },
   });
-  const body = await response.json().catch(() => null) as { organizations?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "子平台列表读取失败");
-  return Array.isArray(body?.organizations) ? body.organizations as SubplatformOrganizationRecord[] : [];
+  const body = (await response.json().catch(() => null)) as {
+    organizations?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "子平台列表读取失败",
+    );
+  return Array.isArray(body?.organizations)
+    ? (body.organizations as SubplatformOrganizationRecord[])
+    : [];
 }
 
-export async function uploadSubplatformArchive(file: File, parentOrganizationId?: string): Promise<SubplatformArchiveUpload> {
+export async function uploadSubplatformArchive(
+  file: File,
+  parentOrganizationId?: string,
+): Promise<SubplatformArchiveUpload> {
   const form = new FormData();
   form.set("archive", file, file.name);
   const headers = new Headers({ accept: "application/json" });
-  if (parentOrganizationId) headers.set("x-matchplane-parent-organization-id", parentOrganizationId);
+  if (parentOrganizationId)
+    headers.set("x-matchplane-parent-organization-id", parentOrganizationId);
   const response = await fetch("/api/platform/subplatforms/upload", {
     method: "POST",
     credentials: "include",
     headers,
     body: form,
   });
-  const body = await response.json().catch(() => null) as Partial<SubplatformArchiveUpload> & { error?: string } | null;
+  const body = (await response.json().catch(() => null)) as
+    | (Partial<SubplatformArchiveUpload> & { error?: string })
+    | null;
   if (!response.ok || !body?.sourceLocator || !body.sourceDigest) {
-    throw new MarketplaceApiError(response.status, body?.error || "子平台压缩包上传失败");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "子平台压缩包上传失败",
+    );
   }
   return body as SubplatformArchiveUpload;
 }
@@ -1718,18 +2710,37 @@ export async function discoverSubplatformSource(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as { intakeId?: string; state?: string; error?: string } | null;
-  if (!response.ok || !body?.intakeId) throw new MarketplaceApiError(response.status, body?.error || "子平台源码发现任务创建失败");
+  const body = (await response.json().catch(() => null)) as {
+    intakeId?: string;
+    state?: string;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.intakeId)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "子平台源码发现任务创建失败",
+    );
   return { intakeId: body.intakeId, state: body.state || "queued" };
 }
 
-export async function getSubplatformSourceIntake(intakeId: string): Promise<SubplatformSourceIntake> {
-  const response = await fetch(`/api/platform/subplatforms/discover?intakeId=${encodeURIComponent(intakeId)}`, {
-    credentials: "include",
-    headers: { accept: "application/json" },
-  });
-  const body = await response.json().catch(() => null) as (Partial<SubplatformSourceIntake> & { error?: string }) | null;
-  if (!response.ok || !body?.intakeId) throw new MarketplaceApiError(response.status, body?.error || "子平台源码发现状态读取失败");
+export async function getSubplatformSourceIntake(
+  intakeId: string,
+): Promise<SubplatformSourceIntake> {
+  const response = await fetch(
+    `/api/platform/subplatforms/discover?intakeId=${encodeURIComponent(intakeId)}`,
+    {
+      credentials: "include",
+      headers: { accept: "application/json" },
+    },
+  );
+  const body = (await response.json().catch(() => null)) as
+    | (Partial<SubplatformSourceIntake> & { error?: string })
+    | null;
+  if (!response.ok || !body?.intakeId)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "子平台源码发现状态读取失败",
+    );
   return body as SubplatformSourceIntake;
 }
 
@@ -1753,22 +2764,36 @@ export async function registerSubplatform(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as Partial<SubplatformRegistrationResult> & { error?: string } | null;
+  const body = (await response.json().catch(() => null)) as
+    | (Partial<SubplatformRegistrationResult> & { error?: string })
+    | null;
   if (!response.ok || !body?.registrationId) {
-    throw new MarketplaceApiError(response.status, body?.error || "子平台注册失败");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "子平台注册失败",
+    );
   }
   return body as SubplatformRegistrationResult;
 }
 
-export async function activateSubplatform(input: { registrationId: string; buildDigest: string }): Promise<Record<string, unknown>> {
+export async function activateSubplatform(input: {
+  registrationId: string;
+  buildDigest: string;
+}): Promise<Record<string, unknown>> {
   const response = await fetch("/api/platform/subplatforms/activate", {
     method: "POST",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input),
   });
-  const body = await response.json().catch(() => null) as Record<string, unknown> & { error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "子平台激活失败");
+  const body = (await response.json().catch(() => null)) as
+    | (Record<string, unknown> & { error?: string })
+    | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "子平台激活失败",
+    );
   return body ?? {};
 }
 
@@ -1833,18 +2858,29 @@ export async function querySubplatformRetrieval(input: {
       input: {
         narrative: input.narrative,
         requirements: input.requirements ?? {},
-        ...(input.budgetMin === undefined ? {} : { budget_min: input.budgetMin }),
-        ...(input.budgetMax === undefined ? {} : { budget_max: input.budgetMax }),
+        ...(input.budgetMin === undefined
+          ? {}
+          : { budget_min: input.budgetMin }),
+        ...(input.budgetMax === undefined
+          ? {}
+          : { budget_max: input.budgetMax }),
         ...(input.currency === undefined ? {} : { currency: input.currency }),
-        ...(input.currencyScale === undefined ? {} : { currency_scale: input.currencyScale }),
+        ...(input.currencyScale === undefined
+          ? {}
+          : { currency_scale: input.currencyScale }),
       },
       limit: input.limit ?? 20,
       ...(input.traceId === undefined ? {} : { trace_id: input.traceId }),
     }),
   });
-  const body = await response.json().catch(() => null) as (Partial<RetrievalWireResult> & { error?: string }) | null;
+  const body = (await response.json().catch(() => null)) as
+    | (Partial<RetrievalWireResult> & { error?: string })
+    | null;
   if (!response.ok || !body || body.protocol !== "matchplane.retrieval/v1") {
-    throw new MarketplaceApiError(response.status, body?.error || "子平台检索暂时不可用");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "子平台检索暂时不可用",
+    );
   }
   const result = body as RetrievalWireResult;
   return {
@@ -1853,17 +2889,27 @@ export async function querySubplatformRetrieval(input: {
     provider: result.provider,
     candidates: result.candidates.map((candidate) => ({
       assetId: candidate.asset_id,
-      ...(candidate.offer_id === undefined ? {} : { offerId: candidate.offer_id }),
-      ...(candidate.display_name === undefined ? {} : { displayName: candidate.display_name }),
-      ...(candidate.attributes === undefined ? {} : { attributes: candidate.attributes }),
+      ...(candidate.offer_id === undefined
+        ? {}
+        : { offerId: candidate.offer_id }),
+      ...(candidate.display_name === undefined
+        ? {}
+        : { displayName: candidate.display_name }),
+      ...(candidate.attributes === undefined
+        ? {}
+        : { attributes: candidate.attributes }),
       ...(candidate.terms === undefined ? {} : { terms: candidate.terms }),
       score: candidate.score,
       reasons: candidate.reasons,
       ...(candidate.risks === undefined ? {} : { risks: candidate.risks }),
-      ...(candidate.metadata === undefined ? {} : { metadata: candidate.metadata }),
+      ...(candidate.metadata === undefined
+        ? {}
+        : { metadata: candidate.metadata }),
     })),
     degraded: result.degraded,
-    ...(result.generated_at === undefined ? {} : { generatedAt: result.generated_at }),
+    ...(result.generated_at === undefined
+      ? {}
+      : { generatedAt: result.generated_at }),
   };
 }
 
@@ -1899,22 +2945,21 @@ export function switchPaymentMode(input: {
   expectedVersion: number;
   reason: string;
 }): Promise<PaymentSetting> {
-  return paymentRequest<PaymentSetting>(
-    "",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        tenant_id: input.tenantId,
-        mode: input.mode,
-        expected_version: input.expectedVersion,
-        actor: "web-admin",
-        reason: input.reason,
-      }),
-    },
-  );
+  return paymentRequest<PaymentSetting>("", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: input.tenantId,
+      mode: input.mode,
+      expected_version: input.expectedVersion,
+      actor: "web-admin",
+      reason: input.reason,
+    }),
+  });
 }
 
-export function getPaymentGateways(tenantId?: string): Promise<PaymentGatewayRecord[]> {
+export function getPaymentGateways(
+  tenantId?: string,
+): Promise<PaymentGatewayRecord[]> {
   return paymentAdminRequest<PaymentGatewayRecord[]>(
     `payment-gateways${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
@@ -1949,7 +2994,9 @@ export function savePaymentGateway(input: {
   });
 }
 
-export function getPaymentRoutes(tenantId?: string): Promise<PaymentRouteRecord[]> {
+export function getPaymentRoutes(
+  tenantId?: string,
+): Promise<PaymentRouteRecord[]> {
   return paymentAdminRequest<PaymentRouteRecord[]>(
     `payment-routes${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
@@ -1982,7 +3029,9 @@ export function savePaymentRoute(input: {
   });
 }
 
-export function getInvoiceProviders(tenantId?: string): Promise<InvoiceProviderRecord[]> {
+export function getInvoiceProviders(
+  tenantId?: string,
+): Promise<InvoiceProviderRecord[]> {
   return paymentAdminRequest<InvoiceProviderRecord[]>(
     `invoice-providers${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
@@ -2023,13 +3072,19 @@ export function getInvoiceSetting(tenantId?: string): Promise<InvoiceSetting> {
   );
 }
 
-export function getPaymentAdminRecords(tenantId?: string, limit = 25): Promise<PaymentAdminRecord[]> {
+export function getPaymentAdminRecords(
+  tenantId?: string,
+  limit = 25,
+): Promise<PaymentAdminRecord[]> {
   return paymentAdminRequest<PaymentAdminRecord[]>(
     `payments?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
 }
 
-export function getRefundAdminRecords(tenantId?: string, limit = 25): Promise<RefundAdminRecord[]> {
+export function getRefundAdminRecords(
+  tenantId?: string,
+  limit = 25,
+): Promise<RefundAdminRecord[]> {
   return paymentAdminRequest<RefundAdminRecord[]>(
     `refunds?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
@@ -2049,12 +3104,16 @@ export function createAdminRefund(input: {
       payment_id: input.paymentId,
       amount: input.amount,
       reason: input.reason,
-      idempotency_key: input.idempotencyKey ?? `web-refund-${crypto.randomUUID()}`,
+      idempotency_key:
+        input.idempotencyKey ?? `web-refund-${crypto.randomUUID()}`,
     }),
   });
 }
 
-export function getInvoiceAdminRecords(tenantId?: string, limit = 25): Promise<InvoiceAdminRecord[]> {
+export function getInvoiceAdminRecords(
+  tenantId?: string,
+  limit = 25,
+): Promise<InvoiceAdminRecord[]> {
   return paymentAdminRequest<InvoiceAdminRecord[]>(
     `invoices?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
@@ -2086,10 +3145,19 @@ export function readPartySession(
   authUserId?: string,
 ): PartySession | null {
   pruneCapabilityCache();
-  const storageRoles = role === "admin" ? ["admin", "both"] : [role];
-  const scopedKey = platformPath ? encodeURIComponent(platformPath) : subplatform;
+  const storageRoles =
+    role === "admin"
+      ? ["admin", "both"]
+      : role === "both"
+        ? ["both"]
+        : [role, "both"];
+  const scopedKey = platformPath
+    ? encodeURIComponent(platformPath)
+    : subplatform;
   const keys = [
-    ...storageRoles.map((storageRole) => `matchplane.party.${scopedKey}.${storageRole}`),
+    ...storageRoles.map(
+      (storageRole) => `matchplane.party.${scopedKey}.${storageRole}`,
+    ),
     ...(!platformPath && role !== "admin" ? [`matchplane.party.${role}`] : []),
   ];
   for (const key of [...new Set(keys)]) {
@@ -2121,12 +3189,25 @@ export function savePartySession(
   platformPath?: string,
 ): void {
   pruneCapabilityCache();
-  const scopedKey = platformPath ? encodeURIComponent(platformPath) : subplatform;
-  if (!capabilityCache.has(`matchplane.party.${scopedKey}.${storageRole}`) && capabilityCache.size >= MAX_CAPABILITY_CACHE_ENTRIES) {
-    const oldest = capabilityCache.keys().next().value;
-    if (typeof oldest === "string") capabilityCache.delete(oldest);
+  const scopedKey = platformPath
+    ? encodeURIComponent(platformPath)
+    : subplatform;
+  const storageRoles = new Set([storageRole, session.role]);
+  if (session.role === "both") {
+    storageRoles.add("buyer");
+    storageRoles.add("seller");
   }
-  capabilityCache.set(`matchplane.party.${scopedKey}.${storageRole}`, session);
+  for (const role of storageRoles) {
+    const key = `matchplane.party.${scopedKey}.${role}`;
+    if (
+      !capabilityCache.has(key) &&
+      capabilityCache.size >= MAX_CAPABILITY_CACHE_ENTRIES
+    ) {
+      const oldest = capabilityCache.keys().next().value;
+      if (typeof oldest === "string") capabilityCache.delete(oldest);
+    }
+    capabilityCache.set(key, session);
+  }
 }
 
 /** Clear all in-memory capabilities after logout or an account switch. */
@@ -2139,14 +3220,12 @@ export function clearPartySessionCache(): void {
  * Rust marketplace API. The browser never creates or chooses an access token itself.
  */
 export async function establishMarketplaceSession(input: {
-  tenantId: string;
+  tenantId?: string;
   domainId?: string;
   subplatform: string;
   platformPath?: string;
   role: BetterAuthMarketplaceRole;
   authUserId?: string;
-  contact?: ContactExchange;
-  preserveContact?: boolean;
 }): Promise<PartySession> {
   const response = await fetch("/api/marketplace/session", {
     method: "POST",
@@ -2187,7 +3266,12 @@ export async function establishMarketplaceSession(input: {
     accessToken: result.access_token,
     accessTokenExpiresAt: result.access_token_expires_at,
   };
-  savePartySession(session, input.subplatform, input.role === "subplatform_admin" ? "admin" : input.role, input.platformPath);
+  savePartySession(
+    session,
+    input.subplatform,
+    input.role === "subplatform_admin" ? "admin" : input.role,
+    input.platformPath,
+  );
   return session;
 }
 
@@ -2198,7 +3282,8 @@ function isCapabilityActive(value: string): boolean {
 
 function pruneCapabilityCache(): void {
   for (const [key, session] of capabilityCache) {
-    if (!isCapabilityActive(session.accessTokenExpiresAt)) capabilityCache.delete(key);
+    if (!isCapabilityActive(session.accessTokenExpiresAt))
+      capabilityCache.delete(key);
   }
 }
 
@@ -2376,7 +3461,9 @@ export function recordMarketplaceBehaviorEvent(input: {
         event_type: input.eventType,
         ...(input.reason ? { reason: input.reason } : {}),
         metadata: input.metadata ?? {},
-        idempotency_key: input.idempotencyKey ?? `web-${input.eventType}-${crypto.randomUUID()}`,
+        idempotency_key:
+          input.idempotencyKey ??
+          `web-${input.eventType}-${crypto.randomUUID()}`,
       }),
     },
     input.session,
@@ -2440,7 +3527,8 @@ export function createMarketplaceSalesHandoff(input: {
         participant_id: input.session.partyId,
         ...(input.intentId ? { intent_id: input.intentId } : {}),
         summary: input.summary,
-        idempotency_key: input.idempotencyKey ?? `web-sales-handoff-${crypto.randomUUID()}`,
+        idempotency_key:
+          input.idempotencyKey ?? `web-sales-handoff-${crypto.randomUUID()}`,
       }),
     },
     input.session,
@@ -2474,7 +3562,10 @@ export function getMarketplaceDemandMatches(input: {
   offerId: string;
   limit?: number;
 }): Promise<MarketplaceDemandCandidate[]> {
-  return request<{ offer_id: string; candidates: MarketplaceDemandCandidate[] }>(
+  return request<{
+    offer_id: string;
+    candidates: MarketplaceDemandCandidate[];
+  }>(
     `/v1/marketplace/offers/${encodeURIComponent(input.offerId)}/demand-matches`,
     {
       method: "POST",
@@ -2536,7 +3627,9 @@ export function createMarketplaceIntroduction(input: {
         score: input.score,
         reasons: input.reasons ?? [],
         idempotency_key: input.idempotencyKey,
-        expires_at: input.expiresAt ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        expires_at:
+          input.expiresAt ??
+          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       }),
     },
     input.session,
@@ -2573,7 +3666,8 @@ export function requestMarketplaceContact(input: {
         tenant_id: input.session.tenantId,
         domain_id: input.domainId,
         participant_id: input.session.partyId,
-        idempotency_key: input.idempotencyKey ?? `web-contact-request-${input.introductionId}`,
+        idempotency_key:
+          input.idempotencyKey ?? `web-contact-request-${input.introductionId}`,
       }),
     },
     input.session,
@@ -2594,7 +3688,8 @@ export function consentMarketplaceContact(input: {
         tenant_id: input.session.tenantId,
         domain_id: input.domainId,
         participant_id: input.session.partyId,
-        idempotency_key: input.idempotencyKey ?? `web-contact-consent-${input.introductionId}`,
+        idempotency_key:
+          input.idempotencyKey ?? `web-contact-consent-${input.introductionId}`,
       }),
     },
     input.session,
@@ -2615,7 +3710,8 @@ export function retrieveMarketplaceContact(input: {
         tenant_id: input.session.tenantId,
         domain_id: input.domainId,
         participant_id: input.session.partyId,
-        idempotency_key: input.idempotencyKey ?? `web-contact-release-${input.introductionId}`,
+        idempotency_key:
+          input.idempotencyKey ?? `web-contact-release-${input.introductionId}`,
       }),
       cache: "no-store",
     },
@@ -2649,6 +3745,56 @@ export function createMarketplaceOffer(input: {
   );
 }
 
+/** Replace editable offer fields using the caller's latest optimistic version. */
+export function updateMarketplaceOffer(input: {
+  session: PartySession;
+  domainId: string;
+  offerId: string;
+  displayName: string;
+  attributes: Record<string, unknown>;
+  terms: Record<string, unknown>;
+  expectedVersion: number;
+}): Promise<MarketplaceOffer> {
+  return request<MarketplaceOffer>(
+    `/v1/marketplace/offers/${encodeURIComponent(input.offerId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        supply_party_id: input.session.partyId,
+        display_name: input.displayName,
+        attributes: input.attributes,
+        terms: input.terms,
+        expected_version: input.expectedVersion,
+      }),
+    },
+    input.session,
+  );
+}
+
+/** Withdraw a draft or active offer without deleting its history. */
+export function withdrawMarketplaceOffer(input: {
+  session: PartySession;
+  domainId: string;
+  offerId: string;
+  expectedVersion: number;
+}): Promise<MarketplaceOffer> {
+  return request<MarketplaceOffer>(
+    `/v1/marketplace/offers/${encodeURIComponent(input.offerId)}/withdraw`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        tenant_id: input.session.tenantId,
+        domain_id: input.domainId,
+        supply_party_id: input.session.partyId,
+        expected_version: input.expectedVersion,
+      }),
+    },
+    input.session,
+  );
+}
+
 /** Read the root-scoped generic offer queue for the administrator workspace. */
 export async function getMarketplaceOfferAdminRecords(input?: {
   domainId?: string;
@@ -2665,24 +3811,60 @@ export async function getMarketplaceOfferAdminRecords(input?: {
     headers: { accept: "application/json" },
     cache: "no-store",
   });
-  const body = await response.json().catch(() => null) as { offers?: unknown; error?: string } | null;
-  if (!response.ok) throw new MarketplaceApiError(response.status, body?.error || "供给审核队列读取失败");
-  return Array.isArray(body?.offers) ? body.offers as MarketplaceOfferAdminRecord[] : [];
+  const body = (await response.json().catch(() => null)) as {
+    offers?: unknown;
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "供给审核队列读取失败",
+    );
+  return Array.isArray(body?.offers)
+    ? (body.offers as MarketplaceOfferAdminRecord[]).map((offer) => ({
+        ...offer,
+        version: Number(offer.version),
+      }))
+    : [];
 }
 
 /** Activate one draft through the Rust gateway's operator state transition. */
 export async function activateMarketplaceOffer(input: {
   offerId: string;
   tenantId: string;
-}): Promise<MarketplaceOfferAdminRecord & { catalog_sync?: { synced?: boolean; error?: string; platform_path?: string | null } }> {
-  const response = await fetch(`/api/admin/marketplace/offers/${encodeURIComponent(input.offerId)}/activate`, {
-    method: "POST",
-    credentials: "include",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ tenant_id: input.tenantId }),
-  });
-  const body = await response.json().catch(() => null) as (MarketplaceOfferAdminRecord & { error?: string }) | null;
-  if (!response.ok || !body?.offer_id) throw new MarketplaceApiError(response.status, body?.error || "供给激活失败");
+  expectedVersion: number;
+}): Promise<
+  MarketplaceOfferAdminRecord & {
+    catalog_sync?: {
+      synced?: boolean;
+      error?: string;
+      platform_path?: string | null;
+    };
+  }
+> {
+  const response = await fetch(
+    `/api/admin/marketplace/offers/${encodeURIComponent(input.offerId)}/activate`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        tenant_id: input.tenantId,
+        expected_version: Number(input.expectedVersion),
+      }),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as
+    | (MarketplaceOfferAdminRecord & { error?: string })
+    | null;
+  if (!response.ok || !body?.offer_id)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "供给激活失败",
+    );
   return body;
 }
 
@@ -2708,10 +3890,24 @@ export async function syncMarketplaceOfferToChild(input: {
       offer_id: input.offerId,
     }),
   });
-  const body = await response.json().catch(() => null) as { offer_id?: string; synced?: boolean; platform_path?: string | null; error?: string } | null;
-  if (!response.ok && response.status !== 202) throw new MarketplaceApiError(response.status, body?.error || "子平台目录同步失败");
-  if (!body?.offer_id) throw new MarketplaceApiError(502, "子平台目录同步返回了无效响应");
-  return { offerId: body.offer_id, synced: body.synced === true, platformPath: body.platform_path ?? null };
+  const body = (await response.json().catch(() => null)) as {
+    offer_id?: string;
+    synced?: boolean;
+    platform_path?: string | null;
+    error?: string;
+  } | null;
+  if (!response.ok && response.status !== 202)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "子平台目录同步失败",
+    );
+  if (!body?.offer_id)
+    throw new MarketplaceApiError(502, "子平台目录同步返回了无效响应");
+  return {
+    offerId: body.offer_id,
+    synced: body.synced === true,
+    platformPath: body.platform_path ?? null,
+  };
 }
 
 /** Upload bytes transiently to the active child-owned media adapter. */
@@ -2755,7 +3951,11 @@ export async function uploadMarketplaceAttachment(input: {
     }),
   });
   const body = await readJson<unknown>(response);
-  if (!response.ok) throw new MarketplaceApiError(response.status, readApiError(body) ?? "附件上传失败");
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      readApiError(body) ?? "附件上传失败",
+    );
   const parsed = parseMediaUploadResponse(body, requestId, MAX_MEDIA_BYTES);
   if (!parsed.ok) throw new MarketplaceApiError(502, parsed.error);
   return parsed.value.attachment;
@@ -2764,6 +3964,7 @@ export async function uploadMarketplaceAttachment(input: {
 export function getMarketplaceOffers(input: {
   session: PartySession;
   domainId: string;
+  domainWide?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<MarketplaceOffer[]> {
@@ -2774,6 +3975,7 @@ export function getMarketplaceOffers(input: {
     limit: String(input.limit ?? 50),
     offset: String(input.offset ?? 0),
   });
+  if (input.domainWide) params.set("domain_wide", "true");
   return request<MarketplaceOffer[]>(
     `/v1/marketplace/offers?${params.toString()}`,
     { cache: "no-store" },
@@ -2946,7 +4148,10 @@ export async function createBuyerIntroduction(input: {
     limit: 20,
   });
   if (!recommendations.some((item) => item.listing_id === input.listingId)) {
-    throw new MarketplaceApiError(409, "该供给不满足当前需求，请刷新匹配理由后再试");
+    throw new MarketplaceApiError(
+      409,
+      "该供给不满足当前需求，请刷新匹配理由后再试",
+    );
   }
   const outcome = await request<{ offline_deal_id: string }>(
     "/v1/marketplace/offline-deals",
@@ -2969,7 +4174,10 @@ export async function createBuyerIntroduction(input: {
   );
 }
 
-export function listOfflineDeals(session: PartySession, domainId?: string): Promise<OfflineDeal[]> {
+export function listOfflineDeals(
+  session: PartySession,
+  domainId?: string,
+): Promise<OfflineDeal[]> {
   return request<OfflineDeal[]>(
     `/v1/marketplace/offline-deals?tenant_id=${session.tenantId}&party_id=${session.partyId}${domainId ? `&domain_id=${encodeURIComponent(domainId)}` : ""}`,
     {},
@@ -2986,7 +4194,11 @@ export function acceptContactExchange(
     `/v1/marketplace/offline-deals/${offlineDealId}/contact/accept`,
     {
       method: "POST",
-      body: JSON.stringify({ tenant_id: session.tenantId, domain_id: domainId, party_id: session.partyId }),
+      body: JSON.stringify({
+        tenant_id: session.tenantId,
+        domain_id: domainId,
+        party_id: session.partyId,
+      }),
     },
     session,
   );
@@ -3005,7 +4217,128 @@ export function retrieveContact(
 }
 
 export function listingIdFromBackend(listing: AssetListing): string | null {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{2}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(listing.id)
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{2}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    listing.id,
+  )
     ? listing.id
     : null;
+}
+
+export interface MarketplaceLikeState {
+  offerId: string;
+  viewerLikeCount: number;
+  likeTotal: string;
+}
+
+export async function getMarketplaceOfferLikes(
+  offerIds: string[],
+): Promise<MarketplaceLikeState[]> {
+  if (!offerIds.length) return [];
+  const query = new URLSearchParams({ offerIds: offerIds.join(",") });
+  const response = await fetch(`/api/mall/likes?${query}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    likes?: MarketplaceLikeState[];
+    error?: string;
+  } | null;
+  if (!response.ok) {
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "点赞状态读取失败",
+    );
+  }
+  return Array.isArray(body?.likes) ? body.likes : [];
+}
+
+export async function setMarketplaceOfferLikeCount(input: {
+  offerId: string;
+  count: number;
+  expectedCount: number;
+}): Promise<MarketplaceLikeState> {
+  const response = await fetch(
+    `/api/mall/offers/${encodeURIComponent(input.offerId)}/likes`,
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        count: input.count,
+        expectedCount: input.expectedCount,
+      }),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as
+    | (Partial<MarketplaceLikeState> & { error?: string })
+    | null;
+  if (!response.ok || !body?.offerId) {
+    throw new MarketplaceApiError(response.status, body?.error || "点赞失败");
+  }
+  return body as MarketplaceLikeState;
+}
+
+export interface UserNotification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  actionPath: string;
+  createdAt: string;
+  read: boolean;
+}
+
+export interface UserNotificationFeed {
+  notifications: UserNotification[];
+  unreadCount: number;
+}
+
+export async function getUserNotifications(
+  limit = 20,
+): Promise<UserNotificationFeed> {
+  const response = await fetch(`/api/account/notifications?limit=${limit}`, {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as
+    | (Partial<UserNotificationFeed> & { error?: string })
+    | null;
+  if (!response.ok) {
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "通知读取失败",
+    );
+  }
+  return {
+    notifications: Array.isArray(body?.notifications) ? body.notifications : [],
+    unreadCount: typeof body?.unreadCount === "number" ? body.unreadCount : 0,
+  };
+}
+
+export async function markUserNotificationsRead(input: {
+  id?: string;
+  all?: boolean;
+}): Promise<number> {
+  const response = await fetch("/api/account/notifications", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    unreadCount?: number;
+    error?: string;
+  } | null;
+  if (!response.ok) {
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "通知状态保存失败",
+    );
+  }
+  return typeof body?.unreadCount === "number" ? body.unreadCount : 0;
 }

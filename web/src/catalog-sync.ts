@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { auth, authDatabase } from "./lib/auth";
 import { executeAuthenticatedChildTool } from "./platform-child-tool";
-import { CATALOG_PROTOCOL, type CatalogSyncRequest } from "./catalog-protocol";
+import type { CatalogSyncRequest } from "./catalog-protocol";
+import {
+  buildCatalogProjectionArguments,
+  parseCatalogProjectionAck,
+  type CatalogOfferStatus,
+} from "./catalog-projection";
 
 export interface CatalogSyncOutcome {
   ok: boolean;
@@ -25,7 +30,8 @@ export async function syncCanonicalMarketplaceOffer(input: {
   requested?: Partial<Pick<CatalogSyncRequest, "domainId" | "platformPath">>;
 }): Promise<CatalogSyncOutcome> {
   const session = await auth.api.getSession({ headers: input.request.headers });
-  if (!session) return failure(401, input.offerId, "Better Auth session is required");
+  if (!session)
+    return failure(401, input.offerId, "Better Auth session is required");
 
   const result = await authDatabase.query<CanonicalOfferRow>(
     `WITH RECURSIVE legacy_platform_tree AS (
@@ -50,6 +56,7 @@ export async function syncCanonicalMarketplaceOffer(input: {
             offer.attributes,
             offer.terms,
             offer.status,
+            offer.version::text AS canonical_version,
             COALESCE(alias.path, tree.platform_path) AS platform_path,
             store.integration_kind,
             EXISTS (
@@ -73,20 +80,35 @@ export async function syncCanonicalMarketplaceOffer(input: {
     [input.tenantId, session.user.id, input.offerId],
   );
   const offer = result.rows[0];
-  if (!offer) return failure(404, input.offerId, "供给不存在或不属于当前根 tenant");
+  if (!offer)
+    return failure(404, input.offerId, "供给不存在或不属于当前根 tenant");
   const role = (session.user as { role?: unknown }).role;
   const rootAdmin = role === "rootSuperAdmin" || role === "rootAdmin";
-  if (!rootAdmin && !offer.owner) return failure(403, input.offerId, "当前账号不能同步该供给");
+  if (!rootAdmin && !offer.owner)
+    return failure(403, input.offerId, "当前账号不能同步该供给");
   if (offer.status !== "active") {
-    return failure(409, input.offerId, "供给必须先通过根平台审核并处于 active 状态后才能同步目录");
+    return failure(
+      409,
+      input.offerId,
+      "供给必须先通过根平台审核并处于 active 状态后才能同步目录",
+    );
   }
-  if (input.requested?.domainId && input.requested.domainId !== offer.domain_id) {
+  if (
+    input.requested?.domainId &&
+    input.requested.domainId !== offer.domain_id
+  ) {
     return failure(403, input.offerId, "供给 domain 与当前平台不一致");
   }
-  if (!offer.platform_path || !/^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(offer.platform_path)) {
+  if (
+    !offer.platform_path ||
+    !/^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(offer.platform_path)
+  ) {
     return failure(409, input.offerId, "供给尚未绑定可路由的子平台路径");
   }
-  if (input.requested?.platformPath && input.requested.platformPath !== offer.platform_path) {
+  if (
+    input.requested?.platformPath &&
+    input.requested.platformPath !== offer.platform_path
+  ) {
     return failure(403, input.offerId, "供给平台路径与当前平台不一致");
   }
 
@@ -103,27 +125,31 @@ export async function syncCanonicalMarketplaceOffer(input: {
     };
   }
 
+  let projection;
+  try {
+    projection = buildCatalogProjectionArguments({
+      requestId: randomUUID(),
+      tenantId: offer.tenant_id,
+      domainId: offer.domain_id,
+      platformPath: offer.platform_path,
+      offer: {
+        offerId: offer.offer_id,
+        externalKey: offer.external_key,
+        displayName: offer.display_name,
+        attributes: asObject(offer.attributes),
+        terms: asObject(offer.terms),
+        status: offer.status,
+        canonicalVersion: Number(offer.canonical_version),
+      },
+    });
+  } catch {
+    return failure(500, input.offerId, "规范供给版本无法安全投影");
+  }
   const execution = await executeAuthenticatedChildTool({
     request: input.request,
     platformPath: offer.platform_path,
     toolName: "catalog.upsert",
-    arguments: {
-      protocol: CATALOG_PROTOCOL,
-      request_id: randomUUID(),
-      scope: {
-        tenant_id: offer.tenant_id,
-        domain_id: offer.domain_id,
-        platform_path: offer.platform_path,
-      },
-      offer: {
-        offer_id: offer.offer_id,
-        external_key: offer.external_key,
-        display_name: offer.display_name,
-        attributes: asObject(offer.attributes),
-        terms: asObject(offer.terms),
-        status: offer.status,
-      },
-    },
+    arguments: projection,
     permissions: { marketplace: ["write"] },
     tenantId: offer.tenant_id,
     domainId: offer.domain_id,
@@ -139,6 +165,20 @@ export async function syncCanonicalMarketplaceOffer(input: {
       payload: execution.payload,
     };
   }
+  const acknowledgement = parseCatalogProjectionAck(
+    execution.payload,
+    projection,
+  );
+  if (!acknowledgement.ok) {
+    return {
+      ok: false,
+      status: 502,
+      synced: false,
+      offerId: offer.offer_id,
+      platformPath: offer.platform_path,
+      payload: { error: acknowledgement.error },
+    };
+  }
   return {
     ok: true,
     status: execution.status,
@@ -150,11 +190,24 @@ export async function syncCanonicalMarketplaceOffer(input: {
 }
 
 function asObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
-function failure(status: number, offerId: string, error: string): CatalogSyncOutcome {
-  return { ok: false, status, synced: false, offerId, platformPath: null, payload: { error } };
+function failure(
+  status: number,
+  offerId: string,
+  error: string,
+): CatalogSyncOutcome {
+  return {
+    ok: false,
+    status,
+    synced: false,
+    offerId,
+    platformPath: null,
+    payload: { error },
+  };
 }
 
 interface CanonicalOfferRow {
@@ -166,7 +219,8 @@ interface CanonicalOfferRow {
   display_name: string;
   attributes: unknown;
   terms: unknown;
-  status: string;
+  status: CatalogOfferStatus;
+  canonical_version: string;
   platform_path: string | null;
   integration_kind: string | null;
   owner: boolean;

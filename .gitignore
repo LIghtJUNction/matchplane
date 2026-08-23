@@ -11,10 +11,15 @@ dist/
 result/
 /web/node_modules/
 /node_modules/
+/integrations/*/node_modules/
 *.tsbuildinfo
 /web/dist/
 /web/.next/
 /web/out/
 /web/web/
 /.playwright-cli/
+/.scratch/
+/.memsearch/
+/.pi/
+/.turbo/
 /output/

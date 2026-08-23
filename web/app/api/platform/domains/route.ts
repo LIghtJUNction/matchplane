@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import { readJsonBody } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -126,10 +127,6 @@ function normalizeName(value: unknown): string | null {
 
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "23505");
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function jsonError(error: string, status: number): Response {

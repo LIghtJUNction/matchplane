@@ -3,14 +3,17 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../../src/lib/auth";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  RequestBodyTooLargeError,
+} from "../../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
+import { isUuid } from "../../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_LOCATOR_LENGTH = 2_048;
-const MAX_MANIFEST_BYTES = 64 * 1024;
 const ALLOWED_SCOPES = new Set([
   "marketplace:read",
   "marketplace:write",
@@ -21,71 +24,118 @@ const ALLOWED_SCOPES = new Set([
 
 /** Queue a source-only package for the isolated builder to inspect. */
 export async function POST(request: Request): Promise<Response> {
-  if (!hasTrustedBrowserOrigin(request)) return jsonError("请求来源未被平台信任", 403);
+  if (!hasTrustedBrowserOrigin(request))
+    return jsonError("请求来源未被平台信任", 403);
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return jsonError("Better Auth session is required", 401);
   let input: IntakeRequest;
   try {
     input = await parseBody(request);
   } catch (error) {
-    return jsonError(error instanceof RequestBodyTooLargeError ? "源码发现请求体过大" : "请求 JSON 无效", error instanceof RequestBodyTooLargeError ? 413 : 400);
+    return jsonError(
+      error instanceof RequestBodyTooLargeError
+        ? "源码发现请求体过大"
+        : "请求 JSON 无效",
+      error instanceof RequestBodyTooLargeError ? 413 : 400,
+    );
   }
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
   if (!isUuid(tenantId)) return jsonError("root tenant 尚未配置", 503);
   const domainId = isUuid(input.domainId) ? input.domainId : null;
   if (!domainId) return jsonError("domainId 必须是 UUID", 400);
-  const parentOrganizationId = input.parentOrganizationId === undefined || input.parentOrganizationId === null
-    ? null
-    : isUuid(input.parentOrganizationId) ? input.parentOrganizationId : null;
-  if (input.parentOrganizationId !== undefined && input.parentOrganizationId !== null && !parentOrganizationId) {
+  const parentOrganizationId =
+    input.parentOrganizationId === undefined ||
+    input.parentOrganizationId === null
+      ? null
+      : isUuid(input.parentOrganizationId)
+        ? input.parentOrganizationId
+        : null;
+  if (
+    input.parentOrganizationId !== undefined &&
+    input.parentOrganizationId !== null &&
+    !parentOrganizationId
+  ) {
     return jsonError("parentOrganizationId 必须是 UUID", 400);
   }
-  const sourceKind = input.sourceKind === "git" || input.sourceKind === "archive" ? input.sourceKind : null;
+  const sourceKind =
+    input.sourceKind === "git" || input.sourceKind === "archive"
+      ? input.sourceKind
+      : null;
   if (!sourceKind) return jsonError("sourceKind 必须是 git 或 archive", 400);
-  const sourceLocator = typeof input.sourceLocator === "string" ? input.sourceLocator.trim() : "";
-  const sourceError = validateSource(sourceKind, sourceLocator, input.sourceDigest);
+  const sourceLocator =
+    typeof input.sourceLocator === "string" ? input.sourceLocator.trim() : "";
+  const sourceError = validateSource(
+    sourceKind,
+    sourceLocator,
+    input.sourceDigest,
+  );
   if (sourceError) return jsonError(sourceError, 400);
-  const membershipPolicy = input.membershipPolicy === "invite" ? "invite" : "public";
+  const membershipPolicy =
+    input.membershipPolicy === "invite" ? "invite" : "public";
   const scopes = normalizeScopes(input.requestedScopes);
   if (!scopes) return jsonError("requestedScopes 包含未允许的权限", 400);
 
   const parentId = await readRootOrganizationId(tenantId);
-  if (!parentId) return jsonError("请先初始化商城，再接入店铺", 409);
+  if (!parentId) return jsonError("商城初始化完成后即可接入店铺", 409);
   if (parentOrganizationId && parentOrganizationId !== parentId) {
     return jsonError("店铺只能直接接入商城，不能嵌套在其他店铺中", 400);
   }
   const role = (session.user as { role?: string }).role;
-  if (!(await canManageParent(session.user.id, role, parentId))) return jsonError("当前账号没有导入该平台节点的权限", 403);
+  if (!(await canManageParent(session.user.id, role, parentId)))
+    return jsonError("当前账号没有导入该平台节点的权限", 403);
   const domain = await authDatabase.query(
     `SELECT 1 FROM domains WHERE tenant_id = $1::uuid AND id = $2::uuid AND status = 'active' LIMIT 1`,
     [tenantId, domainId],
   );
-  if (domain.rowCount !== 1) return jsonError("domainId 不属于当前 root tenant 的 active domain", 400);
+  if (domain.rowCount !== 1)
+    return jsonError("domainId 不属于当前 root tenant 的 active domain", 400);
 
   const intakeId = randomUUID();
-  const sourceDigest = typeof input.sourceDigest === "string" && /^[0-9a-f]{64}$/i.test(input.sourceDigest)
-    ? input.sourceDigest.toLowerCase()
-    : null;
+  const sourceDigest =
+    typeof input.sourceDigest === "string" &&
+    /^[0-9a-f]{64}$/i.test(input.sourceDigest)
+      ? input.sourceDigest.toLowerCase()
+      : null;
   await authDatabase.query(
     `INSERT INTO subplatform_source_intakes
       (id, tenant_id, domain_id, parent_organization_id, source_kind, source_locator,
        source_digest, requested_scopes, membership_policy, created_by)
      VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6,
        CASE WHEN $7::text IS NULL THEN NULL ELSE decode($7, 'hex') END, $8, $9, $10)`,
-    [intakeId, tenantId, domainId, parentId, sourceKind, sourceLocator, sourceDigest, scopes, membershipPolicy, session.user.id],
+    [
+      intakeId,
+      tenantId,
+      domainId,
+      parentId,
+      sourceKind,
+      sourceLocator,
+      sourceDigest,
+      scopes,
+      membershipPolicy,
+      session.user.id,
+    ],
   );
-  return NextResponse.json({ intakeId, state: "queued", next: "isolated_builder_discovers_manifest" }, {
-    status: 202,
-    headers: { "cache-control": "no-store" },
-  });
+  return NextResponse.json(
+    { intakeId, state: "queued", next: "isolated_builder_discovers_manifest" },
+    {
+      status: 202,
+      headers: { "cache-control": "no-store" },
+    },
+  );
 }
 
 /** Read bounded discovery state for the authenticated operator who queued it. */
 export async function GET(request: Request): Promise<Response> {
-  if (!hasTrustedBrowserOrigin(request)) return jsonError("请求来源未被平台信任", 403);
+  if (!hasTrustedBrowserOrigin(request))
+    return jsonError("请求来源未被平台信任", 403);
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return jsonError("Better Auth session is required", 401);
-  const id = new URL(request.url).searchParams.get("intakeId")?.trim() ?? "";
+  let id: string;
+  try {
+    id = new URL(request.url).searchParams.get("intakeId")?.trim() ?? "";
+  } catch {
+    return jsonError("请求 URL 无效", 400);
+  }
   if (!isUuid(id)) return jsonError("intakeId 必须是 UUID", 400);
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
   if (!isUuid(tenantId)) return jsonError("root tenant 尚未配置", 503);
@@ -102,11 +152,16 @@ export async function GET(request: Request): Promise<Response> {
   if (!result.rows[0]) return jsonError("源码导入任务不存在", 404);
   const row = result.rows[0] as Record<string, unknown>;
   const manifest = isRecord(row.manifest) ? row.manifest : null;
-  return NextResponse.json({
-    ...row,
-    packageId: manifest && typeof manifest.id === "string" ? manifest.id : null,
-    slug: manifest && typeof manifest.slug === "string" ? manifest.slug : null,
-  }, { headers: { "cache-control": "no-store" } });
+  return NextResponse.json(
+    {
+      ...row,
+      packageId:
+        manifest && typeof manifest.id === "string" ? manifest.id : null,
+      slug:
+        manifest && typeof manifest.slug === "string" ? manifest.slug : null,
+    },
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 interface IntakeRequest {
@@ -122,39 +177,65 @@ interface IntakeRequest {
 async function parseBody(request: Request): Promise<IntakeRequest> {
   try {
     const value = await readJsonBody<unknown>(request, 128 * 1024);
-    return isRecord(value) ? value as IntakeRequest : {};
+    return isRecord(value) ? (value as IntakeRequest) : {};
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) throw error;
     return {};
   }
 }
 
-function validateSource(kind: "git" | "archive", locator: string, digest: unknown): string | null {
-  if (!locator || locator.length > MAX_LOCATOR_LENGTH) return "sourceLocator 长度必须为 1..2048";
+function validateSource(
+  kind: "git" | "archive",
+  locator: string,
+  digest: unknown,
+): string | null {
+  if (!locator || locator.length > MAX_LOCATOR_LENGTH)
+    return "sourceLocator 长度必须为 1..2048";
   if (kind === "git") {
     try {
       const url = new URL(locator);
-      if (url.protocol !== "https:" || url.username || url.password || !url.hostname) return "Git 只接受不带凭据的 HTTPS 地址";
+      if (
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password ||
+        !url.hostname
+      )
+        return "Git 只接受不带凭据的 HTTPS 地址";
     } catch {
       return "Git sourceLocator 不是有效 HTTPS URL";
     }
     return null;
   }
-  if (!/^upload:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(locator)) {
+  if (
+    !/^upload:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      locator,
+    )
+  ) {
     return "压缩包必须先通过上传接口保存为 upload:// locator";
   }
-  if (digest !== undefined && (typeof digest !== "string" || !/^[0-9a-f]{64}$/i.test(digest))) return "sourceDigest 必须是 SHA-256";
+  if (
+    digest !== undefined &&
+    (typeof digest !== "string" || !/^[0-9a-f]{64}$/i.test(digest))
+  )
+    return "sourceDigest 必须是 SHA-256";
   return null;
 }
 
 function normalizeScopes(value: unknown): string[] | null {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 32) return null;
-  if (value.some((item) => typeof item !== "string" || !ALLOWED_SCOPES.has(item))) return null;
+  if (
+    value.some((item) => typeof item !== "string" || !ALLOWED_SCOPES.has(item))
+  )
+    return null;
   return [...new Set(value as string[])];
 }
 
-async function canManageParent(userId: string, role: string | undefined, parentId: string): Promise<boolean> {
+async function canManageParent(
+  userId: string,
+  role: string | undefined,
+  parentId: string,
+): Promise<boolean> {
   if (role === "rootSuperAdmin" || role === "rootAdmin") return true;
   const result = await authDatabase.query(
     `SELECT 1 FROM member WHERE "organizationId" = $1::uuid AND "userId" = $2::uuid
@@ -164,7 +245,9 @@ async function canManageParent(userId: string, role: string | undefined, parentI
   return result.rowCount === 1;
 }
 
-async function readRootOrganizationId(tenantId: string): Promise<string | null> {
+async function readRootOrganizationId(
+  tenantId: string,
+): Promise<string | null> {
   const result = await authDatabase.query<{ id: string }>(
     `SELECT id::text FROM "organization" WHERE "tenantId" = $1 AND "parentOrganizationId" IS NULL
        AND "rootPlatform" = true LIMIT 1`,
@@ -173,35 +256,13 @@ async function readRootOrganizationId(tenantId: string): Promise<string | null> 
   return result.rows[0]?.id ?? null;
 }
 
-async function validateParent(parentId: string, tenantId: string): Promise<string | null> {
-  const result = await authDatabase.query(
-    `WITH RECURSIVE chain(id, parent_id, depth, tenant_id, root_platform) AS (
-       SELECT id, "parentOrganizationId", 0, "tenantId", "rootPlatform" FROM "organization" WHERE id = $1::uuid
-       UNION ALL
-       SELECT parent.id, parent."parentOrganizationId", chain.depth + 1, parent."tenantId", parent."rootPlatform"
-         FROM "organization" parent JOIN chain ON parent.id = chain.parent_id WHERE chain.depth < 64
-     ) SELECT count(*)::int AS count, coalesce(max(depth), 0)::int AS depth,
-              coalesce(bool_and(tenant_id = $2), false) AS "sameTenant",
-              coalesce(bool_or(root_platform AND parent_id IS NULL), false) AS "reachesRoot"
-       FROM chain`,
-    [parentId, tenantId],
-  );
-  const row = result.rows[0] as { count?: number; depth?: number; sameTenant?: boolean; reachesRoot?: boolean } | undefined;
-  if (!row || row.count !== 1) return "parentOrganizationId 不存在";
-  if (!row.sameTenant) return "parentOrganizationId 与 tenantId 不一致";
-  if ((row.depth ?? 0) >= 64) return "平台树深度超过 64 层";
-  if (!row.reachesRoot) return "父平台尚未连接到唯一根平台组织";
-  return null;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function isUuid(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
 function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } });
+  return NextResponse.json(
+    { error },
+    { status, headers: { "cache-control": "no-store" } },
+  );
 }

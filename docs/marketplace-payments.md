@@ -115,6 +115,8 @@ MatchPlane 将需求/供给发现、联系方式交换与平台收益作为独�
 
 管理员列表接口支持倒序且有上限：`GET /v1/admin/payments`、`GET /v1/admin/refunds`、`GET /v1/admin/invoices`，接收 `tenant_id`、`limit`（1–100）、`offset`（封顶 100000）。仅返回运营元数据，发票账单明细和加密工件保留在服务端。Web 工作区通过同源服务端 BFF 路由透出这些列表，支付 bearer token 不会下发浏览器。
 
+店铺财务报表使用 `GET /v1/admin/financial-report`，必须同时传入 `tenant_id`、精确的 `source_type=store`、`source_ref=<store UUID>`、RFC 3339 `from`/`to` 与可选 `limit`（1–500）。窗口最长 366 天。服务端只查询该 source pair，并按支付创建、退款发生与发票申请时间汇总成交额、退款、平台服务费和净成交额。浏览器只能调用同源 `/api/stores/{storeId}/finance`；该 BFF 从登录会话重新解析店铺所有权，固定 source pair，不接受浏览器提交的租户或店铺范围。报表不读取演示数字，也不代表银行结算余额。需要进入店铺报表的支付必须由可信编排器在创建时写入对应的 `source_type` 与 `source_ref`。
+
 发票管理接口：
 
 - `GET|POST /v1/admin/invoice-providers?tenant_id=...`：列出或做版本更新；

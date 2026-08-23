@@ -11,20 +11,50 @@ import {
 
 function fakeFetch() {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
-  const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+  const fetchImpl = async (
+    url: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
     calls.push({ url: String(url), init });
-    const body = JSON.parse(String(init?.body)) as { method: string; params?: { name?: string; arguments?: Record<string, unknown> } };
-    if (body.method === "tools/call" && body.params?.name === "marketplace.agent.session") {
-      return new Response(JSON.stringify({
+    const body = JSON.parse(String(init?.body)) as {
+      method: string;
+      params?: { name?: string; arguments?: Record<string, unknown> };
+    };
+    if (
+      body.method === "tools/call" &&
+      body.params?.name === "marketplace.agent.session"
+    ) {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "1",
+          result: {
+            structuredContent: {
+              tenant_id: "t",
+              domain_id: "d",
+              party_id: "p",
+              side: "demand",
+              role: "buyer",
+              access_token: "secret",
+              access_token_expires_at: "2099-01-01T00:00:00Z",
+              cost_bearer: "caller",
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({
         jsonrpc: "2.0",
         id: "1",
-        result: { structuredContent: { tenant_id: "t", domain_id: "d", party_id: "p", side: "demand", role: "buyer", access_token: "secret", access_token_expires_at: "2099-01-01T00:00:00Z", cost_bearer: "caller" } },
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: "1", result: { structuredContent: { ok: true } } }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
+        result: { structuredContent: { ok: true } },
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      },
+    );
   };
   return { fetchImpl, calls };
 }
@@ -35,7 +65,11 @@ describe("MatchPlane external Agent client", () => {
       requestId: "request",
       platformPath: "/",
       status: "delegated",
-      routePlan: [{ path: "/used-car" }, { path: "/used-car/premium" }, { path: "not-a-path" }],
+      routePlan: [
+        { path: "/used-car" },
+        { path: "/used-car/premium" },
+        { path: "not-a-path" },
+      ],
       routing: {},
     };
     expect(routePlanPaths(result)).toEqual(["/used-car", "/used-car/premium"]);
@@ -44,7 +78,11 @@ describe("MatchPlane external Agent client", () => {
 
   it("routes a caller-funded narrative through the platform tree", async () => {
     const fake = fakeFetch();
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: fake.fetchImpl,
+    });
 
     const result = await client.routePlatformIntent({
       narrative: "帮我找到适合通勤的方案",
@@ -64,37 +102,61 @@ describe("MatchPlane external Agent client", () => {
 
   it("rejects an empty platform route before contacting the gateway", async () => {
     const fake = fakeFetch();
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
-    await expect(client.routePlatformIntent({ narrative: "   " })).rejects.toThrow("narrative is required");
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: fake.fetchImpl,
+    });
+    await expect(
+      client.routePlatformIntent({ narrative: "   " }),
+    ).rejects.toThrow("narrative is required");
     expect(fake.calls).toHaveLength(0);
   });
 
   it("wraps child tools and parses the retrieval ABI without leaking provider details into the client", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const requestId = "123e4567-e89b-12d3-a456-426614174004";
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       calls.push({ url: String(url), init });
-      const body = JSON.parse(String(init?.body)) as { scope?: { platform_path?: string }; limit?: number; input?: { narrative?: string } };
+      const body = JSON.parse(String(init?.body)) as {
+        scope?: { platform_path?: string };
+        limit?: number;
+        input?: { narrative?: string };
+      };
       const retrieval = {
         protocol: "matchplane.retrieval/v1",
         request_id: requestId,
         provider: { id: "used-car.search", version: "2026.08", model: null },
-        candidates: [{
-          asset_id: "123e4567-e89b-12d3-a456-426614174002",
-          offer_id: "123e4567-e89b-12d3-a456-426614174003",
-          display_name: "通勤方案",
-          score: 0.91,
-          reasons: ["预算匹配"],
-        }],
+        candidates: [
+          {
+            asset_id: "123e4567-e89b-12d3-a456-426614174002",
+            offer_id: "123e4567-e89b-12d3-a456-426614174003",
+            display_name: "通勤方案",
+            score: 0.91,
+            reasons: ["预算匹配"],
+          },
+        ],
         degraded: false,
       };
-      expect(String(url)).toBe("https://matx.tech/api/platform/retrieval/query");
+      expect(String(url)).toBe(
+        "https://matx.tech/api/platform/retrieval/query",
+      );
       expect(body.scope?.platform_path).toBe("/used-car");
       expect(body.input?.narrative).toBe("预算内的通勤方案");
       expect(body.limit).toBe(2);
-      return new Response(JSON.stringify(retrieval), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify(retrieval), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     };
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl });
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl,
+    });
 
     const result = await client.queryRetrieval({
       tenant_id: "123e4567-e89b-12d3-a456-426614174000",
@@ -106,20 +168,39 @@ describe("MatchPlane external Agent client", () => {
       limit: 2,
     });
 
-    expect(result.candidates[0]?.offer_id).toBe("123e4567-e89b-12d3-a456-426614174003");
-    expect(new Headers(calls[0]?.init?.headers).get("x-matchplane-api-key")).toBe("mpk_test");
+    expect(result.candidates[0]?.offer_id).toBe(
+      "123e4567-e89b-12d3-a456-426614174003",
+    );
+    expect(
+      new Headers(calls[0]?.init?.headers).get("x-matchplane-api-key"),
+    ).toBe("mpk_test");
   });
 
   it("accepts generic offer-only retrieval candidates and preserves risks", async () => {
     const requestId = "123e4567-e89b-12d3-a456-426614174004";
-    const fetchImpl = async (): Promise<Response> => new Response(JSON.stringify({
-      protocol: "matchplane.retrieval/v1",
-      request_id: requestId,
-      provider: { id: "service.search", version: "2026.08" },
-      candidates: [{ offer_id: "123e4567-e89b-12d3-a456-426614174003", score: 0.74, reasons: ["范围匹配"], risks: ["需确认档期"] }],
-      degraded: false,
-    }), { status: 200, headers: { "content-type": "application/json" } });
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl });
+    const fetchImpl = async (): Promise<Response> =>
+      new Response(
+        JSON.stringify({
+          protocol: "matchplane.retrieval/v1",
+          request_id: requestId,
+          provider: { id: "service.search", version: "2026.08" },
+          candidates: [
+            {
+              offer_id: "123e4567-e89b-12d3-a456-426614174003",
+              score: 0.74,
+              reasons: ["范围匹配"],
+              risks: ["需确认档期"],
+            },
+          ],
+          degraded: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl,
+    });
     const result = await client.queryRetrieval({
       tenant_id: "123e4567-e89b-12d3-a456-426614174000",
       domain_id: "123e4567-e89b-12d3-a456-426614174001",
@@ -129,43 +210,63 @@ describe("MatchPlane external Agent client", () => {
       limit: 2,
     });
     expect(result.candidates[0]?.asset_id).toBeUndefined();
-    expect(result.candidates[0]?.offer_id).toBe("123e4567-e89b-12d3-a456-426614174003");
+    expect(result.candidates[0]?.offer_id).toBe(
+      "123e4567-e89b-12d3-a456-426614174003",
+    );
     expect(result.candidates[0]?.risks).toEqual(["需确认档期"]);
   });
 
   it("upserts a generic child catalogue offer through the scoped MCP bridge", async () => {
     const requestId = "123e4567-e89b-12d3-a456-426614174004";
     const calls: Array<{ url: string; init?: RequestInit }> = [];
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       calls.push({ url: String(url), init });
-      const body = JSON.parse(String(init?.body)) as { params?: { name?: string; arguments?: Record<string, unknown> } };
+      const body = JSON.parse(String(init?.body)) as {
+        params?: { name?: string; arguments?: Record<string, unknown> };
+      };
       expect(body.params?.name).toBe("platform.child.tool");
       const argumentsValue = body.params?.arguments;
       expect(argumentsValue?.tool_name).toBe("catalog.upsert");
-      const envelope = argumentsValue?.arguments as { protocol?: string; scope?: { platform_path?: string }; offer?: { offer_id?: string } };
+      const envelope = argumentsValue?.arguments as {
+        protocol?: string;
+        scope?: { platform_path?: string };
+        offer?: { offer_id?: string };
+      };
       expect(envelope.protocol).toBe("matchplane.catalog/v1");
       expect(envelope.scope?.platform_path).toBe("/services");
-      expect(envelope.offer?.offer_id).toBe("123e4567-e89b-12d3-a456-426614174003");
-      return new Response(JSON.stringify({
-        jsonrpc: "2.0",
-        id: "1",
-        result: {
-          structuredContent: {
-            protocol: "matchplane.catalog/v1",
-            request_id: requestId,
-            scope: {
-              tenant_id: "123e4567-e89b-12d3-a456-426614174000",
-              domain_id: "123e4567-e89b-12d3-a456-426614174001",
-              platform_path: "/services",
+      expect(envelope.offer?.offer_id).toBe(
+        "123e4567-e89b-12d3-a456-426614174003",
+      );
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "1",
+          result: {
+            structuredContent: {
+              protocol: "matchplane.catalog/v1",
+              request_id: requestId,
+              scope: {
+                tenant_id: "123e4567-e89b-12d3-a456-426614174000",
+                domain_id: "123e4567-e89b-12d3-a456-426614174001",
+                platform_path: "/services",
+              },
+              offer_id: "123e4567-e89b-12d3-a456-426614174003",
+              status: "active",
+              indexed: true,
             },
-            offer_id: "123e4567-e89b-12d3-a456-426614174003",
-            status: "active",
-            indexed: true,
           },
-        },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     };
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl });
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl,
+    });
     const result = await client.upsertCatalogOffer({
       tenant_id: "123e4567-e89b-12d3-a456-426614174000",
       domain_id: "123e4567-e89b-12d3-a456-426614174001",
@@ -181,32 +282,49 @@ describe("MatchPlane external Agent client", () => {
       },
     });
     expect(result.indexed).toBe(true);
-    expect(new Headers(calls[0]?.init?.headers).get("x-matchplane-api-key")).toBe("mpk_test");
+    expect(
+      new Headers(calls[0]?.init?.headers).get("x-matchplane-api-key"),
+    ).toBe("mpk_test");
   });
 
   it("uploads a bounded media attachment through the root facade", async () => {
     const requestId = "123e4567-e89b-12d3-a456-426614174004";
-    const fetchImpl = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       expect(String(url)).toBe("https://matx.tech/api/platform/media/upload");
-      const body = JSON.parse(String(init?.body)) as { protocol?: string; scope?: { platform_path?: string }; attachment?: { size_bytes?: number; data_base64?: string } };
+      const body = JSON.parse(String(init?.body)) as {
+        protocol?: string;
+        scope?: { platform_path?: string };
+        attachment?: { size_bytes?: number; data_base64?: string };
+      };
       expect(body.protocol).toBe("matchplane.media/v1");
       expect(body.scope?.platform_path).toBe("/services");
       expect(body.attachment?.size_bytes).toBe(5);
       expect(body.attachment?.data_base64).toBe("aGVsbG8=");
-      return new Response(JSON.stringify({
-        protocol: "matchplane.media/v1",
-        request_id: requestId,
-        attachment: {
-          attachment_ref: "media://services/abc",
-          kind: "document",
-          file_name: "hello.txt",
-          media_type: "text/plain",
-          size_bytes: 5,
-          sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(
+        JSON.stringify({
+          protocol: "matchplane.media/v1",
+          request_id: requestId,
+          attachment: {
+            attachment_ref: "media://services/abc",
+            kind: "document",
+            file_name: "hello.txt",
+            media_type: "text/plain",
+            size_bytes: 5,
+            sha256:
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     };
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl });
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl,
+    });
     const result = await client.uploadMedia({
       tenant_id: "123e4567-e89b-12d3-a456-426614174000",
       domain_id: "123e4567-e89b-12d3-a456-426614174001",
@@ -224,19 +342,29 @@ describe("MatchPlane external Agent client", () => {
 
   it("rejects invalid child retrieval scope before contacting the gateway", async () => {
     const fake = fakeFetch();
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
-    await expect(client.queryRetrieval({
-      tenant_id: "not-a-uuid",
-      domain_id: "123e4567-e89b-12d3-a456-426614174001",
-      platform_path: "/",
-      narrative: "找供给",
-    })).rejects.toThrow("UUIDs");
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: fake.fetchImpl,
+    });
+    await expect(
+      client.queryRetrieval({
+        tenant_id: "not-a-uuid",
+        domain_id: "123e4567-e89b-12d3-a456-426614174001",
+        platform_path: "/",
+        narrative: "找供给",
+      }),
+    ).rejects.toThrow("UUIDs");
     expect(fake.calls).toHaveLength(0);
   });
 
   it("exposes contact-free demand discovery to a supply Agent", async () => {
     const fake = fakeFetch();
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: fake.fetchImpl,
+    });
     const capability = await client.openMarketplaceSession({
       tenant_id: "tenant",
       domain_id: "domain",
@@ -255,7 +383,9 @@ describe("MatchPlane external Agent client", () => {
     };
     expect(body.params?.name).toBe("marketplace.demand.match");
     expect(body.params?.arguments?.platform_path).toBe("/used-car");
-    expect(body.params?.arguments?.offer_id).toBe("123e4567-e89b-12d3-a456-426614174003");
+    expect(body.params?.arguments?.offer_id).toBe(
+      "123e4567-e89b-12d3-a456-426614174003",
+    );
 
     await client.updateDemandDiscovery(capability, {
       tenant_id: "tenant",
@@ -273,7 +403,11 @@ describe("MatchPlane external Agent client", () => {
 
   it("uses one MCP client shape for buyer and seller capability exchange", async () => {
     const fake = fakeFetch();
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: fake.fetchImpl,
+    });
     const capability = await client.openMarketplaceSession({
       tenant_id: "tenant",
       domain_id: "domain",
@@ -283,7 +417,9 @@ describe("MatchPlane external Agent client", () => {
     expect(capability.role).toBe("buyer");
     expect(capability.access_token_expires_at).toBe("2099-01-01T00:00:00Z");
     expect(fake.calls[0]?.url).toBe("https://matx.tech/api/mcp");
-    expect(new Headers(fake.calls[0]?.init?.headers).get("x-matchplane-api-key")).toBe("mpk_test");
+    expect(
+      new Headers(fake.calls[0]?.init?.headers).get("x-matchplane-api-key"),
+    ).toBe("mpk_test");
 
     await client.createIntent(capability, {
       tenant_id: "tenant",
@@ -293,7 +429,9 @@ describe("MatchPlane external Agent client", () => {
       narrative: "找一个合适的供给",
       idempotency_key: "intent-1",
     });
-    expect(new Headers(fake.calls[1]?.init?.headers).get("authorization")).toBe("Bearer secret");
+    expect(new Headers(fake.calls[1]?.init?.headers).get("authorization")).toBe(
+      "Bearer secret",
+    );
     const secondBody = JSON.parse(String(fake.calls[1]?.init?.body)) as {
       params?: { arguments?: { platform_path?: string } };
     };
@@ -309,7 +447,9 @@ describe("MatchPlane external Agent client", () => {
     const contactBody = JSON.parse(String(fake.calls[2]?.init?.body)) as {
       params?: { name?: string; arguments?: Record<string, unknown> };
     };
-    expect(contactBody.params?.name).toBe("marketplace.introduction.contact.request");
+    expect(contactBody.params?.name).toBe(
+      "marketplace.introduction.contact.request",
+    );
     expect(contactBody.params?.arguments?.platform_path).toBe("/used-car");
 
     await client.consentContact(capability, {
@@ -331,16 +471,31 @@ describe("MatchPlane external Agent client", () => {
 
   it("rejects platform-funded external handoffs before a network call", async () => {
     const fake = fakeFetch();
-    const client = new MatchPlaneAgentClient({ baseUrl: "https://matx.tech", apiKey: "mpk_test", fetchImpl: fake.fetchImpl });
-    await expect(client.handoff({
-      protocol: "matchplane.agent/v1",
-      request_id: "123e4567-e89b-12d3-a456-426614174000",
-      stage: "platform",
-      scope: { platform_path: "/" },
-      intent: { narrative: "找供给", requirements: {} },
-      agent: { id: "buyer.example", version: "1.0.0", capabilities: ["search"] },
-      budget: { max_steps: 8, max_input_characters: 24_000, max_output_tokens: 512, cost_bearer: "platform" as unknown as "caller" },
-    })).rejects.toThrow("caller-funded");
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: fake.fetchImpl,
+    });
+    await expect(
+      client.handoff({
+        protocol: "matchplane.agent/v1",
+        request_id: "123e4567-e89b-12d3-a456-426614174000",
+        stage: "platform",
+        scope: { platform_path: "/" },
+        intent: { narrative: "找供给", requirements: {} },
+        agent: {
+          id: "buyer.example",
+          version: "1.0.0",
+          capabilities: ["search"],
+        },
+        budget: {
+          max_steps: 8,
+          max_input_characters: 24_000,
+          max_output_tokens: 512,
+          cost_bearer: "platform" as unknown as "caller",
+        },
+      }),
+    ).rejects.toThrow("caller-funded");
     expect(fake.calls).toHaveLength(0);
   });
 
@@ -348,11 +503,18 @@ describe("MatchPlane external Agent client", () => {
     const client = new MatchPlaneAgentClient({
       baseUrl: "https://matx.tech",
       apiKey: "mpk_test",
-      fetchImpl: async () => new Response(JSON.stringify({
-        jsonrpc: "2.0",
-        id: "1",
-        result: { isError: true, structuredContent: { error: "scope denied" } },
-      }), { status: 200 }),
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              isError: true,
+              structuredContent: { error: "scope denied" },
+            },
+          }),
+          { status: 200 },
+        ),
     });
     await expect(client.listTools()).rejects.toBeInstanceOf(MatchPlaneMcpError);
   });
@@ -364,7 +526,7 @@ describe("MatchPlane external Agent client", () => {
       apiKey: "mpk_test",
       requestTimeoutMs: 5_000,
       fetchImpl: async (_url, init) => {
-        requestSignal = init?.signal;
+        requestSignal = init?.signal ?? undefined;
         return new Response("x".repeat(256 * 1024 + 1), { status: 200 });
       },
     });
@@ -373,12 +535,25 @@ describe("MatchPlane external Agent client", () => {
     expect(requestSignal).toBeInstanceOf(AbortSignal);
   });
 
+  it("rejects a malformed base URL with a stable validation error", () => {
+    expect(
+      () =>
+        new MatchPlaneAgentClient({
+          baseUrl: "not a URL",
+          apiKey: "mpk_test",
+        }),
+    ).toThrow("valid absolute URL");
+  });
+
   it("rejects an unbounded external Agent request timeout", () => {
-    expect(() => new MatchPlaneAgentClient({
-      baseUrl: "https://matx.tech",
-      apiKey: "mpk_test",
-      requestTimeoutMs: 120_001,
-    })).toThrow("requestTimeoutMs");
+    expect(
+      () =>
+        new MatchPlaneAgentClient({
+          baseUrl: "https://matx.tech",
+          apiKey: "mpk_test",
+          requestTimeoutMs: 120_001,
+        }),
+    ).toThrow("requestTimeoutMs");
   });
 
   it("normalizes a transport timeout to a typed MCP error", async () => {
@@ -386,21 +561,27 @@ describe("MatchPlane external Agent client", () => {
       baseUrl: "https://matx.tech",
       apiKey: "mpk_test",
       requestTimeoutMs: 5,
-      fetchImpl: async (_url, init) => new Promise<Response>((_resolve, reject) => {
-        const signal = init?.signal;
-        if (!signal) {
-          reject(new Error("missing request signal"));
-          return;
-        }
-        if (signal.aborted) {
-          reject(signal.reason);
-          return;
-        }
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-      }),
+      fetchImpl: async (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) {
+            reject(new Error("missing request signal"));
+            return;
+          }
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        }),
     });
 
-    await expect(client.listTools()).rejects.toMatchObject({ name: "MatchPlaneMcpError", code: 504 });
+    await expect(client.listTools()).rejects.toMatchObject({
+      name: "MatchPlaneMcpError",
+      code: 504,
+    });
   });
 
   it("runs a caller-funded multi-step Skill only through its advertised MCP tools", async () => {
@@ -409,19 +590,39 @@ describe("MatchPlane external Agent client", () => {
       request_id: "123e4567-e89b-12d3-a456-426614174000",
       stage: "inventory",
       scope: { platform_path: "/used-car" },
-      intent: { narrative: "找符合约束的供给", requirements: { budget: 100000 } },
+      intent: {
+        narrative: "找符合约束的供给",
+        requirements: { budget: 100000 },
+      },
       skill: "matchplane.matching.v1",
       allowed_mcp_tools: ["inventory.search"],
-      budget: { max_steps: 3, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+      budget: {
+        max_steps: 3,
+        max_input_characters: 4000,
+        max_output_tokens: 512,
+        cost_bearer: "caller",
+      },
     };
     const calls: string[] = [];
     let decisionCount = 0;
     const result = await runBoundedAgentSkill(request, {
-      provider: { id: "buyer.example", version: "1.0.0", model: "caller-model" },
+      provider: {
+        id: "buyer.example",
+        version: "1.0.0",
+        model: "caller-model",
+      },
       decide: async ({ history }) => {
         decisionCount += 1;
-        if (!history.length) return { type: "tool", tool: "inventory.search", arguments: { budget: 100000 } };
-        return { type: "complete", selected: [{ ref: "offer-1", score: 0.92, reasons: ["预算匹配"] }] };
+        if (!history.length)
+          return {
+            type: "tool",
+            tool: "inventory.search",
+            arguments: { budget: 100000 },
+          };
+        return {
+          type: "complete",
+          selected: [{ ref: "offer-1", score: 0.92, reasons: ["预算匹配"] }],
+        };
       },
       callTool: async ({ tool }) => {
         calls.push(tool);
@@ -447,12 +648,21 @@ describe("MatchPlane external Agent client", () => {
       intent: { narrative: "找供给方", requirements: {} },
       skill: "matchplane.matching.v1",
       allowed_mcp_tools: ["merchant.search"],
-      budget: { max_steps: 2, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+      budget: {
+        max_steps: 2,
+        max_input_characters: 4000,
+        max_output_tokens: 512,
+        cost_bearer: "caller",
+      },
     };
     let called = false;
     const result = await runBoundedAgentSkill(request, {
       provider: { id: "seller.example", version: "1.0.0" },
-      decide: async () => ({ type: "tool", tool: "payment.refund", arguments: {} }),
+      decide: async () => ({
+        type: "tool",
+        tool: "payment.refund",
+        arguments: {},
+      }),
       callTool: async () => {
         called = true;
         return {};
@@ -473,12 +683,21 @@ describe("MatchPlane external Agent client", () => {
       intent: { narrative: "选择平台", requirements: {} },
       skill: "matchplane.route.v1",
       allowed_mcp_tools: ["platform.search"],
-      budget: { max_steps: 2, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+      budget: {
+        max_steps: 2,
+        max_input_characters: 4000,
+        max_output_tokens: 512,
+        cost_bearer: "caller",
+      },
     };
     let calls = 0;
     const result = await runBoundedAgentSkill(request, {
       provider: { id: "router.example", version: "1.0.0" },
-      decide: async () => ({ type: "tool", tool: "platform.search", arguments: { query: "供给" } }),
+      decide: async () => ({
+        type: "tool",
+        tool: "platform.search",
+        arguments: { query: "供给" },
+      }),
       callTool: async () => {
         calls += 1;
         return { ok: true };
@@ -500,7 +719,12 @@ describe("MatchPlane external Agent client", () => {
       intent: { narrative: "验证预算边界", requirements: {} },
       skill: "matchplane.matching.v1",
       allowed_mcp_tools: ["inventory.search"],
-      budget: { max_steps: 1, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+      budget: {
+        max_steps: 1,
+        max_input_characters: 4000,
+        max_output_tokens: 512,
+        cost_bearer: "caller",
+      },
     };
     let calls = 0;
     const result = await runBoundedAgentSkill(request, {
@@ -526,6 +750,47 @@ describe("MatchPlane external Agent client", () => {
     expect(calls).toBe(1);
   });
 
+  it("falls back safely when a tool output becomes unserializable during snapshotting", async () => {
+    const request: AgentSkillRequest = {
+      protocol: "matchplane.agent/v1",
+      request_id: "123e4567-e89b-12d3-a456-426614174000",
+      stage: "inventory",
+      scope: { platform_path: "/used-car" },
+      intent: { narrative: "验证快照降级", requirements: {} },
+      skill: "matchplane.matching.v1",
+      allowed_mcp_tools: ["inventory.search"],
+      budget: {
+        max_steps: 2,
+        max_input_characters: 4000,
+        max_output_tokens: 512,
+        cost_bearer: "caller",
+      },
+    };
+    let serializations = 0;
+    let observedOutput: unknown;
+    const unstableOutput = {
+      toJSON() {
+        serializations += 1;
+        if (serializations >= 3) throw new Error("serialization changed");
+        return { refs: ["offer-1"] };
+      },
+    };
+
+    const result = await runBoundedAgentSkill(request, {
+      provider: { id: "bounded.example", version: "1.0.0" },
+      decide: async ({ history }) => {
+        if (!history.length)
+          return { type: "tool", tool: "inventory.search", arguments: {} };
+        observedOutput = history[0]?.output;
+        return { type: "complete", selected: [] };
+      },
+      callTool: async () => unstableOutput,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(observedOutput).toBeNull();
+  });
+
   it("returns bounded rejected results for malformed runtime inputs and reasons", async () => {
     const malformed = await runBoundedAgentSkill(
       null as unknown as AgentSkillRequest,
@@ -542,11 +807,19 @@ describe("MatchPlane external Agent client", () => {
       intent: { narrative: "验证错误原因", requirements: {} },
       skill: "matchplane.route.v1",
       allowed_mcp_tools: [],
-      budget: { max_steps: 1, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+      budget: {
+        max_steps: 1,
+        max_input_characters: 4000,
+        max_output_tokens: 512,
+        cost_bearer: "caller",
+      },
     };
     const rejected = await runBoundedAgentSkill(request, {
       provider: { id: "bounded.example", version: "1.0.0" },
-      decide: async () => ({ type: "reject", reason: 123 } as unknown as ReturnType<NonNullable<Parameters<typeof runBoundedAgentSkill>[1]["decide"]>>),
+      decide: async () =>
+        ({ type: "reject", reason: 123 }) as unknown as ReturnType<
+          NonNullable<Parameters<typeof runBoundedAgentSkill>[1]["decide"]>
+        >,
       callTool: async () => ({}),
     });
     expect(rejected.status).toBe("rejected");
@@ -562,7 +835,12 @@ describe("MatchPlane external Agent client", () => {
       intent: { narrative: "验证超时", requirements: {} },
       skill: "matchplane.route.v1",
       allowed_mcp_tools: [],
-      budget: { max_steps: 1, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+      budget: {
+        max_steps: 1,
+        max_input_characters: 4000,
+        max_output_tokens: 512,
+        cost_bearer: "caller",
+      },
     };
     const result = await runBoundedAgentSkill(request, {
       provider: { id: "bounded.example", version: "1.0.0" },
@@ -583,12 +861,24 @@ describe("MatchPlane external Agent client", () => {
       intent: { narrative: "验证 MCP 错误", requirements: {} },
       skill: "matchplane.matching.v1",
       allowed_mcp_tools: ["inventory.search"],
-      budget: { max_steps: 1, max_input_characters: 4000, max_output_tokens: 512, cost_bearer: "caller" },
+      budget: {
+        max_steps: 1,
+        max_input_characters: 4000,
+        max_output_tokens: 512,
+        cost_bearer: "caller",
+      },
     };
     const result = await runBoundedAgentSkill(request, {
       provider: { id: "bounded.example", version: "1.0.0" },
-      decide: async () => ({ type: "tool", tool: "inventory.search", arguments: {} }),
-      callTool: async () => ({ isError: true, structuredContent: { error: "upstream unavailable" } }),
+      decide: async () => ({
+        type: "tool",
+        tool: "inventory.search",
+        arguments: {},
+      }),
+      callTool: async () => ({
+        isError: true,
+        structuredContent: { error: "upstream unavailable" },
+      }),
     });
     expect(result.status).toBe("degraded");
     expect(result.reason).toBe("tool_failed");

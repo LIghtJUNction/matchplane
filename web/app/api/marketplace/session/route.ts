@@ -1,12 +1,25 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
-import { auth, authDatabase, rootPlatformReferenceId } from "../../../../src/lib/auth";
+import {
+  auth,
+  authDatabase,
+  rootPlatformReferenceId,
+} from "../../../../src/lib/auth";
 import { loadInternalBearer } from "../../../../src/lib/internal-auth";
-import { isMountedPlatformPath, readActivePlatformScope } from "../../../../src/platform-mount";
+import {
+  isMountedPlatformPath,
+  readActivePlatformScope,
+} from "../../../../src/platform-mount";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
-import { readJsonBody, readJsonResponseBody, readResponseTextBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  readJsonResponseBody,
+  readResponseTextBody,
+  RequestBodyTooLargeError,
+} from "../../../../src/lib/body-limit";
 import { isProductionEnvironment } from "../../../../src/lib/runtime";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -20,10 +33,6 @@ interface SessionRequest {
   subplatform?: string;
   platformPath?: string;
   role?: RequestedRole;
-  /** Optional user-owned contact channels. The gateway encrypts these values at rest. */
-  contact?: Record<string, unknown>;
-  /** Keep existing channels during ordinary capability refreshes. */
-  preserveContact?: boolean;
   /** Server-to-server OIDC exchange for a child hosted on another origin. */
   federated?: {
     accessToken?: string;
@@ -53,36 +62,86 @@ export async function POST(request: Request): Promise<Response> {
   let input: SessionRequest;
   try {
     const value = await readJsonBody<unknown>(request, 128 * 1024);
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new SyntaxError("object required");
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new SyntaxError("object required");
     input = value as SessionRequest;
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof RequestBodyTooLargeError ? "撮合会话请求过大" : "请求必须是有效 JSON" },
+      {
+        error:
+          error instanceof RequestBodyTooLargeError
+            ? "撮合会话请求过大"
+            : "请求必须是有效 JSON",
+      },
       { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
+    );
+  }
+  const legacyContactInput = input as SessionRequest & {
+    contact?: unknown;
+    preserveContact?: unknown;
+  };
+  if (
+    legacyContactInput.contact !== undefined ||
+    legacyContactInput.preserveContact !== undefined
+  ) {
+    return NextResponse.json(
+      { error: "联系方式只能来自账号中已验证的邮箱或手机号" },
+      { status: 400 },
     );
   }
   const isFederatedRequest = Boolean(input.federated);
   if (!isFederatedRequest && !hasTrustedBrowserOrigin(request)) {
-    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+    return NextResponse.json(
+      { error: "请求来源未被平台信任" },
+      { status: 403 },
+    );
   }
 
-  if (!input.tenantId || !input.role || !input.subplatform) {
+  if (!input.role || !input.subplatform) {
     return NextResponse.json(
-      { error: "tenantId, subplatform, and role are required" },
+      { error: "subplatform and role are required" },
+      { status: 400 },
+    );
+  }
+  if (input.subplatform === "root" && !input.tenantId) {
+    const configuredRootTenant = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
+    if (!configuredRootTenant || !isUuid(configuredRootTenant)) {
+      return NextResponse.json(
+        { error: "根平台尚未配置 MATCHPLANE_ROOT_TENANT_ID" },
+        { status: 503 },
+      );
+    }
+    input.tenantId = configuredRootTenant;
+  }
+  if (!input.tenantId) {
+    return NextResponse.json(
+      { error: "child platform sessions require tenantId" },
       { status: 400 },
     );
   }
   if (!isRequestedRole(input.role)) {
-    return NextResponse.json({ error: "role must be buyer, seller, or subplatform_admin" }, { status: 400 });
+    return NextResponse.json(
+      { error: "role must be buyer, seller, or subplatform_admin" },
+      { status: 400 },
+    );
   }
   if (!isUuid(input.tenantId)) {
-    return NextResponse.json({ error: "tenantId must be a UUID" }, { status: 400 });
+    return NextResponse.json(
+      { error: "tenantId must be a UUID" },
+      { status: 400 },
+    );
   }
   if (input.domainId && !isUuid(input.domainId)) {
-    return NextResponse.json({ error: "domainId must be a UUID when provided" }, { status: 400 });
+    return NextResponse.json(
+      { error: "domainId must be a UUID when provided" },
+      { status: 400 },
+    );
   }
   if (input.subplatform !== "root" && !input.domainId) {
-    return NextResponse.json({ error: "child platform sessions require domainId" }, { status: 400 });
+    return NextResponse.json(
+      { error: "child platform sessions require domainId" },
+      { status: 400 },
+    );
   }
 
   const resolvedIdentity = await resolveMarketplaceIdentity(request, input);
@@ -90,89 +149,166 @@ export async function POST(request: Request): Promise<Response> {
   const identity = resolvedIdentity.identity;
   if (identity.federated && input.role === "subplatform_admin") {
     return NextResponse.json(
-      { error: "跨域 OIDC 登录只可交换买家或卖家 capability；管理员必须在根平台会话中操作" },
+      {
+        error:
+          "跨域 OIDC 登录只可交换买家或卖家 capability；管理员必须在根平台会话中操作",
+      },
       { status: 403 },
     );
   }
 
   const platformPath = normalizePlatformPath(
-    input.platformPath ?? (input.subplatform === "root" ? "/" : `/${input.subplatform}`),
+    input.platformPath ??
+      (input.subplatform === "root" ? "/" : `/${input.subplatform}`),
   );
-  if (!platformPath || (input.subplatform !== "root" && platformPath.split("/").filter(Boolean).at(-1) !== input.subplatform)) {
-    return NextResponse.json({ error: "platformPath must identify the requested platform node" }, { status: 400 });
+  if (
+    !platformPath ||
+    (input.subplatform !== "root" &&
+      platformPath.split("/").filter(Boolean).at(-1) !== input.subplatform)
+  ) {
+    return NextResponse.json(
+      { error: "platformPath must identify the requested platform node" },
+      { status: 400 },
+    );
   }
   if (!(await isMountedPlatformPath(platformPath))) {
-    return NextResponse.json({ error: "当前平台路径尚未激活" }, { status: 404 });
+    return NextResponse.json(
+      { error: "当前平台路径尚未激活" },
+      { status: 404 },
+    );
   }
 
   if (input.subplatform !== "root" && isProductionEnvironment()) {
     const resolved = await readActivePlatformScope(platformPath);
     if (!resolved || resolved.slug !== input.subplatform) {
-      return NextResponse.json({ error: "平台路径无法解析为唯一的 active 节点" }, { status: 404 });
+      return NextResponse.json(
+        { error: "平台路径无法解析为唯一的 active 节点" },
+        { status: 404 },
+      );
     }
-    if (resolved.tenantId !== input.tenantId || resolved.domainId !== input.domainId) {
-      return NextResponse.json({ error: "tenantId/domainId 与平台路径不匹配" }, { status: 403 });
+    if (
+      resolved.tenantId !== input.tenantId ||
+      resolved.domainId !== input.domainId
+    ) {
+      return NextResponse.json(
+        { error: "tenantId/domainId 与平台路径不匹配" },
+        { status: 403 },
+      );
     }
   }
 
   if (input.subplatform === "root") {
     const configuredRootTenant = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
     if (
-      isProductionEnvironment()
-      && (!configuredRootTenant || !isUuid(configuredRootTenant))
+      isProductionEnvironment() &&
+      (!configuredRootTenant || !isUuid(configuredRootTenant))
     ) {
-      return NextResponse.json({ error: "根平台尚未配置 MATCHPLANE_ROOT_TENANT_ID" }, { status: 503 });
+      return NextResponse.json(
+        { error: "根平台尚未配置 MATCHPLANE_ROOT_TENANT_ID" },
+        { status: 503 },
+      );
     }
     if (configuredRootTenant && configuredRootTenant !== input.tenantId) {
-      return NextResponse.json({ error: "tenantId 不属于根平台" }, { status: 403 });
+      return NextResponse.json(
+        { error: "tenantId 不属于根平台" },
+        { status: 403 },
+      );
     }
-    if (input.domainId && !(await activeRootDomain(input.tenantId, input.domainId))) {
-      return NextResponse.json({ error: "当前 domain 已停用或不属于根平台" }, { status: 404 });
+    if (
+      input.domainId &&
+      !(await activeRootDomain(input.tenantId, input.domainId))
+    ) {
+      return NextResponse.json(
+        { error: "当前 domain 已停用或不属于根平台" },
+        { status: 404 },
+      );
     }
-  } else if (!(await activeSubplatformScope(input.tenantId, input.domainId, input.subplatform))) {
-    return NextResponse.json({ error: "当前子平台没有可用的 active registration" }, { status: 404 });
+  } else if (
+    !(await activeSubplatformScope(
+      input.tenantId,
+      input.domainId,
+      input.subplatform,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "当前子平台没有可用的 active registration" },
+      { status: 404 },
+    );
   }
 
   // Store membership controls listing and store operations, not browsing. A public store can
   // issue a buyer capability without silently adding every visitor to the merchant's team.
   // Sellers must be an explicit owner/operator of that store.
-  const membership = input.subplatform === "root"
-    ? await readRootOrganizationMembership(input.tenantId, identity.user.id)
-    : await readOrganizationMembershipByScope(input.tenantId, input.domainId, input.subplatform, identity.user.id);
+  const membership =
+    input.subplatform === "root"
+      ? await readRootOrganizationMembership(input.tenantId, identity.user.id)
+      : await readOrganizationMembershipByScope(
+          input.tenantId,
+          input.domainId,
+          input.subplatform,
+          identity.user.id,
+        );
   const userRole = identity.user.role;
   const rootSuperAdmin = userRole === "rootSuperAdmin";
-  const scopedOperator = membership?.role
-    .split(",")
-    .some((role) => role === "owner" || role === "admin" || role === "subplatform_admin") === true;
+  const scopedOperator =
+    membership?.role
+      .split(",")
+      .some(
+        (role) =>
+          role === "owner" || role === "admin" || role === "subplatform_admin",
+      ) === true;
   if (input.role === "subplatform_admin" || input.role === "seller") {
     if (!rootSuperAdmin && !scopedOperator) {
       return NextResponse.json(
-        { error: input.role === "seller" ? "只有店主或店铺运营可以上架商品" : "当前账号没有这家店铺的运营权限" },
+        {
+          error:
+            input.role === "seller"
+              ? "只有店主或店铺运营可以上架商品"
+              : "当前账号没有这家店铺的运营权限",
+        },
         { status: 403 },
       );
     }
   }
-  const publicBuyerAccess = input.role === "buyer"
-    && input.subplatform !== "root"
-    && await storeAllowsPublicBuyerAccess(input.tenantId, input.domainId, input.subplatform);
-  if (!rootSuperAdmin && !membership && !publicBuyerAccess && input.subplatform !== "root") {
+  const publicBuyerAccess =
+    input.role === "buyer" &&
+    input.subplatform !== "root" &&
+    (await storeAllowsPublicBuyerAccess(
+      input.tenantId,
+      input.domainId,
+      input.subplatform,
+    ));
+  if (
+    !rootSuperAdmin &&
+    !membership &&
+    !publicBuyerAccess &&
+    input.subplatform !== "root"
+  ) {
     return NextResponse.json(
       { error: "这家店铺仅对受邀成员开放" },
       { status: 403 },
     );
   }
 
-  // Verified first-party login methods are trustworthy identity channels. They are stored
-  // encrypted and still released only after the existing two-party consent transition; an
-  // OAuth subject (for example a WeChat openid) is deliberately never presented as a WeChat ID.
-  const suppliedContact = input.contact && typeof input.contact === "object" && !Array.isArray(input.contact)
-    ? input.contact
-    : input.contact ?? {};
-  const contact = normalizeContactInput({
-    ...(suppliedContact as Record<string, unknown>),
-    ...verifiedIdentityContacts(identity.user),
-  });
-  if (!contact.ok) return NextResponse.json({ error: contact.error }, { status: 400 });
+  // Contact disclosure is identity-bound: only verified first-party login methods become
+  // exchangeable channels. OAuth subjects (for example a WeChat openid) prove identity but are
+  // deliberately never exposed as contact handles.
+  const identityContacts = verifiedIdentityContacts(identity.user);
+  if (Object.keys(identityContacts).length === 0) {
+    return NextResponse.json(
+      { error: "请先在账号设置中绑定并验证邮箱或手机号" },
+      { status: 409 },
+    );
+  }
+  const contact = normalizeContactInput(identityContacts);
+  if (!contact.ok)
+    return NextResponse.json({ error: contact.error }, { status: 400 });
+  const gatewayRole =
+    rootSuperAdmin || scopedOperator
+      ? "both"
+      : input.role === "subplatform_admin"
+        ? "both"
+        : input.role;
   let gatewayResponse: Response;
   try {
     gatewayResponse = await fetch(
@@ -192,21 +328,32 @@ export async function POST(request: Request): Promise<Response> {
           tenant_id: input.tenantId,
           domain_id: input.domainId ?? null,
           platform_path: platformPath,
-          external_key: `better-auth:${identity.user.id}:${input.tenantId}:${platformPath}`,
+          external_key: `better-auth:${identity.user.id}:${input.tenantId}:${platformPath}:${gatewayRole}`,
           display_name: identity.user.name,
-          role: input.role === "subplatform_admin" ? "both" : input.role,
-          marketplace_sides: input.role === "seller" ? ["supply"] : input.role === "buyer" ? ["demand"] : ["demand", "supply"],
+          role: gatewayRole,
+          marketplace_sides:
+            gatewayRole === "seller"
+              ? ["supply"]
+              : gatewayRole === "buyer"
+                ? ["demand"]
+                : ["demand", "supply"],
           contact: contact.value,
-          preserve_contact: input.preserveContact !== false && !input.contact,
+          preserve_contact: false,
         }),
       },
     );
   } catch (error) {
     console.error("marketplace session bridge unavailable", error);
-    return NextResponse.json({ error: "撮合会话服务暂时不可用" }, { status: 503 });
+    return NextResponse.json(
+      { error: "撮合会话服务暂时不可用" },
+      { status: 503 },
+    );
   }
   if (!gatewayResponse.ok) {
-    const message = await readResponseTextBody(gatewayResponse, MAX_GATEWAY_RESPONSE_BYTES).catch(() => "");
+    const message = await readResponseTextBody(
+      gatewayResponse,
+      MAX_GATEWAY_RESPONSE_BYTES,
+    ).catch(() => "");
     return NextResponse.json(
       { error: message.slice(0, 2_000) || "marketplace session bridge failed" },
       { status: gatewayResponse.status >= 500 ? 502 : gatewayResponse.status },
@@ -219,9 +366,16 @@ export async function POST(request: Request): Promise<Response> {
     access_token: string;
     access_token_expires_at: string;
   }>(gatewayResponse, MAX_GATEWAY_RESPONSE_BYTES).catch(() => null);
-  if (!body) return NextResponse.json({ error: "撮合会话服务返回了无效响应" }, { status: 502 });
+  if (!body)
+    return NextResponse.json(
+      { error: "撮合会话服务返回了无效响应" },
+      { status: 502 },
+    );
   if (!isUuid(body.party_id) || body.tenant_id !== input.tenantId) {
-    return NextResponse.json({ error: "撮合会话服务返回了无效的平台身份" }, { status: 502 });
+    return NextResponse.json(
+      { error: "撮合会话服务返回了无效的平台身份" },
+      { status: 502 },
+    );
   }
   if (input.subplatform !== "root") {
     try {
@@ -230,7 +384,7 @@ export async function POST(request: Request): Promise<Response> {
         domainId: input.domainId!,
         partyId: body.party_id,
         authUserId: identity.user.id,
-        requestedRole: input.role,
+        requestedRole: body.role === "both" ? "subplatform_admin" : input.role,
       });
     } catch (error) {
       console.error("marketplace membership projection failed", error);
@@ -250,7 +404,9 @@ export async function POST(request: Request): Promise<Response> {
       eventType: "marketplace.capability.issued",
       metadata: {
         role: input.role,
-        identitySource: identity.federated ? "root-oidc" : "better-auth-session",
+        identitySource: identity.federated
+          ? "root-oidc"
+          : "better-auth-session",
         membershipProjection: input.subplatform === "root" ? "root" : "active",
         expiresAt: body.access_token_expires_at,
       },
@@ -304,9 +460,10 @@ async function resolveMarketplaceIdentity(
           name: sessionUser.name,
           email: sessionUser.email,
           emailVerified: sessionUser.emailVerified === true,
-          phoneNumber: typeof sessionUser.phoneNumber === "string"
-            ? sessionUser.phoneNumber
-            : null,
+          phoneNumber:
+            typeof sessionUser.phoneNumber === "string"
+              ? sessionUser.phoneNumber
+              : null,
           phoneNumberVerified: sessionUser.phoneNumberVerified === true,
           role: sessionUser.role,
         },
@@ -319,19 +476,28 @@ async function resolveMarketplaceIdentity(
   if (!federated) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "Better Auth session is required" }, { status: 401 }),
+      response: NextResponse.json(
+        { error: "Better Auth session is required" },
+        { status: 401 },
+      ),
     };
   }
   if (input.subplatform === "root") {
     return {
       ok: false,
-      response: NextResponse.json({ error: "跨域 OIDC capability 必须绑定到具体子平台" }, { status: 400 }),
+      response: NextResponse.json(
+        { error: "跨域 OIDC capability 必须绑定到具体子平台" },
+        { status: 400 },
+      ),
     };
   }
   if (!input.domainId || !input.subplatform) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "跨域 OIDC capability 缺少子平台作用域" }, { status: 400 }),
+      response: NextResponse.json(
+        { error: "跨域 OIDC capability 缺少子平台作用域" },
+        { status: 400 },
+      ),
     };
   }
 
@@ -348,18 +514,37 @@ async function resolveMarketplaceIdentity(
     };
   }
 
-  const introspection = await introspectRootAccessToken(request, token, clientId, clientSecret);
-  if (!introspection || introspection.active !== true || introspection.client_id !== clientId) {
+  const introspection = await introspectRootAccessToken(
+    request,
+    token,
+    clientId,
+    clientSecret,
+  );
+  if (
+    !introspection ||
+    introspection.active !== true ||
+    introspection.client_id !== clientId
+  ) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "根平台 OIDC access token 无效或已撤销" }, { status: 401 }),
+      response: NextResponse.json(
+        { error: "根平台 OIDC access token 无效或已撤销" },
+        { status: 401 },
+      ),
     };
   }
   const subject = introspection.sub;
-  if (!introspection.scope?.split(" ").includes("openid") || !subject || !isUuid(subject)) {
+  if (
+    !introspection.scope?.split(" ").includes("openid") ||
+    !subject ||
+    !isUuid(subject)
+  ) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "根平台 OIDC token 缺少有效的 openid 身份" }, { status: 401 }),
+      response: NextResponse.json(
+        { error: "根平台 OIDC token 缺少有效的 openid 身份" },
+        { status: 401 },
+      ),
     };
   }
 
@@ -376,12 +561,21 @@ async function resolveMarketplaceIdentity(
         AND r.slug = $4
         AND r.state = 'active'
       LIMIT 1`,
-    [clientId, input.tenantId, input.domainId, input.subplatform, rootPlatformReferenceId()],
+    [
+      clientId,
+      input.tenantId,
+      input.domainId,
+      input.subplatform,
+      rootPlatformReferenceId(),
+    ],
   );
   if (registration.rowCount !== 1) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "OIDC 客户端没有绑定当前 active 子平台" }, { status: 403 }),
+      response: NextResponse.json(
+        { error: "OIDC 客户端没有绑定当前 active 子平台" },
+        { status: 403 },
+      ),
     };
   }
 
@@ -397,7 +591,10 @@ async function resolveMarketplaceIdentity(
   if (!user) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "根平台身份不存在或已停用" }, { status: 401 }),
+      response: NextResponse.json(
+        { error: "根平台身份不存在或已停用" },
+        { status: 401 },
+      ),
     };
   }
   return { ok: true, identity: { user, federated: true } };
@@ -416,16 +613,24 @@ async function introspectRootAccessToken(
 } | null> {
   try {
     const url = new URL("/api/auth/oauth2/introspect", request.url);
-    const credentials = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64");
-    const response = await auth.handler(new Request(url, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Basic ${credentials}`,
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ token: accessToken, token_type_hint: "access_token" }).toString(),
-    }));
+    const credentials = Buffer.from(
+      `${clientId}:${clientSecret}`,
+      "utf8",
+    ).toString("base64");
+    const response = await auth.handler(
+      new Request(url, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          authorization: `Basic ${credentials}`,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          token: accessToken,
+          token_type_hint: "access_token",
+        }).toString(),
+      }),
+    );
     if (!response.ok) return null;
     const body = await readJsonResponseBody<unknown>(response, 32 * 1024);
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
@@ -442,28 +647,41 @@ async function introspectRootAccessToken(
 }
 
 function boundedString(value: unknown, maxLength: number): string | undefined {
-  return typeof value === "string" && value.length > 0 && value.length <= maxLength ? value : undefined;
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maxLength
+    ? value
+    : undefined;
 }
 
-function verifiedIdentityContacts(user: MarketplaceIdentity["user"]): Record<string, string> {
+function verifiedIdentityContacts(
+  user: MarketplaceIdentity["user"],
+): Record<string, string> {
   const contact: Record<string, string> = {};
   if (user.emailVerified && user.email) contact.email = user.email;
-  if (user.phoneNumberVerified && user.phoneNumber) contact.phone = user.phoneNumber;
+  if (user.phoneNumberVerified && user.phoneNumber)
+    contact.phone = user.phoneNumber;
   return contact;
 }
 
-function normalizeContactInput(value: unknown):
-  | { ok: true; value: Record<string, string> }
-  | { ok: false; error: string } {
+function normalizeContactInput(
+  value: unknown,
+): { ok: true; value: Record<string, string> } | { ok: false; error: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, error: "联系方式必须是 JSON 对象" };
   }
   const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.length > 32) return { ok: false, error: "联系方式渠道数量不能超过 32 个" };
+  if (entries.length > 32)
+    return { ok: false, error: "联系方式渠道数量不能超过 32 个" };
   const normalized: Record<string, string> = {};
   let totalBytes = 0;
   for (const [key, raw] of entries) {
-    if (!/^[A-Za-z0-9._-]{1,64}$/.test(key) || typeof raw !== "string" || !raw.trim() || raw.length > 256) {
+    if (
+      !/^[A-Za-z0-9._-]{1,64}$/.test(key) ||
+      typeof raw !== "string" ||
+      !raw.trim() ||
+      raw.length > 256
+    ) {
       return { ok: false, error: "联系方式渠道名称或内容格式无效" };
     }
     if ([...raw].some((character) => character.codePointAt(0)! < 0x20)) {
@@ -485,7 +703,8 @@ async function upsertMarketplaceMembershipProjection(input: {
   authUserId: string;
   requestedRole: RequestedRole;
 }): Promise<void> {
-  const role = input.requestedRole === "subplatform_admin" ? "admin" : input.requestedRole;
+  const role =
+    input.requestedRole === "subplatform_admin" ? "admin" : input.requestedRole;
   await authDatabase.query(
     `INSERT INTO marketplace_subplatform_memberships
        (tenant_id, domain_id, party_id, role, labels, status, approved_at, approved_by)
@@ -692,7 +911,10 @@ async function storeProjectionExists(
   return result.rowCount === 1;
 }
 
-async function activeRootDomain(tenantId: string, domainId: string): Promise<boolean> {
+async function activeRootDomain(
+  tenantId: string,
+  domainId: string,
+): Promise<boolean> {
   const result = await authDatabase.query(
     `SELECT 1
        FROM domains
@@ -705,16 +927,17 @@ async function activeRootDomain(tenantId: string, domainId: string): Promise<boo
   return result.rowCount === 1;
 }
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
 function isRequestedRole(value: unknown): value is RequestedRole {
-  return value === "buyer" || value === "seller" || value === "subplatform_admin";
+  return (
+    value === "buyer" || value === "seller" || value === "subplatform_admin"
+  );
 }
 
 function normalizePlatformPath(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 512) return null;
   const normalized = `/${value.split("/").filter(Boolean).join("/")}`;
-  return normalized === "/" || /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(normalized) ? normalized : null;
+  return normalized === "/" ||
+    /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(normalized)
+    ? normalized
+    : null;
 }

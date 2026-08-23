@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated Rust build artifacts are not source inputs"
+paths = ['''(^|/)target/''']

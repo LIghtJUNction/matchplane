@@ -6,7 +6,7 @@ x-matchplane-service: &matchplane-service
     context: ../..
     dockerfile: deploy/compose/service.Dockerfile
   restart: unless-stopped
-  environment: &matchplane-environment
+  environment:
     MATCHPLANE_ENVIRONMENT: development
     # Compose is a local development profile. The first account may inspect the admin workspace
     # without SMTP; production packaging and the host bootstrap script keep this disabled.
@@ -31,7 +31,7 @@ x-matchplane-service: &matchplane-service
     MATCHPLANE_TLS_CERTIFICATE_PATH: ""
     MATCHPLANE_TLS_PRIVATE_KEY_PATH: ""
     MATCHPLANE_TLS_CLIENT_CA_PATH: ""
-  depends_on: &matchplane-dependencies
+  depends_on:
     migration:
       condition: service_completed_successfully
     kafka-init:
@@ -88,7 +88,14 @@ services:
     volumes:
       - valkey-data:/data
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "${MATCHPLANE_VALKEY_PASSWORD:-matchplane_dev_only}", "ping"]
+      test:
+        [
+          "CMD",
+          "valkey-cli",
+          "-a",
+          "${MATCHPLANE_VALKEY_PASSWORD:-matchplane_dev_only}",
+          "ping",
+        ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -118,7 +125,11 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list >/dev/null 2>&1"]
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list >/dev/null 2>&1",
+        ]
       interval: 5s
       timeout: 10s
       retries: 30
@@ -248,7 +259,13 @@ services:
       - ${MATCHPLANE_HOSTED_MEDIA_HOST_ROOT:-./var/hosted-media}:/var/lib/matchplane/media:rw
       - ${MATCHPLANE_SUBPLATFORM_SECRET_HOST_ROOT:-./var/subplatform-email-secrets}:/run/secrets/subplatform-email:ro
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/api/health/web').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4173/api/health/web').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -281,7 +298,13 @@ services:
     expose:
       - "8787"
     healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8787/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:8787/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 10s
       timeout: 5s
       retries: 12

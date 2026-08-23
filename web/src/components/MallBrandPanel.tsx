@@ -1,6 +1,12 @@
 "use client";
 
-import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type SyntheticEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { ImagePlus, Save } from "lucide-react";
 
 import {
@@ -29,6 +35,10 @@ export function MallBrandPanel({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [placeholderText, setPlaceholderText] = useState("");
+  const [includeProductTitles, setIncludeProductTitles] = useState(false);
+  const [productTitleCount, setProductTitleCount] = useState(0);
+  const [promptSaving, setPromptSaving] = useState(false);
   const [termsContent, setTermsContent] = useState("");
   const [savedTermsContent, setSavedTermsContent] = useState("");
   const [privacyContent, setPrivacyContent] = useState("");
@@ -47,8 +57,14 @@ export function MallBrandPanel({
         setSavedName(mall.name);
         setVersion(mall.version);
         setLogoUrl(mall.logoUrl ?? null);
+        setPlaceholderText((mall.customPlaceholderPhrases ?? []).join("\n"));
+        setIncludeProductTitles(mall.includeActiveProductTitles ?? false);
+        setProductTitleCount(mall.activeProductTitleCount ?? 0);
       })
-      .catch((error) => { if (mounted) onNotice(error instanceof Error ? error.message : "商城品牌读取失败"); });
+      .catch((error) => {
+        if (mounted)
+          onNotice(error instanceof Error ? error.message : "商城品牌读取失败");
+      });
     return () => {
       mounted = false;
       if (previewRef.current) URL.revokeObjectURL(previewRef.current);
@@ -67,8 +83,13 @@ export function MallBrandPanel({
         setSavedPrivacyContent(legal.documents.privacy.content);
         setPrivacyVersion(legal.documents.privacy.version);
       })
-      .catch((error) => { if (mounted) onNotice(error instanceof Error ? error.message : "法律页面读取失败"); });
-    return () => { mounted = false; };
+      .catch((error) => {
+        if (mounted)
+          onNotice(error instanceof Error ? error.message : "法律页面读取失败");
+      });
+    return () => {
+      mounted = false;
+    };
   }, [onNotice]);
 
   const selectLogo = (event: ChangeEvent<HTMLInputElement>) => {
@@ -90,7 +111,7 @@ export function MallBrandPanel({
     setLogoFile(file);
   };
 
-  const save = async (event: FormEvent<HTMLFormElement>) => {
+  const save = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canEdit) {
       onNotice("只有商城负责人可以保存品牌设置");
@@ -104,14 +125,32 @@ export function MallBrandPanel({
     }
     setSaving(true);
     try {
-      let current: { name: string; version: number; logoUrl: string | null } = { name: savedName, version, logoUrl };
+      let current: { name: string; version: number; logoUrl: string | null } = {
+        name: savedName,
+        version,
+        logoUrl,
+      };
       if (nextName !== savedName) {
-        const updated = await saveMallSettings({ name: nextName, expectedVersion: current.version });
-        current = { name: updated.name, version: updated.version, logoUrl: updated.logoUrl ?? null };
+        const updated = await saveMallSettings({
+          name: nextName,
+          expectedVersion: current.version,
+        });
+        current = {
+          name: updated.name,
+          version: updated.version,
+          logoUrl: updated.logoUrl ?? null,
+        };
       }
       if (logoFile) {
-        const updated = await uploadMallBrandLogo({ file: logoFile, expectedVersion: current.version });
-        current = { name: updated.name, version: updated.version, logoUrl: updated.logoUrl ?? null };
+        const updated = await uploadMallBrandLogo({
+          file: logoFile,
+          expectedVersion: current.version,
+        });
+        current = {
+          name: updated.name,
+          version: updated.version,
+          logoUrl: updated.logoUrl ?? null,
+        };
       }
       setName(current.name);
       setSavedName(current.name);
@@ -130,7 +169,52 @@ export function MallBrandPanel({
     }
   };
 
-  const saveLegal = async (event: FormEvent<HTMLFormElement>) => {
+  const savePrompts = async (
+    event: SyntheticEvent<HTMLFormElement> | null,
+    nextIncludeProductTitles = includeProductTitles,
+  ) => {
+    event?.preventDefault();
+    if (!canEdit) {
+      onNotice("只有商城负责人可以保存输入提示");
+      return;
+    }
+    if (!version || !savedName) return;
+    const placeholderPhrases = Array.from(
+      new Set(
+        placeholderText
+          .split("\n")
+          .map((phrase) => phrase.trim())
+          .filter(Boolean),
+      ),
+    );
+    if (
+      placeholderPhrases.length > 64 ||
+      placeholderPhrases.some((phrase) => phrase.length > 120)
+    ) {
+      onNotice("最多 64 条，每条不能超过 120 个字符");
+      return;
+    }
+    setPromptSaving(true);
+    try {
+      const updated = await saveMallSettings({
+        name: savedName,
+        expectedVersion: version,
+        placeholderPhrases,
+        includeActiveProductTitles: nextIncludeProductTitles,
+      });
+      setVersion(updated.version);
+      setPlaceholderText((updated.customPlaceholderPhrases ?? []).join("\n"));
+      setIncludeProductTitles(updated.includeActiveProductTitles ?? false);
+      setProductTitleCount(updated.activeProductTitleCount ?? 0);
+      onNotice("输入提示已保存");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "输入提示保存失败");
+    } finally {
+      setPromptSaving(false);
+    }
+  };
+
+  const saveLegal = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canEdit) {
       onNotice("只有商城负责人可以保存法律页面");
@@ -141,7 +225,10 @@ export function MallBrandPanel({
       onNotice("请填写用户协议和隐私政策");
       return;
     }
-    if (termsContent === savedTermsContent && privacyContent === savedPrivacyContent) {
+    if (
+      termsContent === savedTermsContent &&
+      privacyContent === savedPrivacyContent
+    ) {
       onNotice("法律页面没有需要保存的修改");
       return;
     }
@@ -168,30 +255,176 @@ export function MallBrandPanel({
   };
 
   return (
-    <section className="surface mall-brand-panel" aria-labelledby="mall-brand-title">
+    <section
+      className="surface mall-brand-panel"
+      aria-labelledby="mall-brand-title"
+    >
       <SectionHeading title="品牌" titleId="mall-brand-title" />
       <p className="mall-brand-intro">设置商城名称和 Logo。</p>
       <form className="mall-brand-form" onSubmit={save}>
         <div className="mall-brand-preview" aria-label="品牌 Logo 预览">
-          {previewUrl || logoUrl ? <img src={previewUrl || logoUrl || ""} alt={`${name || "商城"} Logo`} /> : <span>{(name || "M").slice(0, 1).toUpperCase()}</span>}
+          {previewUrl || logoUrl ? (
+            <img
+              src={previewUrl || logoUrl || ""}
+              alt={`${name || "商城"} Logo`}
+            />
+          ) : (
+            <span>{(name || "M").slice(0, 1).toUpperCase()}</span>
+          )}
         </div>
         <div className="mall-brand-fields">
-          <label htmlFor="mall-brand-name"><span>品牌名</span><input id="mall-brand-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={200} required disabled={!canEdit || saving} /></label>
-          <label className="mall-brand-upload"><span>品牌 Logo</span><input type="file" accept="image/png,image/jpeg,image/webp,image/avif,image/heif,image/gif" onChange={selectLogo} disabled={!canEdit || saving} /><span className="button button-light"><ImagePlus size={16} aria-hidden="true" />{logoFile ? "已选择新 Logo" : logoUrl ? "替换 Logo" : "上传 Logo"}</span><small>支持 JPG、PNG、WebP、AVIF、HEIF、GIF，最大 4 MiB。</small></label>
+          <label htmlFor="mall-brand-name">
+            <span>品牌名</span>
+            <input
+              id="mall-brand-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              maxLength={200}
+              required
+              disabled={!canEdit || saving}
+            />
+          </label>
+          <label className="mall-brand-upload">
+            <span>品牌 Logo</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/avif,image/heif,image/gif"
+              onChange={selectLogo}
+              disabled={!canEdit || saving}
+            />
+            <span className="button button-light">
+              <ImagePlus size={16} aria-hidden="true" />
+              {logoFile ? "已选择新 Logo" : logoUrl ? "替换 Logo" : "上传 Logo"}
+            </span>
+            <small>支持 JPG、PNG、WebP、AVIF、HEIF、GIF，最大 4 MiB。</small>
+          </label>
         </div>
         <div className="mall-brand-actions">
-          <p>{canEdit ? "保存后会显示在商城首页和登录页。" : "只有商城负责人可以修改品牌设置。"}</p>
-          <button className="button button-dark" type="submit" disabled={!canEdit || saving || !version}><Save size={16} aria-hidden="true" />{saving ? "保存中…" : "保存品牌"}</button>
+          <p>
+            {canEdit
+              ? "保存后会显示在商城首页和登录页。"
+              : "只有商城负责人可以修改品牌设置。"}
+          </p>
+          <button
+            className="button button-dark"
+            type="submit"
+            disabled={!canEdit || saving || !version}
+          >
+            <Save size={16} aria-hidden="true" />
+            {saving ? "保存中…" : "保存品牌"}
+          </button>
+        </div>
+      </form>
+      <form
+        className="mall-brand-prompts"
+        onSubmit={(event) => void savePrompts(event)}
+      >
+        <h3>输入提示</h3>
+        <label htmlFor="mall-home-placeholder-phrases">
+          <span>轮播文字</span>
+          <textarea
+            id="mall-home-placeholder-phrases"
+            value={placeholderText}
+            onChange={(event) => setPlaceholderText(event.target.value)}
+            placeholder="每行一条"
+            rows={6}
+            maxLength={7744}
+            disabled={!canEdit || promptSaving}
+          />
+        </label>
+        <div className="mall-brand-prompt-actions">
+          <button
+            className="button button-light"
+            type="button"
+            disabled={!canEdit || promptSaving || !version}
+            onClick={() => void savePrompts(null, !includeProductTitles)}
+          >
+            {includeProductTitles
+              ? `移除全部商品标题（${productTitleCount}）`
+              : "加入全部商品标题"}
+          </button>
+          <button
+            className="button button-dark"
+            type="submit"
+            disabled={!canEdit || promptSaving || !version}
+          >
+            <Save size={16} aria-hidden="true" />
+            {promptSaving ? "保存中…" : "保存"}
+          </button>
         </div>
       </form>
       <form className="mall-brand-legal" onSubmit={saveLegal}>
         <div className="mall-brand-legal-heading">
-          <div><h3>法律页面</h3><p>注册前会要求用户阅读并同意。</p></div>
-          <small>公开路径：<a href="/terms" target="_blank" rel="noreferrer">/terms</a> · <a href="/privacy" target="_blank" rel="noreferrer">/privacy</a></small>
+          <div>
+            <h3>法律页面</h3>
+            <p>注册前会要求用户阅读并同意。</p>
+          </div>
+          <small>
+            公开路径：
+            <a href="/terms" target="_blank" rel="noreferrer">
+              /terms
+            </a>{" "}
+            ·{" "}
+            <a href="/privacy" target="_blank" rel="noreferrer">
+              /privacy
+            </a>
+          </small>
         </div>
-        <div className="mall-brand-legal-editor"><div><label htmlFor="mall-terms-content">用户协议</label><button type="button" className="text-action" onClick={() => setTermsContent(initialTermsTemplate())} disabled={!canEdit || legalSaving}>恢复初始模板</button></div><textarea id="mall-terms-content" value={termsContent} onChange={(event) => setTermsContent(event.target.value)} maxLength={100000} rows={11} disabled={!canEdit || legalSaving} /></div>
-        <div className="mall-brand-legal-editor"><div><label htmlFor="mall-privacy-content">隐私政策</label><button type="button" className="text-action" onClick={() => setPrivacyContent(initialPrivacyTemplate())} disabled={!canEdit || legalSaving}>恢复初始模板</button></div><textarea id="mall-privacy-content" value={privacyContent} onChange={(event) => setPrivacyContent(event.target.value)} maxLength={100000} rows={11} disabled={!canEdit || legalSaving} /></div>
-        <div className="mall-brand-legal-actions"><small>{termsContent.length + privacyContent.length}/200000</small><button className="button button-dark" type="submit" disabled={!canEdit || legalSaving || !termsVersion || !privacyVersion}><Save size={16} aria-hidden="true" />{legalSaving ? "保存中…" : "保存法律页面"}</button></div>
+        <div className="mall-brand-legal-editor">
+          <div>
+            <label htmlFor="mall-terms-content">用户协议</label>
+            <button
+              type="button"
+              className="text-action"
+              onClick={() => setTermsContent(initialTermsTemplate())}
+              disabled={!canEdit || legalSaving}
+            >
+              恢复初始模板
+            </button>
+          </div>
+          <textarea
+            id="mall-terms-content"
+            value={termsContent}
+            onChange={(event) => setTermsContent(event.target.value)}
+            maxLength={100000}
+            rows={11}
+            disabled={!canEdit || legalSaving}
+          />
+        </div>
+        <div className="mall-brand-legal-editor">
+          <div>
+            <label htmlFor="mall-privacy-content">隐私政策</label>
+            <button
+              type="button"
+              className="text-action"
+              onClick={() => setPrivacyContent(initialPrivacyTemplate())}
+              disabled={!canEdit || legalSaving}
+            >
+              恢复初始模板
+            </button>
+          </div>
+          <textarea
+            id="mall-privacy-content"
+            value={privacyContent}
+            onChange={(event) => setPrivacyContent(event.target.value)}
+            maxLength={100000}
+            rows={11}
+            disabled={!canEdit || legalSaving}
+          />
+        </div>
+        <div className="mall-brand-legal-actions">
+          <small>{termsContent.length + privacyContent.length}/200000</small>
+          <button
+            className="button button-dark"
+            type="submit"
+            disabled={
+              !canEdit || legalSaving || !termsVersion || !privacyVersion
+            }
+          >
+            <Save size={16} aria-hidden="true" />
+            {legalSaving ? "保存中…" : "保存法律页面"}
+          </button>
+        </div>
       </form>
     </section>
   );

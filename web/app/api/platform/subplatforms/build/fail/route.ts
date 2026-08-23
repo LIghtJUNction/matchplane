@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { authDatabase } from "../../../../../../src/lib/auth";
 import { hasValidConfiguredSubplatformBuilderToken } from "../../../../../../src/subplatform-builder";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../../../src/lib/body-limit";
+import { isUuid } from "../../../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -58,9 +59,4 @@ function readError(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
   return normalized.length >= 1 && normalized.length <= 4_000 ? normalized : null;
-}
-
-function isUuid(value: unknown): value is string {
-  return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

@@ -146,6 +146,86 @@ pub struct WebhookReceipt {
     pub status: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct FinancialCurrencySummary {
+    pub currency: String,
+    pub currency_scale: i16,
+    pub gross_captured: String,
+    pub refunded: String,
+    pub platform_fees: String,
+    pub net_revenue: String,
+    pub payment_count: i64,
+    pub captured_count: i64,
+    pub refund_count: i64,
+    pub invoice_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FinancialPaymentRow {
+    pub payment_id: String,
+    pub merchant_order_id: String,
+    pub status: String,
+    pub amount: String,
+    pub captured_amount: String,
+    pub refunded_amount: String,
+    pub platform_fee: String,
+    pub currency: String,
+    pub currency_scale: i16,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FinancialRefundRow {
+    pub refund_id: String,
+    pub payment_id: String,
+    pub merchant_order_id: String,
+    pub status: String,
+    pub amount: String,
+    pub platform_fee_reversal: String,
+    pub currency: String,
+    pub currency_scale: i16,
+    pub reason: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FinancialInvoiceRow {
+    pub invoice_id: String,
+    pub payment_id: Option<String>,
+    pub status: String,
+    pub kind: String,
+    pub amount: String,
+    pub currency: String,
+    pub currency_scale: i16,
+    pub description: String,
+    pub invoice_number: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub requested_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub issued_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FinancialReport {
+    pub tenant_id: TenantId,
+    pub source_type: String,
+    pub source_ref: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub from: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub to: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub generated_at: OffsetDateTime,
+    pub basis: &'static str,
+    pub currencies: Vec<FinancialCurrencySummary>,
+    pub payments: Vec<FinancialPaymentRow>,
+    pub refunds: Vec<FinancialRefundRow>,
+    pub invoices: Vec<FinancialInvoiceRow>,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct PaymentStore {
     pool: PgPool,
@@ -903,6 +983,167 @@ impl PaymentStore {
         rows.iter().map(payment_from_row).collect()
     }
 
+    /// Builds a bounded operational finance report for one exact generic payment source.
+    ///
+    /// The source pair is supplied only by the authenticated administrator boundary. Store
+    /// reports use `source_type=store` and the immutable store UUID as `source_ref`; no query in
+    /// this method can fall back to another source or to the tenant-wide payment page.
+    pub async fn financial_report(
+        &self,
+        tenant_id: TenantId,
+        source_type: &str,
+        source_ref: &str,
+        from: OffsetDateTime,
+        to: OffsetDateTime,
+        limit: u16,
+    ) -> Result<FinancialReport, StoreError> {
+        let tenant_uuid = tenant_id.into_uuid();
+        let row_limit = i64::from(limit) + 1;
+        let summary_query = sqlx::query(
+            "WITH entries AS (\
+                 SELECT payment.currency, payment.currency_scale, payment.captured_amount AS gross, \
+                        0::numeric AS refunded, LEAST(payment.commission_amount, payment.captured_amount) AS fees, \
+                        0::numeric AS fee_reversal, 1::bigint AS payment_count, \
+                        CASE WHEN payment.captured_amount > 0 THEN 1 ELSE 0 END::bigint AS captured_count, \
+                        0::bigint AS refund_count, 0::bigint AS invoice_count \
+                   FROM payment_intents payment \
+                  WHERE payment.tenant_id = $1 AND payment.source_type = $2 AND payment.source_ref = $3 \
+                    AND payment.created_at >= $4 AND payment.created_at < $5 \
+                 UNION ALL \
+                 SELECT refund.currency, refund.currency_scale, 0::numeric, \
+                        CASE WHEN refund.status = 'succeeded' THEN refund.amount ELSE 0::numeric END, \
+                        0::numeric, \
+                        CASE WHEN refund.status = 'succeeded' THEN refund.commission_reversal_amount ELSE 0::numeric END, \
+                        0::bigint, 0::bigint, \
+                        CASE WHEN refund.status = 'succeeded' THEN 1 ELSE 0 END::bigint, 0::bigint \
+                   FROM payment_refunds refund \
+                   JOIN payment_intents payment \
+                     ON payment.tenant_id = refund.tenant_id AND payment.id = refund.payment_id \
+                  WHERE payment.tenant_id = $1 AND payment.source_type = $2 AND payment.source_ref = $3 \
+                    AND refund.created_at >= $4 AND refund.created_at < $5 \
+                 UNION ALL \
+                 SELECT invoice.currency, invoice.currency_scale, 0::numeric, 0::numeric, 0::numeric, 0::numeric, \
+                        0::bigint, 0::bigint, 0::bigint, 1::bigint \
+                   FROM invoice_requests invoice \
+                   LEFT JOIN payment_intents payment \
+                     ON payment.tenant_id = invoice.tenant_id AND payment.id = invoice.payment_id \
+                  WHERE invoice.tenant_id = $1 \
+                    AND ((invoice.source_type = $2 AND invoice.source_ref = $3) \
+                      OR (invoice.source_type IS NULL AND payment.source_type = $2 AND payment.source_ref = $3)) \
+                    AND invoice.requested_at >= $4 AND invoice.requested_at < $5\
+             ) \
+             SELECT currency, currency_scale, SUM(gross)::text AS gross_captured, \
+                    SUM(refunded)::text AS refunded, (SUM(fees) - SUM(fee_reversal))::text AS platform_fees, \
+                    (SUM(gross) - SUM(refunded) - SUM(fees) + SUM(fee_reversal))::text AS net_revenue, \
+                    SUM(payment_count)::bigint AS payment_count, \
+                    SUM(captured_count)::bigint AS captured_count, \
+                    SUM(refund_count)::bigint AS refund_count, \
+                    SUM(invoice_count)::bigint AS invoice_count \
+               FROM entries GROUP BY currency, currency_scale ORDER BY currency, currency_scale",
+        )
+        .bind(tenant_uuid)
+        .bind(source_type)
+        .bind(source_ref)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool);
+        let payment_query = sqlx::query(
+            "SELECT payment.id, payment.merchant_order_id, payment.status, payment.amount::text AS amount, \
+                    payment.captured_amount::text AS captured_amount, payment.refunded_amount::text AS refunded_amount, \
+                    LEAST(payment.commission_amount, payment.captured_amount)::text AS platform_fee, \
+                    payment.currency, payment.currency_scale, payment.created_at \
+               FROM payment_intents payment \
+              WHERE payment.tenant_id = $1 AND payment.source_type = $2 AND payment.source_ref = $3 \
+                AND payment.created_at >= $4 AND payment.created_at < $5 \
+              ORDER BY payment.created_at DESC, payment.id DESC LIMIT $6",
+        )
+        .bind(tenant_uuid)
+        .bind(source_type)
+        .bind(source_ref)
+        .bind(from)
+        .bind(to)
+        .bind(row_limit)
+        .fetch_all(&self.pool);
+        let refund_query = sqlx::query(
+            "SELECT refund.id, refund.payment_id, payment.merchant_order_id, refund.status, \
+                    refund.amount::text AS amount, refund.commission_reversal_amount::text AS platform_fee_reversal, \
+                    refund.currency, refund.currency_scale, refund.reason, refund.created_at \
+               FROM payment_refunds refund \
+               JOIN payment_intents payment \
+                 ON payment.tenant_id = refund.tenant_id AND payment.id = refund.payment_id \
+              WHERE payment.tenant_id = $1 AND payment.source_type = $2 AND payment.source_ref = $3 \
+                AND refund.created_at >= $4 AND refund.created_at < $5 \
+              ORDER BY refund.created_at DESC, refund.id DESC LIMIT $6",
+        )
+        .bind(tenant_uuid)
+        .bind(source_type)
+        .bind(source_ref)
+        .bind(from)
+        .bind(to)
+        .bind(row_limit)
+        .fetch_all(&self.pool);
+        let invoice_query = sqlx::query(
+            "SELECT invoice.id, invoice.payment_id, invoice.status, invoice.kind, invoice.amount::text AS amount, \
+                    invoice.currency, invoice.currency_scale, invoice.description, invoice.invoice_number, \
+                    invoice.requested_at, invoice.issued_at \
+               FROM invoice_requests invoice \
+               LEFT JOIN payment_intents payment \
+                 ON payment.tenant_id = invoice.tenant_id AND payment.id = invoice.payment_id \
+              WHERE invoice.tenant_id = $1 \
+                AND ((invoice.source_type = $2 AND invoice.source_ref = $3) \
+                  OR (invoice.source_type IS NULL AND payment.source_type = $2 AND payment.source_ref = $3)) \
+                AND invoice.requested_at >= $4 AND invoice.requested_at < $5 \
+              ORDER BY invoice.requested_at DESC, invoice.id DESC LIMIT $6",
+        )
+        .bind(tenant_uuid)
+        .bind(source_type)
+        .bind(source_ref)
+        .bind(from)
+        .bind(to)
+        .bind(row_limit)
+        .fetch_all(&self.pool);
+        let (summary_rows, payment_rows, refund_rows, invoice_rows) =
+            tokio::try_join!(summary_query, payment_query, refund_query, invoice_query)?;
+
+        let currencies = summary_rows
+            .iter()
+            .map(financial_summary_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut payments = payment_rows
+            .iter()
+            .map(financial_payment_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut refunds = refund_rows
+            .iter()
+            .map(financial_refund_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut invoices = invoice_rows
+            .iter()
+            .map(financial_invoice_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        let truncated = payments.len() > usize::from(limit)
+            || refunds.len() > usize::from(limit)
+            || invoices.len() > usize::from(limit);
+        payments.truncate(usize::from(limit));
+        refunds.truncate(usize::from(limit));
+        invoices.truncate(usize::from(limit));
+
+        Ok(FinancialReport {
+            tenant_id,
+            source_type: source_type.to_owned(),
+            source_ref: source_ref.to_owned(),
+            from,
+            to,
+            generated_at: OffsetDateTime::now_utc(),
+            basis: "payment_created_refund_created_invoice_requested",
+            currencies,
+            payments,
+            refunds,
+            invoices,
+            truncated,
+        })
+    }
+
     pub async fn prepare_query(
         &self,
         tenant_id: TenantId,
@@ -1572,6 +1813,77 @@ impl PaymentStore {
             .await?;
         rows.iter().map(refund_from_row).collect()
     }
+}
+
+fn financial_summary_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<FinancialCurrencySummary, sqlx::Error> {
+    Ok(FinancialCurrencySummary {
+        currency: row.try_get("currency")?,
+        currency_scale: row.try_get("currency_scale")?,
+        gross_captured: row.try_get("gross_captured")?,
+        refunded: row.try_get("refunded")?,
+        platform_fees: row.try_get("platform_fees")?,
+        net_revenue: row.try_get("net_revenue")?,
+        payment_count: row.try_get("payment_count")?,
+        captured_count: row.try_get("captured_count")?,
+        refund_count: row.try_get("refund_count")?,
+        invoice_count: row.try_get("invoice_count")?,
+    })
+}
+
+fn financial_payment_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<FinancialPaymentRow, sqlx::Error> {
+    Ok(FinancialPaymentRow {
+        payment_id: row.try_get::<Uuid, _>("id")?.to_string(),
+        merchant_order_id: row.try_get("merchant_order_id")?,
+        status: row.try_get("status")?,
+        amount: row.try_get("amount")?,
+        captured_amount: row.try_get("captured_amount")?,
+        refunded_amount: row.try_get("refunded_amount")?,
+        platform_fee: row.try_get("platform_fee")?,
+        currency: row.try_get("currency")?,
+        currency_scale: row.try_get("currency_scale")?,
+        created_at: row.try_get("created_at")?,
+    })
+}
+
+fn financial_refund_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<FinancialRefundRow, sqlx::Error> {
+    Ok(FinancialRefundRow {
+        refund_id: row.try_get::<Uuid, _>("id")?.to_string(),
+        payment_id: row.try_get::<Uuid, _>("payment_id")?.to_string(),
+        merchant_order_id: row.try_get("merchant_order_id")?,
+        status: row.try_get("status")?,
+        amount: row.try_get("amount")?,
+        platform_fee_reversal: row.try_get("platform_fee_reversal")?,
+        currency: row.try_get("currency")?,
+        currency_scale: row.try_get("currency_scale")?,
+        reason: row.try_get("reason")?,
+        created_at: row.try_get("created_at")?,
+    })
+}
+
+fn financial_invoice_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<FinancialInvoiceRow, sqlx::Error> {
+    Ok(FinancialInvoiceRow {
+        invoice_id: row.try_get::<Uuid, _>("id")?.to_string(),
+        payment_id: row
+            .try_get::<Option<Uuid>, _>("payment_id")?
+            .map(|payment_id| payment_id.to_string()),
+        status: row.try_get("status")?,
+        kind: row.try_get("kind")?,
+        amount: row.try_get("amount")?,
+        currency: row.try_get("currency")?,
+        currency_scale: row.try_get("currency_scale")?,
+        description: row.try_get("description")?,
+        invoice_number: row.try_get("invoice_number")?,
+        requested_at: row.try_get("requested_at")?,
+        issued_at: row.try_get("issued_at")?,
+    })
 }
 
 const PAYMENT_SELECT: &str = "SELECT id, tenant_id, gateway_id, offline_deal_id, source_type, source_ref, payer_party_id, merchant_order_id, transaction_channel, \

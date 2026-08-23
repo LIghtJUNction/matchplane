@@ -1,0 +1,33 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": [
+    "subplatforms/auto/**"
+  ],
+  "workspaces": {
+    "web": {
+      "entry": [
+        "app/**/*.{ts,tsx}",
+        "src/**/*.test.{ts,tsx}",
+        "public/**/*.js",
+        "src/api.ts",
+        "src/catalog-{projection,protocol}.ts",
+        "src/federation-contract.ts",
+        "src/lib/{auth,mail,payment-admin,preferences,root-email-config}.ts",
+        "src/media-attachment.ts",
+        "src/platform-agent-{handoff,session}.ts",
+        "src/platform-router.ts",
+        "src/retrieval-protocol.ts",
+        "src/shopping-{intent,memory-contract}.ts",
+        "src/store-finance.ts",
+        "src/subplatform.ts",
+        "src/types.ts"
+      ]
+    },
+    "integrations/matchplane-agent-client": {
+      "entry": [
+        "src/index.ts",
+        "examples/*.ts"
+      ]
+    }
+  }
+}

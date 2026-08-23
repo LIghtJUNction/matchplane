@@ -8,6 +8,7 @@ import { isAgentKeyRole, isAgentKeySide, keyCanActAsNeutralSide, keyCanActAsSide
 import { verifyPlatformApiKey } from "../../../../src/lib/platform-api-key";
 import { readJsonBody, readJsonResponseBody, readResponseTextBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { isProductionEnvironment } from "../../../../src/lib/runtime";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -302,9 +303,4 @@ async function isActiveRootScope(tenantId: string, domainId: string): Promise<bo
     [tenantId, domainId],
   );
   return result.rowCount === 1;
-}
-
-function isUuid(value: unknown): value is string {
-  return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

@@ -1,5 +1,6 @@
 import { verifyPlatformApiKey } from "./lib/platform-api-key";
 import { auth } from "./lib/auth";
+import { isUuid } from "./lib/uuid";
 
 export interface PlatformRequestActor {
   /** Stable ledger subject; API-key subjects are deliberately not user sessions. */
@@ -44,8 +45,4 @@ export async function authenticatePlatformRequest(
     organizationId: key.referenceId,
     isRootAdministrator: false,
   };
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

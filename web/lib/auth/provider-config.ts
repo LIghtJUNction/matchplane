@@ -3,7 +3,7 @@
  * server endpoint. This module deliberately contains no endpoint, client ID,
  * API key, or secret reference.
  */
-export type AuthCapabilityKind =
+type AuthCapabilityKind =
   | "password"
   | "email_otp"
   | "phone_otp"

@@ -1,5 +1,6 @@
 import { authDatabase } from "./lib/auth";
 import { isProductionEnvironment } from "./lib/runtime";
+import { isUuid } from "./lib/uuid";
 
 export interface MountedPlatformScope {
   organizationId: string;
@@ -312,8 +313,4 @@ export async function isPlatformPathAccessibleByOrganization(
 
 function isPlatformPath(value: string): boolean {
   return value === "/" || /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(value);
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

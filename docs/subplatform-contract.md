@@ -69,17 +69,17 @@ Key 不会创建被冒充的用户会话。轮换方式是创建替代 key、更
 
 根服务在注册前会按 schema 验证清单。`id` 在全局稳定；`slug` 在根租户内唯一，并作为 URL 路径。`rootApiVersion` 与能力在启用前协商。可选 `agent` 块仅声明协议、工作流阶段与 MCP 工具名，不包含 endpoint、凭据或向量库配置。`agent.stages` 是子平台自有的 taxonomy key，根只校验长度/字符边界；`merchant`、`inventory` 只是二手车示例，不是全局枚举。`mcpServerKey` 仅是稳定的查找键。部署管理员可通过 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 将该 key 绑定到 HTTPS MCP endpoint；软件包本身不能指定 URL 或提供 bearer token。带有 `agent:tool` 权限的已认证 Agent 可调用通用 HTTP MCP 工具 `platform.child.tool`，传入当前 `platform_path`、白名单内 `tool_name` 和受限 JSON `arguments`。根服务会在转发前再次检查路径可见性与活跃注册，剥离调用方 API key，仅添加受限路由头、请求超时和响应体限制，并将子平台 MCP 结果作为可审计工具响应返回。终端未配置时返回明确的 degraded 错误，不会回退到根凭据或任意 URL。
 
-领域文案、定价能力、筛选器与商家字段属于软件包，不属于根实现。软件包可在清单中声明 `pricing`、`ui.chat`、`ui.copy`、`ui.filters`、`ui.supplyFields` 与 `ui.contactFields`；根服务会校验并传递给通用 shell/plugin。默认走领域中立 marketplace 合约。仍需使用旧垂直适配器的软件包必须显式声明 `marketplaceContract: "legacy-v1"`；仅定价或存在 schema 并不隐式选择该适配器。网关的 legacy HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明或默认业务货币。卖家提交由激活包 schema 定义的值，根服务仅保存并转发其结构化属性。
+领域文案、定价能力、筛选器与商家字段属于软件包，不属于根实现。软件包可在清单中声明 `pricing`、`ui.chat`、`ui.copy`、`ui.filters` 与 `ui.supplyFields`；根服务会校验并传递给通用 shell/plugin。联系方式是例外：包不能声明手填字段，交换只使用根 Better Auth 账号已验证的邮箱或手机，并要求双方明确同意。默认走领域中立 marketplace 合约。仍需使用旧垂直适配器的软件包必须显式声明 `marketplaceContract: "legacy-v1"`；仅定价或存在 schema 并不隐式选择该适配器。网关的 legacy HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明或默认业务货币。卖家提交由激活包 schema 定义的值，根服务仅保存并转发其结构化属性。
 
 ### Agent 资料上传
 
 需要让买方或卖方在聊天里交图片、PDF 或其他材料的包，必须同时提供真实的 `media.upload` MCP 工具并把它写进 `agent.mcpTools`。根 web 的 `POST /api/platform/media/upload` 只做 Better Auth/API-key、tenant/domain/path、MIME、文件名、base64 长度和 `request_id` 形状校验，然后把有限时的请求转发给这个子平台工具；根不保存原始二进制、不扫描、不解析车辆或其他领域字段。子平台负责恶意内容扫描、图片尺寸/文本提取、内容寻址存储、`request_id` 幂等与保留策略，并返回 [`docs/media-attachment-protocol-v1.json`](media-attachment-protocol-v1.json) 约定的 `media://` 引用。聊天草稿会把引用交给子平台 Agent，人工编辑器必须允许供给方查看、修改和删除后再创建 offer。
 
-供给创建后，根通过 [`docs/catalog-protocol-v1.json`](catalog-protocol-v1.json) 将数据库中的 canonical opaque offer projection 同步给子平台的 `catalog.upsert`。浏览器只能提交 offer UUID，根会重新读取供给所有字段并检查 Better Auth 所属关系；客户端不能伪造价格、属性、卖家或 `active` 状态。审核激活由 Rust 网关完成，成功后再同步 `active` 状态；同步失败会显示为可观测的 degraded 状态，买方仍以根的 active offer 重读结果为准。
+供给创建后，根通过 [`docs/catalog-protocol-v2.json`](catalog-protocol-v2.json) 将数据库中的 canonical opaque offer projection 投递给子平台的 `catalog.upsert`。浏览器只能提交 offer UUID，根会重新读取供给所有字段并检查 Better Auth 所属关系；客户端不能伪造价格、属性、卖家或 `active` 状态。每次审核激活、宽字段修改和下架都会在同一个 PostgreSQL 事务中写入 durable projection job，并绑定当时不可变的 registration、canonical path 与 MCP server key；新注册版本激活时会在同一激活事务中为该店全部规范商品重新投递，即使商品版本本身没有变化。relay 每次尝试都重新读取 canonical offer、确认这个 destination 仍是当前 active binding，并复用持久化 `request_id`；endpoint URL 与 bearer token 可以在稳定 server key 后安全轮换。子适配器必须按 `canonical_version` 单调应用、拒绝同版本不同 `projection_digest`，并返回结构化 ACK；超时使用有界退避重试，合同错误或耗尽重试进入 dead-letter。v1 仅保留为旧适配器的兼容输入，不满足 durable ACK，新的根投影只发送 v2。同步失败不会回滚根的规范状态：根目录会立刻排除非 active offer，买方还必须通过根的 active offer 与有效引入交集，因此子目录旧记录不能解锁联系人、支付或交易状态。
 
 默认 relay 上限为 25 MiB，部署可用 `MATCHPLANE_MEDIA_MAX_BYTES` 调低或提高到协议硬上限 256 MiB，并同步 Nginx/Ingress/Next body 限制。根会在读取 base64 envelope 前验证 Better Auth 会话或具备 `media:upload` 权限的 API key。不要把它设成无界：JSON/base64 中转会按请求大小占用 web 内存。视频或更大文件应由子平台提供对象存储直传/MCP URL 协议；没有真实 `media.upload` 适配器的包不会显示上传按钮，也不会假装文件已经进入检索索引。
 
-`ui.copy` 和 `ui.chat` 的键默认是中文或平台的主语言；需要英文界面时，包可以为同一个键提供 `<key>En` 覆盖，例如 `contactProfileTitleEn` 或 `buyerTitleEn`。没有覆盖时，根通用 shell 使用自己的英文 fallback；它不会翻译或重写 `supplyFields`、`contactFields`、资产属性和商家内容。这样语言切换不会把领域术语硬编码进根平台，同时保留商家对文案的控制权。
+`ui.copy` 和 `ui.chat` 的键默认是中文或平台的主语言；需要英文界面时，包可以为同一个键提供 `<key>En` 覆盖，例如 `buyerTitleEn`。没有覆盖时，根通用 shell 使用自己的英文 fallback；它不会翻译或重写 `supplyFields`、资产属性和商家内容。这样语言切换不会把领域术语硬编码进根平台，同时保留商家对文案的控制权。
 
 内置注册入口是 `POST /api/platform/subplatforms`。该接口要求 Better Auth 根/父管理员会话、已存在的 `tenantId`/`domainId`、锁定的 Git commit 或不可变 archive 定位符，以及 manifest JSON。它会创建 Better Auth 组织，记录递归父子关系和不可变 digest 到 `subplatform_registrations`，并返回 `state: validated`。在另一次激活前，隔离构建器必须先附加签名后的 `build_digest`；web 请求不会克隆或执行不受信任的包代码。注册请求不能自报 `buildDigest`。生产激活还会对 manifest 中声明的 MCP 工具执行 endpoint 配置与 `initialize` 健康门禁；开发环境可以先激活静态包再配置工具服务。构建回调为
 `POST /api/platform/subplatforms/build`，由部署端独占 token `MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN` 认证；对同一不可变 digest 幂等。根或父管理员仍负责最终激活；builder 不可独立发布软件包。浏览器包可额外提交 `artifactPath`（位于 `MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT` 下的相对 digest 目录）和 `artifactEntry`（相对 HTML 文件，默认 `index.html`）。这些值与 build digest 一并不可变，不能从公开注册接口注入。
@@ -157,6 +157,8 @@ Rust 网关暴露一套小型、与垂直无关的持久化合同。它是平台
 | intent（意向） | `POST /v1/marketplace/intents` | 已认证参与方创建 `demand` 或 `supply` 意向，并可携带不透明 JSON `attributes` 与 `terms`。 |
 | intent（意向） | `GET /v1/marketplace/intents/{id}?tenant_id=&participant_id=` | 参与方读取自己的意向。 |
 | offer（供给） | `POST /v1/marketplace/offers` | 已认证供给方创建草稿供给意向；对于服务或其他垂直 `asset_id` 可选。 |
+| offer（供给） | `PATCH /v1/marketplace/offers/{id}` | 创建者或同 domain 的 `admin/both` capability 以 `expected_version` 替换可编辑字段；active/withdrawn 修改后回到 draft，必须重新审核。 |
+| offer（供给） | `POST /v1/marketplace/offers/{id}/withdraw` | 创建者或同 domain 的 `admin/both` capability 以 `expected_version` 下架 draft/active 供给，保留版本和审计历史。 |
 | offer（供给） | `POST /v1/marketplace/intents/{id}/matches` | 持有方（需求方）获取活跃供给候选。若未配置检索 provider，可走确定性属性回退。 |
 | demand（需求发现） | `POST /v1/marketplace/offers/{offer_id}/demand-matches` | 持有方（供给方）只能检索已明确允许供给方发现的需求摘要；结果不含需求参与者 ID 或联系方式。需求方可通过 `PATCH /v1/marketplace/intents/{intent_id}/discovery` 随时撤回后续发现。 |
 | offer（供给） | `POST /v1/admin/marketplace/offers/{id}/activate` | 运营者或垂直审核流程发布草稿。 |
@@ -165,7 +167,7 @@ Rust 网关暴露一套小型、与垂直无关的持久化合同。它是平台
 
 所有写入接受 caller 生成的 id 和幂等键。每个 party-auth 请求还必须携带 `x-matchplane-platform-path`（由 capability exchange 返回的规范路径）。网关会校验短期 party bearer token、精确递归节点路径、tenant/domain 作用域、需求/供给角色、激活生命周期、过期时间以及跨方不变式。`attributes` 与 `terms` 必须是 JSON 对象，不会被根解释为车辆字段。分数和理由是 AI 建议输出，联系人释放仍是独立的、需同意的状态转换，受现有 `introduction/contact` 合约约束。
 
-同一资源也可通过已认证 HTTP MCP 门面 `/api/mcp` 给外部 Agent 使用，工具包括 `marketplace.intent.create`、`marketplace.offer.create`、`marketplace.offer.match`、`marketplace.demand.match`、`marketplace.intent.discovery.update`、`marketplace.introduction.create` 与 `marketplace.introductions.list`。需求创建时只有显式设置 `supply_discovery_enabled: true` 才会进入供给发现索引；该查询只返回匿名摘要，不能替代需求方发起引介。需求方可以通过 discovery update 工具撤回后续发现。子平台自有检索/Skill 工具通过通用 `platform.child.tool` 调用，调用方必须持有 `agent:tool` 且工具名必须在目标 active manifest 的白名单中；根仅做递归路径授权和有界转发，不把调用方 API Key 传给子平台 endpoint。MCP 门面会把调用方的 party capability 转给 Rust 网关，不会保存第二套 schema 或 token。由调用方自费的 Agent 自行承担其模型和向量库成本；MatchPlane 仅执行受限且可审计的状态变更。
+同一资源也可通过已认证 HTTP MCP 门面 `/api/mcp` 给外部 Agent 使用，工具包括 `marketplace.intent.create`、`marketplace.offer.create`、`marketplace.offer.update`、`marketplace.offer.withdraw`、`marketplace.offer.match`、`marketplace.demand.match`、`marketplace.intent.discovery.update`、`marketplace.introduction.create` 与 `marketplace.introductions.list`。需求创建时只有显式设置 `supply_discovery_enabled: true` 才会进入供给发现索引；该查询只返回匿名摘要，不能替代需求方发起引介。需求方可以通过 discovery update 工具撤回后续发现。子平台自有检索/Skill 工具通过通用 `platform.child.tool` 调用，调用方必须持有 `agent:tool` 且工具名必须在目标 active manifest 的白名单中；根仅做递归路径授权和有界转发，不把调用方 API Key 传给子平台 endpoint。MCP 门面会把调用方的 party capability 转给 Rust 网关，不会保存第二套 schema 或 token。由调用方自费的 Agent 自行承担其模型和向量库成本；MatchPlane 仅执行受限且可审计的状态变更。
 
 稳定边界携带标准 ID 与分数，不携带向量：
 

@@ -5,10 +5,11 @@ import {
   isLiveMarketplaceEnabled,
   readPartySession,
   type BetterAuthMarketplaceRole,
-  type ContactExchange,
   type PartySession,
 } from "../api";
 import { authClient, authFetchOptions } from "./auth-client";
+
+const pendingSessions = new Map<string, Promise<PartySession>>();
 
 /**
  * Better Auth is the only user-authentication check. The returned PartySession is a short-lived
@@ -20,8 +21,6 @@ export async function getMarketplaceSession(input: {
   tenantId?: string;
   domainId?: string;
   role: BetterAuthMarketplaceRole;
-  contact?: ContactExchange;
-  preserveContact?: boolean;
   forceRefresh?: boolean;
 }): Promise<PartySession | null> {
   const { data, error } = await authClient.getSession({
@@ -30,25 +29,44 @@ export async function getMarketplaceSession(input: {
   if (error || !data) return null;
 
   if (input.role === "platform") return null;
-  let capability = input.forceRefresh ? null : readPartySession(
-    input.role === "subplatform_admin" ? "admin" : input.role,
-    input.subplatform,
-    input.platformPath,
-    data.user.id,
-  );
+  let capability = input.forceRefresh
+    ? null
+    : readPartySession(
+        input.role === "subplatform_admin" ? "admin" : input.role,
+        input.subplatform,
+        input.platformPath,
+        data.user.id,
+      );
   if (isLiveMarketplaceEnabled()) {
-    if (!input.tenantId) throw new Error("当前子平台尚未完成 root tenant 注册");
+    if (!input.tenantId && input.subplatform !== "root")
+      throw new Error("当前子平台尚未完成 root tenant 注册");
     if (!capability) {
-      capability = await establishMarketplaceSession({
+      const scopeKey = [
+        data.user.id,
+        input.tenantId ?? "root",
+        input.domainId ?? "root",
+        input.platformPath ?? input.subplatform,
+      ].join(":");
+      const pending = pendingSessions.get(scopeKey);
+      if (pending) {
+        const shared = await pending;
+        if (shared.role === "both" || shared.role === input.role) return shared;
+      }
+      const request = establishMarketplaceSession({
         tenantId: input.tenantId,
         domainId: input.domainId,
         subplatform: input.subplatform,
         platformPath: input.platformPath,
         role: input.role,
         authUserId: data.user.id,
-        contact: input.contact,
-        preserveContact: input.preserveContact,
       });
+      pendingSessions.set(scopeKey, request);
+      try {
+        capability = await request;
+      } finally {
+        if (pendingSessions.get(scopeKey) === request)
+          pendingSessions.delete(scopeKey);
+      }
     }
     return capability;
   }

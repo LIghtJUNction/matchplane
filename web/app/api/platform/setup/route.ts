@@ -3,17 +3,10 @@ import { statSync } from "node:fs";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import { isPlatformRouterConfigured } from "../../../../src/platform-router";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-interface RootContactField {
-  key: string;
-  label: string;
-  type?: "text" | "tel" | "email";
-  required?: boolean;
-  placeholder?: string;
-}
 
 interface RootChatConfig {
   buyerHeadlines?: string[];
@@ -104,7 +97,6 @@ export async function GET(request: Request): Promise<Response> {
     const identityAccounts = Number.parseInt(accountResult.rows[0]?.count ?? "0", 10) || 0;
     const rootAdminAccounts = Number.parseInt(rootAdminResult.rows[0]?.count ?? "0", 10) || 0;
     const activeChildren = registrations.active ?? 0;
-    const contactFields = readRootContactFields();
     const chat = readRootChatConfig();
     const builder = readBuilderStatus();
 
@@ -120,7 +112,7 @@ export async function GET(request: Request): Promise<Response> {
           rootAdminConfigured,
           identityAccounts,
           rootAdminAccounts,
-          ...(contactFields || chat ? { ui: { ...(contactFields ? { contactFields } : {}), ...(chat ? { chat } : {}) } } : {}),
+          ...(chat ? { ui: { chat } } : {}),
         },
         domains: domainsResult.rows,
         registrations,
@@ -233,40 +225,6 @@ function hasNonEmptyFile(path: string): boolean {
   }
 }
 
-/**
- * Root contact channels are operator configuration, never a kernel default.  Keeping this
- * bounded and secret-free lets the root UI render the same participant profile form as a child
- * package without embedding any vertical's field names in the web bundle.
- */
-function readRootContactFields(): RootContactField[] | undefined {
-  const raw = process.env.MATCHPLANE_ROOT_CONTACT_FIELDS_JSON?.trim();
-  if (!raw || raw.length > 32_768) return undefined;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return undefined;
-    const fields = parsed.flatMap((value): RootContactField[] => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-      const field = value as Record<string, unknown>;
-      const key = typeof field.key === "string" ? field.key.trim() : "";
-      const label = typeof field.label === "string" ? field.label.trim() : "";
-      const type = field.type === "text" || field.type === "tel" || field.type === "email" ? field.type : undefined;
-      const placeholder = typeof field.placeholder === "string" ? field.placeholder.trim() : undefined;
-      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(key) || !label || label.length > 200) return [];
-      if (placeholder !== undefined && placeholder.length > 200) return [];
-      return [{
-        key,
-        label,
-        ...(type ? { type } : {}),
-        ...(field.required === true ? { required: true } : {}),
-        ...(placeholder ? { placeholder } : {}),
-      }];
-    }).slice(0, 32);
-    return fields.length ? fields : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Root headline rotation is operator configuration, not a hard-coded vertical label. */
 function readRootChatConfig(): RootChatConfig | undefined {
   const raw = process.env.MATCHPLANE_ROOT_CHAT_HEADLINES_JSON?.trim();
@@ -300,8 +258,4 @@ function isOperatorEmail(value: string | undefined): boolean {
     && !email.endsWith("@example.com")
     && !email.endsWith("@example.org")
     && !email.endsWith("@example.net");
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

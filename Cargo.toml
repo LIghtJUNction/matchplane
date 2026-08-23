@@ -41,6 +41,7 @@ clap = { version = "4.6.6", features = ["derive", "env"] }
 config = "0.15.25"
 futures-util = "0.3.34"
 flate2 = "1.1.1"
+fred = { version = "10.1.0", features = ["enable-rustls", "i-scripts"] }
 getrandom = "0.3.4"
 hex = "0.4.3"
 metrics = "0.24.6"
@@ -54,11 +55,8 @@ percent-encoding = "2.3.1"
 prost = "0.14.4"
 prost-types = "0.14.4"
 rdkafka = { version = "0.39.0", features = ["cmake-build", "tracing"] }
-redis = {
-    version = "1.5.0",
-    features = ["connection-manager", "tokio-rustls-comp"],
-}
 reqwest = { version = "0.13.4", default-features = false, features = ["form", "json", "rustls", "stream"] }
+rustls-pemfile = "2.2.0"
 rig-core = { version = "0.42.0", default-features = false }
 rpassword = "7.5.4"
 rsa = { version = "0.9.10", features = ["sha2"] }

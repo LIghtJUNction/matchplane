@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
+import type { PoolClient } from "pg";
 
 import { auth, authDatabase } from "../../../../../src/lib/auth";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  RequestBodyTooLargeError,
+} from "../../../../../src/lib/body-limit";
 import { isProductionEnvironment } from "../../../../../src/lib/runtime";
 import {
   probeSubplatformMcpEndpoint,
   readSubplatformMcpEndpoint,
   validateSubplatformMcpEndpointUrl,
 } from "../../../../../src/platform-agent-tool";
+import { isUuid } from "../../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -20,27 +25,46 @@ export const runtime = "nodejs";
  */
 export async function POST(request: Request): Promise<Response> {
   if (!hasTrustedBrowserOrigin(request)) {
-    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+    return NextResponse.json(
+      { error: "请求来源未被平台信任" },
+      { status: 403 },
+    );
   }
   const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return NextResponse.json({ error: "Better Auth session is required" }, { status: 401 });
+  if (!session)
+    return NextResponse.json(
+      { error: "Better Auth session is required" },
+      { status: 401 },
+    );
 
   let input: ActivationRequest;
   try {
     const value = await readJsonBody<unknown>(request, 16 * 1024);
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new SyntaxError("object required");
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new SyntaxError("object required");
     input = value as ActivationRequest;
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof RequestBodyTooLargeError ? "激活请求过大" : "请求必须是有效 JSON" },
+      {
+        error:
+          error instanceof RequestBodyTooLargeError
+            ? "激活请求过大"
+            : "请求必须是有效 JSON",
+      },
       { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
     );
   }
   if (!input.registrationId || !isUuid(input.registrationId)) {
-    return NextResponse.json({ error: "registrationId must be a UUID" }, { status: 400 });
+    return NextResponse.json(
+      { error: "registrationId must be a UUID" },
+      { status: 400 },
+    );
   }
   if (!input.buildDigest || !/^[0-9a-f]{64}$/i.test(input.buildDigest)) {
-    return NextResponse.json({ error: "buildDigest must be a SHA-256 digest" }, { status: 400 });
+    return NextResponse.json(
+      { error: "buildDigest must be a SHA-256 digest" },
+      { status: 400 },
+    );
   }
 
   const registration = await authDatabase.query(
@@ -68,25 +92,55 @@ export async function POST(request: Request): Promise<Response> {
     [input.registrationId],
   );
   const row = registration.rows[0] as RegistrationRow | undefined;
-  if (!row) return NextResponse.json({ error: "子平台注册记录不存在" }, { status: 404 });
+  if (!row)
+    return NextResponse.json(
+      { error: "子平台注册记录不存在" },
+      { status: 404 },
+    );
 
   const userRole = (session.user as { role?: string }).role;
-  if (!(await canManageParent(session.user.id, userRole, row.parentOrganizationId))) {
-    return NextResponse.json({ error: "当前账号没有激活该平台节点的权限" }, { status: 403 });
+  if (
+    !(await canManageParent(
+      session.user.id,
+      userRole,
+      row.parentOrganizationId,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "当前账号没有激活该平台节点的权限" },
+      { status: 403 },
+    );
   }
-  if (row.state !== "active" && !new Set(["validated", "building", "ready"]).has(row.state)) {
-    return NextResponse.json({ error: `当前状态 ${row.state} 不允许激活` }, { status: 409 });
+  if (
+    row.state !== "active" &&
+    !new Set(["validated", "building", "ready"]).has(row.state)
+  ) {
+    return NextResponse.json(
+      { error: `当前状态 ${row.state} 不允许激活` },
+      { status: 409 },
+    );
   }
   if (row.state !== "active" && !row.buildDigest) {
-    return NextResponse.json({ error: "隔离构建器尚未附加 buildDigest" }, { status: 409 });
+    return NextResponse.json(
+      { error: "隔离构建器尚未附加 buildDigest" },
+      { status: 409 },
+    );
   }
-  if (row.state !== "active" && (!row.buildDigest || row.buildDigest.toLowerCase() !== input.buildDigest.toLowerCase())) {
-    return NextResponse.json({ error: "buildDigest 与已验证构建产物不一致" }, { status: 409 });
+  if (
+    row.state !== "active" &&
+    (!row.buildDigest ||
+      row.buildDigest.toLowerCase() !== input.buildDigest.toLowerCase())
+  ) {
+    return NextResponse.json(
+      { error: "buildDigest 与已验证构建产物不一致" },
+      { status: 409 },
+    );
   }
 
   if (row.state !== "active") {
     const toolHealthError = await validateDeclaredMcpTools(row);
-    if (toolHealthError) return NextResponse.json({ error: toolHealthError }, { status: 409 });
+    if (toolHealthError)
+      return NextResponse.json({ error: toolHealthError }, { status: 409 });
   }
 
   const client = await authDatabase.connect();
@@ -121,18 +175,31 @@ export async function POST(request: Request): Promise<Response> {
       [input.registrationId],
     );
     const target = lockedTargetResult.rows[0];
-    if (!target
-      || target.tenantId !== row.tenantId
-      || target.slug !== row.slug
-      || target.domainId !== row.domainId
-      || target.version !== row.version
-      || target.manifestDigest !== row.manifestDigest) {
+    if (
+      !target ||
+      target.tenantId !== row.tenantId ||
+      target.slug !== row.slug ||
+      target.domainId !== row.domainId ||
+      target.version !== row.version ||
+      target.manifestDigest !== row.manifestDigest
+    ) {
       await client.query("ROLLBACK");
-      return NextResponse.json({ error: "注册版本已被其他操作修改，请重新读取后再试" }, { status: 409 });
+      return NextResponse.json(
+        { error: "注册版本已被其他操作修改，请重新读取后再试" },
+        { status: 409 },
+      );
     }
     if (target.buildDigest?.toLowerCase() !== input.buildDigest.toLowerCase()) {
       await client.query("ROLLBACK");
-      return NextResponse.json({ error: target.state === "active" ? "已激活版本的 buildDigest 不匹配，不能覆盖不可变发布" : "buildDigest 与已验证构建产物不一致" }, { status: 409 });
+      return NextResponse.json(
+        {
+          error:
+            target.state === "active"
+              ? "已激活版本的 buildDigest 不匹配，不能覆盖不可变发布"
+              : "buildDigest 与已验证构建产物不一致",
+        },
+        { status: 409 },
+      );
     }
 
     const currentActiveResult = await client.query<ActiveRegistration>(
@@ -150,18 +217,36 @@ export async function POST(request: Request): Promise<Response> {
     if (target.state === "active") {
       if (currentActive?.id !== target.id) {
         await client.query("ROLLBACK");
-        return NextResponse.json({ error: "已有更新的注册版本处于激活状态，不能回退覆盖" }, { status: 409 });
+        return NextResponse.json(
+          { error: "已有更新的注册版本处于激活状态，不能回退覆盖" },
+          { status: 409 },
+        );
       }
+      await enqueueRegistrationCatalogProjections(client, target);
       await client.query("COMMIT");
-      return NextResponse.json(toResponse(target), { headers: { "cache-control": "no-store" } });
+      return NextResponse.json(toResponse(target), {
+        headers: { "cache-control": "no-store" },
+      });
     }
-    if (!new Set(["validated", "building", "ready"]).has(target.state) || !target.buildDigest) {
+    if (
+      !new Set(["validated", "building", "ready"]).has(target.state) ||
+      !target.buildDigest
+    ) {
       await client.query("ROLLBACK");
-      return NextResponse.json({ error: `当前状态 ${target.state} 不允许激活` }, { status: 409 });
+      return NextResponse.json(
+        { error: `当前状态 ${target.state} 不允许激活` },
+        { status: 409 },
+      );
     }
-    if (currentActive && compareRegistrationVersion(target.version, currentActive.version) <= 0) {
+    if (
+      currentActive &&
+      compareRegistrationVersion(target.version, currentActive.version) <= 0
+    ) {
       await client.query("ROLLBACK");
-      return NextResponse.json({ error: "目标注册版本必须严格新于当前激活版本" }, { status: 409 });
+      return NextResponse.json(
+        { error: "目标注册版本必须严格新于当前激活版本" },
+        { status: 409 },
+      );
     }
 
     const activated = await client.query(
@@ -185,7 +270,10 @@ export async function POST(request: Request): Promise<Response> {
     );
     if (activated.rowCount !== 1) {
       await client.query("ROLLBACK");
-      return NextResponse.json({ error: "注册版本已被其他操作修改，请重新读取后再试" }, { status: 409 });
+      return NextResponse.json(
+        { error: "注册版本已被其他操作修改，请重新读取后再试" },
+        { status: 409 },
+      );
     }
     const active = activated.rows[0] as ActivationResponseRow;
     // A slug is one mounted organization path. Once a newer immutable release is active,
@@ -200,15 +288,22 @@ export async function POST(request: Request): Promise<Response> {
           AND version < $4::bigint`,
       [active.tenantId, active.slug, target.id, target.version],
     );
+    await enqueueRegistrationCatalogProjections(client, target);
     await client.query("COMMIT");
-    return NextResponse.json({
-      ...activated.rows[0],
-      routing: "enabled",
-    }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json(
+      {
+        ...activated.rows[0],
+        routing: "enabled",
+      },
+      { headers: { "cache-control": "no-store" } },
+    );
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     console.error("subplatform activation transaction failed", error);
-    return NextResponse.json({ error: "子平台激活失败，请稍后重试" }, { status: 500 });
+    return NextResponse.json(
+      { error: "子平台激活失败，请稍后重试" },
+      { status: 500 },
+    );
   } finally {
     client.release();
   }
@@ -258,7 +353,9 @@ interface ActivationResponseRow {
  * local deployment and deliberately remains opt-in for development so an operator can stage a
  * package before wiring its service.
  */
-async function validateDeclaredMcpTools(row: RegistrationRow): Promise<string | null> {
+async function validateDeclaredMcpTools(
+  row: RegistrationRow,
+): Promise<string | null> {
   if (!isProductionEnvironment()) return null;
   const tools = declaredMcpTools(row.manifest);
   if (!tools.length) return null;
@@ -276,6 +373,77 @@ async function validateDeclaredMcpTools(row: RegistrationRow): Promise<string | 
   return null;
 }
 
+async function enqueueRegistrationCatalogProjections(
+  client: PoolClient,
+  registration: RegistrationRow,
+): Promise<void> {
+  if (!declaredMcpTools(registration.manifest).includes("catalog.upsert"))
+    return;
+  await client.query(
+    `WITH target AS (
+       SELECT offer.tenant_id,
+              offer.domain_id,
+              offer.store_id,
+              offer.id AS offer_id,
+              offer.version AS canonical_version,
+              alias.path AS platform_path
+         FROM stores store
+         JOIN marketplace_offers offer
+           ON offer.tenant_id = store.tenant_id
+          AND offer.domain_id = store.domain_id
+          AND offer.store_id = store.id
+         JOIN store_path_aliases alias
+           ON alias.tenant_id = store.tenant_id
+          AND alias.store_id = store.id
+          AND alias.is_canonical
+        WHERE store.tenant_id = $1::uuid
+          AND store.domain_id = $2::uuid
+          AND store.current_registration_id = $3::uuid
+          AND store.integration_kind <> 'hosted'
+     ), superseded AS (
+       UPDATE marketplace_offer_projection_jobs job
+          SET status = 'superseded',
+              lease_owner = NULL,
+              lease_expires_at = NULL,
+              last_error_code = NULL,
+              last_error = NULL,
+              updated_at = clock_timestamp()
+         FROM target
+        WHERE job.tenant_id = target.tenant_id
+          AND job.offer_id = target.offer_id
+          AND job.status IN ('pending', 'retry')
+          AND job.registration_id IS DISTINCT FROM $3::uuid
+       RETURNING job.id
+     )
+     INSERT INTO marketplace_offer_projection_jobs (
+       tenant_id,
+       domain_id,
+       store_id,
+       offer_id,
+       canonical_version,
+       registration_id,
+       platform_path,
+       mcp_server_key
+     )
+     SELECT tenant_id,
+            domain_id,
+            store_id,
+            offer_id,
+            canonical_version,
+            $3::uuid,
+            platform_path,
+            $4
+       FROM target
+     ON CONFLICT (tenant_id, offer_id, canonical_version, registration_id) DO NOTHING`,
+    [
+      registration.tenantId,
+      registration.domainId,
+      registration.id,
+      registration.mcpServerKey,
+    ],
+  );
+}
+
 function declaredMcpTools(value: unknown): string[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const agent = (value as { agent?: unknown }).agent;
@@ -283,11 +451,18 @@ function declaredMcpTools(value: unknown): string[] {
   const tools = (agent as { mcpTools?: unknown }).mcpTools;
   if (!Array.isArray(tools)) return [];
   return tools
-    .filter((tool): tool is string => typeof tool === "string" && /^[a-z0-9][a-z0-9._:-]{1,127}$/.test(tool))
+    .filter(
+      (tool): tool is string =>
+        typeof tool === "string" && /^[a-z0-9][a-z0-9._:-]{1,127}$/.test(tool),
+    )
     .slice(0, 64);
 }
 
-async function canManageParent(userId: string, role: string | null | undefined, parentId: string | null): Promise<boolean> {
+async function canManageParent(
+  userId: string,
+  role: string | null | undefined,
+  parentId: string | null,
+): Promise<boolean> {
   if (!parentId) return role === "rootSuperAdmin" || role === "rootAdmin";
   if (role === "rootSuperAdmin" || role === "rootAdmin") return true;
   const result = await authDatabase.query(
@@ -302,7 +477,18 @@ async function canManageParent(userId: string, role: string | null | undefined, 
   return result.rowCount === 1;
 }
 
-function toResponse(row: Pick<RegistrationRow, "id" | "slug" | "state" | "buildDigest" | "manifestDigest" | "tenantId" | "domainId">): Record<string, unknown> {
+function toResponse(
+  row: Pick<
+    RegistrationRow,
+    | "id"
+    | "slug"
+    | "state"
+    | "buildDigest"
+    | "manifestDigest"
+    | "tenantId"
+    | "domainId"
+  >,
+): Record<string, unknown> {
   return {
     registrationId: row.id,
     slug: row.slug,
@@ -319,14 +505,14 @@ function compareRegistrationVersion(left: string, right: string): number {
   try {
     const leftVersion = BigInt(left);
     const rightVersion = BigInt(right);
-    return leftVersion === rightVersion ? 0 : leftVersion < rightVersion ? -1 : 1;
+    return leftVersion === rightVersion
+      ? 0
+      : leftVersion < rightVersion
+        ? -1
+        : 1;
   } catch {
     // The database constrains versions to positive bigint values. Treat an unexpectedly malformed
     // row as non-activatable rather than accepting a potentially stale release.
     return -1;
   }
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

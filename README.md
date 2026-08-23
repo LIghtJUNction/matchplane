@@ -58,9 +58,9 @@ administrator. Local Compose is an explicit development exception: when
 `MATCHPLANE_ENVIRONMENT=development` and `MATCHPLANE_ALLOW_DEMO_BOOTSTRAP=true`, the first
 account may enter the root workspace without SMTP so the operator can inspect the UI. Never carry
 that flag into a public deployment.
-Root contact channels are likewise operator configuration (`MATCHPLANE_ROOT_CONTACT_FIELDS_JSON`);
-mounted packages own their presentation fields in `ui.contactFields`. No vertical fields are
-compiled into the root UI.
+Contact exchange uses only email or phone bindings verified by the root Better Auth account.
+Operators and mounted packages cannot define manual contact-entry fields, and disclosure still
+requires explicit consent from both parties.
 Set `MATCHPLANE_ROOT_ADMIN_EMAIL` to an operator-owned address, then provision only the identities
 you want to mount:
 

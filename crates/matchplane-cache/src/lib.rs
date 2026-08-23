@@ -1,8 +1,16 @@
 //! Rebuildable Valkey market-data projections.
 
-use std::{fs, path::Path};
+use std::{fs::File, io::BufReader, path::Path};
 
-use redis::{AsyncCommands, Script, TlsCertificates, aio::ConnectionManager};
+use fred::rustls::{ClientConfig, RootCertStore};
+use fred::{
+    clients::Client,
+    interfaces::{ClientLike, KeysInterface, LuaInterface},
+    types::{
+        Builder,
+        config::{Config, TlsConnector},
+    },
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -44,7 +52,7 @@ pub enum ProjectionOutcome {
 /// Valkey client and sequence-guarded book projector.
 #[derive(Clone)]
 pub struct ValkeyCache {
-    connection: ConnectionManager,
+    client: Client,
 }
 
 impl std::fmt::Debug for ValkeyCache {
@@ -58,12 +66,15 @@ impl std::fmt::Debug for ValkeyCache {
 /// Valkey connection or command failure.
 #[derive(Debug, Error)]
 pub enum CacheError {
-    /// Redis protocol client failure.
+    /// Valkey protocol client failure.
     #[error("Valkey operation failed: {0}")]
-    Redis(#[from] redis::RedisError),
+    Valkey(#[from] fred::error::Error),
     /// The configured Valkey TLS CA bundle could not be read.
     #[error("Valkey TLS CA bundle could not be read: {0}")]
     TlsCertificate(#[from] std::io::Error),
+    /// The configured TLS trust bundle was empty or contained an invalid certificate.
+    #[error("Valkey TLS configuration is invalid: {0}")]
+    TlsConfiguration(String),
     /// Projection script returned an unknown code.
     #[error("Valkey projection returned unexpected code {0}")]
     UnexpectedProjectionCode(i64),
@@ -81,6 +92,26 @@ pub enum CacheError {
     Json(#[from] serde_json::Error),
 }
 
+fn tls_client_config(path: &Path) -> Result<ClientConfig, CacheError> {
+    let mut reader = BufReader::new(File::open(path)?);
+    let certificates = rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
+    if certificates.is_empty() {
+        return Err(CacheError::TlsConfiguration(
+            "CA bundle contains no certificates".to_owned(),
+        ));
+    }
+
+    let mut roots = RootCertStore::empty();
+    for certificate in certificates {
+        roots
+            .add(certificate)
+            .map_err(|error| CacheError::TlsConfiguration(error.to_string()))?;
+    }
+    Ok(ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth())
+}
+
 impl ValkeyCache {
     /// Opens an asynchronous Valkey connection manager.
     ///
@@ -93,28 +124,23 @@ impl ValkeyCache {
 
     /// Opens an asynchronous Valkey connection manager with an optional private CA bundle.
     ///
-    /// `rediss://` URLs use the redis-rs Rustls transport. When `ca_file` is provided, the
-    /// certificate is used as the exclusive trust anchor for that connection; otherwise the
-    /// operating-system trust store is used. Plain `redis://` URLs remain supported for the
-    /// development and test profiles, while production configuration rejects them before this
-    /// method is called.
+    /// `rediss://` URLs use Fred's Rustls transport. When `ca_file` is provided, the certificate
+    /// bundle is used as the exclusive trust anchor for that connection; otherwise Fred uses the
+    /// operating-system trust store. Plain `redis://` URLs remain supported for development and
+    /// test profiles because that URI scheme is part of the RESP ecosystem; production
+    /// configuration rejects plaintext before this method is called.
     ///
     /// # Errors
     ///
     /// Returns [`CacheError`] when the URL, CA bundle, or connection is invalid.
     pub async fn connect_with_ca(url: &str, ca_file: Option<&Path>) -> Result<Self, CacheError> {
-        let client = match ca_file.filter(|path| !path.as_os_str().is_empty()) {
-            Some(path) => redis::Client::build_with_tls(
-                url,
-                TlsCertificates {
-                    client_tls: None,
-                    root_cert: Some(fs::read(path)?),
-                },
-            )?,
-            None => redis::Client::open(url)?,
-        };
-        let connection = client.get_connection_manager().await?;
-        Ok(Self { connection })
+        let mut config = Config::from_url(url)?;
+        if let Some(path) = ca_file.filter(|path| !path.as_os_str().is_empty()) {
+            config.tls = Some(TlsConnector::from(tls_client_config(path)?).into());
+        }
+        let client = Builder::from_config(config).build()?;
+        client.init().await?;
+        Ok(Self { client })
     }
 
     /// Pings Valkey.
@@ -123,7 +149,7 @@ impl ValkeyCache {
     ///
     /// Returns [`CacheError`] when Valkey is unavailable.
     pub async fn ping(&mut self) -> Result<(), CacheError> {
-        let _: String = self.connection.ping().await?;
+        let _: String = self.client.ping(None).await?;
         Ok(())
     }
 
@@ -166,11 +192,13 @@ if count == 1 or ttl < 0 then redis.call('EXPIRE', KEYS[1], window) end
 if count <= limit then return 1 end
 return 0
 "#;
-        let code: i64 = Script::new(LUA)
-            .key(key)
-            .arg(limit)
-            .arg(window_secs)
-            .invoke_async(&mut self.connection)
+        let code: i64 = self
+            .client
+            .eval(
+                LUA,
+                vec![key],
+                vec![limit.to_string(), window_secs.to_string()],
+            )
             .await?;
         match code {
             1 => Ok(true),
@@ -220,16 +248,20 @@ return 1
         let ask_quantities_key = format!("{prefix}:ask:quantities");
         let json_key = format!("{prefix}:json");
         let json = serde_json::to_string(book)?;
-        let code: i64 = Script::new(LUA)
-            .key(sequence_key)
-            .key(bid_prices_key)
-            .key(bid_quantities_key)
-            .key(ask_prices_key)
-            .key(ask_quantities_key)
-            .key(json_key)
-            .arg(book.sequence)
-            .arg(json)
-            .invoke_async(&mut self.connection)
+        let code: i64 = self
+            .client
+            .eval(
+                LUA,
+                vec![
+                    sequence_key,
+                    bid_prices_key,
+                    bid_quantities_key,
+                    ask_prices_key,
+                    ask_quantities_key,
+                    json_key,
+                ],
+                vec![book.sequence.to_string(), json],
+            )
             .await?;
         match code {
             1 => Ok(ProjectionOutcome::Applied),
@@ -247,7 +279,7 @@ return 1
     /// Returns [`CacheError`] if Valkey is unavailable or stored JSON is corrupt.
     pub async fn book(&mut self, market_id: &str) -> Result<Option<CachedBook>, CacheError> {
         let key = format!("mp:book:{market_id}:json");
-        let value: Option<String> = self.connection.get(key).await?;
+        let value: Option<String> = self.client.get(key).await?;
         value
             .map(|json| serde_json::from_str(&json))
             .transpose()

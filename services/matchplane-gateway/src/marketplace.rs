@@ -18,7 +18,7 @@ use matchplane_storage::{
     MarketplaceParty, OfflineDeal, OfflineDealOutcome, OfflineDealProgress,
     RecommendVehicleListings, RecommendedListing, RecordExposure, ReleaseContact,
     SellerPromotionCampaign, SetMarketplaceAssetAuthorization, SubplatformEmailConfig,
-    TransitionViewingAppointment, UpsertSubplatformEmailConfig, VehicleListing, ViewingAppointment,
+    TransitionViewingAppointment, VehicleListing, ViewingAppointment,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -126,30 +126,6 @@ pub(super) struct ApproveListingSubmissionRequest {
     tenant_id: String,
     authorized_by: String,
     reason: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct SubplatformEmailConfigRequest {
-    tenant_id: String,
-    party_id: String,
-    provider_key: String,
-    smtp_host: String,
-    smtp_port: i32,
-    tls_mode: String,
-    username: String,
-    credential_secret_ref: String,
-    from_address: String,
-    reply_to: Option<String>,
-    mode: String,
-    enabled: bool,
-    expected_version: Option<i64>,
-    updated_by: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct SubplatformEmailConfigQuery {
-    tenant_id: String,
-    party_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -533,68 +509,20 @@ pub(super) async fn ensure_party_session(
     ))
 }
 
-/// Returns a subplatform admin's email routing metadata without secret material.
-pub(super) async fn get_subplatform_email_config(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(domain_id): Path<String>,
-    Query(query): Query<SubplatformEmailConfigQuery>,
-) -> Result<Json<SubplatformEmailConfig>, ApiError> {
-    let tenant_id = parse_id(&query.tenant_id)?;
-    let party_id = parse_id(&query.party_id)?;
-    let domain_id = parse_id::<DomainId>(&domain_id)?;
-    authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
-    state
-        .store
-        .subplatform_email_config(tenant_id, domain_id, party_id)
-        .await
-        .map(Json)
-        .map_err(ApiError::from)
+/// Store capabilities must not expose mall-wide email infrastructure.
+pub(super) async fn get_subplatform_email_config() -> Result<Json<SubplatformEmailConfig>, ApiError>
+{
+    Err(ApiError::forbidden(
+        "email infrastructure is managed only in the root mall console".to_owned(),
+    ))
 }
 
-/// Updates one subplatform's SMTP route. Only an active `admin` membership can mutate it.
-pub(super) async fn upsert_subplatform_email_config(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(domain_id): Path<String>,
-    Json(request): Json<SubplatformEmailConfigRequest>,
-) -> Result<Json<SubplatformEmailConfig>, ApiError> {
-    validate_text(&request.provider_key, "provider_key", 100)?;
-    validate_text(&request.smtp_host, "smtp_host", 255)?;
-    validate_text(&request.username, "username", 320)?;
-    validate_text(
-        &request.credential_secret_ref,
-        "credential_secret_ref",
-        2048,
-    )?;
-    validate_text(&request.from_address, "from_address", 320)?;
-    validate_text(&request.updated_by, "updated_by", 256)?;
-    let tenant_id = parse_id(&request.tenant_id)?;
-    let party_id = parse_id(&request.party_id)?;
-    let domain_id = parse_id::<DomainId>(&domain_id)?;
-    authenticate_domain(&state, &headers, tenant_id, party_id, domain_id).await?;
-    state
-        .store
-        .upsert_subplatform_email_config(&UpsertSubplatformEmailConfig {
-            tenant_id,
-            domain_id,
-            actor_party_id: party_id,
-            provider_key: request.provider_key,
-            smtp_host: request.smtp_host,
-            smtp_port: request.smtp_port,
-            tls_mode: request.tls_mode,
-            username: request.username,
-            credential_secret_ref: request.credential_secret_ref,
-            from_address: request.from_address,
-            reply_to: request.reply_to,
-            mode: request.mode,
-            enabled: request.enabled,
-            expected_version: request.expected_version,
-            updated_by: request.updated_by,
-        })
-        .await
-        .map(Json)
-        .map_err(ApiError::from)
+/// Store capabilities must not mutate mall-wide email infrastructure.
+pub(super) async fn upsert_subplatform_email_config()
+-> Result<Json<SubplatformEmailConfig>, ApiError> {
+    Err(ApiError::forbidden(
+        "email infrastructure is managed only in the root mall console".to_owned(),
+    ))
 }
 
 fn party_registration_tenant_key(tenant_id: TenantId) -> String {

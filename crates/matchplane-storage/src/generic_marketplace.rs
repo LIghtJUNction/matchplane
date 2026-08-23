@@ -238,6 +238,37 @@ pub struct CreateMarketplaceOffer {
     pub expires_at: Option<OffsetDateTime>,
 }
 
+/// Replaces the seller-owned public fields for one editable offer. The authenticated gateway
+/// derives `actor_party_id`, `can_manage_domain`, and `platform_path`; clients never grant those
+/// fields to themselves.
+#[derive(Debug)]
+pub struct UpdateMarketplaceOffer {
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub actor_party_id: MarketplacePartyId,
+    pub can_manage_domain: bool,
+    pub platform_path: String,
+    pub request_id: Option<String>,
+    pub offer_id: MarketplaceOfferId,
+    pub display_name: String,
+    pub attributes: Value,
+    pub terms: Value,
+    pub expected_version: i64,
+}
+
+/// Withdraws one draft or active offer without deleting its audit history.
+#[derive(Debug)]
+pub struct WithdrawMarketplaceOffer {
+    pub tenant_id: TenantId,
+    pub domain_id: DomainId,
+    pub actor_party_id: MarketplacePartyId,
+    pub can_manage_domain: bool,
+    pub platform_path: String,
+    pub request_id: Option<String>,
+    pub offer_id: MarketplaceOfferId,
+    pub expected_version: i64,
+}
+
 /// Persisted offer plus duplicate status for idempotent callers.
 #[derive(Debug, Clone, Serialize)]
 pub struct MarketplaceOfferOutcome {
@@ -675,18 +706,182 @@ impl PgStore {
         rows.iter().map(offer_from_row).collect()
     }
 
-    /// Activates one draft offer after an authenticated operator/moderation decision.
+    /// Lists all offers in one domain for an authenticated store operator.
+    pub async fn marketplace_offers_for_domain(
+        &self,
+        tenant_id: TenantId,
+        domain_id: DomainId,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<MarketplaceOffer>, StorageError> {
+        if !(1..=100).contains(&limit) || !(0..=10_000).contains(&offset) {
+            return Err(StorageError::InvalidData(
+                "marketplace offer page must use limit 1..=100 and offset 0..=10000".to_owned(),
+            ));
+        }
+        let rows = sqlx::query(
+            "SELECT id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
+                    display_name, attributes, terms, status, published_at, expires_at,
+                    version, created_at, updated_at
+             FROM marketplace_offers
+             WHERE tenant_id = $1 AND domain_id = $2
+             ORDER BY updated_at DESC, id DESC LIMIT $3 OFFSET $4",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(domain_id.into_uuid())
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(self.pool())
+        .await?;
+        rows.iter().map(offer_from_row).collect()
+    }
+
+    /// Replaces editable offer content. Published or withdrawn offers return to `draft` so new
+    /// content cannot bypass moderation; a concurrent writer is rejected by optimistic version.
+    pub async fn update_marketplace_offer(
+        &self,
+        command: &UpdateMarketplaceOffer,
+    ) -> Result<MarketplaceOffer, StorageError> {
+        validate_offer_update(command)?;
+        let mut transaction = self.pool().begin().await?;
+        let current = lock_marketplace_offer(
+            &mut transaction,
+            command.tenant_id,
+            command.domain_id,
+            command.offer_id,
+        )
+        .await?;
+        authorize_offer_management(&current, command.actor_party_id, command.can_manage_domain)?;
+        ensure_offer_version(&current, command.expected_version)?;
+        if !matches!(current.status.as_str(), "draft" | "active" | "withdrawn") {
+            return Err(StorageError::Conflict(
+                "marketplace offer cannot be edited in its current status".to_owned(),
+            ));
+        }
+
+        let row = sqlx::query(
+            "UPDATE marketplace_offers
+                SET display_name = $4, attributes = $5, terms = $6, status = 'draft',
+                    published_at = NULL, version = version + 1,
+                    updated_at = clock_timestamp()
+              WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
+              RETURNING id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
+                        display_name, attributes, terms, status, published_at, expires_at,
+                        version, created_at, updated_at",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.offer_id.into_uuid())
+        .bind(&command.display_name)
+        .bind(&command.attributes)
+        .bind(&command.terms)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let offer = offer_from_row(&row)?;
+        record_offer_audit(
+            &mut transaction,
+            command.tenant_id,
+            command.domain_id,
+            command.actor_party_id,
+            &command.platform_path,
+            command.request_id.as_deref(),
+            "marketplace.offer.updated",
+            &current,
+            &offer,
+        )
+        .await?;
+        enqueue_marketplace_offer_projection(
+            &mut transaction,
+            command.tenant_id,
+            command.domain_id,
+            command.offer_id,
+            offer.version,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(offer)
+    }
+
+    /// Withdraws one draft or active offer while retaining the canonical record and history.
+    pub async fn withdraw_marketplace_offer(
+        &self,
+        command: &WithdrawMarketplaceOffer,
+    ) -> Result<MarketplaceOffer, StorageError> {
+        let mut transaction = self.pool().begin().await?;
+        let current = lock_marketplace_offer(
+            &mut transaction,
+            command.tenant_id,
+            command.domain_id,
+            command.offer_id,
+        )
+        .await?;
+        authorize_offer_management(&current, command.actor_party_id, command.can_manage_domain)?;
+        ensure_offer_version(&current, command.expected_version)?;
+        if !matches!(current.status.as_str(), "draft" | "active") {
+            return Err(StorageError::Conflict(
+                "marketplace offer cannot be withdrawn in its current status".to_owned(),
+            ));
+        }
+
+        let row = sqlx::query(
+            "UPDATE marketplace_offers
+                SET status = 'withdrawn', version = version + 1,
+                    updated_at = clock_timestamp()
+              WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
+              RETURNING id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
+                        display_name, attributes, terms, status, published_at, expires_at,
+                        version, created_at, updated_at",
+        )
+        .bind(command.tenant_id.into_uuid())
+        .bind(command.domain_id.into_uuid())
+        .bind(command.offer_id.into_uuid())
+        .fetch_one(&mut *transaction)
+        .await?;
+        let offer = offer_from_row(&row)?;
+        record_offer_audit(
+            &mut transaction,
+            command.tenant_id,
+            command.domain_id,
+            command.actor_party_id,
+            &command.platform_path,
+            command.request_id.as_deref(),
+            "marketplace.offer.withdrawn",
+            &current,
+            &offer,
+        )
+        .await?;
+        enqueue_marketplace_offer_projection(
+            &mut transaction,
+            command.tenant_id,
+            command.domain_id,
+            command.offer_id,
+            offer.version,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(offer)
+    }
+
+    /// Activates one reviewed offer when the moderator still holds its latest version.
     pub async fn activate_marketplace_offer(
         &self,
         tenant_id: TenantId,
         offer_id: MarketplaceOfferId,
+        expected_version: i64,
     ) -> Result<MarketplaceOffer, StorageError> {
+        if expected_version < 1 {
+            return Err(StorageError::InvalidData(
+                "marketplace offer version must be positive".to_owned(),
+            ));
+        }
+        let mut transaction = self.pool().begin().await?;
         let row = sqlx::query(
             "UPDATE marketplace_offers offer
              SET status = 'active', published_at = coalesce(published_at, clock_timestamp()),
-                 version = version + 1
+                 version = version + 1, updated_at = clock_timestamp()
              WHERE offer.tenant_id = $1
                AND offer.id = $2
+               AND offer.version = $3
                AND offer.status IN ('draft', 'withdrawn')
                AND (
                  offer.store_id IS NULL
@@ -739,13 +934,24 @@ impl PgStore {
         )
         .bind(tenant_id.into_uuid())
         .bind(offer_id.into_uuid())
-        .fetch_optional(self.pool())
+        .bind(expected_version)
+        .fetch_optional(&mut *transaction)
         .await?
         .ok_or(StorageError::Conflict(
             "marketplace offer is not awaiting activation or is incomplete for publication"
                 .to_owned(),
         ))?;
-        offer_from_row(&row)
+        let offer = offer_from_row(&row)?;
+        enqueue_marketplace_offer_projection(
+            &mut transaction,
+            tenant_id,
+            offer.domain_id,
+            offer_id,
+            offer.version,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(offer)
     }
 
     /// Searches active offers with a deterministic, domain-neutral attribute fallback.  A
@@ -1756,6 +1962,190 @@ fn validate_intent(command: &CreateMarketplaceIntent) -> Result<(), StorageError
     Ok(())
 }
 
+struct LockedMarketplaceOffer {
+    supply_party_id: MarketplacePartyId,
+    status: String,
+    version: i64,
+}
+
+async fn lock_marketplace_offer(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: TenantId,
+    domain_id: DomainId,
+    offer_id: MarketplaceOfferId,
+) -> Result<LockedMarketplaceOffer, StorageError> {
+    let row = sqlx::query(
+        "SELECT supply_party_id, status, version
+           FROM marketplace_offers
+          WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
+          FOR UPDATE",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(domain_id.into_uuid())
+    .bind(offer_id.into_uuid())
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(StorageError::NotFound("marketplace offer"))?;
+    Ok(LockedMarketplaceOffer {
+        supply_party_id: MarketplacePartyId::from_uuid(row.try_get("supply_party_id")?),
+        status: row.try_get("status")?,
+        version: row.try_get("version")?,
+    })
+}
+
+fn authorize_offer_management(
+    offer: &LockedMarketplaceOffer,
+    actor_party_id: MarketplacePartyId,
+    can_manage_domain: bool,
+) -> Result<(), StorageError> {
+    if offer.supply_party_id == actor_party_id || can_manage_domain {
+        Ok(())
+    } else {
+        Err(StorageError::Forbidden(
+            "marketplace offer belongs to another supply participant".to_owned(),
+        ))
+    }
+}
+
+fn ensure_offer_version(
+    offer: &LockedMarketplaceOffer,
+    expected_version: i64,
+) -> Result<(), StorageError> {
+    if expected_version < 1 {
+        return Err(StorageError::InvalidData(
+            "marketplace offer version must be positive".to_owned(),
+        ));
+    }
+    if offer.version == expected_version {
+        Ok(())
+    } else {
+        Err(StorageError::Conflict(
+            "marketplace offer version is stale".to_owned(),
+        ))
+    }
+}
+
+async fn enqueue_marketplace_offer_projection(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: TenantId,
+    domain_id: DomainId,
+    offer_id: MarketplaceOfferId,
+    canonical_version: i64,
+) -> Result<(), StorageError> {
+    sqlx::query(
+        r#"WITH target AS (
+           SELECT offer.tenant_id,
+                  offer.domain_id,
+                  offer.store_id,
+                  offer.id,
+                  offer.version,
+                  registration.id AS registration_id,
+                  alias.path AS platform_path,
+                  COALESCE(
+                    NULLIF(registration.manifest -> 'agent' ->> 'mcpServerKey', ''),
+                    registration.slug
+                  ) AS mcp_server_key
+             FROM marketplace_offers offer
+             JOIN stores store
+               ON store.tenant_id = offer.tenant_id
+              AND store.domain_id = offer.domain_id
+              AND store.id = offer.store_id
+             JOIN store_path_aliases alias
+               ON alias.tenant_id = store.tenant_id
+              AND alias.store_id = store.id
+              AND alias.is_canonical
+             JOIN subplatform_registrations registration
+               ON registration.id = store.current_registration_id
+              AND registration.tenant_id = store.tenant_id
+              AND registration.domain_id = store.domain_id
+              AND registration.state = 'active'
+            WHERE offer.tenant_id = $1
+              AND offer.domain_id = $2
+              AND offer.id = $3
+              AND offer.version = $4
+              AND store.integration_kind <> 'hosted'
+              AND registration.manifest @> '{"agent":{"mcpTools":["catalog.upsert"]}}'::jsonb
+         ), superseded AS (
+           UPDATE marketplace_offer_projection_jobs job
+              SET status = 'superseded',
+                  next_attempt_at = clock_timestamp(),
+                  last_error_code = NULL,
+                  last_error = NULL,
+                  updated_at = clock_timestamp()
+             FROM target
+            WHERE job.tenant_id = target.tenant_id
+              AND job.offer_id = target.id
+              AND job.canonical_version < target.version
+              AND job.status IN ('pending', 'retry')
+           RETURNING job.id
+         )
+         INSERT INTO marketplace_offer_projection_jobs (
+           tenant_id,
+           domain_id,
+           store_id,
+           offer_id,
+           canonical_version,
+           registration_id,
+           platform_path,
+           mcp_server_key
+         )
+         SELECT tenant_id,
+                domain_id,
+                store_id,
+                id,
+                version,
+                registration_id,
+                platform_path,
+                mcp_server_key
+           FROM target
+         ON CONFLICT (tenant_id, offer_id, canonical_version, registration_id) DO NOTHING"#,
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(domain_id.into_uuid())
+    .bind(offer_id.into_uuid())
+    .bind(canonical_version)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_offer_audit(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: TenantId,
+    domain_id: DomainId,
+    actor_party_id: MarketplacePartyId,
+    platform_path: &str,
+    request_id: Option<&str>,
+    event_type: &str,
+    previous: &LockedMarketplaceOffer,
+    offer: &MarketplaceOffer,
+) -> Result<(), StorageError> {
+    sqlx::query(
+        "INSERT INTO platform_audit_events
+         (id, tenant_id, domain_id, platform_path, actor_party_id, event_type, outcome,
+          request_id, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, 'success', $7, $8)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(tenant_id.into_uuid())
+    .bind(domain_id.into_uuid())
+    .bind(platform_path)
+    .bind(actor_party_id.into_uuid())
+    .bind(event_type)
+    .bind(request_id)
+    .bind(serde_json::json!({
+        "offer_id": offer.offer_id.to_string(),
+        "previous_status": previous.status,
+        "status": offer.status,
+        "previous_version": previous.version,
+        "version": offer.version,
+    }))
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
 fn validate_offer(command: &CreateMarketplaceOffer) -> Result<(), StorageError> {
     validate_text(
         &command.external_key,
@@ -1775,6 +2165,22 @@ fn validate_offer(command: &CreateMarketplaceOffer) -> Result<(), StorageError> 
     {
         return Err(StorageError::InvalidData(
             "offer expiry must be in the future".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_offer_update(command: &UpdateMarketplaceOffer) -> Result<(), StorageError> {
+    validate_text(
+        &command.display_name,
+        MAX_DISPLAY_NAME_BYTES,
+        "offer display name",
+    )?;
+    validate_object(&command.attributes, "offer attributes")?;
+    validate_object(&command.terms, "offer terms")?;
+    if command.expected_version < 1 {
+        return Err(StorageError::InvalidData(
+            "marketplace offer version must be positive".to_owned(),
         ));
     }
     Ok(())
@@ -2218,8 +2624,14 @@ async fn serializable(transaction: &mut Transaction<'_, Postgres>) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::generic_match_score;
+    use super::{
+        LockedMarketplaceOffer, authorize_offer_management, ensure_offer_version,
+        generic_match_score,
+    };
+    use crate::StorageError;
+    use matchplane_domain::MarketplacePartyId;
     use serde_json::json;
+    use uuid::Uuid;
 
     #[test]
     fn generic_match_score_keeps_exact_attributes_explainable() {
@@ -2261,5 +2673,46 @@ mod tests {
 
         assert!(score > 0.0);
         assert!(reasons.iter().any(|reason| reason == "narrative_match:新"));
+    }
+
+    #[test]
+    fn offer_management_allows_the_owner_or_same_domain_admin_only() {
+        let owner = party_id(0x11111111_1111_4111_8111_111111111111);
+        let collaborator = party_id(0x22222222_2222_4222_8222_222222222222);
+        let offer = LockedMarketplaceOffer {
+            supply_party_id: owner,
+            status: "active".to_owned(),
+            version: 4,
+        };
+
+        assert!(authorize_offer_management(&offer, owner, false).is_ok());
+        assert!(authorize_offer_management(&offer, collaborator, true).is_ok());
+        assert!(matches!(
+            authorize_offer_management(&offer, collaborator, false),
+            Err(StorageError::Forbidden(_))
+        ));
+    }
+
+    #[test]
+    fn offer_management_rejects_stale_versions() {
+        let offer = LockedMarketplaceOffer {
+            supply_party_id: party_id(0x11111111_1111_4111_8111_111111111111),
+            status: "draft".to_owned(),
+            version: 5,
+        };
+
+        assert!(ensure_offer_version(&offer, 5).is_ok());
+        assert!(matches!(
+            ensure_offer_version(&offer, 4),
+            Err(StorageError::Conflict(_))
+        ));
+        assert!(matches!(
+            ensure_offer_version(&offer, 0),
+            Err(StorageError::InvalidData(_))
+        ));
+    }
+
+    fn party_id(value: u128) -> MarketplacePartyId {
+        MarketplacePartyId::from_uuid(Uuid::from_u128(value))
     }
 }

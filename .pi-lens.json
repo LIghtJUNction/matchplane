@@ -1,0 +1,6 @@
+{
+  "ignore": [
+    "/deploy/helm/matchplane/templates/",
+    "/target/"
+  ]
+}

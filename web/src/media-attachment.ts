@@ -1,4 +1,5 @@
 import { normalizePlatformPath } from "./platform-agent-handoff";
+import { isUuid } from "./lib/uuid";
 
 export const MEDIA_ATTACHMENT_PROTOCOL = "matchplane.media/v1" as const;
 /** Default browser/root relay budget; larger media uses child-owned direct storage. */
@@ -48,7 +49,6 @@ export interface MediaUploadResponse {
 
 export type MediaParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/i;
 const MIME_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+*-]{0,126}$/i;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -252,10 +252,6 @@ function jsonBytes(value: unknown): number {
   } catch {
     return Number.POSITIVE_INFINITY;
   }
-}
-
-function isUuid(value: unknown): value is string {
-  return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

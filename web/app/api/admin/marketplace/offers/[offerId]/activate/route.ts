@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../../../../src/lib/auth";
-import { readJsonBody, readResponseTextBody } from "../../../../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  readResponseTextBody,
+} from "../../../../../../../src/lib/body-limit";
 import { loadInternalBearer } from "../../../../../../../src/lib/internal-auth";
 import { hasTrustedBrowserOrigin } from "../../../../../../../src/lib/request-origin";
+import { notifyPartyUsers } from "../../../../../../../src/lib/user-notifications";
 import { syncCanonicalMarketplaceOffer } from "../../../../../../../src/catalog-sync";
 import { validateStorefrontPublication } from "../../../../../../../src/storefront-publication";
+import { isUuid } from "../../../../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +26,8 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ offerId: string }> },
 ): Promise<Response> {
-  if (!hasTrustedBrowserOrigin(request)) return jsonError("请求来源未被平台信任", 403);
+  if (!hasTrustedBrowserOrigin(request))
+    return jsonError("请求来源未被平台信任", 403);
   const session = await auth.api.getSession({ headers: request.headers });
   const role = (session?.user as { role?: unknown } | undefined)?.role;
   if (!session || (role !== "rootSuperAdmin" && role !== "rootAdmin")) {
@@ -31,30 +37,44 @@ export async function POST(
   const { offerId } = await context.params;
   if (!isUuid(offerId)) return jsonError("offerId 必须是 UUID", 400);
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  if (!tenantId || !isUuid(tenantId)) return jsonError("根平台 tenant 尚未配置", 503);
+  if (!tenantId || !isUuid(tenantId))
+    return jsonError("根平台 tenant 尚未配置", 503);
 
   let body: Record<string, unknown> = {};
   try {
     const parsed = await readJsonBody<unknown>(request, 32 * 1024);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      body = parsed as Record<string, unknown>;
   } catch {
     return jsonError("供给审核请求必须是有效 JSON", 400);
   }
   if (body.tenant_id !== undefined && body.tenant_id !== tenantId) {
     return jsonError("供给审核只能访问当前根平台 tenant", 403);
   }
+  const expectedVersion = Number(body.expected_version);
+  if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+    return jsonError("expected_version 必须是正整数", 400);
+  }
 
-  const publication = await readPublicationCandidate(tenantId, offerId).catch((error) => {
-    console.error("storefront publication validation failed", error);
-    return null;
-  });
+  const publication = await readPublicationCandidate(tenantId, offerId).catch(
+    (error) => {
+      console.error("storefront publication validation failed", error);
+      return null;
+    },
+  );
   if (!publication) return jsonError("商品不存在或审核资料暂时不可用", 404);
+  if (publication.version !== expectedVersion) {
+    return jsonError("商品已被店铺更新，请重新读取后再审核", 409);
+  }
   const validation = validateStorefrontPublication(publication);
   if (!validation.ok) return jsonError(validation.error, 409);
 
   let bearer: string;
   try {
-    bearer = await loadInternalBearer("MATCHPLANE_GATEWAY_ADMIN_TOKEN", "MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE");
+    bearer = await loadInternalBearer(
+      "MATCHPLANE_GATEWAY_ADMIN_TOKEN",
+      "MATCHPLANE_GATEWAY_ADMIN_TOKEN_FILE",
+    );
   } catch {
     return jsonError("网关管理员密钥尚未配置", 503);
   }
@@ -70,7 +90,10 @@ export async function POST(
           "content-type": "application/json",
           authorization: `Bearer ${bearer}`,
         },
-        body: JSON.stringify({ tenant_id: tenantId }),
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          expected_version: expectedVersion,
+        }),
         cache: "no-store",
       },
     );
@@ -79,13 +102,17 @@ export async function POST(
     return jsonError("网关审核服务暂时不可用", 503);
   }
 
-  const responseText = await readResponseTextBody(upstream, 256 * 1024).catch(() => null);
-  if (responseText === null) return jsonError("网关审核服务返回内容过大或无效", 502);
+  const responseText = await readResponseTextBody(upstream, 256 * 1024).catch(
+    () => null,
+  );
+  if (responseText === null)
+    return jsonError("网关审核服务返回内容过大或无效", 502);
   if (!upstream.ok) {
     return new Response(responseText, {
       status: upstream.status,
       headers: {
-        "content-type": upstream.headers.get("content-type") ?? "application/json",
+        "content-type":
+          upstream.headers.get("content-type") ?? "application/json",
         "cache-control": "no-store",
       },
     });
@@ -97,16 +124,24 @@ export async function POST(
   let activated: Record<string, unknown>;
   try {
     const parsed = JSON.parse(responseText) as unknown;
-    activated = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
+    activated =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
   } catch {
     return new Response(responseText, {
       status: upstream.status,
-      headers: { "content-type": "application/json", "cache-control": "no-store" },
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+      },
     });
   }
-  const sync = await syncCanonicalMarketplaceOffer({ request, offerId, tenantId });
+  const sync = await syncCanonicalMarketplaceOffer({
+    request,
+    offerId,
+    tenantId,
+  });
   if (validation.hostedMediaIds.length) {
     await authDatabase.query(
       `UPDATE hosted_store_media media
@@ -125,8 +160,24 @@ export async function POST(
   activated.catalog_sync = {
     synced: sync.synced,
     platform_path: sync.platformPath,
-    ...(sync.synced ? {} : { error: readError(sync.payload) ?? "子平台目录尚未同步" }),
+    ...(sync.synced
+      ? {}
+      : { error: readError(sync.payload) ?? "子平台目录尚未同步" }),
   };
+  await notifyPartyUsers({
+    tenantId,
+    partyId: publication.supplyPartyId,
+    kind: "offer_activated",
+    sourceType: "marketplace_offer",
+    sourceId: `${offerId}:${expectedVersion}`,
+    title: "商品已通过审核",
+    body: publication.displayName,
+    platformPath: publication.storePath,
+    actionPath: `${publication.storePath}?console=products&offer=${encodeURIComponent(offerId)}`,
+    payload: { offerId },
+  }).catch((error) =>
+    console.error("offer activation notification failed", error),
+  );
   return NextResponse.json(activated, {
     status: upstream.status,
     headers: { "cache-control": "no-store" },
@@ -141,9 +192,12 @@ async function readPublicationCandidate(tenantId: string, offerId: string) {
     integrationKind: string | null;
     domainMatches: boolean;
     displayName: string;
+    supplyPartyId: string;
+    storePath: string;
     attributes: unknown;
     terms: unknown;
     availableHostedMediaIds: string[];
+    version: number;
   }>(
     `SELECT offer.store_id::text AS "storeId",
             store.status AS "storeStatus",
@@ -151,8 +205,11 @@ async function readPublicationCandidate(tenantId: string, offerId: string) {
             store.integration_kind AS "integrationKind",
             (store.domain_id = offer.domain_id) AS "domainMatches",
             offer.display_name AS "displayName",
+            offer.supply_party_id::text AS "supplyPartyId",
+            alias.path AS "storePath",
             offer.attributes,
             offer.terms,
+            offer.version,
             COALESCE(array_agg(media.id::text) FILTER (WHERE media.id IS NOT NULL), '{}') AS "availableHostedMediaIds"
        FROM marketplace_offers offer
        LEFT JOIN stores store
@@ -161,26 +218,32 @@ async function readPublicationCandidate(tenantId: string, offerId: string) {
          ON media.tenant_id = store.tenant_id
         AND media.store_id = store.id
         AND media.status IN ('pending', 'published')
+       LEFT JOIN store_path_aliases alias
+         ON alias.tenant_id = store.tenant_id
+        AND alias.store_id = store.id
+        AND alias.is_canonical = true
       WHERE offer.tenant_id = $1::uuid
         AND offer.id = $2::uuid
         AND offer.status IN ('draft', 'withdrawn')
-      GROUP BY offer.id, store.id`,
+      GROUP BY offer.id, store.id, alias.path`,
     [tenantId, offerId],
   );
-  return result.rows[0] ?? null;
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  const row = result.rows[0];
+  return row ? { ...row, version: Number(row.version) } : null;
 }
 
 function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, {
-    status,
-    headers: { "cache-control": "no-store" },
-  });
+  return NextResponse.json(
+    { error },
+    {
+      status,
+      headers: { "cache-control": "no-store" },
+    },
+  );
 }
 
 function readError(payload: Record<string, unknown>): string | null {
-  return typeof payload.error === "string" && payload.error.length <= 500 ? payload.error : null;
+  return typeof payload.error === "string" && payload.error.length <= 500
+    ? payload.error
+    : null;
 }

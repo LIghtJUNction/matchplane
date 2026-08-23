@@ -2,12 +2,23 @@ import { NextResponse } from "next/server";
 
 import { authDatabase } from "../../../../../src/lib/auth";
 import { readActiveDirectChildRoutes } from "../../../../../src/platform-child-routes";
-import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization } from "../../../../../src/platform-mount";
+import {
+  isMountedPlatformPath,
+  isPlatformPathAccessibleByOrganization,
+} from "../../../../../src/platform-mount";
 import { authenticatePlatformRequest } from "../../../../../src/platform-request-auth";
-import { parseAgentHandoff, type AgentHandoffEnvelope } from "../../../../../src/platform-agent-handoff";
+import {
+  parseAgentHandoff,
+  type AgentHandoffEnvelope,
+} from "../../../../../src/platform-agent-handoff";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
+import { requestSearchParams } from "../../../../../src/lib/request-url";
 import { isActivePlatformPathVisible } from "../../../../../src/platform-visibility";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  RequestBodyTooLargeError,
+} from "../../../../../src/lib/body-limit";
+import { isUuid } from "../../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -21,29 +32,53 @@ const HANDOFF_TTL_MINUTES = 15;
  */
 export async function POST(request: Request): Promise<Response> {
   if (!hasTrustedBrowserOrigin(request)) {
-    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+    return NextResponse.json(
+      { error: "请求来源未被平台信任" },
+      { status: 403 },
+    );
   }
-  const actor = await authenticatePlatformRequest(request, { agent: ["handoff"] });
-  if (!actor) return NextResponse.json({ error: "Better Auth session or agent API key is required" }, { status: 401 });
+  const actor = await authenticatePlatformRequest(request, {
+    agent: ["handoff"],
+  });
+  if (!actor)
+    return NextResponse.json(
+      { error: "Better Auth session or agent API key is required" },
+      { status: 401 },
+    );
 
   let body: unknown;
   try {
     body = await readJsonBody<unknown>(request, 128 * 1024);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof RequestBodyTooLargeError ? "Agent handoff 请求过大" : "请求必须是有效 JSON" },
+      {
+        error:
+          error instanceof RequestBodyTooLargeError
+            ? "Agent handoff 请求过大"
+            : "请求必须是有效 JSON",
+      },
       { status: error instanceof RequestBodyTooLargeError ? 413 : 400 },
     );
   }
   const parsed = parseAgentHandoff(body);
-  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  if (!parsed.ok)
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
   const handoff = parsed.value;
 
   if (!(await isMountedPlatformPath(handoff.platformPath))) {
     return NextResponse.json({ error: "平台路径尚未激活" }, { status: 404 });
   }
-  if (actor.organizationId && !(await isPlatformPathAccessibleByOrganization(handoff.platformPath, actor.organizationId))) {
-    return NextResponse.json({ error: "API key 不能访问该平台节点" }, { status: 403 });
+  if (
+    actor.organizationId &&
+    !(await isPlatformPathAccessibleByOrganization(
+      handoff.platformPath,
+      actor.organizationId,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "API key 不能访问该平台节点" },
+      { status: 403 },
+    );
   }
 
   const viewer = {
@@ -52,13 +87,21 @@ export async function POST(request: Request): Promise<Response> {
     isRootAdministrator: actor.isRootAdministrator,
   };
   if (!(await isActivePlatformPathVisible(handoff.platformPath, viewer))) {
-    return NextResponse.json({ error: "当前平台节点不对该身份开放" }, { status: 404 });
+    return NextResponse.json(
+      { error: "当前平台节点不对该身份开放" },
+      { status: 404 },
+    );
   }
 
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  const children = rootTenantId && isUuid(rootTenantId)
-    ? await readActiveDirectChildRoutes(handoff.platformPath, rootTenantId, viewer)
-    : [];
+  const children =
+    rootTenantId && isUuid(rootTenantId)
+      ? await readActiveDirectChildRoutes(
+          handoff.platformPath,
+          rootTenantId,
+          viewer,
+        )
+      : [];
   const expiresAt = new Date(Date.now() + HANDOFF_TTL_MINUTES * 60 * 1000);
   const inserted = await authDatabase.query(
     `INSERT INTO platform_agent_handoffs
@@ -93,23 +136,44 @@ export async function POST(request: Request): Promise<Response> {
         LIMIT 1`,
       [handoff.requestId],
     );
-    const row = existing.rows[0] as {
-      requestId?: string;
-      authSubject?: string;
-      platformPath?: string;
-      stage?: string;
-      status?: string;
-      expiresAt?: string;
-    } | undefined;
+    const row = existing.rows[0] as
+      | {
+          requestId?: string;
+          authSubject?: string;
+          platformPath?: string;
+          stage?: string;
+          status?: string;
+          expiresAt?: string;
+        }
+      | undefined;
     if (!row || row.authSubject !== actor.subject) {
-      return NextResponse.json({ error: "request_id 已被其他 Agent 使用" }, { status: 409 });
+      return NextResponse.json(
+        { error: "request_id 已被其他 Agent 使用" },
+        { status: 409 },
+      );
     }
-    if (row.platformPath !== handoff.platformPath || row.stage !== handoff.stage) {
-      return NextResponse.json({ error: "同一 request_id 不能改变 handoff 范围" }, { status: 409 });
+    if (
+      row.platformPath !== handoff.platformPath ||
+      row.stage !== handoff.stage
+    ) {
+      return NextResponse.json(
+        { error: "同一 request_id 不能改变 handoff 范围" },
+        { status: 409 },
+      );
     }
     return NextResponse.json(
-      handoffResponse(handoff, children, row.status ?? "accepted", row.expiresAt ?? expiresAt.toISOString()),
-      { headers: { "cache-control": "no-store", "x-matchplane-idempotent": "true" } },
+      handoffResponse(
+        handoff,
+        children,
+        row.status ?? "accepted",
+        row.expiresAt ?? expiresAt.toISOString(),
+      ),
+      {
+        headers: {
+          "cache-control": "no-store",
+          "x-matchplane-idempotent": "true",
+        },
+      },
     );
   }
 
@@ -122,12 +186,25 @@ export async function POST(request: Request): Promise<Response> {
 /** Read back a handoff owned by the same session or API key. */
 export async function GET(request: Request): Promise<Response> {
   if (!hasTrustedBrowserOrigin(request)) {
-    return NextResponse.json({ error: "请求来源未被平台信任" }, { status: 403 });
+    return NextResponse.json(
+      { error: "请求来源未被平台信任" },
+      { status: 403 },
+    );
   }
-  const actor = await authenticatePlatformRequest(request, { agent: ["handoff"] });
-  if (!actor) return NextResponse.json({ error: "Better Auth session or agent API key is required" }, { status: 401 });
-  const requestId = new URL(request.url).searchParams.get("request_id");
-  if (!isUuid(requestId)) return NextResponse.json({ error: "request_id must be a UUID" }, { status: 400 });
+  const actor = await authenticatePlatformRequest(request, {
+    agent: ["handoff"],
+  });
+  if (!actor)
+    return NextResponse.json(
+      { error: "Better Auth session or agent API key is required" },
+      { status: 401 },
+    );
+  const requestId = requestSearchParams(request).get("request_id");
+  if (!isUuid(requestId))
+    return NextResponse.json(
+      { error: "request_id must be a UUID" },
+      { status: 400 },
+    );
 
   const result = await authDatabase.query(
     `SELECT request_id AS "requestId", auth_subject AS "authSubject",
@@ -139,30 +216,46 @@ export async function GET(request: Request): Promise<Response> {
       LIMIT 1`,
     [requestId],
   );
-  const row = result.rows[0] as {
-    requestId?: string;
-    authSubject?: string;
-    platformPath?: string;
-    stage?: string;
-    status?: string;
-    expiresAt?: string;
-    createdAt?: string;
-    updatedAt?: string;
-  } | undefined;
-  if (!row || row.authSubject !== actor.subject) return NextResponse.json({ error: "handoff not found" }, { status: 404 });
-  if (row.platformPath && actor.organizationId && !(await isPlatformPathAccessibleByOrganization(row.platformPath, actor.organizationId))) {
-    return NextResponse.json({ error: "API key 不能访问该平台节点" }, { status: 403 });
+  const row = result.rows[0] as
+    | {
+        requestId?: string;
+        authSubject?: string;
+        platformPath?: string;
+        stage?: string;
+        status?: string;
+        expiresAt?: string;
+        createdAt?: string;
+        updatedAt?: string;
+      }
+    | undefined;
+  if (!row || row.authSubject !== actor.subject)
+    return NextResponse.json({ error: "handoff not found" }, { status: 404 });
+  if (
+    row.platformPath &&
+    actor.organizationId &&
+    !(await isPlatformPathAccessibleByOrganization(
+      row.platformPath,
+      actor.organizationId,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "API key 不能访问该平台节点" },
+      { status: 403 },
+    );
   }
-  return NextResponse.json({
-    protocol: "matchplane.agent/v1",
-    requestId: row.requestId,
-    platformPath: row.platformPath,
-    stage: row.stage,
-    status: row.status,
-    expiresAt: row.expiresAt,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }, { headers: { "cache-control": "no-store" } });
+  return NextResponse.json(
+    {
+      protocol: "matchplane.agent/v1",
+      requestId: row.requestId,
+      platformPath: row.platformPath,
+      stage: row.stage,
+      status: row.status,
+      expiresAt: row.expiresAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    },
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 function handoffResponse(
@@ -200,9 +293,4 @@ function handoffResponse(
       "handoff does not grant contact, payment, invoice, refund, or administrator authority",
     ],
   };
-}
-
-function isUuid(value: unknown): value is string {
-  return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

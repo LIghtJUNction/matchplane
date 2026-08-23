@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { X } from "lucide-react";
+import { Search, X, type LucideIcon } from "lucide-react";
 import {
   Dialog,
   DialogBody,
@@ -13,6 +13,13 @@ import {
 } from "@appica/ui-react/dialog";
 import { Button } from "@appica/ui-react/button";
 
+interface WorkspaceSettingsNavigationItem {
+  id: string;
+  label: string;
+  icon?: LucideIcon;
+  count?: number;
+}
+
 export interface WorkspaceSettingsDialogProps {
   open: boolean;
   onClose: () => void;
@@ -22,9 +29,15 @@ export interface WorkspaceSettingsDialogProps {
   className?: string;
   closeLabel?: string;
   backdropLabel?: string;
+  navigation?: WorkspaceSettingsNavigationItem[];
+  navigationLabel?: string;
+  activeNavigationId?: string;
+  onNavigationChange?: (id: string) => void;
+  searchLabel?: string;
+  emptyNavigationLabel?: string;
 }
 
-/** Appica-powered, controlled workspace dialog for account and role preferences. */
+/** Controlled two-pane settings dialog shared by account, store and memory surfaces. */
 export function WorkspaceSettingsDialog({
   open,
   onClose,
@@ -34,16 +47,41 @@ export function WorkspaceSettingsDialog({
   className,
   closeLabel = "Close workspace settings",
   backdropLabel = "Close workspace settings dialog",
+  navigation = [],
+  navigationLabel,
+  activeNavigationId,
+  onNavigationChange,
+  searchLabel,
+  emptyNavigationLabel = "No settings found",
 }: WorkspaceSettingsDialogProps) {
   const titleId = useId();
+  const searchId = useId();
   const restoreFocusRef = useRef<HTMLElement | null>(null);
-  const dialogClassName = ["workspace-settings-dialog", "appica-workspace-settings-dialog", className]
+  const [query, setQuery] = useState("");
+  const showSearch = Boolean(searchLabel) && navigation.length >= 6;
+  const dialogClassName = [
+    "workspace-settings-dialog",
+    "appica-workspace-settings-dialog",
+    navigation.length ? "has-navigation" : "has-single-pane",
+    className,
+  ]
     .filter(Boolean)
     .join(" ");
+  const visibleNavigation = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase();
+    if (!normalized) return navigation;
+    return navigation.filter((item) =>
+      item.label.toLocaleLowerCase().includes(normalized),
+    );
+  }, [navigation, query]);
 
   useEffect(() => {
     if (!open) return;
-    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setQuery("");
+    restoreFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     return () => {
       const previous = restoreFocusRef.current;
       restoreFocusRef.current = null;
@@ -65,23 +103,91 @@ export function WorkspaceSettingsDialog({
         frame={false}
         aria-labelledby={titleId}
       >
-        <DialogHeader className="workspace-settings-header">
-          <div>
-            <DialogTitle id={titleId}>{title}</DialogTitle>
-            {description ? <DialogDescription>{description}</DialogDescription> : null}
-          </div>
-          <Button
-            className="workspace-settings-close"
-            variant="outline"
-            size="icon-sm"
-            type="button"
-            aria-label={closeLabel}
-            onClick={onClose}
+        <div className="workspace-settings-layout">
+          <aside
+            className="workspace-settings-rail"
+            aria-label={navigationLabel || title}
           >
-            <X size={19} aria-hidden="true" />
-          </Button>
-        </DialogHeader>
-        <DialogBody className="workspace-settings-content">{children}</DialogBody>
+            <Button
+              className="workspace-settings-close"
+              variant="ghost"
+              size="icon-sm"
+              type="button"
+              aria-label={closeLabel}
+              onClick={onClose}
+            >
+              <X size={20} aria-hidden="true" />
+            </Button>
+
+            {showSearch ? (
+              <label className="workspace-settings-search" htmlFor={searchId}>
+                <Search size={16} aria-hidden="true" />
+                <span className="sr-only">{searchLabel}</span>
+                <input
+                  id={searchId}
+                  type="search"
+                  value={query}
+                  placeholder={searchLabel}
+                  onChange={(event) => setQuery(event.currentTarget.value)}
+                />
+              </label>
+            ) : null}
+
+            {navigation.length ? (
+              <nav className="workspace-settings-navigation">
+                {visibleNavigation.map((item) => {
+                  const Icon = item.icon;
+                  const active = item.id === activeNavigationId;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => onNavigationChange?.(item.id)}
+                    >
+                      {Icon ? <Icon size={18} aria-hidden="true" /> : null}
+                      <span>{item.label}</span>
+                      {typeof item.count === "number" ? (
+                        <small>{item.count}</small>
+                      ) : null}
+                    </button>
+                  );
+                })}
+                {visibleNavigation.length ? null : (
+                  <p className="workspace-settings-navigation-empty">
+                    {emptyNavigationLabel}
+                  </p>
+                )}
+              </nav>
+            ) : (
+              <div
+                className="workspace-settings-single-destination"
+                aria-current="page"
+              >
+                {title}
+              </div>
+            )}
+          </aside>
+
+          <section className="workspace-settings-main">
+            <DialogHeader className="workspace-settings-header">
+              <div>
+                <DialogTitle id={titleId}>{title}</DialogTitle>
+                {description ? (
+                  <DialogDescription>{description}</DialogDescription>
+                ) : null}
+              </div>
+            </DialogHeader>
+            <DialogBody
+              className="workspace-settings-content"
+              role="region"
+              aria-labelledby={titleId}
+              tabIndex={0}
+            >
+              {children}
+            </DialogBody>
+          </section>
+        </div>
       </DialogContent>
     </Dialog>
   );

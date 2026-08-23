@@ -13,8 +13,12 @@ export async function admitPlatformAiCall(input: {
   const client = await authDatabase.connect();
   try {
     await client.query("BEGIN");
-    await client.query("SELECT pg_advisory_xact_lock(hashtext('matchplane:platform-ai:global'))");
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.subject]);
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext('matchplane:platform-ai:global'))",
+    );
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      input.subject,
+    ]);
     await client.query(
       `DELETE FROM platform_ai_call_admissions
         WHERE created_at < clock_timestamp() - interval '2 hours'`,
@@ -48,7 +52,11 @@ export async function admitPlatformAiCall(input: {
     await client.query("COMMIT");
     return true;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Preserve the admission failure that caused the rollback.
+    }
     throw error;
   } finally {
     client.release();

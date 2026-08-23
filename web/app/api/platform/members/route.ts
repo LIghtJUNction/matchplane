@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import { readJsonBody } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { requestSearchParams } from "../../../../src/lib/request-url";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,7 +64,7 @@ export async function POST(request: Request): Promise<Response> {
   if (role === "owner" && !access.isRootSuperAdmin) {
     return jsonError("只有根超级管理员可以转移平台所有权", 403);
   }
-  if (role === "owner" && await hasAnotherStoreOwner(organizationId)) {
+  if (role === "owner" && (await hasAnotherStoreOwner(organizationId))) {
     return jsonError("每家店铺只能有一位店长；请先完成店长交接", 409);
   }
 
@@ -78,7 +80,10 @@ export async function POST(request: Request): Promise<Response> {
     });
     return NextResponse.json(
       { invitation: toPublicInvitation(invitation) },
-      { status: 201, headers: { "cache-control": "no-store", pragma: "no-cache" } },
+      {
+        status: 201,
+        headers: { "cache-control": "no-store", pragma: "no-cache" },
+      },
     );
   } catch (error) {
     console.error("platform membership invitation failed", error);
@@ -99,7 +104,10 @@ export async function PATCH(request: Request): Promise<Response> {
   if (role === "owner" && !access.isRootSuperAdmin) {
     return jsonError("只有根超级管理员可以转移平台所有权", 403);
   }
-  if (role === "owner" && await hasAnotherStoreOwner(organizationId, memberId)) {
+  if (
+    role === "owner" &&
+    (await hasAnotherStoreOwner(organizationId, memberId))
+  ) {
     return jsonError("每家店铺只能有一位店长；请先完成店长交接", 409);
   }
 
@@ -124,13 +132,16 @@ export async function DELETE(request: Request): Promise<Response> {
   const memberIdOrEmail = readBoundedText(input.memberIdOrEmail, 320);
   const invitationId = readBoundedText(input.invitationId, 128);
   if (!organizationId) return jsonError("organizationId 必须是 UUID", 400);
-  if (!memberIdOrEmail && !invitationId) return jsonError("memberIdOrEmail 或 invitationId 必须提供一个", 400);
+  if (!memberIdOrEmail && !invitationId)
+    return jsonError("memberIdOrEmail 或 invitationId 必须提供一个", 400);
   const access = await requireOrganizationManager(request, organizationId);
   if (access.response) return access.response;
 
   try {
     if (invitationId) {
-      if (!(await invitationBelongsToOrganization(invitationId, organizationId))) {
+      if (
+        !(await invitationBelongsToOrganization(invitationId, organizationId))
+      ) {
         return jsonError("邀请不属于当前平台", 404);
       }
       await auth.api.cancelInvitation({
@@ -216,12 +227,17 @@ async function requireOrganizationManager(
   request: Request,
   organizationId: string,
 ): Promise<AccessContext | { response: Response }> {
-  if (!hasTrustedBrowserOrigin(request)) return { response: jsonError("请求来源未被平台信任", 403) };
+  if (!hasTrustedBrowserOrigin(request))
+    return { response: jsonError("请求来源未被平台信任", 403) };
   const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return { response: jsonError("Better Auth session is required", 401) };
+  if (!session)
+    return { response: jsonError("Better Auth session is required", 401) };
 
   const organization = await findOrganization(organizationId);
-  if (!organization) return { response: jsonError("平台组织不存在或不属于当前 root tenant", 404) };
+  if (!organization)
+    return {
+      response: jsonError("平台组织不存在或不属于当前 root tenant", 404),
+    };
 
   const role = (session.user as { role?: unknown }).role;
   const isRootSuperAdmin = role === "rootSuperAdmin";
@@ -245,18 +261,30 @@ async function requireOrganizationManager(
       query: { organizationId, membersLimit: 1000 },
       headers: request.headers,
     });
-    const member = full?.members?.find((candidate) => candidate.userId === session.user.id);
+    const member = full?.members?.find(
+      (candidate) => candidate.userId === session.user.id,
+    );
     const scopedManager = member?.role
       .split(",")
-      .some((value) => value === "owner" || value === "admin" || value === "subplatform_admin");
-    if (!scopedManager) return { response: jsonError("当前账号没有该平台的成员管理权限", 403) };
+      .some(
+        (value) =>
+          value === "owner" ||
+          value === "admin" ||
+          value === "subplatform_admin",
+      );
+    if (!scopedManager)
+      return { response: jsonError("当前账号没有该平台的成员管理权限", 403) };
     return { organization, isRootSuperAdmin: false };
   } catch {
-    return { response: jsonError("当前账号不是该平台的 Better Auth 成员", 403) };
+    return {
+      response: jsonError("当前账号不是该平台的 Better Auth 成员", 403),
+    };
   }
 }
 
-async function findOrganization(organizationId: string): Promise<OrganizationScope | null> {
+async function findOrganization(
+  organizationId: string,
+): Promise<OrganizationScope | null> {
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!tenantId || !isUuid(tenantId)) return null;
   const result = await authDatabase.query<OrganizationScope>(
@@ -271,7 +299,10 @@ async function findOrganization(organizationId: string): Promise<OrganizationSco
 }
 
 /** A store has one accountable manager; legacy root organizations retain their existing owner model. */
-async function hasAnotherStoreOwner(organizationId: string, excludeMemberId?: string): Promise<boolean> {
+async function hasAnotherStoreOwner(
+  organizationId: string,
+  excludeMemberId?: string,
+): Promise<boolean> {
   const organization = await findOrganization(organizationId);
   if (!organization || organization.parentOrganizationId === null) return false;
   try {
@@ -290,7 +321,10 @@ async function hasAnotherStoreOwner(organizationId: string, excludeMemberId?: st
   }
 }
 
-async function invitationBelongsToOrganization(invitationId: string, organizationId: string): Promise<boolean> {
+async function invitationBelongsToOrganization(
+  invitationId: string,
+  organizationId: string,
+): Promise<boolean> {
   const result = await authDatabase.query(
     `SELECT 1 FROM "invitation" WHERE id = $1 AND "organizationId" = $2 LIMIT 1`,
     [invitationId, organizationId],
@@ -299,13 +333,15 @@ async function invitationBelongsToOrganization(invitationId: string, organizatio
 }
 
 function readOrganizationId(request: Request): string | null {
-  return readUuid(new URL(request.url).searchParams.get("organizationId"));
+  return readUuid(requestSearchParams(request).get("organizationId"));
 }
 
 async function parseJson(request: Request): Promise<Record<string, unknown>> {
   try {
     const value = await readJsonBody<unknown>(request, 32 * 1024);
-    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
@@ -314,13 +350,25 @@ async function parseJson(request: Request): Promise<Record<string, unknown>> {
 function normalizeEmail(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
-  return normalized.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : null;
+  return normalized.length <= 320 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
+    ? normalized
+    : null;
 }
 
-type OrganizationRole = "owner" | "admin" | "subplatform_admin" | "moderator" | "member";
+type OrganizationRole =
+  | "owner"
+  | "admin"
+  | "subplatform_admin"
+  | "moderator"
+  | "member";
 
 function normalizeOrganizationRole(value: unknown): OrganizationRole | null {
-  return value === "owner" || value === "admin" || value === "subplatform_admin" || value === "moderator" || value === "member"
+  return value === "owner" ||
+    value === "admin" ||
+    value === "subplatform_admin" ||
+    value === "moderator" ||
+    value === "member"
     ? value
     : null;
 }
@@ -328,17 +376,20 @@ function normalizeOrganizationRole(value: unknown): OrganizationRole | null {
 function readBoundedText(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
-  return normalized.length >= 1 && normalized.length <= maxLength ? normalized : null;
+  return normalized.length >= 1 && normalized.length <= maxLength
+    ? normalized
+    : null;
 }
 
 function readUuid(value: unknown): string | null {
-  return typeof value === "string" && isUuid(value.trim()) ? value.trim() : null;
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  return typeof value === "string" && isUuid(value.trim())
+    ? value.trim()
+    : null;
 }
 
 function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } });
+  return NextResponse.json(
+    { error },
+    { status, headers: { "cache-control": "no-store" } },
+  );
 }

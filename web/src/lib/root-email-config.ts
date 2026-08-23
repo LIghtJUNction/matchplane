@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { Pool } from "pg";
+import { isUuid } from "./uuid";
 
 const database = new Pool({
   connectionString: process.env.MATCHPLANE_DATABASE_URL ?? process.env.DATABASE_URL,
@@ -280,10 +281,6 @@ function isSafeSmtpHost(value: string): boolean {
 
 function isEmail(value: string): boolean {
   return value.trim().length <= 320 && emailPattern.test(value.trim());
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function isWithin(parent: string, child: string): boolean {

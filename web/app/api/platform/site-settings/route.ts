@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
-import { readJsonBody, readJsonResponseBody } from "../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  readJsonResponseBody,
+} from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
-import { isMountedPlatformPath, readActivePlatformScope } from "../../../../src/platform-mount";
+import { requestSearchParams } from "../../../../src/lib/request-url";
+import {
+  isMountedPlatformPath,
+  readActivePlatformScope,
+} from "../../../../src/platform-mount";
 import { isActivePlatformPathVisible } from "../../../../src/platform-visibility";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +25,7 @@ const LOOKUP_TIMEOUT_MS = 3_000;
  * child nodes; only the organization manager may write it.
  */
 export async function GET(request: Request): Promise<Response> {
-  const query = new URL(request.url).searchParams;
+  const query = requestSearchParams(request);
   const organizationId = readUuid(query.get("organizationId"));
   const platformPath = normalizePlatformPath(query.get("platformPath") ?? "/");
 
@@ -40,7 +48,10 @@ export async function GET(request: Request): Promise<Response> {
   // fail closed when their registration tree cannot be resolved.
   if (!scope) {
     if (platformPath === "/") {
-      return NextResponse.json({ settings: emptySettings(null, null) }, noStore());
+      return NextResponse.json(
+        { settings: emptySettings(null, null) },
+        noStore(),
+      );
     }
     return jsonError("平台范围尚未初始化", 404);
   }
@@ -70,7 +81,8 @@ export async function PATCH(request: Request): Promise<Response> {
     );
     const current = existing.rows[0];
     if (!current) {
-      if (expectedVersion !== undefined) return jsonError("备案设置尚未创建，不能携带 expectedVersion", 409);
+      if (expectedVersion !== undefined)
+        return jsonError("备案设置尚未创建，不能携带 expectedVersion", 409);
       const inserted = await authDatabase.query<SiteSettingsRow>(
         `INSERT INTO platform_site_settings
           (organization_id, tenant_id, icp_number, icp_subject, icp_record_url,
@@ -92,7 +104,10 @@ export async function PATCH(request: Request): Promise<Response> {
           access.userId,
         ],
       );
-      return NextResponse.json({ settings: toPublicSettings(inserted.rows[0]) }, noStore());
+      return NextResponse.json(
+        { settings: toPublicSettings(inserted.rows[0]) },
+        noStore(),
+      );
     }
 
     const updated = await authDatabase.query<SiteSettingsRow>(
@@ -124,10 +139,15 @@ export async function PATCH(request: Request): Promise<Response> {
         expectedVersion ?? null,
       ],
     );
-    if (updated.rowCount !== 1) return jsonError("备案设置已被其他管理员更新，请刷新后再保存", 409);
-    return NextResponse.json({ settings: toPublicSettings(updated.rows[0]) }, noStore());
+    if (updated.rowCount !== 1)
+      return jsonError("备案设置已被其他管理员更新，请刷新后再保存", 409);
+    return NextResponse.json(
+      { settings: toPublicSettings(updated.rows[0]) },
+      noStore(),
+    );
   } catch (error) {
-    if (isMissingSettingsTable(error)) return jsonError("数据库尚未执行平台备案设置迁移", 503);
+    if (isMissingSettingsTable(error))
+      return jsonError("数据库尚未执行平台备案设置迁移", 503);
     console.error("platform site settings update failed", error);
     return jsonError("备案设置保存失败", 500);
   }
@@ -149,9 +169,14 @@ export async function POST(request: Request): Promise<Response> {
 
   const lookupUrl = process.env.MATCHPLANE_ICP_LOOKUP_URL?.trim();
   if (!lookupUrl || !isHttpsOrLoopbackUrl(lookupUrl)) {
-    return jsonError("尚未配置 MATCHPLANE_ICP_LOOKUP_URL；请先手动填写备案信息或接入查询服务", 503);
+    return jsonError(
+      "尚未配置 MATCHPLANE_ICP_LOOKUP_URL；请先手动填写备案信息或接入查询服务",
+      503,
+    );
   }
-  const hostname = normalizeHostname(input.hostname) ?? normalizeHostname(request.headers.get("host"));
+  const hostname =
+    normalizeHostname(input.hostname) ??
+    normalizeHostname(request.headers.get("host"));
   if (!hostname) return jsonError("当前请求没有可查询的域名", 400);
 
   const controller = new AbortController();
@@ -163,27 +188,40 @@ export async function POST(request: Request): Promise<Response> {
         accept: "application/json",
         "content-type": "application/json",
         ...(process.env.MATCHPLANE_ICP_LOOKUP_TOKEN?.trim()
-          ? { authorization: `Bearer ${process.env.MATCHPLANE_ICP_LOOKUP_TOKEN.trim()}` }
+          ? {
+              authorization: `Bearer ${process.env.MATCHPLANE_ICP_LOOKUP_TOKEN.trim()}`,
+            }
           : {}),
       },
-      body: JSON.stringify({ hostname, platformPath: input.platformPath ?? "/" }),
+      body: JSON.stringify({
+        hostname,
+        platformPath: input.platformPath ?? "/",
+      }),
       signal: controller.signal,
     });
     if (!response.ok) return jsonError("备案查询服务暂时不可用", 502);
-    const body = await readJsonResponseBody<unknown>(response, 256 * 1024).catch(() => null);
+    const body = await readJsonResponseBody<unknown>(
+      response,
+      256 * 1024,
+    ).catch(() => null);
     const values = normalizeLookupResponse(body);
-    if (!values.ok) return jsonError("备案查询服务没有返回可验证的备案字段", 502);
-    return NextResponse.json({
-      settings: {
-        organization_id: access.organization.id,
-        tenant_id: access.organization.tenantId,
-        ...values.settings,
-        lookup_source: lookupUrl,
-        lookup_checked_at: new Date().toISOString(),
+    if (!values.ok)
+      return jsonError("备案查询服务没有返回可验证的备案字段", 502);
+    return NextResponse.json(
+      {
+        settings: {
+          organization_id: access.organization.id,
+          tenant_id: access.organization.tenantId,
+          ...values.settings,
+          lookup_source: lookupUrl,
+          lookup_checked_at: new Date().toISOString(),
+        },
       },
-    }, noStore());
+      noStore(),
+    );
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") return jsonError("备案查询超时，请稍后重试", 504);
+    if (error instanceof Error && error.name === "AbortError")
+      return jsonError("备案查询超时，请稍后重试", 504);
     console.error("platform site settings lookup failed", error);
     return jsonError("备案查询失败，请稍后重试", 502);
   } finally {
@@ -217,7 +255,10 @@ interface SiteSettingsRow {
   updated_at: string | Date;
 }
 
-async function readSettings(organizationId: string, tenantId: string): Promise<Response> {
+async function readSettings(
+  organizationId: string,
+  tenantId: string,
+): Promise<Response> {
   try {
     const result = await authDatabase.query<SiteSettingsRow>(
       `SELECT organization_id::text, tenant_id::text, icp_number, icp_subject, icp_record_url,
@@ -228,20 +269,32 @@ async function readSettings(organizationId: string, tenantId: string): Promise<R
         LIMIT 1`,
       [organizationId, tenantId],
     );
-    return NextResponse.json({ settings: result.rows[0] ? toPublicSettings(result.rows[0]) : emptySettings(organizationId, tenantId) }, noStore());
+    return NextResponse.json(
+      {
+        settings: result.rows[0]
+          ? toPublicSettings(result.rows[0])
+          : emptySettings(organizationId, tenantId),
+      },
+      noStore(),
+    );
   } catch (error) {
-    if (isMissingSettingsTable(error)) return jsonError("数据库尚未执行平台备案设置迁移", 503);
+    if (isMissingSettingsTable(error))
+      return jsonError("数据库尚未执行平台备案设置迁移", 503);
     console.error("platform site settings read failed", error);
     return jsonError("备案设置读取失败", 503);
   }
 }
 
-async function resolvePublicScope(platformPath: string): Promise<{ organizationId: string; tenantId: string } | null> {
+async function resolvePublicScope(
+  platformPath: string,
+): Promise<{ organizationId: string; tenantId: string } | null> {
   const tenantId = configuredTenantId();
   if (!tenantId) return null;
   if (platformPath !== "/") {
     const scope = await readActivePlatformScope(platformPath);
-    return scope ? { organizationId: scope.organizationId, tenantId: scope.tenantId } : null;
+    return scope
+      ? { organizationId: scope.organizationId, tenantId: scope.tenantId }
+      : null;
   }
   const result = await authDatabase.query<{ id: string; tenant_id: string }>(
     `SELECT id::text, "tenantId"::text AS tenant_id
@@ -258,12 +311,20 @@ async function resolvePublicScope(platformPath: string): Promise<{ organizationI
     : null;
 }
 
-async function requireOrganizationManager(request: Request, organizationId: string): Promise<ManagerAccess | { response: Response }> {
-  if (!hasTrustedBrowserOrigin(request)) return { response: jsonError("请求来源未被平台信任", 403) };
+async function requireOrganizationManager(
+  request: Request,
+  organizationId: string,
+): Promise<ManagerAccess | { response: Response }> {
+  if (!hasTrustedBrowserOrigin(request))
+    return { response: jsonError("请求来源未被平台信任", 403) };
   const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return { response: jsonError("Better Auth session is required", 401) };
+  if (!session)
+    return { response: jsonError("Better Auth session is required", 401) };
   const organization = await findOrganization(organizationId);
-  if (!organization) return { response: jsonError("平台组织不存在或不属于当前 root tenant", 404) };
+  if (!organization)
+    return {
+      response: jsonError("平台组织不存在或不属于当前 root tenant", 404),
+    };
 
   const role = (session.user as { role?: unknown }).role;
   if (role === "rootSuperAdmin" || role === "rootAdmin") {
@@ -274,17 +335,30 @@ async function requireOrganizationManager(request: Request, organizationId: stri
       query: { organizationId, membersLimit: 1000 },
       headers: request.headers,
     });
-    const member = full?.members?.find((candidate) => candidate.userId === session.user.id);
-    const canManage = member?.role.split(",").some((value) => value === "owner" || value === "admin" || value === "subplatform_admin");
+    const member = full?.members?.find(
+      (candidate) => candidate.userId === session.user.id,
+    );
+    const canManage = member?.role
+      .split(",")
+      .some(
+        (value) =>
+          value === "owner" ||
+          value === "admin" ||
+          value === "subplatform_admin",
+      );
     return canManage
       ? { organization, userId: session.user.id }
       : { response: jsonError("当前账号没有该平台的设置权限", 403) };
   } catch {
-    return { response: jsonError("当前账号不是该平台的 Better Auth 成员", 403) };
+    return {
+      response: jsonError("当前账号不是该平台的 Better Auth 成员", 403),
+    };
   }
 }
 
-async function findOrganization(organizationId: string): Promise<OrganizationScope | null> {
+async function findOrganization(
+  organizationId: string,
+): Promise<OrganizationScope | null> {
   const tenantId = configuredTenantId();
   if (!tenantId) return null;
   const result = await authDatabase.query<OrganizationScope>(
@@ -299,36 +373,72 @@ async function findOrganization(organizationId: string): Promise<OrganizationSco
   return row && isUuid(row.id) && isUuid(row.tenantId) ? row : null;
 }
 
-function normalizeSettings(input: Record<string, unknown>):
-  | { ok: true; icpNumber: string | null; icpSubject: string | null; icpRecordUrl: string | null; publicSecurityNumber: string | null; publicSecurityUrl: string | null }
+function normalizeSettings(
+  input: Record<string, unknown>,
+):
+  | {
+      ok: true;
+      icpNumber: string | null;
+      icpSubject: string | null;
+      icpRecordUrl: string | null;
+      publicSecurityNumber: string | null;
+      publicSecurityUrl: string | null;
+    }
   | { ok: false; error: string } {
   const icpNumber = optionalText(input.icpNumber, 128);
   const icpSubject = optionalText(input.icpSubject, 200);
   const icpRecordUrl = optionalUrl(input.icpRecordUrl);
   const publicSecurityNumber = optionalText(input.publicSecurityNumber, 128);
   const publicSecurityUrl = optionalUrl(input.publicSecurityUrl);
-  if (icpNumber === undefined || icpSubject === undefined || publicSecurityNumber === undefined) return { ok: false, error: "备案字段必须是字符串或 null" };
-  if (icpRecordUrl === undefined || publicSecurityUrl === undefined) return { ok: false, error: "备案链接必须是 HTTPS 地址或 null" };
-  if (!icpNumber && !icpSubject && !icpRecordUrl && !publicSecurityNumber && !publicSecurityUrl) {
+  if (
+    icpNumber === undefined ||
+    icpSubject === undefined ||
+    publicSecurityNumber === undefined
+  )
+    return { ok: false, error: "备案字段必须是字符串或 null" };
+  if (icpRecordUrl === undefined || publicSecurityUrl === undefined)
+    return { ok: false, error: "备案链接必须是 HTTPS 地址或 null" };
+  if (
+    !icpNumber &&
+    !icpSubject &&
+    !icpRecordUrl &&
+    !publicSecurityNumber &&
+    !publicSecurityUrl
+  ) {
     return { ok: false, error: "至少填写一项备案信息" };
   }
-  return { ok: true, icpNumber, icpSubject, icpRecordUrl, publicSecurityNumber, publicSecurityUrl };
+  return {
+    ok: true,
+    icpNumber,
+    icpSubject,
+    icpRecordUrl,
+    publicSecurityNumber,
+    publicSecurityUrl,
+  };
 }
 
-function normalizeLookupResponse(input: unknown):
-  | { ok: true; settings: Record<string, string | null> }
-  | { ok: false } {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return { ok: false };
+function normalizeLookupResponse(
+  input: unknown,
+): { ok: true; settings: Record<string, string | null> } | { ok: false } {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    return { ok: false };
   const body = input as Record<string, unknown>;
-  const candidate = body.data && typeof body.data === "object" && !Array.isArray(body.data)
-    ? body.data as Record<string, unknown>
-    : body;
+  const candidate =
+    body.data && typeof body.data === "object" && !Array.isArray(body.data)
+      ? (body.data as Record<string, unknown>)
+      : body;
   const normalized = normalizeSettings({
-    icpNumber: candidate.icpNumber ?? candidate.icp_number ?? candidate.recordNumber,
-    icpSubject: candidate.icpSubject ?? candidate.icp_subject ?? candidate.subject,
+    icpNumber:
+      candidate.icpNumber ?? candidate.icp_number ?? candidate.recordNumber,
+    icpSubject:
+      candidate.icpSubject ?? candidate.icp_subject ?? candidate.subject,
     icpRecordUrl: candidate.icpRecordUrl ?? candidate.icp_record_url,
-    publicSecurityNumber: candidate.publicSecurityNumber ?? candidate.public_security_number ?? candidate.psbNumber,
-    publicSecurityUrl: candidate.publicSecurityUrl ?? candidate.public_security_url,
+    publicSecurityNumber:
+      candidate.publicSecurityNumber ??
+      candidate.public_security_number ??
+      candidate.psbNumber,
+    publicSecurityUrl:
+      candidate.publicSecurityUrl ?? candidate.public_security_url,
   });
   return normalized.ok
     ? {
@@ -354,10 +464,18 @@ function toPublicSettings(row: SiteSettingsRow) {
     public_security_number: row.public_security_number,
     public_security_url: row.public_security_url,
     lookup_source: row.lookup_source,
-    lookup_checked_at: row.lookup_checked_at ? new Date(row.lookup_checked_at).toISOString() : null,
+    lookup_checked_at: row.lookup_checked_at
+      ? new Date(row.lookup_checked_at).toISOString()
+      : null,
     version: Number(row.version) || 1,
     updated_at: new Date(row.updated_at).toISOString(),
-    configured: Boolean(row.icp_number || row.icp_subject || row.icp_record_url || row.public_security_number || row.public_security_url),
+    configured: Boolean(
+      row.icp_number ||
+        row.icp_subject ||
+        row.icp_record_url ||
+        row.public_security_number ||
+        row.public_security_url,
+    ),
   };
 }
 
@@ -403,18 +521,28 @@ function optionalUrl(value: unknown): string | null | undefined {
 function normalizeHostname(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase().replace(/:\d+$/, "");
-  return /^[a-z0-9](?:[a-z0-9.-]{0,252}[a-z0-9])?$/.test(normalized) && normalized.includes(".") ? normalized : null;
+  return /^[a-z0-9](?:[a-z0-9.-]{0,252}[a-z0-9])?$/.test(normalized) &&
+    normalized.includes(".")
+    ? normalized
+    : null;
 }
 
 function normalizePlatformPath(value: string): string | null {
   const normalized = value.trim() || "/";
-  return normalized === "/" || /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(normalized) ? normalized : null;
+  return normalized === "/" ||
+    /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(normalized)
+    ? normalized
+    : null;
 }
 
 function isHttpsOrLoopbackUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || (url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1"));
+    return (
+      url.protocol === "https:" ||
+      (url.protocol === "http:" &&
+        (url.hostname === "localhost" || url.hostname === "127.0.0.1"))
+    );
   } catch {
     return false;
   }
@@ -422,12 +550,19 @@ function isHttpsOrLoopbackUrl(value: string): boolean {
 
 function readVersion(value: unknown): number | undefined {
   if (value === undefined || value === null || value === "") return undefined;
-  const version = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+  const version =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/.test(value)
+        ? Number(value)
+        : NaN;
   return Number.isSafeInteger(version) && version > 0 ? version : undefined;
 }
 
 function readUuid(value: unknown): string | null {
-  return typeof value === "string" && isUuid(value.trim()) ? value.trim() : null;
+  return typeof value === "string" && isUuid(value.trim())
+    ? value.trim()
+    : null;
 }
 
 function configuredTenantId(): string | null {
@@ -435,21 +570,24 @@ function configuredTenantId(): string | null {
   return value && isUuid(value) ? value : null;
 }
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
 async function parseJson(request: Request): Promise<Record<string, unknown>> {
   try {
     const value = await readJsonBody<unknown>(request, 32 * 1024);
-    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
 }
 
 function isMissingSettingsTable(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "42P01");
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "42P01",
+  );
 }
 
 function noStore(): { headers: { "cache-control": string } } {

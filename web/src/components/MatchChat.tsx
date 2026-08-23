@@ -1,7 +1,21 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, FileUp, LoaderCircle, Trash2 } from "lucide-react";
+import {
+  type KeyboardEvent,
+  type SyntheticEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  ArrowUp,
+  Brain,
+  FileUp,
+  History,
+  LoaderCircle,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@appica/ui-react/button";
 import { Textarea } from "@appica/ui-react/textarea";
 
@@ -16,6 +30,9 @@ import {
   querySubplatformRetrieval,
   updateMarketplaceIntent,
   upsertMarketplaceProfile,
+  type MallAssistantChoiceAction,
+  type MallAssistantContactConsentAction,
+  type MallAssistantHumanHandoffAction,
   type RecommendedBackendListing,
   routePlatformIntent,
   type PlatformRouteHop,
@@ -25,8 +42,27 @@ import {
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { authClient, authFetchOptions } from "../lib/auth-client";
+import {
+  conversationHistoryStorageKey,
+  deleteConversationHistory,
+  readConversationHistory,
+  upsertConversationHistory,
+  type ConversationHistoryRecord,
+} from "../lib/conversation-history";
 import type { InterfaceLocale } from "../lib/preferences";
-import { loadSubplatform, pricingFor, subplatformCopy, subplatformFieldLabel, type SubplatformConfig } from "../subplatform";
+import { mapRecommendations } from "../marketplace-listings";
+import type { AssetListing } from "../types";
+import { ConversationHistoryPanel } from "./ConversationHistoryPanel";
+import { MarketplaceListingCard } from "./MarketplaceListingCard";
+import { ShoppingMemoryPanel } from "./ShoppingMemoryPanel";
+import { StoreContactConsentCard } from "./StoreContactConsentCard";
+import {
+  loadSubplatform,
+  pricingFor,
+  subplatformCopy,
+  subplatformFieldLabel,
+  type SubplatformConfig,
+} from "../subplatform";
 
 const PENDING_CHAT_KEY = "matchplane.pending-chat";
 // A route plan is a bounded protocol result, not an instruction to make dozens of sequential
@@ -34,12 +70,271 @@ const PENDING_CHAT_KEY = "matchplane.pending-chat";
 // partial results when one child service is unavailable.
 const MAX_CHAT_TARGETS = 4;
 const CHAT_TARGET_CONCURRENCY = 3;
+const HOME_PLACEHOLDER_EXAMPLES = {
+  zh: [
+    "5万内，省油的通勤车",
+    "耐用的轻薄笔记本",
+    "小户型、好打理的单椅",
+    "1000元内的降噪耳机",
+  ],
+  en: [
+    "A fuel-efficient commuter car",
+    "A durable lightweight laptop",
+    "An easy-care chair for a small room",
+    "Noise-cancelling headphones under 1,000",
+  ],
+} as const;
+
+function useHomePlaceholder(
+  locale: InterfaceLocale,
+  enabled: boolean,
+  configuredPhrases?: string[],
+) {
+  const phrases = configuredPhrases?.length
+    ? configuredPhrases
+    : locale === "en"
+      ? HOME_PLACEHOLDER_EXAMPLES.en
+      : HOME_PLACEHOLDER_EXAMPLES.zh;
+  const phraseSignature = phrases.join("\u0000");
+  const [typed, setTyped] = useState<{
+    locale: InterfaceLocale;
+    value: string;
+  }>({ locale, value: phrases[0] });
+
+  useEffect(() => {
+    setTyped({ locale, value: phrases[0] });
+  }, [locale, phraseSignature]);
+
+  useEffect(() => {
+    if (
+      !enabled ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    )
+      return;
+    let phraseIndex = 0;
+    let characterIndex = phrases[0].length;
+    let deleting = true;
+    let timer = 0;
+
+    const tick = () => {
+      const phrase = phrases[phraseIndex];
+      if (deleting) {
+        characterIndex -= 1;
+        setTyped({
+          locale,
+          value: phrase.slice(0, Math.max(0, characterIndex)),
+        });
+        if (characterIndex <= 0) {
+          deleting = false;
+          phraseIndex = (phraseIndex + 1) % phrases.length;
+          timer = window.setTimeout(tick, 260);
+          return;
+        }
+        timer = window.setTimeout(tick, 34);
+        return;
+      }
+
+      const nextPhrase = phrases[phraseIndex];
+      characterIndex += 1;
+      setTyped({ locale, value: nextPhrase.slice(0, characterIndex) });
+      if (characterIndex >= nextPhrase.length) {
+        deleting = true;
+        timer = window.setTimeout(tick, 1200);
+        return;
+      }
+      timer = window.setTimeout(tick, 68);
+    };
+
+    timer = window.setTimeout(tick, 1200);
+    return () => window.clearTimeout(timer);
+  }, [enabled, locale, phraseSignature]);
+
+  return typed.locale === locale ? typed.value : phrases[0];
+}
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   attachments?: MarketplaceAttachment[];
+  choices?: Array<MallAssistantChoiceAction & { selectedValue?: string }>;
+  recommendations?: AssetListing[];
+  handoff?: MallAssistantHumanHandoffAction & {
+    status: "pending" | "sent" | "failed";
+  };
+  contactConsent?: MallAssistantContactConsentAction;
+}
+
+function parseStoredChoices(value: unknown): ChatMessage["choices"] {
+  if (!Array.isArray(value)) return undefined;
+  const choices = value.slice(0, 2).flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const candidate = item as {
+      id?: unknown;
+      type?: unknown;
+      question?: unknown;
+      options?: unknown;
+      selectedValue?: unknown;
+    };
+    if (
+      candidate.type !== "choice" ||
+      typeof candidate.id !== "string" ||
+      typeof candidate.question !== "string" ||
+      !candidate.question.trim() ||
+      !Array.isArray(candidate.options)
+    )
+      return [];
+    const options = candidate.options.slice(0, 6).flatMap((option) => {
+      if (!option || typeof option !== "object" || Array.isArray(option))
+        return [];
+      const entry = option as {
+        id?: unknown;
+        label?: unknown;
+        value?: unknown;
+      };
+      return typeof entry.id === "string" &&
+        typeof entry.label === "string" &&
+        entry.label.trim() &&
+        typeof entry.value === "string" &&
+        entry.value.trim()
+        ? [{ id: entry.id, label: entry.label, value: entry.value }]
+        : [];
+    });
+    if (options.length < 2) return [];
+    return [
+      {
+        type: "choice" as const,
+        id: candidate.id,
+        question: candidate.question,
+        options,
+        ...(typeof candidate.selectedValue === "string" &&
+        options.some((option) => option.value === candidate.selectedValue)
+          ? { selectedValue: candidate.selectedValue }
+          : {}),
+      },
+    ];
+  });
+  return choices.length ? choices : undefined;
+}
+
+const SHOPPING_CONVERSATION_KEY = "matchplane.shopping-conversation.v1";
+const MAX_CONVERSATION_MESSAGES = 24;
+
+function parseStoredRecommendations(value: unknown): AssetListing[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 8).flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const candidate = item as Record<string, unknown>;
+    if (
+      typeof candidate.id !== "string" ||
+      !candidate.id ||
+      typeof candidate.title !== "string" ||
+      !candidate.title.trim() ||
+      typeof candidate.price !== "string"
+    )
+      return [];
+    const text = (key: string) =>
+      typeof candidate[key] === "string" && candidate[key].trim()
+        ? candidate[key].trim()
+        : undefined;
+    const imageUrls = Array.isArray(candidate.imageUrls)
+      ? candidate.imageUrls
+          .filter(
+            (url): url is string =>
+              typeof url === "string" && Boolean(url.trim()),
+          )
+          .map((url) => url.trim())
+          .slice(0, 12)
+      : [];
+    const accent = ["cactus", "clay", "heather", "oat"].includes(
+      String(candidate.accent),
+    )
+      ? (candidate.accent as AssetListing["accent"])
+      : "cactus";
+    return [
+      {
+        id: candidate.id,
+        title: candidate.title.trim(),
+        subtitle: text("subtitle") ?? "",
+        price: candidate.price,
+        accent,
+        facts: [],
+        ...(text("description") ? { description: text("description") } : {}),
+        ...(text("imageUrl") ? { imageUrl: text("imageUrl") } : {}),
+        ...(imageUrls.length ? { imageUrls } : {}),
+        ...(text("storeId") ? { storeId: text("storeId") } : {}),
+        ...(text("storeName") ? { storeName: text("storeName") } : {}),
+        ...(text("platformPath") ? { platformPath: text("platformPath") } : {}),
+        ...(text("subplatform") ? { subplatform: text("subplatform") } : {}),
+        ...(text("tenantId") ? { tenantId: text("tenantId") } : {}),
+        ...(text("domainId") ? { domainId: text("domainId") } : {}),
+        ...(text("offerId") ? { offerId: text("offerId") } : {}),
+        ...(text("intentId") ? { intentId: text("intentId") } : {}),
+        ...(text("seller") ? { seller: text("seller") } : {}),
+        ...(typeof candidate.likeTotal === "string"
+          ? { likeTotal: candidate.likeTotal }
+          : {}),
+        ...(typeof candidate.viewerLikeCount === "number"
+          ? { viewerLikeCount: candidate.viewerLikeCount }
+          : {}),
+        ...(typeof candidate.matchScore === "number"
+          ? { matchScore: candidate.matchScore }
+          : {}),
+      },
+    ];
+  });
+}
+
+function parseStoredMessages(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-MAX_CONVERSATION_MESSAGES).flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const role = (item as { role?: unknown }).role;
+    const text = (item as { text?: unknown }).text;
+    const id = (item as { id?: unknown }).id;
+    const choices = parseStoredChoices((item as { choices?: unknown }).choices);
+    const recommendations = parseStoredRecommendations(
+      (item as { recommendations?: unknown }).recommendations,
+    );
+    if (
+      (role !== "user" && role !== "assistant") ||
+      typeof text !== "string" ||
+      !text.trim() ||
+      text.length > 2_000
+    )
+      return [];
+    return [
+      {
+        id: typeof id === "string" && id ? id : crypto.randomUUID(),
+        role,
+        text,
+        ...(choices ? { choices } : {}),
+        ...(recommendations.length ? { recommendations } : {}),
+      } satisfies ChatMessage,
+    ];
+  });
+}
+
+function readStoredConversation(
+  key: string,
+  owner: string,
+): { id: string; messages: ChatMessage[] } {
+  try {
+    const value: unknown = JSON.parse(
+      window.sessionStorage.getItem(key) ?? "null",
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return { id: crypto.randomUUID(), messages: [] };
+    const storedOwner = (value as { owner?: unknown }).owner;
+    if (storedOwner !== owner) return { id: crypto.randomUUID(), messages: [] };
+    const id = (value as { id?: unknown }).id;
+    return {
+      id: typeof id === "string" && id ? id : crypto.randomUUID(),
+      messages: parseStoredMessages((value as { messages?: unknown }).messages),
+    };
+  } catch {
+    return { id: crypto.randomUUID(), messages: [] };
+  }
 }
 
 interface PendingChat {
@@ -71,9 +366,18 @@ const defaultChatCopy: ChatCopy = {
   sellerEyebrow: "供给方入口",
   buyerTitle: "想买什么，告诉我就行。",
   sellerTitle: "说说你能提供什么。",
-  buyerHeadlines: ["想买什么，告诉我就行。", "帮你逛店、比价、算清总价。", "从一句话开始挑选。"],
-  sellerHeadlines: ["说说你能提供什么。", "让真实供给被看见。", "把你的优势交给匹配。"],
-  buyerDescription: "我会在商城店铺中找商品、比较价格，并说明为什么适合你。无需登录即可开始。",
+  buyerHeadlines: [
+    "想买什么，告诉我就行。",
+    "帮你逛店、比价、算清总价。",
+    "从一句话开始挑选。",
+  ],
+  sellerHeadlines: [
+    "说说你能提供什么。",
+    "让真实供给被看见。",
+    "把你的优势交给匹配。",
+  ],
+  buyerDescription:
+    "我会在商城店铺中找商品、比较价格，并说明为什么适合你。无需登录即可开始。",
   sellerDescription: "说出你能提供的内容、条件和限制。",
   buyerPlaceholder: "输入预算、用途和偏好……",
   buyerDiscoveryLabel: "允许供给方看到这条需求摘要（不含联系方式）",
@@ -90,18 +394,30 @@ const defaultChatCopyEn: ChatCopy = {
   sellerEyebrow: "Seller entry",
   buyerTitle: "Tell me what you want to buy.",
   sellerTitle: "Tell us what you can offer.",
-  buyerHeadlines: ["Tell me what you want to buy.", "Browse stores and compare prices.", "Start with one sentence."],
-  sellerHeadlines: ["Tell us what you can offer.", "Let the right people find you.", "Start with one sentence."],
-  buyerDescription: "I’ll search the mall, compare products, and explain the best options. No sign-in needed to browse.",
+  buyerHeadlines: [
+    "Tell me what you want to buy.",
+    "Browse stores and compare prices.",
+    "Start with one sentence.",
+  ],
+  sellerHeadlines: [
+    "Tell us what you can offer.",
+    "Let the right people find you.",
+    "Start with one sentence.",
+  ],
+  buyerDescription:
+    "I’ll search the mall, compare products, and explain the best options. No sign-in needed to browse.",
   sellerDescription: "Share what you offer, the terms, and any constraints.",
   buyerPlaceholder: "Describe your budget, needs, and preferences…",
-  buyerDiscoveryLabel: "Let supply agents see this request summary (no contact details)",
+  buyerDiscoveryLabel:
+    "Let supply agents see this request summary (no contact details)",
   buyerDiscoveryDefault: false,
-  sellerPlaceholder: "For example: I can offer this, under these terms and constraints…",
+  sellerPlaceholder:
+    "For example: I can offer this, under these terms and constraints…",
   buyerFootnote: "Enter to send · Shift + Enter for a new line",
   sellerFootnote: "Enter to send · Shift + Enter for a new line",
   buyerSuccess: "Products have been organized around what you asked for.",
-  sellerSuccess: "Your offer is organized; submit the details below to publish it.",
+  sellerSuccess:
+    "Your offer is organized; submit the details below to publish it.",
 };
 
 const englishChatLabels: Record<string, string> = {
@@ -142,24 +458,37 @@ interface RuntimeChatCopy {
 function runtimeChatCopy(locale: InterfaceLocale): RuntimeChatCopy {
   if (locale === "en") {
     return {
-      sellerLocated: (name) => `Located ${name}. You can submit your offer details now.`,
-      sellerSwitched: (name) => `Switched to ${name}. Continue with your offer details.`,
-      routeOpenError: "The target platform could not be opened. Try again shortly.",
-      unavailableSupply: "This environment is not connected to the live supply API, so nothing was saved. Enable the platform API before sending.",
-      unavailableDemand: "This environment is not connected to the live matching API, so nothing was saved. Enable the platform API before sending.",
-      multiplePlatforms: "I found several suitable platforms for this offer. Choose one to continue.",
+      sellerLocated: (name) =>
+        `Located ${name}. You can submit your offer details now.`,
+      sellerSwitched: (name) =>
+        `Switched to ${name}. Continue with your offer details.`,
+      routeOpenError:
+        "The target platform could not be opened. Try again shortly.",
+      unavailableSupply:
+        "This environment is not connected to the live supply API, so nothing was saved. Enable the platform API before sending.",
+      unavailableDemand:
+        "This environment is not connected to the live matching API, so nothing was saved. Enable the platform API before sending.",
+      multiplePlatforms:
+        "I found several suitable platforms for this offer. Choose one to continue.",
       choosePlatform: "Choose a platform for this offer.",
       targetPlatform: "target subplatform",
-      authDisconnected: "The Better Auth session is not connected to this platform node.",
+      authDisconnected:
+        "The Better Auth session is not connected to this platform node.",
       routeNode: "the current platform node",
       routeOverflow: " and other platforms",
-      routeDegraded: (names, overflow) => `Routing is temporarily degraded. Your request was sent to ${names}${overflow} under the bounded fallback; downstream platforms will continue looking for supply.`,
-      routeSelected: (names, overflow) => `The routing Agent selected ${names}${overflow}. Downstream platforms will now look for merchants and specific offers, with an explanation for each match.`,
-      noMatch: "Your request was recorded here, but the routing Agent did not find a suitable active platform. Add a goal, budget, or constraint and try again.",
-      noChildren: "Your request was recorded here. There are no active child platforms yet; an administrator can enable one to continue routing.",
+      routeDegraded: (names, overflow) =>
+        `Routing is temporarily degraded. Your request was sent to ${names}${overflow} under the bounded fallback; downstream platforms will continue looking for supply.`,
+      routeSelected: (names, overflow) =>
+        `The routing Agent selected ${names}${overflow}. Downstream platforms will now look for merchants and specific offers, with an explanation for each match.`,
+      noMatch:
+        "Your request was recorded here, but the routing Agent did not find a suitable active platform. Add a goal, budget, or constraint and try again.",
+      noChildren:
+        "Your request was recorded here. There are no active child platforms yet; an administrator can enable one to continue routing.",
       recorded: "Your request was recorded on this platform node.",
-      retrievalDegraded: " A child retrieval service is temporarily unavailable, so basic condition matching is being used. It will recover when the administrator configures the service.",
-      retrievalDegradedNotice: "Child retrieval is temporarily unavailable; basic condition matching is being used.",
+      retrievalDegraded:
+        " A child retrieval service is temporarily unavailable, so basic condition matching is being used. It will recover when the administrator configures the service.",
+      retrievalDegradedNotice:
+        "Child retrieval is temporarily unavailable; basic condition matching is being used.",
       sendFailed: "Your request could not be sent. Try again shortly.",
       authFailed: "The Better Auth session check did not complete.",
       routeChoicesAria: "Choose a platform for publishing an offer",
@@ -169,17 +498,22 @@ function runtimeChatCopy(locale: InterfaceLocale): RuntimeChatCopy {
     sellerLocated: (name) => `已定位到${name}，现在可以提交你的供给资料。`,
     sellerSwitched: (name) => `已切换到${name}，请继续填写供给资料`,
     routeOpenError: "目标平台暂时无法打开，请稍后重试",
-    unavailableSupply: "当前环境未连接真实供给 API，内容没有写入系统。请先启用平台 API 后再发送。",
-    unavailableDemand: "当前环境未连接真实撮合 API，内容没有写入系统。请先启用平台 API 后再发送。",
+    unavailableSupply:
+      "当前环境未连接真实供给 API，内容没有写入系统。请启用平台 API 后重试。",
+    unavailableDemand:
+      "当前环境未连接真实撮合 API，内容没有写入系统。请启用平台 API 后重试。",
     multiplePlatforms: "我找到了多个适合发布供给的平台，请先选择一个。",
     choosePlatform: "请选择供给发布的平台",
     targetPlatform: "目标店铺",
     authDisconnected: "登录会话尚未连接到当前店铺",
     routeNode: "商城",
     routeOverflow: " 等平台",
-    routeDegraded: (names, overflow) => `AI 导购暂时不可用，已按相关性在 ${names}${overflow} 中查找商品。`,
-    routeSelected: (names, overflow) => `AI 导购选择了 ${names}${overflow}，正在从这些店铺的在售商品中挑选并解释理由。`,
-    noMatch: "暂时没有找到合适的店铺。你可以补充品类、预算或必须具备的功能后重试。",
+    routeDegraded: (names, overflow) =>
+      `AI 导购暂时不可用，已按相关性在 ${names}${overflow} 中查找商品。`,
+    routeSelected: (names, overflow) =>
+      `AI 导购选择了 ${names}${overflow}，正在从这些店铺的在售商品中挑选并解释理由。`,
+    noMatch:
+      "暂时没有找到合适的店铺。你可以补充品类、预算或必须具备的功能后重试。",
     noChildren: "商城目前还没有上线店铺。",
     recorded: "你的购物需求已经记录。",
     retrievalDegraded: " 店铺智能检索暂时不可用，已先使用基础商品条件匹配。",
@@ -190,7 +524,10 @@ function runtimeChatCopy(locale: InterfaceLocale): RuntimeChatCopy {
   };
 }
 
-function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale): ChatCopy {
+function resolveChatCopy(
+  subplatform: SubplatformConfig,
+  locale: InterfaceLocale,
+): ChatCopy {
   const configured = subplatform.ui?.chat ?? {};
   const defaults = locale === "en" ? defaultChatCopyEn : defaultChatCopy;
   const text = (key: keyof ChatCopy, fallback: string): string => {
@@ -198,32 +535,55 @@ function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale
     const value = configured[localizedKey];
     return typeof value === "string" && value.trim() ? value.trim() : fallback;
   };
-  const headlines = (key: "buyerHeadlines" | "sellerHeadlines", fallback: string[]): string[] => {
+  const headlines = (
+    key: "buyerHeadlines" | "sellerHeadlines",
+    fallback: string[],
+  ): string[] => {
     const localizedKey = locale === "en" ? `${key}En` : key;
     const value = configured[localizedKey];
     if (!Array.isArray(value)) return fallback;
-    const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()).slice(0, 12);
+    const items = value
+      .filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
+      )
+      .map((item) => item.trim())
+      .slice(0, 12);
     return items.length ? items : fallback;
   };
   const configuredBuyerHeadlines = headlines("buyerHeadlines", []);
   const configuredSellerHeadlines = headlines("sellerHeadlines", []);
-  const buyerTitle = text("buyerTitle", configuredBuyerHeadlines[0] ?? defaults.buyerTitle);
-  const sellerTitle = text("sellerTitle", configuredSellerHeadlines[0] ?? defaults.sellerTitle);
-  const buyerDiscoveryDefault = typeof configured.demandDiscoveryDefault === "boolean"
-    ? configured.demandDiscoveryDefault
-    : defaults.buyerDiscoveryDefault;
+  const buyerTitle = text(
+    "buyerTitle",
+    configuredBuyerHeadlines[0] ?? defaults.buyerTitle,
+  );
+  const sellerTitle = text(
+    "sellerTitle",
+    configuredSellerHeadlines[0] ?? defaults.sellerTitle,
+  );
+  const buyerDiscoveryDefault =
+    typeof configured.demandDiscoveryDefault === "boolean"
+      ? configured.demandDiscoveryDefault
+      : defaults.buyerDiscoveryDefault;
   return {
     ...defaults,
     buyerEyebrow: text("buyerEyebrow", defaults.buyerEyebrow),
     sellerEyebrow: text("sellerEyebrow", defaults.sellerEyebrow),
     buyerTitle,
     sellerTitle,
-    buyerHeadlines: configuredBuyerHeadlines.length ? configuredBuyerHeadlines : [buyerTitle],
-    sellerHeadlines: configuredSellerHeadlines.length ? configuredSellerHeadlines : [sellerTitle],
+    buyerHeadlines: configuredBuyerHeadlines.length
+      ? configuredBuyerHeadlines
+      : [buyerTitle],
+    sellerHeadlines: configuredSellerHeadlines.length
+      ? configuredSellerHeadlines
+      : [sellerTitle],
     buyerDescription: text("buyerDescription", defaults.buyerDescription),
     sellerDescription: text("sellerDescription", defaults.sellerDescription),
     buyerPlaceholder: text("buyerPlaceholder", defaults.buyerPlaceholder),
-    buyerDiscoveryLabel: text("buyerDiscoveryLabel", defaults.buyerDiscoveryLabel),
+    buyerDiscoveryLabel: text(
+      "buyerDiscoveryLabel",
+      defaults.buyerDiscoveryLabel,
+    ),
     buyerDiscoveryDefault,
     sellerPlaceholder: text("sellerPlaceholder", defaults.sellerPlaceholder),
     buyerFootnote: text("buyerFootnote", defaults.buyerFootnote),
@@ -235,47 +595,174 @@ function resolveChatCopy(subplatform: SubplatformConfig, locale: InterfaceLocale
 
 interface MatchChatProps {
   compact?: boolean;
+  home?: boolean;
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
   locale?: InterfaceLocale;
   role?: "buyer" | "seller";
+  onLikeListing?: (listing: AssetListing) => Promise<void>;
+  onOpenListing?: (listing: AssetListing) => void;
   onRecommendations?: (recommendations: RecommendedBackendListing[]) => void;
+  onHumanHandoff?: (input: {
+    requestId: string;
+    summary: string;
+    intent: MallAssistantHumanHandoffAction["intent"];
+    productIds: string[];
+  }) => Promise<void>;
+  onContactConsent?: (
+    action: MallAssistantContactConsentAction,
+  ) => Promise<void>;
   /** Pass the seller's conversational draft into the schema-driven editor. */
-  onSellerDraft?: (draft: { narrative: string; intentId?: string; attributes: Record<string, unknown>; terms: Record<string, unknown>; attachments?: MarketplaceAttachment[] }) => void;
+  onSellerDraft?: (draft: {
+    narrative: string;
+    intentId?: string;
+    attributes: Record<string, unknown>;
+    terms: Record<string, unknown>;
+    attachments?: MarketplaceAttachment[];
+  }) => void;
   /** Move a seller into the selected terminal platform before showing its supply form. */
   onSellerPlatformSelected?: (hop: PlatformRouteHop) => void | Promise<void>;
 }
 
-export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh", role = "buyer", onRecommendations, onSellerDraft, onSellerPlatformSelected }: MatchChatProps) {
+export function MatchChat({
+  compact = false,
+  home = false,
+  onNotice,
+  subplatform,
+  locale = "zh",
+  role = "buyer",
+  onLikeListing,
+  onOpenListing,
+  onRecommendations,
+  onHumanHandoff,
+  onContactConsent,
+  onSellerDraft,
+  onSellerPlatformSelected,
+}: MatchChatProps) {
   const copy = resolveChatCopy(subplatform, locale);
   const runtime = runtimeChatCopy(locale);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [activeHistoryId, setActiveHistoryId] = useState("");
+  const [conversationHistory, setConversationHistory] = useState<
+    ConversationHistoryRecord<ChatMessage>[]
+  >([]);
+  const [conversationHistoryOpen, setConversationHistoryOpen] = useState(false);
+  const [conversationHydrated, setConversationHydrated] = useState(false);
+  const [conversationOwner, setConversationOwner] = useState<string | null>(
+    null,
+  );
   const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState("");
   const [signedIn, setSignedIn] = useState(false);
-  const [conversationAttachments, setConversationAttachments] = useState<MarketplaceAttachment[]>([]);
+  const [shoppingMemoryOpen, setShoppingMemoryOpen] = useState(false);
+  const [conversationAttachments, setConversationAttachments] = useState<
+    MarketplaceAttachment[]
+  >([]);
   const [mediaUploading, setMediaUploading] = useState(false);
-  const [supplyDiscoveryEnabled, setSupplyDiscoveryEnabled] = useState(copy.buyerDiscoveryDefault);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const [supplyDiscoveryEnabled, setSupplyDiscoveryEnabled] = useState(
+    copy.buyerDiscoveryDefault,
+  );
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const conversationIdRef = useRef<string | null>(null);
-  const intentByTargetRef = useRef(new Map<string, { intentId: string; version: number }>());
+  const intentByTargetRef = useRef(
+    new Map<string, { intentId: string; version: number }>(),
+  );
   const focusInputAfterErrorRef = useRef(false);
-  const [sellerRouteChoices, setSellerRouteChoices] = useState<PlatformRouteHop[]>([]);
+  const submitMessageRef = useRef<
+    ((rawText: string, session?: PartySession) => Promise<void>) | null
+  >(null);
+  const [sellerRouteChoices, setSellerRouteChoices] = useState<
+    PlatformRouteHop[]
+  >([]);
   const isRoot = subplatform.slug === "root";
   const isSeller = role === "seller";
-  const mediaUploadEnabled = subplatform.agentMcpTools?.includes("media.upload") === true;
-  const label = (key: string, fallback: string) => subplatformCopy(subplatform, key, locale === "en" ? (englishChatLabels[key] ?? fallback) : fallback);
+  const mediaUploadEnabled =
+    subplatform.agentMcpTools?.includes("media.upload") === true;
+  const label = (key: string, fallback: string) =>
+    subplatformCopy(
+      subplatform,
+      key,
+      locale === "en" ? (englishChatLabels[key] ?? fallback) : fallback,
+    );
   // Keep the primary action visually stable. A changing/typewriter headline delays
   // scanning and makes a marketplace feel like a demo; merchants may still
   // customize the static copy through the manifest.
   const headline = isSeller ? copy.sellerTitle : copy.buyerTitle;
-  const visibleHeadline = compact && isRoot && !isSeller
-    ? (locale === "en" ? "What are you looking for?" : "想找什么？")
-    : headline;
-  const visibleDescription = compact && isRoot && !isSeller
-    ? (locale === "en" ? "Describe your budget and must-haves. AI will filter real products." : "说出预算和要求，AI 从真实商品中筛选。")
-    : isSeller ? copy.sellerDescription : copy.buyerDescription;
+  const visibleHeadline =
+    compact && isRoot && !isSeller
+      ? locale === "en"
+        ? "What are you looking for?"
+        : "想找什么？"
+      : headline;
+  const visibleDescription =
+    compact && isRoot && !isSeller
+      ? locale === "en"
+        ? "Say what you need and your budget. Matching products will appear here."
+        : "说说想买什么和预算，合适的商品会直接出现在这里。"
+      : isSeller
+        ? copy.sellerDescription
+        : copy.buyerDescription;
+  const homePlaceholder = useHomePlaceholder(
+    locale,
+    home && isRoot && !isSeller && !message && !composerFocused,
+    subplatform.ui?.chat?.homePlaceholderPhrases,
+  );
+  const conversationStorageKey = `${SHOPPING_CONVERSATION_KEY}:${subplatform.slug}:${role}`;
+
+  useEffect(() => {
+    if (
+      !conversationHydrated ||
+      !conversationOwner ||
+      !activeHistoryId ||
+      !isRoot ||
+      isSeller
+    )
+      return;
+    const bounded = messages
+      .slice(-MAX_CONVERSATION_MESSAGES)
+      .map(({ id, role, text, choices, recommendations }) => ({
+        id,
+        role,
+        text,
+        ...(choices ? { choices } : {}),
+        ...(recommendations ? { recommendations } : {}),
+      }));
+    window.sessionStorage.setItem(
+      conversationStorageKey,
+      JSON.stringify({
+        owner: conversationOwner,
+        id: activeHistoryId,
+        messages: bounded,
+      }),
+    );
+    if (!bounded.length) return;
+    setConversationHistory(
+      upsertConversationHistory({
+        storage: window.localStorage,
+        key: conversationHistoryStorageKey(conversationStorageKey),
+        owner: conversationOwner,
+        record: {
+          id: activeHistoryId,
+          title: locale === "en" ? "Conversation" : "对话",
+          updatedAt: new Date().toISOString(),
+          messages: bounded,
+        },
+        parseMessages: parseStoredMessages,
+      }),
+    );
+  }, [
+    activeHistoryId,
+    conversationHydrated,
+    conversationOwner,
+    conversationStorageKey,
+    isRoot,
+    isSeller,
+    locale,
+    messages,
+  ]);
 
   const resizeInput = useCallback((input: HTMLTextAreaElement | null) => {
     if (!input) return;
@@ -283,20 +770,22 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
     input.style.height = `${Math.min(input.scrollHeight, 240)}px`;
   }, []);
 
-  const shoppingPromises = locale === "en"
-    ? ["Browse publicly", "Compare across stores", "Consent before contact"]
-    : ["公开浏览", "跨店比较", "联系前征得同意"];
-  const quickPrompts = locale === "en"
-    ? [
-        "A lightweight laptop for commuting, within my budget",
-        "Compare a few suitable options and explain the trade-offs",
-        "Find a reliable store for this product",
-      ]
-    : [
-        "预算内找一台适合通勤的轻薄电脑",
-        "比较几款合适的商品，并说明取舍",
-        "帮我找一家可靠的店铺",
-      ];
+  const shoppingPromises =
+    locale === "en"
+      ? ["Browse publicly", "Compare across stores", "Consent before contact"]
+      : ["公开浏览", "跨店比较", "联系前征得同意"];
+  const quickPrompts =
+    locale === "en"
+      ? [
+          "A lightweight laptop for commuting, within my budget",
+          "Compare a few suitable options and explain the trade-offs",
+          "Find a reliable store for this product",
+        ]
+      : [
+          "预算内找一台适合通勤的轻薄电脑",
+          "比较几款合适的商品，并说明取舍",
+          "帮我找一家可靠的店铺",
+        ];
   const applyQuickPrompt = (value: string) => {
     setMessage(value);
     window.requestAnimationFrame(() => {
@@ -312,7 +801,10 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
   useEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
-    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)")
+      .matches
+      ? "auto"
+      : "smooth";
     if (typeof thread.scrollTo === "function") {
       thread.scrollTo({ top: thread.scrollHeight, behavior });
     } else {
@@ -332,75 +824,123 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
   useEffect(() => {
     // A platform path and a buyer/seller side define the matching scope. Do not carry a
     // conversation identifier or transcript into another node or role by accident.
-    setMessages([]);
+    if (!isRoot || isSeller) setMessages([]);
     setSellerRouteChoices([]);
     setConversationAttachments([]);
     setSupplyDiscoveryEnabled(copy.buyerDiscoveryDefault);
     conversationIdRef.current = null;
     intentByTargetRef.current.clear();
-  }, [copy.buyerDiscoveryDefault, role, subplatform.path]);
+  }, [copy.buyerDiscoveryDefault, isRoot, isSeller, role, subplatform.path]);
 
-  const chooseSellerRoute = useCallback(async (target: PlatformRouteHop) => {
-    if (!onSellerPlatformSelected || sending) return;
-    setSending(true);
-    try {
-      await onSellerPlatformSelected(target);
-      setSellerRouteChoices([]);
-      setMessages((current) => [
-        ...current,
-        { id: `route-${crypto.randomUUID()}`, role: "assistant", text: runtime.sellerLocated(target.displayName) },
-      ]);
-      onNotice(runtime.sellerSwitched(target.displayName));
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : runtime.routeOpenError);
-    } finally {
-      setSending(false);
-    }
-  }, [locale, onNotice, onSellerPlatformSelected, sending]);
-
-  const uploadFiles = useCallback(async (files: FileList | null) => {
-    if (!files || !files.length || mediaUploading) return;
-    if (!mediaUploadEnabled) return;
-    if (!subplatform.tenantId || !subplatform.domainId) {
-      onNotice(locale === "en" ? "This platform is not ready to receive attachments." : "当前平台尚未完成资料上传配置");
-      return;
-    }
-    const session = await getMarketplaceSession({
-      subplatform: subplatform.slug,
-      platformPath: subplatform.path,
-      tenantId: subplatform.tenantId,
-      domainId: subplatform.domainId,
-      role,
-    });
-    if (!session) {
-      const next = `${window.location.pathname}${window.location.search}`;
-      window.location.assign(`/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`);
-      return;
-    }
-    const remaining = Math.max(0, 8 - conversationAttachments.length);
-    if (!remaining) {
-      onNotice(locale === "en" ? "You can add up to 8 attachments." : "最多添加 8 个附件");
-      return;
-    }
-    setMediaUploading(true);
-    try {
-      const uploaded: MarketplaceAttachment[] = [];
-      for (const file of Array.from(files).slice(0, remaining)) {
-        uploaded.push(await uploadMarketplaceAttachment({
-          platformPath: subplatform.path,
-          tenantId: subplatform.tenantId,
-          domainId: subplatform.domainId,
-          file,
-        }));
+  const chooseSellerRoute = useCallback(
+    async (target: PlatformRouteHop) => {
+      if (!onSellerPlatformSelected || sending) return;
+      setSending(true);
+      try {
+        await onSellerPlatformSelected(target);
+        setSellerRouteChoices([]);
+        setMessages((current) => [
+          ...current,
+          {
+            id: `route-${crypto.randomUUID()}`,
+            role: "assistant",
+            text: runtime.sellerLocated(target.displayName),
+          },
+        ]);
+        onNotice(runtime.sellerSwitched(target.displayName));
+      } catch (error) {
+        onNotice(
+          error instanceof Error ? error.message : runtime.routeOpenError,
+        );
+      } finally {
+        setSending(false);
       }
-      setConversationAttachments((current) => [...current, ...uploaded].slice(0, 8));
-      if (files.length > remaining) onNotice(locale === "en" ? "Only the first 8 attachments were kept." : "最多保留 8 个附件");
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : locale === "en" ? "Could not upload the attachment." : "附件上传失败，请稍后重试");
-    } finally {
-      setMediaUploading(false);
-    }
-  }, [conversationAttachments.length, locale, mediaUploadEnabled, mediaUploading, onNotice, role, subplatform.domainId, subplatform.path, subplatform.slug, subplatform.tenantId]);
+    },
+    [locale, onNotice, onSellerPlatformSelected, sending],
+  );
+
+  const uploadFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || !files.length || mediaUploading) return;
+      if (!mediaUploadEnabled) return;
+      if (!subplatform.tenantId || !subplatform.domainId) {
+        onNotice(
+          locale === "en"
+            ? "This platform is not ready to receive attachments."
+            : "当前平台尚未完成资料上传配置",
+        );
+        return;
+      }
+      const session = await getMarketplaceSession({
+        subplatform: subplatform.slug,
+        platformPath: subplatform.path,
+        tenantId: subplatform.tenantId,
+        domainId: subplatform.domainId,
+        role,
+      });
+      if (!session) {
+        const next = `${window.location.pathname}${window.location.search}`;
+        window.location.assign(
+          `/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`,
+        );
+        return;
+      }
+      const remaining = Math.max(0, 8 - conversationAttachments.length);
+      if (!remaining) {
+        onNotice(
+          locale === "en"
+            ? "You can add up to 8 attachments."
+            : "最多添加 8 个附件",
+        );
+        return;
+      }
+      setMediaUploading(true);
+      try {
+        const uploaded: MarketplaceAttachment[] = [];
+        for (const file of Array.from(files).slice(0, remaining)) {
+          uploaded.push(
+            await uploadMarketplaceAttachment({
+              platformPath: subplatform.path,
+              tenantId: subplatform.tenantId,
+              domainId: subplatform.domainId,
+              file,
+            }),
+          );
+        }
+        setConversationAttachments((current) =>
+          [...current, ...uploaded].slice(0, 8),
+        );
+        if (files.length > remaining)
+          onNotice(
+            locale === "en"
+              ? "Only the first 8 attachments were kept."
+              : "最多保留 8 个附件",
+          );
+      } catch (error) {
+        onNotice(
+          error instanceof Error
+            ? error.message
+            : locale === "en"
+              ? "Could not upload the attachment."
+              : "附件上传失败，请稍后重试",
+        );
+      } finally {
+        setMediaUploading(false);
+      }
+    },
+    [
+      conversationAttachments.length,
+      locale,
+      mediaUploadEnabled,
+      mediaUploading,
+      onNotice,
+      role,
+      subplatform.domainId,
+      subplatform.path,
+      subplatform.slug,
+      subplatform.tenantId,
+    ],
+  );
 
   const submitMessage = useCallback(
     async (rawText: string, session?: PartySession) => {
@@ -412,21 +952,37 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
       const submittedAttachments = conversationAttachments;
       setConversationAttachments([]);
       const requestId = crypto.randomUUID();
-      const conversationId = conversationIdRef.current ?? (conversationIdRef.current = crypto.randomUUID());
+      const conversationId =
+        conversationIdRef.current ??
+        (conversationIdRef.current = crypto.randomUUID());
       const narrative = buildConversationNarrative(
-        messages.filter((item) => item.role === "user").map((item) => item.text),
+        messages
+          .filter((item) => item.role === "user")
+          .map((item) => item.text),
         text,
       );
       setMessages((current) => [
         ...current,
-        { id: `${requestId}-user`, role: "user", text, ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}) },
+        {
+          id: `${requestId}-user`,
+          role: "user",
+          text,
+          ...(submittedAttachments.length
+            ? { attachments: submittedAttachments }
+            : {}),
+        },
       ]);
 
       try {
         const live = isLiveMarketplaceEnabled();
         if (!live) {
-          const message = isSeller ? runtime.unavailableSupply : runtime.unavailableDemand;
-          setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: message }]);
+          const message = isSeller
+            ? runtime.unavailableSupply
+            : runtime.unavailableDemand;
+          setMessages((current) => [
+            ...current,
+            { id: `${requestId}-assistant`, role: "assistant", text: message },
+          ]);
           setMessage(text);
           onNotice(message);
           return;
@@ -449,19 +1005,33 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
               source: "conversation",
               conversation_id: conversationId,
               routed_from: platformPath(subplatform),
-              ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
+              ...(submittedAttachments.length
+                ? { attachments: submittedAttachments.map(publicAttachment) }
+                : {}),
             },
             terms: { pricing_mode: pricingFor(subplatform).mode },
-            ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}),
+            ...(submittedAttachments.length
+              ? { attachments: submittedAttachments }
+              : {}),
           });
           // A seller must publish into the node selected by the platform Agent. The old flow
           // wrote supply intents into every hop and left the form mounted at the root path,
           // which made a successful route look like a dead end. Pick the deepest terminal hop
           // and let App load its package-owned schema before the form is rendered.
-          const terminals = terminalRouteHops(route.routePlan).slice(0, MAX_CHAT_TARGETS);
+          const terminals = terminalRouteHops(route.routePlan).slice(
+            0,
+            MAX_CHAT_TARGETS,
+          );
           if (terminals.length > 1) {
             setSellerRouteChoices(terminals);
-            setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: runtime.multiplePlatforms }]);
+            setMessages((current) => [
+              ...current,
+              {
+                id: `${requestId}-assistant`,
+                role: "assistant",
+                text: runtime.multiplePlatforms,
+              },
+            ]);
             onNotice(runtime.choosePlatform);
             return;
           }
@@ -469,8 +1039,18 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
           if (target && onSellerPlatformSelected) {
             await onSellerPlatformSelected(target);
           }
-          const selectedName = target?.displayName || route.routePlan.at(-1)?.displayName || runtime.targetPlatform;
-          setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: runtime.sellerLocated(selectedName) }]);
+          const selectedName =
+            target?.displayName ||
+            route.routePlan.at(-1)?.displayName ||
+            runtime.targetPlatform;
+          setMessages((current) => [
+            ...current,
+            {
+              id: `${requestId}-assistant`,
+              role: "assistant",
+              text: runtime.sellerLocated(selectedName),
+            },
+          ]);
           onNotice(runtime.sellerSwitched(selectedName));
           return;
         }
@@ -486,284 +1066,397 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
           if (allTargets.length > targets.length) retrievalDegraded = true;
           const processTarget = async (hop: PlatformRouteHop | null) => {
             try {
-            const target = hop
-              ? {
-                  ...(await loadSubplatform(hop.path)),
-                  slug: hop.slug,
-                  path: hop.path,
-                  tenantId: hop.tenantId,
-                  domainId: hop.domainId,
+              const target = hop
+                ? {
+                    ...(await loadSubplatform(hop.path)),
+                    slug: hop.slug,
+                    path: hop.path,
+                    tenantId: hop.tenantId,
+                    domainId: hop.domainId,
+                  }
+                : subplatform;
+              if (!target.domainId) return;
+              const targetDomainId = target.domainId;
+              const targetSession = hop
+                ? await getMarketplaceSession({
+                    subplatform: target.slug,
+                    platformPath: target.path,
+                    tenantId: target.tenantId,
+                    domainId: targetDomainId,
+                    role,
+                  })
+                : (session ??
+                  (await getMarketplaceSession({
+                    subplatform: target.slug,
+                    platformPath: target.path,
+                    tenantId: target.tenantId,
+                    domainId: targetDomainId,
+                    role,
+                  })));
+              if (!targetSession) throw new Error(runtime.authDisconnected);
+              const targetPricing = pricingFor(target);
+              const targetUsesLegacy =
+                target.marketplaceContract === "legacy-v1";
+              const targetKey =
+                target.path
+                  .replace(/[^a-z0-9]+/gi, "-")
+                  .replace(/^-|-$/g, "")
+                  .slice(0, 96) || "root";
+              if (isSeller) {
+                // Keep seller conversations durable in the same intent as the buyer flow. A
+                // seller may describe the same offer over several turns; creating a new supply
+                // intent on every turn would fragment the listing and make the later editable
+                // draft depend on whichever request happened to finish last.
+                const supplyIntentState =
+                  intentByTargetRef.current.get(targetKey);
+                const supplyIntent = supplyIntentState
+                  ? await updateMarketplaceIntent({
+                      session: targetSession,
+                      domainId: targetDomainId,
+                      intentId: supplyIntentState.intentId,
+                      narrative,
+                      attributes: {
+                        source: "conversation",
+                        conversation_id: conversationId,
+                        latest_turn: text,
+                        platform_path: target.path,
+                        ...(submittedAttachments.length
+                          ? {
+                              attachments:
+                                submittedAttachments.map(publicAttachment),
+                            }
+                          : {}),
+                      },
+                      terms: {
+                        pricing_mode: targetPricing.mode,
+                        ...(targetPricing.currency
+                          ? { currency: targetPricing.currency }
+                          : {}),
+                        ...(targetPricing.currencyScale === undefined
+                          ? {}
+                          : { currency_scale: targetPricing.currencyScale }),
+                      },
+                      expectedVersion: supplyIntentState.version,
+                    })
+                  : await createMarketplaceIntent({
+                      session: targetSession,
+                      domainId: targetDomainId,
+                      side: "supply",
+                      narrative,
+                      attributes: {
+                        source: "conversation",
+                        conversation_id: conversationId,
+                        platform_path: target.path,
+                        delegated_route_count: route?.routePlan.length ?? 0,
+                        routing_source: route?.routing.source ?? null,
+                        routing_degraded: route?.routing.degraded ?? false,
+                        ...(submittedAttachments.length
+                          ? {
+                              attachments:
+                                submittedAttachments.map(publicAttachment),
+                            }
+                          : {}),
+                      },
+                      terms: {
+                        pricing_mode: targetPricing.mode,
+                        ...(targetPricing.currency
+                          ? { currency: targetPricing.currency }
+                          : {}),
+                        ...(targetPricing.currencyScale === undefined
+                          ? {}
+                          : { currency_scale: targetPricing.currencyScale }),
+                      },
+                      idempotencyKey: `chat-${requestId}-${targetKey}`,
+                    });
+                if (
+                  typeof supplyIntent.intent_id === "string" &&
+                  typeof supplyIntent.version === "number"
+                ) {
+                  intentByTargetRef.current.set(targetKey, {
+                    intentId: supplyIntent.intent_id,
+                    version: supplyIntent.version,
+                  });
                 }
-              : subplatform;
-            if (!target.domainId) return;
-            const targetDomainId = target.domainId;
-            const targetSession = hop
-              ? await getMarketplaceSession({
-                  subplatform: target.slug,
-                  platformPath: target.path,
-                  tenantId: target.tenantId,
-                  domainId: targetDomainId,
-                  role,
-                })
-              : session ?? await getMarketplaceSession({
-                  subplatform: target.slug,
-                  platformPath: target.path,
-                  tenantId: target.tenantId,
-                  domainId: targetDomainId,
-                  role,
-                });
-            if (!targetSession) throw new Error(runtime.authDisconnected);
-            const targetPricing = pricingFor(target);
-            const targetUsesLegacy = target.marketplaceContract === "legacy-v1";
-            const targetKey = target.path.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 96) || "root";
-            if (isSeller) {
-              // Keep seller conversations durable in the same intent as the buyer flow. A
-              // seller may describe the same offer over several turns; creating a new supply
-              // intent on every turn would fragment the listing and make the later editable
-              // draft depend on whichever request happened to finish last.
-              const supplyIntentState = intentByTargetRef.current.get(targetKey);
-              const supplyIntent = supplyIntentState
-                ? await updateMarketplaceIntent({
-                    session: targetSession,
-                    domainId: targetDomainId,
-                    intentId: supplyIntentState.intentId,
-                    narrative,
-                    attributes: {
-                      source: "conversation",
-                      conversation_id: conversationId,
-                      latest_turn: text,
-                      platform_path: target.path,
-                      ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
-                    },
-                    terms: {
-                      pricing_mode: targetPricing.mode,
-                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
-                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
-                    },
-                    expectedVersion: supplyIntentState.version,
-                  })
-                : await createMarketplaceIntent({
-                    session: targetSession,
-                    domainId: targetDomainId,
-                    side: "supply",
-                    narrative,
-                    attributes: {
-                      source: "conversation",
-                      conversation_id: conversationId,
-                      platform_path: target.path,
-                      delegated_route_count: route?.routePlan.length ?? 0,
-                      routing_source: route?.routing.source ?? null,
-                      routing_degraded: route?.routing.degraded ?? false,
-                      ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
-                    },
-                    terms: {
-                      pricing_mode: targetPricing.mode,
-                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
-                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
-                    },
-                    idempotencyKey: `chat-${requestId}-${targetKey}`,
-                  });
-              if (typeof supplyIntent.intent_id === "string" && typeof supplyIntent.version === "number") {
-                intentByTargetRef.current.set(targetKey, { intentId: supplyIntent.intent_id, version: supplyIntent.version });
-              }
-              // Keep the same opaque, scoped profile contract for supply as for demand. The
-              // vertical Agent may later replace this conversation projection with typed fields;
-              // the root never assumes that a supply is a vehicle, service, or another domain.
-              void upsertMarketplaceProfile({
-                session: targetSession,
-                domainId: targetDomainId,
-                profile: {
-                  kind: "supply_conversation",
-                  conversation_id: conversationId,
-                  narrative,
-                  latest_turn: text,
-                  turn_count: messages.filter((item) => item.role === "user").length + 1,
-                  source: "chat",
-                },
-              }).catch(() => undefined);
-              onSellerDraft?.({
-                narrative,
-                intentId: typeof supplyIntent.intent_id === "string" ? supplyIntent.intent_id : undefined,
-                attributes: { source: "conversation", conversation_id: conversationId, narrative, ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}) },
-                terms: { pricing_mode: targetPricing.mode },
-                ...(submittedAttachments.length ? { attachments: submittedAttachments } : {}),
-              });
-            } else if (targetUsesLegacy) {
-              if (!targetPricing.currency) throw new Error(`${target.label || target.slug} 尚未配置结算币种，暂时不能生成真实推荐`);
-              const buyerRequest = await createBuyerRequest({
-                session: targetSession,
-                domainId: targetDomainId,
-                narrative,
-                requirements: {
-                  source: "conversation",
-                  conversation_id: conversationId,
-                  platform_path: target.path,
-                  delegated_route_count: route?.routePlan.length ?? 0,
-                  routing_source: route?.routing.source ?? null,
-                  routing_degraded: route?.routing.degraded ?? false,
-                  ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
-                },
-                currency: targetPricing.currency,
-                currencyScale: targetPricing.currencyScale ?? 0,
-              });
-              const recommendations = await getBuyerRecommendations({
-                session: targetSession,
-                domainId: targetDomainId,
-                requestId: buyerRequest.request_id,
-                exposureKey: `chat-${requestId}-${targetKey}`,
-              });
-              routedRecommendations.push(...recommendations.map((item) => ({
-                ...item,
-                platform_path: target.path,
-                subplatform: target.slug,
-              })));
-            } else {
-              const intentState = intentByTargetRef.current.get(targetKey);
-              const intent = intentState
-                ? await updateMarketplaceIntent({
-                    session: targetSession,
-                    domainId: targetDomainId,
-                    intentId: intentState.intentId,
-                    narrative,
-                    attributes: {
-                      source: "conversation",
-                      conversation_id: conversationId,
-                      latest_turn: text,
-                      ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
-                    },
-                    terms: {
-                      pricing_mode: targetPricing.mode,
-                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
-                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
-                    },
-                    expectedVersion: intentState.version,
-                  })
-                : await createMarketplaceIntent({
-                    session: targetSession,
-                    domainId: targetDomainId,
-                    side: "demand",
-                    narrative,
-                    attributes: {
-                      source: "conversation",
-                      conversation_id: conversationId,
-                      ...(submittedAttachments.length ? { attachments: submittedAttachments.map(publicAttachment) } : {}),
-                    },
-                    terms: {
-                      pricing_mode: targetPricing.mode,
-                      ...(targetPricing.currency ? { currency: targetPricing.currency } : {}),
-                      ...(targetPricing.currencyScale !== undefined ? { currency_scale: targetPricing.currencyScale } : {}),
-                    },
-                    supplyDiscoveryEnabled,
-                    idempotencyKey: `chat-${requestId}-${targetKey}`,
-                  });
-              if (typeof intent.intent_id === "string" && typeof intent.version === "number") {
-                intentByTargetRef.current.set(targetKey, { intentId: intent.intent_id, version: intent.version });
-              }
-              if (intentState && typeof intent.intent_id === "string") {
-                void updateMarketplaceDemandDiscovery({
+                // Keep the same opaque, scoped profile contract for supply as for demand. The
+                // vertical Agent may later replace this conversation projection with typed fields;
+                // the root never assumes that a supply is a vehicle, service, or another domain.
+                void upsertMarketplaceProfile({
                   session: targetSession,
                   domainId: targetDomainId,
-                  intentId: intent.intent_id,
-                  enabled: supplyDiscoveryEnabled,
-                }).catch(() => undefined);
-              }
-              // The root stores only a scoped, versioned understanding. Domain-specific fields
-              // (for example vehicle attributes) are extracted by the active child Agent and
-              // may replace this opaque conversation projection later.
-              void upsertMarketplaceProfile({
-                session: targetSession,
-                domainId: targetDomainId,
-                profile: {
-                  kind: "conversation",
-                  conversation_id: conversationId,
-                  narrative,
-                  latest_turn: text,
-                  turn_count: messages.filter((item) => item.role === "user").length + 1,
-                  source: "chat",
-                },
-              }).catch(() => undefined);
-              let retrievalCandidates: RecommendedBackendListing[] = [];
-              let canonicalCandidates: Awaited<ReturnType<typeof getMarketplaceOfferMatches>> | null = null;
-              if (target.agentMcpTools?.includes("retrieval.query")) {
-                try {
-                  const retrieval = await querySubplatformRetrieval({
-                    requestId,
-                    platformPath: target.path,
-                    tenantId: target.tenantId ?? targetSession.tenantId,
-                    domainId: targetDomainId,
+                  profile: {
+                    kind: "supply_conversation",
+                    conversation_id: conversationId,
                     narrative,
-                    limit: 20,
-                    traceId: requestId,
+                    latest_turn: text,
+                    turn_count:
+                      messages.filter((item) => item.role === "user").length +
+                      1,
+                    source: "chat",
+                  },
+                }).catch(() => undefined);
+                onSellerDraft?.({
+                  narrative,
+                  intentId:
+                    typeof supplyIntent.intent_id === "string"
+                      ? supplyIntent.intent_id
+                      : undefined,
+                  attributes: {
+                    source: "conversation",
+                    conversation_id: conversationId,
+                    narrative,
+                    ...(submittedAttachments.length
+                      ? {
+                          attachments:
+                            submittedAttachments.map(publicAttachment),
+                        }
+                      : {}),
+                  },
+                  terms: { pricing_mode: targetPricing.mode },
+                  ...(submittedAttachments.length
+                    ? { attachments: submittedAttachments }
+                    : {}),
+                });
+              } else if (targetUsesLegacy) {
+                if (!targetPricing.currency)
+                  throw new Error(
+                    `${target.label || target.slug} 尚未配置结算币种，暂时不能生成真实推荐`,
+                  );
+                const buyerRequest = await createBuyerRequest({
+                  session: targetSession,
+                  domainId: targetDomainId,
+                  narrative,
+                  requirements: {
+                    source: "conversation",
+                    conversation_id: conversationId,
+                    platform_path: target.path,
+                    delegated_route_count: route?.routePlan.length ?? 0,
+                    routing_source: route?.routing.source ?? null,
+                    routing_degraded: route?.routing.degraded ?? false,
+                    ...(submittedAttachments.length
+                      ? {
+                          attachments:
+                            submittedAttachments.map(publicAttachment),
+                        }
+                      : {}),
+                  },
+                  currency: targetPricing.currency,
+                  currencyScale: targetPricing.currencyScale ?? 0,
+                });
+                const recommendations = await getBuyerRecommendations({
+                  session: targetSession,
+                  domainId: targetDomainId,
+                  requestId: buyerRequest.request_id,
+                  exposureKey: `chat-${requestId}-${targetKey}`,
+                });
+                routedRecommendations.push(
+                  ...recommendations.map((item) => ({
+                    ...item,
+                    platform_path: target.path,
+                    subplatform: target.slug,
+                  })),
+                );
+              } else {
+                const intentState = intentByTargetRef.current.get(targetKey);
+                const intent = intentState
+                  ? await updateMarketplaceIntent({
+                      session: targetSession,
+                      domainId: targetDomainId,
+                      intentId: intentState.intentId,
+                      narrative,
+                      attributes: {
+                        source: "conversation",
+                        conversation_id: conversationId,
+                        latest_turn: text,
+                        ...(submittedAttachments.length
+                          ? {
+                              attachments:
+                                submittedAttachments.map(publicAttachment),
+                            }
+                          : {}),
+                      },
+                      terms: {
+                        pricing_mode: targetPricing.mode,
+                        ...(targetPricing.currency
+                          ? { currency: targetPricing.currency }
+                          : {}),
+                        ...(targetPricing.currencyScale === undefined
+                          ? {}
+                          : { currency_scale: targetPricing.currencyScale }),
+                      },
+                      expectedVersion: intentState.version,
+                    })
+                  : await createMarketplaceIntent({
+                      session: targetSession,
+                      domainId: targetDomainId,
+                      side: "demand",
+                      narrative,
+                      attributes: {
+                        source: "conversation",
+                        conversation_id: conversationId,
+                        ...(submittedAttachments.length
+                          ? {
+                              attachments:
+                                submittedAttachments.map(publicAttachment),
+                            }
+                          : {}),
+                      },
+                      terms: {
+                        pricing_mode: targetPricing.mode,
+                        ...(targetPricing.currency
+                          ? { currency: targetPricing.currency }
+                          : {}),
+                        ...(targetPricing.currencyScale === undefined
+                          ? {}
+                          : { currency_scale: targetPricing.currencyScale }),
+                      },
+                      supplyDiscoveryEnabled,
+                      idempotencyKey: `chat-${requestId}-${targetKey}`,
+                    });
+                if (
+                  typeof intent.intent_id === "string" &&
+                  typeof intent.version === "number"
+                ) {
+                  intentByTargetRef.current.set(targetKey, {
+                    intentId: intent.intent_id,
+                    version: intent.version,
                   });
-                  // The child result is only a ranking hint. Re-read the canonical active offers
-                  // from the root gateway before displaying anything, so a remote adapter cannot
-                  // replace title, attributes, terms, tenant, or offer ownership in the UI.
-                  canonicalCandidates = await getMarketplaceOfferMatches({
+                }
+                if (intentState && typeof intent.intent_id === "string") {
+                  void updateMarketplaceDemandDiscovery({
                     session: targetSession,
                     domainId: targetDomainId,
                     intentId: intent.intent_id,
-                  });
-                  const remoteByOffer = new Map(
-                    retrieval.candidates
-                      .filter((candidate) => candidate.offerId)
-                      .map((candidate) => [candidate.offerId!, candidate]),
-                  );
-                  retrievalCandidates = canonicalCandidates.flatMap((candidate) => {
-                    const remote = remoteByOffer.get(candidate.offer_id);
-                    if (!remote) return [];
-                    const reasons = [...new Set([...candidate.reasons, ...remote.reasons])].slice(0, 32);
-                    const risks = [...new Set([...(candidate.risks ?? []), ...(remote.risks ?? [])])].slice(0, 32);
-                    return [{
+                    enabled: supplyDiscoveryEnabled,
+                  }).catch(() => undefined);
+                }
+                // The root stores only a scoped, versioned understanding. Domain-specific fields
+                // (for example vehicle attributes) are extracted by the active child Agent and
+                // may replace this opaque conversation projection later.
+                void upsertMarketplaceProfile({
+                  session: targetSession,
+                  domainId: targetDomainId,
+                  profile: {
+                    kind: "conversation",
+                    conversation_id: conversationId,
+                    narrative,
+                    latest_turn: text,
+                    turn_count:
+                      messages.filter((item) => item.role === "user").length +
+                      1,
+                    source: "chat",
+                  },
+                }).catch(() => undefined);
+                let retrievalCandidates: RecommendedBackendListing[] = [];
+                let canonicalCandidates: Awaited<
+                  ReturnType<typeof getMarketplaceOfferMatches>
+                > | null = null;
+                if (target.agentMcpTools?.includes("retrieval.query")) {
+                  try {
+                    const retrieval = await querySubplatformRetrieval({
+                      requestId,
+                      platformPath: target.path,
+                      tenantId: target.tenantId ?? targetSession.tenantId,
+                      domainId: targetDomainId,
+                      narrative,
+                      limit: 20,
+                      traceId: requestId,
+                    });
+                    // The child result is only a ranking hint. Re-read the canonical active offers
+                    // from the root gateway before displaying anything, so a remote adapter cannot
+                    // replace title, attributes, terms, tenant, or offer ownership in the UI.
+                    canonicalCandidates = await getMarketplaceOfferMatches({
+                      session: targetSession,
+                      domainId: targetDomainId,
+                      intentId: intent.intent_id,
+                    });
+                    const remoteByOffer = new Map(
+                      retrieval.candidates
+                        .filter((candidate) => candidate.offerId)
+                        .map((candidate) => [candidate.offerId!, candidate]),
+                    );
+                    retrievalCandidates = canonicalCandidates.flatMap(
+                      (candidate) => {
+                        const remote = remoteByOffer.get(candidate.offer_id);
+                        if (!remote) return [];
+                        const reasons = [
+                          ...new Set([...candidate.reasons, ...remote.reasons]),
+                        ].slice(0, 32);
+                        const risks = [
+                          ...new Set([
+                            ...(candidate.risks ?? []),
+                            ...(remote.risks ?? []),
+                          ]),
+                        ].slice(0, 32);
+                        return [
+                          {
+                            ...candidate,
+                            field_labels: fieldLabelsFor(
+                              target,
+                              candidate.attributes,
+                              locale,
+                            ),
+                            tenant_id:
+                              target.tenantId ?? targetSession.tenantId,
+                            domain_id: targetDomainId,
+                            platform_path: target.path,
+                            subplatform: target.slug,
+                            match_score: candidate.score,
+                            match_reasons: reasons,
+                            match_risks: risks,
+                            intent_id: intent.intent_id,
+                          } satisfies RecommendedBackendListing,
+                        ];
+                      },
+                    );
+                  } catch {
+                    // An unavailable child index is a bounded degradation. The kernel matcher
+                    // remains useful for exact structured attributes and never receives a fake
+                    // neutral score for an empty request.
+                    retrievalDegraded = true;
+                  }
+                }
+                if (retrievalCandidates.length) {
+                  routedRecommendations.push(...retrievalCandidates);
+                } else {
+                  const candidates =
+                    canonicalCandidates ??
+                    (await getMarketplaceOfferMatches({
+                      session: targetSession,
+                      domainId: targetDomainId,
+                      intentId: intent.intent_id,
+                    }));
+                  routedRecommendations.push(
+                    ...candidates.map((candidate) => ({
                       ...candidate,
-                      field_labels: fieldLabelsFor(target, candidate.attributes),
-                      tenant_id: target.tenantId ?? targetSession.tenantId,
+                      field_labels: fieldLabelsFor(
+                        target,
+                        candidate.attributes,
+                        locale,
+                      ),
+                      tenant_id: target.tenantId ?? candidate.tenant_id,
                       domain_id: targetDomainId,
                       platform_path: target.path,
                       subplatform: target.slug,
+                      offer_id: candidate.offer_id,
                       match_score: candidate.score,
-                      match_reasons: reasons,
-                      match_risks: risks,
+                      match_reasons: candidate.reasons,
+                      match_risks: candidate.risks,
                       intent_id: intent.intent_id,
-                    } satisfies RecommendedBackendListing];
-                  });
-                } catch {
-                  // An unavailable child index is a bounded degradation. The kernel matcher
-                  // remains useful for exact structured attributes and never receives a fake
-                  // neutral score for an empty request.
-                  retrievalDegraded = true;
+                    })),
+                  );
                 }
               }
-              if (retrievalCandidates.length) {
-                routedRecommendations.push(...retrievalCandidates);
-              } else {
-                const candidates = canonicalCandidates ?? await getMarketplaceOfferMatches({
-                  session: targetSession,
-                  domainId: targetDomainId,
-                  intentId: intent.intent_id,
-                });
-                routedRecommendations.push(...candidates.map((candidate) => ({
-                  ...candidate,
-                  field_labels: fieldLabelsFor(target, candidate.attributes),
-                  tenant_id: target.tenantId ?? candidate.tenant_id,
-                  domain_id: targetDomainId,
-                  platform_path: target.path,
-                  subplatform: target.slug,
-                  offer_id: candidate.offer_id,
-                  match_score: candidate.score,
-                  match_reasons: candidate.reasons,
-                  match_risks: candidate.risks,
-                  intent_id: intent.intent_id,
-                })));
-              }
-            }
-            } catch (error) {
+            } catch {
               // One child being offline must not erase matches already returned by other active
               // nodes. Keep the partial result and make the degraded state visible below.
               retrievalDegraded = true;
-              console.error("platform child marketplace request failed", error);
             }
           };
-          await runWithConcurrency(targets, CHAT_TARGET_CONCURRENCY, processTarget);
+          await runWithConcurrency(
+            targets,
+            CHAT_TARGET_CONCURRENCY,
+            processTarget,
+          );
           // A successful request with no candidates is still a new result. Clear
           // the previous cards instead of leaving stale offers on screen and
           // making them look like matches for the latest message.
@@ -771,11 +1464,15 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
           // offers; later comparison can be expanded by the child-owned catalogue UI.
           onRecommendations?.(routedRecommendations.slice(0, 3));
         }
-        const visibleRouteNames = route?.routePlan
-          .slice(0, MAX_CHAT_TARGETS)
-          .map((hop) => hop.displayName)
-          .join(locale === "en" ? ", " : "、") || runtime.routeNode;
-        const routeOverflowSuffix = route && route.routePlan.length > MAX_CHAT_TARGETS ? runtime.routeOverflow : "";
+        const visibleRouteNames =
+          route?.routePlan
+            .slice(0, MAX_CHAT_TARGETS)
+            .map((hop) => hop.displayName)
+            .join(locale === "en" ? ", " : "、") || runtime.routeNode;
+        const routeOverflowSuffix =
+          route && route.routePlan.length > MAX_CHAT_TARGETS
+            ? runtime.routeOverflow
+            : "";
         const assistantText = isSeller
           ? copy.sellerSuccess
           : live
@@ -790,56 +1487,199 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
         const degradedSuffix = retrievalDegraded
           ? runtime.retrievalDegraded
           : "";
-        setMessages((current) => [...current, {
-          id: `${requestId}-assistant`,
-          role: "assistant",
-          text: `${assistantText}${isSeller ? "" : degradedSuffix}`,
-        }]);
-        onNotice(retrievalDegraded
-          ? runtime.retrievalDegradedNotice
-          : isSeller ? copy.sellerSuccess : copy.buyerSuccess);
-        if (isSeller) window.setTimeout(() => document.getElementById("seller-display-name")?.focus(), 0);
+        setMessages((current) => [
+          ...current,
+          {
+            id: `${requestId}-assistant`,
+            role: "assistant",
+            text: `${assistantText}${isSeller ? "" : degradedSuffix}`,
+          },
+        ]);
+        onNotice(
+          retrievalDegraded
+            ? runtime.retrievalDegradedNotice
+            : isSeller
+              ? copy.sellerSuccess
+              : copy.buyerSuccess,
+        );
+        if (isSeller)
+          window.setTimeout(
+            () => document.getElementById("seller-display-name")?.focus(),
+            0,
+          );
       } catch (error) {
-        setMessages((current) => [...current, {
-          id: `${requestId}-assistant`,
-          role: "assistant",
-          text: error instanceof Error ? error.message : runtime.sendFailed,
-        }]);
+        setMessages((current) => [
+          ...current,
+          {
+            id: `${requestId}-assistant`,
+            role: "assistant",
+            text: error instanceof Error ? error.message : runtime.sendFailed,
+          },
+        ]);
         setMessage(text);
         focusInputAfterErrorRef.current = true;
       } finally {
         setSending(false);
       }
     },
-    [conversationAttachments, copy.buyerSuccess, copy.sellerSuccess, isSeller, locale, messages, onNotice, onRecommendations, onSellerDraft, onSellerPlatformSelected, resizeInput, role, sending, supplyDiscoveryEnabled, subplatform.domainId, subplatform.slug, subplatform.tenantId, subplatform.path],
+    [
+      conversationAttachments,
+      copy.buyerSuccess,
+      copy.sellerSuccess,
+      isSeller,
+      locale,
+      messages,
+      onNotice,
+      onRecommendations,
+      onSellerDraft,
+      onSellerPlatformSelected,
+      resizeInput,
+      role,
+      sending,
+      supplyDiscoveryEnabled,
+      subplatform.domainId,
+      subplatform.slug,
+      subplatform.tenantId,
+      subplatform.path,
+    ],
   );
 
-  const submitGuestMessage = useCallback(async (rawText: string) => {
-    const text = rawText.trim();
-    if (!text || sending) return;
-    setSending(true);
-    setMessage("");
-    const requestId = crypto.randomUUID();
-    setMessages((current) => [...current, { id: `${requestId}-user`, role: "user", text }]);
-    try {
-      const reply = await askMallShoppingAssistant(text);
-      onRecommendations?.(reply.recommendations);
-      setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: reply.answer }]);
-      onNotice(reply.answer);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : runtime.sendFailed;
-      setMessages((current) => [...current, { id: `${requestId}-assistant`, role: "assistant", text: detail }]);
-      setMessage(text);
-      focusInputAfterErrorRef.current = true;
-    } finally {
-      setSending(false);
-    }
-  }, [onNotice, onRecommendations, runtime.sendFailed, sending]);
+  submitMessageRef.current = submitMessage;
+
+  const submitGuestMessage = useCallback(
+    async (
+      rawText: string,
+      answeredChoice?: {
+        messageId: string;
+        choiceId: string;
+        value: string;
+      },
+    ) => {
+      const text = rawText.trim();
+      if (!text || sending) return;
+      setSending(true);
+      setChatError("");
+      setMessage("");
+      const requestId = crypto.randomUUID();
+      const userMessage: ChatMessage = {
+        id: `${requestId}-user`,
+        role: "user",
+        text,
+      };
+      const priorMessages = answeredChoice
+        ? messages.map((messageItem) =>
+            messageItem.id === answeredChoice.messageId
+              ? {
+                  ...messageItem,
+                  choices: messageItem.choices?.map((choiceItem) =>
+                    choiceItem.id === answeredChoice.choiceId
+                      ? {
+                          ...choiceItem,
+                          selectedValue: answeredChoice.value,
+                        }
+                      : choiceItem,
+                  ),
+                }
+              : messageItem,
+          )
+        : messages;
+      const conversation = [...priorMessages, userMessage].slice(
+        -MAX_CONVERSATION_MESSAGES,
+      );
+      setMessages(conversation);
+      try {
+        const conversationMessages = conversation.map(
+          ({ role, text: content }) => ({ role, content }),
+        );
+        const reply =
+          subplatform.slug === "root"
+            ? await askMallShoppingAssistant(conversationMessages)
+            : await askMallShoppingAssistant(conversationMessages, {
+                storePath: subplatform.path,
+              });
+        const recommendations = mapRecommendations(
+          reply.recommendations,
+          subplatform,
+          locale,
+        );
+        onRecommendations?.(reply.recommendations);
+        const assistantId = `${requestId}-assistant`;
+        const handoff = (reply.uiActions ?? []).find(
+          (action): action is MallAssistantHumanHandoffAction =>
+            action.type === "human_handoff",
+        );
+        const contactConsent = (reply.uiActions ?? []).find(
+          (action): action is MallAssistantContactConsentAction =>
+            action.type === "contact_consent",
+        );
+        setMessages((current) => [
+          ...current,
+          {
+            id: assistantId,
+            role: "assistant",
+            text: reply.answer,
+            choices: (reply.uiActions ?? []).flatMap((action) =>
+              action.type === "choice" ? [action] : [],
+            ),
+            ...(recommendations.length ? { recommendations } : {}),
+            ...(handoff ? { handoff: { ...handoff, status: "pending" } } : {}),
+            ...(contactConsent ? { contactConsent } : {}),
+          },
+        ]);
+        onNotice(reply.answer);
+        if (handoff && onHumanHandoff) {
+          try {
+            await onHumanHandoff({
+              requestId: reply.requestId,
+              summary: handoff.summary,
+              intent: handoff.intent,
+              productIds: handoff.productIds,
+            });
+            setMessages((current) =>
+              current.map((item) =>
+                item.id === assistantId && item.handoff
+                  ? { ...item, handoff: { ...item.handoff, status: "sent" } }
+                  : item,
+              ),
+            );
+          } catch {
+            setMessages((current) =>
+              current.map((item) =>
+                item.id === assistantId && item.handoff
+                  ? { ...item, handoff: { ...item.handoff, status: "failed" } }
+                  : item,
+              ),
+            );
+          }
+        }
+      } catch (error) {
+        const detail =
+          error instanceof Error ? error.message : runtime.sendFailed;
+        setChatError(detail);
+        setMessage(text);
+        focusInputAfterErrorRef.current = true;
+      } finally {
+        setSending(false);
+      }
+    },
+    [
+      locale,
+      messages,
+      onNotice,
+      onRecommendations,
+      onHumanHandoff,
+      runtime.sendFailed,
+      sending,
+      subplatform,
+    ],
+  );
 
   useEffect(() => {
     let cancelled = false;
+    if (isRoot && !isSeller) setConversationHydrated(false);
     void (async () => {
-      const scopedMarketplace = subplatform.slug !== "root" && Boolean(subplatform.domainId);
+      const scopedMarketplace =
+        subplatform.slug !== "root" && Boolean(subplatform.domainId);
       const session = scopedMarketplace
         ? await getMarketplaceSession({
             subplatform: subplatform.slug,
@@ -851,7 +1691,9 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
         : null;
       const authState = scopedMarketplace
         ? null
-        : await authClient.getSession({ fetchOptions: authFetchOptions(subplatform.slug) });
+        : await authClient.getSession({
+            fetchOptions: authFetchOptions(subplatform.slug),
+          });
       if (cancelled) return;
       if (subplatform.domainId && !session) {
         setSignedIn(false);
@@ -859,6 +1701,30 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
       }
       const hasAuthSession = Boolean(session || authState?.data);
       setSignedIn(hasAuthSession);
+      if (isRoot && !isSeller) {
+        const authUserId = authState?.data?.user?.id;
+        const owner = session?.partyId
+          ? `party:${session.partyId}`
+          : typeof authUserId === "string" && authUserId
+            ? `user:${authUserId}`
+            : "guest";
+        const storedConversation = readStoredConversation(
+          conversationStorageKey,
+          owner,
+        );
+        setConversationOwner(owner);
+        setActiveHistoryId(storedConversation.id);
+        setMessages(storedConversation.messages);
+        setConversationHistory(
+          readConversationHistory(
+            window.localStorage,
+            conversationHistoryStorageKey(conversationStorageKey),
+            owner,
+            parseStoredMessages,
+          ),
+        );
+        setConversationHydrated(true);
+      }
       const pending = readPendingChat();
       if (!pending) return;
       // A pending message is only a hand-off across the login page. Keep it until the user is
@@ -866,20 +1732,52 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
       // could consume it without a valid marketplace capability or send it to the wrong node.
       if (!hasAuthSession || pending.next !== currentLocation()) return;
       window.sessionStorage.removeItem(PENDING_CHAT_KEY);
-      if (!cancelled) void submitMessage(pending.text, session ?? undefined);
+      if (!cancelled)
+        void submitMessageRef.current?.(pending.text, session ?? undefined);
     })().catch(() => {
-      if (!cancelled) setSignedIn(false);
+      if (cancelled) return;
+      setSignedIn(false);
+      if (isRoot && !isSeller) {
+        const owner = "guest";
+        const storedConversation = readStoredConversation(
+          conversationStorageKey,
+          owner,
+        );
+        setConversationOwner(owner);
+        setActiveHistoryId(storedConversation.id);
+        setMessages(storedConversation.messages);
+        setConversationHistory(
+          readConversationHistory(
+            window.localStorage,
+            conversationHistoryStorageKey(conversationStorageKey),
+            owner,
+            parseStoredMessages,
+          ),
+        );
+        setConversationHydrated(true);
+      }
     });
-    return () => { cancelled = true; };
-  }, [role, subplatform.domainId, subplatform.slug, subplatform.tenantId, submitMessage]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    conversationStorageKey,
+    isRoot,
+    isSeller,
+    role,
+    subplatform.domainId,
+    subplatform.slug,
+    subplatform.tenantId,
+  ]);
 
-  const send = (event: FormEvent<HTMLFormElement>) => {
+  const send = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     const text = message.trim();
     if ((!text && !conversationAttachments.length) || sending) return;
 
     void (async () => {
-      const scopedMarketplace = subplatform.slug !== "root" && Boolean(subplatform.domainId);
+      const scopedMarketplace =
+        subplatform.slug !== "root" && Boolean(subplatform.domainId);
       const session = scopedMarketplace
         ? await getMarketplaceSession({
             subplatform: subplatform.slug,
@@ -891,7 +1789,9 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
         : null;
       const authState = scopedMarketplace
         ? null
-        : await authClient.getSession({ fetchOptions: authFetchOptions(subplatform.slug) });
+        : await authClient.getSession({
+            fetchOptions: authFetchOptions(subplatform.slug),
+          });
       if (!isSeller) {
         setSignedIn(Boolean(session || authState?.data));
         void submitGuestMessage(text);
@@ -899,82 +1799,362 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
       }
       if (!session && !authState?.data) {
         const next = `${window.location.pathname}${window.location.search}`;
-        window.sessionStorage.setItem(PENDING_CHAT_KEY, JSON.stringify({ text, next } satisfies PendingChat));
+        window.sessionStorage.setItem(
+          PENDING_CHAT_KEY,
+          JSON.stringify({ text, next } satisfies PendingChat),
+        );
         window.location.assign(`/login?next=${encodeURIComponent(next)}`);
         return;
       }
       setSignedIn(true);
       void submitMessage(text, session ?? undefined);
-    })().catch((error) => onNotice(error instanceof Error ? error.message : runtime.authFailed));
+    })().catch((error) =>
+      onNotice(error instanceof Error ? error.message : runtime.authFailed),
+    );
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    if (
+      event.key !== "Enter" ||
+      event.shiftKey ||
+      event.nativeEvent.isComposing
+    )
+      return;
     event.preventDefault();
     event.currentTarget.form?.requestSubmit();
   };
 
+  const startNewConversation = useCallback(() => {
+    if (sending) return;
+    window.sessionStorage.removeItem(conversationStorageKey);
+    setActiveHistoryId(crypto.randomUUID());
+    setChatError("");
+    setMessage("");
+    setMessages([]);
+    setConversationAttachments([]);
+    setConversationHistoryOpen(false);
+    conversationIdRef.current = null;
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, [conversationStorageKey, sending]);
+
   const clearConversation = () => {
     if (sending) return;
+    if (conversationOwner && activeHistoryId) {
+      setConversationHistory(
+        deleteConversationHistory({
+          storage: window.localStorage,
+          key: conversationHistoryStorageKey(conversationStorageKey),
+          owner: conversationOwner,
+          id: activeHistoryId,
+          parseMessages: parseStoredMessages,
+        }),
+      );
+    }
+    startNewConversation();
+  };
+
+  const openHistoricalConversation = (
+    conversation: ConversationHistoryRecord<ChatMessage>,
+  ) => {
+    if (sending) return;
+    setActiveHistoryId(conversation.id);
+    setChatError("");
+    setMessages(conversation.messages);
+    setConversationAttachments([]);
+    setConversationHistoryOpen(false);
+    conversationIdRef.current = null;
+    window.requestAnimationFrame(() => {
+      const thread = threadRef.current;
+      if (thread) thread.scrollTop = thread.scrollHeight;
+      inputRef.current?.focus();
+    });
+  };
+
+  const deleteHistoricalConversation = (id: string) => {
+    if (!conversationOwner) return;
+    setConversationHistory(
+      deleteConversationHistory({
+        storage: window.localStorage,
+        key: conversationHistoryStorageKey(conversationStorageKey),
+        owner: conversationOwner,
+        id,
+        parseMessages: parseStoredMessages,
+      }),
+    );
+    if (id !== activeHistoryId) return;
+    window.sessionStorage.removeItem(conversationStorageKey);
+    setActiveHistoryId(crypto.randomUUID());
+    setChatError("");
     setMessages([]);
     setConversationAttachments([]);
     conversationIdRef.current = null;
   };
 
+  useEffect(() => {
+    const openConversationHistory = () => setConversationHistoryOpen(true);
+    window.addEventListener(
+      "matchplane:new-shopping-conversation",
+      startNewConversation,
+    );
+    window.addEventListener(
+      "matchplane:open-shopping-history",
+      openConversationHistory,
+    );
+    return () => {
+      window.removeEventListener(
+        "matchplane:new-shopping-conversation",
+        startNewConversation,
+      );
+      window.removeEventListener(
+        "matchplane:open-shopping-history",
+        openConversationHistory,
+      );
+    };
+  }, [startNewConversation]);
+
+  const chatActions = (
+    <>
+      {isRoot && !isSeller ? (
+        <button
+          className="match-chat-clear"
+          type="button"
+          onClick={() => setConversationHistoryOpen(true)}
+        >
+          <History size={14} aria-hidden="true" />
+          <span>{locale === "en" ? "History" : "历史"}</span>
+        </button>
+      ) : null}
+      {isRoot && !isSeller && signedIn ? (
+        <button
+          className="match-chat-clear"
+          type="button"
+          onClick={() => setShoppingMemoryOpen(true)}
+        >
+          <Brain size={14} aria-hidden="true" />
+          <span>{locale === "en" ? "Memory" : "记忆"}</span>
+        </button>
+      ) : null}
+      {messages.length ? (
+        <button
+          className="match-chat-clear"
+          type="button"
+          onClick={clearConversation}
+          disabled={sending}
+        >
+          <Trash2 size={14} aria-hidden="true" />
+          <span>{label("clearChatLabel", "清空")}</span>
+        </button>
+      ) : null}
+      <span className="sr-only" aria-live="polite">
+        {!sending && signedIn ? label("signedInChatStatus", "已登录") : ""}
+      </span>
+    </>
+  );
+
   return (
-    <section className={"match-chat" + (isRoot ? " is-root" : "") + (isSeller ? " is-seller" : "") + (compact ? " is-catalog-header" : "")} aria-labelledby="match-chat-title">
-      <div className="match-chat-heading">
-        <div>
-          <h1 id="match-chat-title">{visibleHeadline}</h1>
+    <section
+      className={
+        home
+          ? `home-chat w-full${messages.length || sending || chatError ? " has-conversation" : ""}`
+          : "match-chat" +
+            (isRoot ? " is-root" : "") +
+            (isSeller ? " is-seller" : "") +
+            (compact ? " is-catalog-header" : "")
+      }
+      aria-labelledby="match-chat-title"
+    >
+      <div
+        className={
+          home ? "home-chat-a11y-heading sr-only" : "match-chat-heading"
+        }
+      >
+        <div className={home ? "sr-only" : undefined}>
+          {home ? (
+            <h2 id="match-chat-title">{visibleHeadline}</h2>
+          ) : (
+            <h1 id="match-chat-title">{visibleHeadline}</h1>
+          )}
           <p>{visibleDescription}</p>
           {isRoot && !isSeller && !compact ? (
-            <ul className="match-chat-promises" aria-label={locale === "en" ? "Shopping assistant capabilities" : "导购能力"}>
-              {shoppingPromises.map((item) => <li key={item}>{item}</li>)}
+            <ul
+              className="match-chat-promises"
+              aria-label={
+                locale === "en" ? "Shopping assistant capabilities" : "导购能力"
+              }
+            >
+              {shoppingPromises.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
             </ul>
           ) : null}
         </div>
-        <div className="match-chat-actions">
-          {messages.length ? (
-            <button className="match-chat-clear" type="button" onClick={clearConversation} disabled={sending}>
-              <Trash2 size={14} aria-hidden="true" />
-              <span>{label("clearChatLabel", "清空")}</span>
-            </button>
-          ) : null}
-          <span className="sr-only" aria-live="polite">
-            {!sending && signedIn ? label("signedInChatStatus", "已登录") : ""}
-          </span>
-        </div>
+        {home ? null : <div className="match-chat-actions">{chatActions}</div>}
       </div>
 
-      {messages.length ? (
-        <div ref={threadRef} className="match-chat-thread" role="log" aria-live="polite" aria-relevant="additions text" aria-label={label("chatThreadLabel", "对话记录")}>
+      {isRoot && !isSeller ? (
+        <ConversationHistoryPanel
+          activeId={activeHistoryId}
+          conversations={conversationHistory}
+          locale={locale}
+          onClose={() => setConversationHistoryOpen(false)}
+          onDelete={deleteHistoricalConversation}
+          onOpen={openHistoricalConversation}
+          onStartNew={startNewConversation}
+          open={conversationHistoryOpen}
+        />
+      ) : null}
+
+      {isRoot && !isSeller && shoppingMemoryOpen ? (
+        <ShoppingMemoryPanel
+          open
+          onClose={() => setShoppingMemoryOpen(false)}
+          locale={locale === "en" ? "en" : "zh"}
+        />
+      ) : null}
+
+      {messages.length || sending ? (
+        <div
+          ref={threadRef}
+          className={
+            home
+              ? "home-chat-thread mt-6 grid max-h-80 gap-5 overflow-y-auto px-1 py-2"
+              : "match-chat-thread"
+          }
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label={label("chatThreadLabel", "对话记录")}
+        >
           {messages.map((item) => (
-            <div key={item.id} className={`match-chat-message-group is-${item.role}`}>
-              <p className={`match-chat-message is-${item.role}`}>{item.text}</p>
+            <div
+              key={item.id}
+              className={`match-chat-message-group is-${item.role}`}
+            >
+              <p className={`match-chat-message is-${item.role}`}>
+                {item.text}
+              </p>
+              {item.choices?.map((choice) => (
+                <div
+                  key={choice.id}
+                  className="match-chat-tool-choice"
+                  role="group"
+                  aria-label={choice.question}
+                >
+                  <strong>{choice.question}</strong>
+                  <div>
+                    {choice.options.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        aria-pressed={choice.selectedValue === option.value}
+                        disabled={sending || Boolean(choice.selectedValue)}
+                        onClick={() =>
+                          void submitGuestMessage(option.value, {
+                            messageId: item.id,
+                            choiceId: choice.id,
+                            value: option.value,
+                          })
+                        }
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {item.contactConsent ? (
+                <StoreContactConsentCard
+                  action={item.contactConsent}
+                  locale={locale}
+                  onAgree={onContactConsent}
+                />
+              ) : null}
+              {item.handoff ? (
+                <div
+                  className={`match-chat-handoff is-${item.handoff.status}`}
+                  role={item.handoff.status === "failed" ? "alert" : "status"}
+                >
+                  <strong>
+                    {item.handoff.status === "pending"
+                      ? locale === "en"
+                        ? "Notifying store staff…"
+                        : "正在通知店员…"
+                      : item.handoff.status === "sent"
+                        ? locale === "en"
+                          ? "Store staff have been notified"
+                          : "已通知店员"
+                        : locale === "en"
+                          ? "Staff notification failed"
+                          : "通知店员失败"}
+                  </strong>
+                  <span>
+                    {item.handoff.status === "failed"
+                      ? locale === "en"
+                        ? "You can keep chatting and try the handoff again later."
+                        : "你可以继续对话，稍后再请求人工介入。"
+                      : locale === "en"
+                        ? "The AI manager remains available in this conversation. No contact details were shared."
+                        : "AI 店长会继续对话，本次没有交换任何联系方式。"}
+                  </span>
+                </div>
+              ) : null}
+              {item.recommendations?.length ? (
+                <div
+                  className="match-chat-recommendations"
+                  aria-label={
+                    locale === "en" ? "Recommended products" : "推荐商品"
+                  }
+                >
+                  {item.recommendations.map((recommendation) => (
+                    <MarketplaceListingCard
+                      compact
+                      key={recommendation.id}
+                      listing={recommendation}
+                      locale={locale}
+                      onOpen={() => onOpenListing?.(recommendation)}
+                      onLike={() =>
+                        onLikeListing?.(recommendation) ?? Promise.resolve()
+                      }
+                    />
+                  ))}
+                </div>
+              ) : null}
               {item.attachments?.length ? (
-                <ul className="match-chat-attachments" aria-label={locale === "en" ? "Attachments" : "附件"}>
-                  {item.attachments.map((attachment) => <li key={attachment.attachment_ref}>{attachment.file_name}</li>)}
+                <ul
+                  className="match-chat-attachments"
+                  aria-label={locale === "en" ? "Attachments" : "附件"}
+                >
+                  {item.attachments.map((attachment) => (
+                    <li key={attachment.attachment_ref}>
+                      {attachment.file_name}
+                    </li>
+                  ))}
                 </ul>
               ) : null}
             </div>
           ))}
-        </div>
-      ) : null}
-
-      {sending ? (
-        <div
-          className="chat-typing-indicator"
-          role="status"
-          aria-label={locale === "en" ? "Matching…" : "正在匹配…"}
-        >
-          <span aria-hidden="true" />
-          <span aria-hidden="true" />
-          <span aria-hidden="true" />
+          {sending ? (
+            <div className="match-chat-message-group is-assistant">
+              <div
+                className="chat-typing-indicator"
+                role="status"
+                aria-label={locale === "en" ? "Replying…" : "正在回复…"}
+              >
+                <span aria-hidden="true" />
+                <span aria-hidden="true" />
+                <span aria-hidden="true" />
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
       {sellerRouteChoices.length ? (
-        <div className="match-chat-route-choices" role="group" aria-label={runtime.routeChoicesAria}>
+        <div
+          className="match-chat-route-choices"
+          role="group"
+          aria-label={runtime.routeChoicesAria}
+        >
           {sellerRouteChoices.map((target) => (
             <button
               key={target.path}
@@ -991,14 +2171,24 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
       ) : null}
 
       {mediaUploadEnabled && conversationAttachments.length ? (
-        <ul className="match-chat-compose-attachments" aria-label={locale === "en" ? "Attachments to send" : "待发送附件"}>
+        <ul
+          className="match-chat-compose-attachments"
+          aria-label={locale === "en" ? "Attachments to send" : "待发送附件"}
+        >
           {conversationAttachments.map((attachment) => (
             <li key={attachment.attachment_ref}>
               <span title={attachment.file_name}>{attachment.file_name}</span>
               <button
                 type="button"
                 aria-label={`${locale === "en" ? "Remove" : "移除"} ${attachment.file_name}`}
-                onClick={() => setConversationAttachments((current) => current.filter((item) => item.attachment_ref !== attachment.attachment_ref))}
+                onClick={() =>
+                  setConversationAttachments((current) =>
+                    current.filter(
+                      (item) =>
+                        item.attachment_ref !== attachment.attachment_ref,
+                    ),
+                  )
+                }
                 disabled={sending || mediaUploading}
               >
                 <Trash2 size={14} aria-hidden="true" />
@@ -1008,20 +2198,56 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
         </ul>
       ) : null}
       {isRoot && !isSeller && !compact && !messages.length ? (
-        <div className="match-chat-suggestions" aria-label={locale === "en" ? "Example shopping requests" : "购物需求示例"}>
+        <div
+          className="match-chat-suggestions"
+          aria-label={
+            locale === "en" ? "Example shopping requests" : "购物需求示例"
+          }
+        >
           <span>{locale === "en" ? "Try asking" : "试着这样问"}</span>
           <div>
             {quickPrompts.map((prompt) => (
-              <button key={prompt} type="button" onClick={() => applyQuickPrompt(prompt)}>{prompt}</button>
+              <button
+                key={prompt}
+                type="button"
+                onClick={() => applyQuickPrompt(prompt)}
+              >
+                {prompt}
+              </button>
             ))}
           </div>
         </div>
       ) : null}
-      <form className="match-chat-form" onSubmit={send}>
+      {chatError ? (
+        <div className="home-chat-error" role="alert">
+          <span>{chatError}</span>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.form?.requestSubmit()}
+          >
+            {locale === "en" ? "Retry" : "重试"}
+          </button>
+        </div>
+      ) : null}
+      <form
+        className={
+          home ? "home-chat-form flex items-end gap-3" : "match-chat-form"
+        }
+        onSubmit={send}
+      >
         {mediaUploadEnabled ? (
-          <label className="match-chat-attach" htmlFor="match-chat-attachment-input">
+          <label
+            className={
+              home
+                ? "home-chat-attach relative grid size-14 shrink-0 cursor-pointer place-items-center rounded-xl bg-background text-foreground-muted"
+                : "match-chat-attach"
+            }
+            htmlFor="match-chat-attachment-input"
+          >
             <FileUp size={17} aria-hidden="true" />
-            <span className="sr-only">{locale === "en" ? "Add attachment" : "添加附件"}</span>
+            <span className="sr-only">
+              {locale === "en" ? "Add attachment" : "添加附件"}
+            </span>
             <input
               id="match-chat-attachment-input"
               type="file"
@@ -1035,24 +2261,68 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
             />
           </label>
         ) : null}
-        <label className="sr-only" htmlFor="match-chat-input">{isSeller ? `${label("tellPlatformPrefix", "告诉 MatchPlane")} ${copy.sellerTitle}` : label("chatInputLabel", "告诉 MatchPlane 你的需求")}</label>
+        <label className="sr-only" htmlFor="match-chat-input">
+          {isSeller
+            ? `${label("tellPlatformPrefix", "告诉 MatchPlane")} ${copy.sellerTitle}`
+            : label("chatInputLabel", "告诉 MatchPlane 你的需求")}
+        </label>
         <Textarea
           ref={inputRef}
           id="match-chat-input"
+          className={
+            home
+              ? "home-chat-input min-h-14 max-h-40 flex-1 resize-none"
+              : undefined
+          }
           value={message}
           onChange={(event) => {
             setMessage(event.target.value);
             resizeInput(event.currentTarget);
           }}
+          onFocus={() => setComposerFocused(true)}
+          onBlur={() => setComposerFocused(false)}
           onKeyDown={handleInputKeyDown}
-          placeholder={isSeller ? copy.sellerPlaceholder : copy.buyerPlaceholder}
-          rows={2}
+          placeholder={
+            home && !isSeller
+              ? homePlaceholder
+              : isSeller
+                ? copy.sellerPlaceholder
+                : copy.buyerPlaceholder
+          }
+          rows={home ? 1 : 2}
           maxLength={10000}
           aria-describedby="match-chat-footnote"
-          disabled={sending}
+          readOnly={sending}
+          aria-disabled={sending}
         />
-        <Button className="match-chat-send" size="icon-md" type="submit" aria-label={isSeller ? label("sendSupplyLabel", "发送供给") : label("sendDemandLabel", "发送需求")} aria-busy={sending} disabled={(!message.trim() && !conversationAttachments.length) || sending}>
-          {sending ? <LoaderCircle className="match-chat-spinner" size={18} aria-hidden="true" /> : <ArrowUp size={18} aria-hidden="true" />}
+        {home ? (
+          <div className="home-chat-inline-actions">{chatActions}</div>
+        ) : null}
+        <Button
+          className={
+            home ? "home-chat-send size-14 shrink-0" : "match-chat-send"
+          }
+          size="icon-md"
+          type="submit"
+          aria-label={
+            isSeller
+              ? label("sendSupplyLabel", "发送供给")
+              : label("sendDemandLabel", "发送需求")
+          }
+          aria-busy={sending}
+          disabled={
+            (!message.trim() && !conversationAttachments.length) || sending
+          }
+        >
+          {sending ? (
+            <LoaderCircle
+              className="match-chat-spinner"
+              size={18}
+              aria-hidden="true"
+            />
+          ) : (
+            <ArrowUp size={18} aria-hidden="true" />
+          )}
         </Button>
       </form>
       {!isSeller && signedIn && !isRoot ? (
@@ -1060,27 +2330,40 @@ export function MatchChat({ compact = false, onNotice, subplatform, locale = "zh
           <input
             type="checkbox"
             checked={supplyDiscoveryEnabled}
-            onChange={(event) => setSupplyDiscoveryEnabled(event.currentTarget.checked)}
+            onChange={(event) =>
+              setSupplyDiscoveryEnabled(event.currentTarget.checked)
+            }
             disabled={sending}
           />
           <span>{copy.buyerDiscoveryLabel}</span>
         </label>
       ) : null}
-      <p id="match-chat-footnote" className="match-chat-footnote">{isSeller ? copy.sellerFootnote : copy.buyerFootnote}</p>
+      <p
+        id="match-chat-footnote"
+        className={home ? "sr-only" : "match-chat-footnote"}
+      >
+        {isSeller ? copy.sellerFootnote : copy.buyerFootnote}
+      </p>
     </section>
   );
 }
 
-function fieldLabelsFor(subplatform: SubplatformConfig, attributes: Record<string, unknown>): Record<string, string> {
+function fieldLabelsFor(
+  subplatform: SubplatformConfig,
+  attributes: Record<string, unknown>,
+  locale: InterfaceLocale,
+): Record<string, string> {
   return Object.keys(attributes)
     .slice(0, 32)
     .reduce<Record<string, string>>((labels, key) => {
-      labels[key] = subplatformFieldLabel(subplatform, key);
+      labels[key] = subplatformFieldLabel(subplatform, key, locale);
       return labels;
     }, {});
 }
 
-function publicAttachment(attachment: MarketplaceAttachment): Record<string, unknown> {
+function publicAttachment(
+  attachment: MarketplaceAttachment,
+): Record<string, unknown> {
   return {
     attachment_ref: attachment.attachment_ref,
     kind: attachment.kind,
@@ -1090,16 +2373,26 @@ function publicAttachment(attachment: MarketplaceAttachment): Record<string, unk
     sha256: attachment.sha256,
     ...(attachment.width === undefined ? {} : { width: attachment.width }),
     ...(attachment.height === undefined ? {} : { height: attachment.height }),
-    ...(attachment.duration_ms === undefined ? {} : { duration_ms: attachment.duration_ms }),
-    ...(attachment.metadata === undefined ? {} : { metadata: attachment.metadata }),
+    ...(attachment.duration_ms === undefined
+      ? {}
+      : { duration_ms: attachment.duration_ms }),
+    ...(attachment.metadata === undefined
+      ? {}
+      : { metadata: attachment.metadata }),
   };
 }
 
 /** Keep seller-side follow-up requests useful without storing an unbounded browser transcript. */
-function buildConversationNarrative(previousRequests: string[], currentRequest: string): string {
+function buildConversationNarrative(
+  previousRequests: string[],
+  currentRequest: string,
+): string {
   const recent = previousRequests
     .slice(-4)
-    .map((value, index) => `第${index + 1}条已知需求：${value.trim().slice(0, 1_200)}`)
+    .map(
+      (value, index) =>
+        `第${index + 1}条已知需求：${value.trim().slice(0, 1_200)}`,
+    )
     .filter((value) => value.length > 8);
   const combined = recent.length
     ? `这是同一对话的补充请求。${recent.join("\n")}\n本轮最新需求：${currentRequest}`
@@ -1114,17 +2407,23 @@ async function runWithConcurrency<T>(
 ): Promise<void> {
   let cursor = 0;
   const workerCount = Math.min(Math.max(1, concurrency), items.length);
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (cursor < items.length) {
-      const item = items[cursor];
-      cursor += 1;
-      if (item !== undefined) await worker(item);
-    }
-  }));
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (cursor < items.length) {
+        const item = items[cursor];
+        cursor += 1;
+        if (item !== undefined) await worker(item);
+      }
+      return undefined;
+    }),
+  );
 }
 
 function platformPath(subplatform: SubplatformConfig): string {
-  return subplatform.path || (subplatform.slug === "root" ? "/" : `/${subplatform.slug}`);
+  return (
+    subplatform.path ||
+    (subplatform.slug === "root" ? "/" : `/${subplatform.slug}`)
+  );
 }
 
 function readPendingChat(): PendingChat | null {
@@ -1132,8 +2431,14 @@ function readPendingChat(): PendingChat | null {
     const raw = window.sessionStorage.getItem(PENDING_CHAT_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PendingChat;
-    if (typeof parsed.text !== "string" || !parsed.text.trim() || parsed.text.length > 10000) return null;
-    if (typeof parsed.next !== "string" || !isSafePendingLocation(parsed.next)) return null;
+    if (
+      typeof parsed.text !== "string" ||
+      !parsed.text.trim() ||
+      parsed.text.length > 10000
+    )
+      return null;
+    if (typeof parsed.next !== "string" || !isSafePendingLocation(parsed.next))
+      return null;
     return { text: parsed.text.trim(), next: parsed.next };
   } catch {
     return null;
@@ -1145,17 +2450,26 @@ function currentLocation(): string {
 }
 
 function isSafePendingLocation(value: string): boolean {
-  return value.startsWith("/")
-    && !value.startsWith("//")
-    && !value.includes("\\")
-    && !/[\u0000-\u001f\u007f]/.test(value);
+  return (
+    value.startsWith("/") &&
+    !value.startsWith("//") &&
+    !value.includes("\\") &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
 }
 
 /** Return the first deepest route node; intermediate platform nodes are aggregation boundaries. */
 function terminalRouteHops(routePlan: PlatformRouteHop[]): PlatformRouteHop[] {
-  const terminals = routePlan.filter((candidate) => !routePlan.some((other) => (
-    other.path !== candidate.path && other.path.startsWith(`${candidate.path}/`)
-  )));
-  const unique = new Map(terminals.map((candidate) => [candidate.path, candidate]));
+  const terminals = routePlan.filter(
+    (candidate) =>
+      !routePlan.some(
+        (other) =>
+          other.path !== candidate.path &&
+          other.path.startsWith(`${candidate.path}/`),
+      ),
+  );
+  const unique = new Map(
+    terminals.map((candidate) => [candidate.path, candidate]),
+  );
   return [...unique.values()];
 }

@@ -1,26 +1,25 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { Mail, Save, ShieldCheck } from "lucide-react";
-import { Button } from "@appica/ui-react/button";
-import { Input } from "@appica/ui-react/input";
-
+import { useState } from "react";
 import {
-  getSubplatformEmailConfig,
-  isLiveMarketplaceEnabled,
-  saveSubplatformEmailConfig,
-  type SubplatformEmailConfig,
-  type SubplatformOrganizationRecord,
-  type StoreSummary,
-} from "../api";
-import { getMarketplaceSession } from "../lib/marketplace-session";
+  Package,
+  ReceiptText,
+  ShieldCheck,
+  Store,
+  UserSearch,
+  UsersRound,
+} from "lucide-react";
+
+import type { StoreSummary, SubplatformOrganizationRecord } from "../api";
+import type { InterfaceLocale } from "../lib/preferences";
 import type { SubplatformConfig } from "../subplatform";
-import { SectionHeading } from "./Primitives";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { SellerDashboard } from "./SellerDashboard";
-import type { InterfaceLocale } from "../lib/preferences";
+import { StoreCustomersPanel } from "./StoreCustomersPanel";
+import { StoreFinancePanel } from "./StoreFinancePanel";
 import { StoreManagementPanel } from "./StoreManagementPanel";
 
+/** Store operators manage commerce only; mall infrastructure stays in the root console. */
 export function SubplatformAdminDashboard({
   locale,
   onNotice,
@@ -28,6 +27,7 @@ export function SubplatformAdminDashboard({
   store,
   canManageStore,
   onStoreUpdated,
+  initialSection = "products",
 }: {
   locale: InterfaceLocale;
   onNotice: (message: string) => void;
@@ -35,157 +35,139 @@ export function SubplatformAdminDashboard({
   store: StoreSummary;
   canManageStore: boolean;
   onStoreUpdated: (store: StoreSummary) => void;
+  initialSection?: "products" | "customers";
 }) {
-  const [section, setSection] = useState<"products" | "store" | "team" | "notifications">("products");
-  const [config, setConfig] = useState<SubplatformEmailConfig | null>(null);
-  const [providerKey, setProviderKey] = useState("");
-  const [smtpHost, setSmtpHost] = useState("");
-  const [smtpPort, setSmtpPort] = useState("587");
-  const [tlsMode, setTlsMode] = useState<"starttls" | "tls" | "plain">("starttls");
-  const [username, setUsername] = useState("");
-  const [credentialSecretRef, setCredentialSecretRef] = useState("");
-  const [fromAddress, setFromAddress] = useState("");
-  const [replyTo, setReplyTo] = useState("");
-  const [mode, setMode] = useState<"test" | "production">("test");
-  const [enabled, setEnabled] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!isLiveMarketplaceEnabled() || !subplatform.domainId) return;
-    void getMarketplaceSession({
-      subplatform: subplatform.slug,
-      platformPath: subplatform.path,
-      tenantId: subplatform.tenantId,
-      domainId: subplatform.domainId,
-      role: "subplatform_admin",
-    }).then((session) => {
-      if (!session) return null;
-      return getSubplatformEmailConfig(session, subplatform.domainId!);
-    })
-      .then((current) => {
-        if (!current) return;
-        setConfig(current);
-        setProviderKey(current.provider_key);
-        setSmtpHost(current.smtp_host);
-        setSmtpPort(String(current.smtp_port));
-        setTlsMode(current.tls_mode as "starttls" | "tls" | "plain");
-        setUsername(current.username);
-        setFromAddress(current.from_address);
-        setReplyTo(current.reply_to ?? "");
-        setMode(current.mode as "test" | "production");
-        setEnabled(current.enabled);
-      })
-      .catch(() => {
-        // A missing config is a normal first-run state; the save form remains available.
-      });
-  }, [subplatform.domainId, subplatform.slug]);
-
-  const save = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!canManageStore) {
-      onNotice("只有店长或商城后台可以修改店铺通知配置");
-      return;
-    }
-    if (!isLiveMarketplaceEnabled()) {
-      onNotice("当前环境未启用真实店铺 API，邮箱配置没有写入系统");
-      return;
-    }
-    const session = await getMarketplaceSession({
-      subplatform: subplatform.slug,
-      platformPath: subplatform.path,
-      tenantId: subplatform.tenantId,
-      domainId: subplatform.domainId,
-      role: "subplatform_admin",
-    });
-    if (!session) {
-      const next = `${window.location.pathname}${window.location.search}`;
-      window.location.assign(`/login?role=subplatform_admin&next=${encodeURIComponent(next)}`);
-      return;
-    }
-    if (!subplatform.domainId) {
-      onNotice("当前店铺尚未完成商品范围配置");
-      return;
-    }
-    if (!providerKey.trim() || !smtpHost.trim() || !username.trim() || !credentialSecretRef.trim() || !fromAddress.trim()) {
-      onNotice("请填写完整的邮件服务器配置；只提交 secret reference，不要填写明文密码");
-      return;
-    }
-    setSaving(true);
-    try {
-      const updated = await saveSubplatformEmailConfig({
-        session,
-        domainId: subplatform.domainId,
-        providerKey: providerKey.trim(),
-        smtpHost: smtpHost.trim(),
-        smtpPort: Number(smtpPort),
-        tlsMode,
-        username: username.trim(),
-        credentialSecretRef: credentialSecretRef.trim(),
-        fromAddress: fromAddress.trim(),
-        replyTo: replyTo.trim() || undefined,
-        mode,
-        enabled,
-        expectedVersion: config?.version,
-        updatedBy: session.partyId,
-      });
-      setConfig(updated);
-      onNotice("店铺邮箱配置已保存");
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "邮箱配置保存失败");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const [section, setSection] = useState<
+    "products" | "customers" | "finance" | "store" | "team"
+  >(initialSection);
+  const english = locale === "en";
 
   return (
     <div className="dashboard subplatform-admin-dashboard">
-      <section className="store-console-heading">
-        <div>
-          <span>店铺工作台</span>
-          <h1>经营管理</h1>
-          <p>{canManageStore ? "商品、店铺、团队与通知。" : "商品、审核与联系申请。"}</p>
-        </div>
-        <span className="seller-mode-note"><ShieldCheck size={16} aria-hidden="true" /> {canManageStore ? "店长权限" : "店员权限"}</span>
-      </section>
-
-      <div className="store-console-layout">
-      <nav className="store-management-tabs" role="tablist" aria-label="店铺管理分区">
-        <button type="button" role="tab" aria-selected={section === "products"} className={section === "products" ? "is-active" : ""} onClick={() => setSection("products")}>商品管理</button>
-        {canManageStore ? <button type="button" role="tab" aria-selected={section === "store"} className={section === "store" ? "is-active" : ""} onClick={() => setSection("store")}>店铺管理</button> : null}
-        {canManageStore ? <button type="button" role="tab" aria-selected={section === "team"} className={section === "team" ? "is-active" : ""} onClick={() => setSection("team")}>店员管理</button> : null}
-        {canManageStore ? <button type="button" role="tab" aria-selected={section === "notifications"} className={section === "notifications" ? "is-active" : ""} onClick={() => setSection("notifications")}>通知</button> : null}
-      </nav>
+      <div className="store-console-toolbar">
+        <nav
+          className="store-management-tabs"
+          role="tablist"
+          aria-label={english ? "Store management sections" : "店铺管理分区"}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={section === "products"}
+            className={section === "products" ? "is-active" : ""}
+            onClick={() => setSection("products")}
+          >
+            <Package size={16} aria-hidden="true" />
+            {english ? "Products" : "商品"}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={section === "customers"}
+            className={section === "customers" ? "is-active" : ""}
+            onClick={() => setSection("customers")}
+          >
+            <UserSearch size={16} aria-hidden="true" />
+            {english ? "Customers" : "客户"}
+          </button>
+          {canManageStore ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={section === "finance"}
+              className={section === "finance" ? "is-active" : ""}
+              onClick={() => setSection("finance")}
+            >
+              <ReceiptText size={16} aria-hidden="true" />
+              {english ? "Finance" : "财务"}
+            </button>
+          ) : null}
+          {canManageStore ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={section === "store"}
+              className={section === "store" ? "is-active" : ""}
+              onClick={() => setSection("store")}
+            >
+              <Store size={16} aria-hidden="true" />
+              {english ? "Store details" : "店铺资料"}
+            </button>
+          ) : null}
+          {canManageStore ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={section === "team"}
+              className={section === "team" ? "is-active" : ""}
+              onClick={() => setSection("team")}
+            >
+              <UsersRound size={16} aria-hidden="true" />
+              {english ? "Team" : "店员"}
+            </button>
+          ) : null}
+        </nav>
+        <span className="store-console-scope">
+          <ShieldCheck size={16} aria-hidden="true" />
+          {canManageStore
+            ? english
+              ? "Store manager"
+              : "仅限本店"
+            : english
+              ? "Store staff"
+              : "店员权限"}
+        </span>
+      </div>
 
       <div className="store-console-content">
-      <div hidden={section !== "products"}><SellerDashboard locale={locale} onNotice={onNotice} subplatform={subplatform} /></div>
-      {canManageStore ? <div hidden={section !== "store"}><StoreManagementPanel store={store} canManageStore={canManageStore} onNotice={onNotice} onUpdated={onStoreUpdated} /></div> : null}
-      {canManageStore ? <div hidden={section !== "team"}><PlatformAccessPanel organizations={subplatform.organizationId ? [scopedOrganization(subplatform)] : []} rootRole="subplatform_admin" onNotice={onNotice} /></div> : null}
-      {canManageStore ? <div hidden={section !== "notifications"}>
-        <section className="surface seller-upload" aria-labelledby="email-config-title">
-          <SectionHeading title="通知邮件" titleId="email-config-title" />
-          <p className="seller-upload-intro">可选。这里只发送本店铺的通知，不会影响商城账号登录或密码重置邮件。</p>
-          <form className="seller-upload-form" onSubmit={save}>
-            <label htmlFor="email-provider-key"><span>发信标识</span><Input id="email-provider-key" value={providerKey} onChange={(event) => setProviderKey(event.target.value)} placeholder="店铺自己的标识" /></label>
-            <label htmlFor="email-smtp-host"><span>SMTP 主机</span><Input id="email-smtp-host" value={smtpHost} onChange={(event) => setSmtpHost(event.target.value)} placeholder="smtp.example.com" /></label>
-            <label htmlFor="email-smtp-port"><span>端口</span><Input id="email-smtp-port" value={smtpPort} onChange={(event) => setSmtpPort(event.target.value)} inputMode="numeric" /></label>
-            <label htmlFor="email-tls-mode"><span>TLS 模式</span><select id="email-tls-mode" value={tlsMode} onChange={(event) => setTlsMode(event.target.value as "starttls" | "tls" | "plain")}><option value="starttls">STARTTLS</option><option value="tls">TLS</option><option value="plain">明文（仅受控内网）</option></select></label>
-            <label htmlFor="email-username"><span>SMTP 用户名</span><Input id="email-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
-            <label htmlFor="email-secret-ref"><span>Secret reference（不填密码）</span><Input id="email-secret-ref" value={credentialSecretRef} onChange={(event) => setCredentialSecretRef(event.target.value)} placeholder="secret://subplatform/&lt;tenant&gt;/&lt;domain&gt;/smtp-password" /></label>
-            <label htmlFor="email-from"><span>发件人地址</span><Input id="email-from" type="email" value={fromAddress} onChange={(event) => setFromAddress(event.target.value)} /></label>
-            <label htmlFor="email-reply-to"><span>回复地址（可选）</span><Input id="email-reply-to" type="email" value={replyTo} onChange={(event) => setReplyTo(event.target.value)} /></label>
-            <label htmlFor="email-mode"><span>发送模式</span><select id="email-mode" value={mode} onChange={(event) => setMode(event.target.value as "test" | "production")}><option value="test">测试</option><option value="production">生产</option></select></label>
-            <label className="email-enabled"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />启用当前邮箱路由</label>
-            <div className="seller-upload-actions seller-upload-wide"><p><Mail size={17} aria-hidden="true" /> {config?.credential_configured ? "服务器密钥已配置" : "尚未配置服务器密钥"}</p><Button type="submit" disabled={saving}><Save size={17} aria-hidden="true" />{saving ? "保存中…" : "保存邮箱配置"}</Button></div>
-          </form>
-        </section>
-      </div> : null}
-      </div>
+        <div hidden={section !== "products"}>
+          <SellerDashboard
+            locale={locale}
+            onNotice={onNotice}
+            subplatform={subplatform}
+          />
+        </div>
+        <div hidden={section !== "customers"}>
+          <StoreCustomersPanel storeId={store.id} locale={locale} />
+        </div>
+        {canManageStore && section === "finance" ? (
+          <StoreFinancePanel
+            locale={locale}
+            onNotice={onNotice}
+            store={store}
+          />
+        ) : null}
+        {canManageStore ? (
+          <div hidden={section !== "store"}>
+            <StoreManagementPanel
+              store={store}
+              canManageStore={canManageStore}
+              onNotice={onNotice}
+              onUpdated={onStoreUpdated}
+            />
+          </div>
+        ) : null}
+        {canManageStore ? (
+          <div hidden={section !== "team"}>
+            <PlatformAccessPanel
+              organizations={
+                subplatform.organizationId
+                  ? [scopedOrganization(subplatform)]
+                  : []
+              }
+              rootRole="subplatform_admin"
+              onNotice={onNotice}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function scopedOrganization(subplatform: SubplatformConfig): SubplatformOrganizationRecord {
+function scopedOrganization(
+  subplatform: SubplatformConfig,
+): SubplatformOrganizationRecord {
   return {
     id: subplatform.organizationId!,
     name: subplatform.brandName,

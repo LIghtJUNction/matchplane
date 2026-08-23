@@ -9,7 +9,8 @@
 
 import { parseRetrievalQuery } from "./retrieval-protocol";
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PLATFORM_PATH_PATTERN = /^\/(?:[a-z0-9-]+(?:\/[a-z0-9-]+)*)?$/;
 const MAX_OBJECT_BYTES = 128 * 1024;
 
@@ -46,6 +47,10 @@ export function validateMcpToolArguments(
       return validateSalesHandoff(args);
     case "marketplace.offer.create":
       return validateOffer(args);
+    case "marketplace.offer.update":
+      return validateOfferUpdate(args);
+    case "marketplace.offer.withdraw":
+      return validateOfferWithdraw(args);
     case "marketplace.offer.match":
       return validateOfferMatch(args);
     case "marketplace.demand.match":
@@ -77,7 +82,10 @@ function validateChildTool(args: Record<string, unknown>): string | null {
   const platformPath = platformPathArgument(args, "platform_path");
   if (platformPath) return platformPath;
   const toolName = args.tool_name;
-  if (typeof toolName !== "string" || !/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(toolName)) {
+  if (
+    typeof toolName !== "string" ||
+    !/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(toolName)
+  ) {
     return "tool_name must be a valid MCP tool name";
   }
   const toolArguments = recordArgument(args, "arguments");
@@ -94,10 +102,14 @@ function validatePlatformMatch(args: Record<string, unknown>): string | null {
 }
 
 function validateAgentHandoff(args: Record<string, unknown>): string | null {
-  if (args.protocol !== "matchplane.agent/v1") return "protocol must be matchplane.agent/v1";
+  if (args.protocol !== "matchplane.agent/v1")
+    return "protocol must be matchplane.agent/v1";
   const requestId = uuidArgument(args, "request_id");
   if (requestId) return requestId;
-  if (typeof args.stage !== "string" || !/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(args.stage)) {
+  if (
+    typeof args.stage !== "string" ||
+    !/^[a-z0-9][a-z0-9._:-]{1,127}$/.test(args.stage)
+  ) {
     return "stage must be a bounded lowercase taxonomy key";
   }
   const scope = recordArgument(args, "scope");
@@ -128,7 +140,8 @@ function validateAgentHandoff(args: Record<string, unknown>): string | null {
     const error = integerArgument(budget!, key, minimum, maximum);
     if (error) return error;
   }
-  if (budget!.cost_bearer !== "caller") return "budget.cost_bearer must be caller";
+  if (budget!.cost_bearer !== "caller")
+    return "budget.cost_bearer must be caller";
   if (args.selected_refs !== undefined) {
     const error = stringArrayArgument(args, "selected_refs", 100, 256);
     if (error) return error;
@@ -139,8 +152,13 @@ function validateAgentHandoff(args: Record<string, unknown>): string | null {
 function validateAgentSession(args: Record<string, unknown>): string | null {
   const scope = requiredScope(args);
   if (scope) return scope;
-  if (args.side !== "demand" && args.side !== "supply") return "side must be demand or supply";
-  if (args.role !== undefined && args.role !== "buyer" && args.role !== "seller") {
+  if (args.side !== "demand" && args.side !== "supply")
+    return "side must be demand or supply";
+  if (
+    args.role !== undefined &&
+    args.role !== "buyer" &&
+    args.role !== "seller"
+  ) {
     return "role must be buyer or seller";
   }
   return optionalString(args, "display_name", 200);
@@ -149,7 +167,8 @@ function validateAgentSession(args: Record<string, unknown>): string | null {
 function validateIntent(args: Record<string, unknown>): string | null {
   const scope = requiredScope(args);
   if (scope) return scope;
-  if (args.side !== "demand" && args.side !== "supply") return "side must be demand or supply";
+  if (args.side !== "demand" && args.side !== "supply")
+    return "side must be demand or supply";
   const participant = uuidArgument(args, "participant_id");
   if (participant) return participant;
   const narrative = requiredString(args, "narrative", 10_000);
@@ -158,13 +177,21 @@ function validateIntent(args: Record<string, unknown>): string | null {
   if (idempotency) return idempotency;
   const objects = validateOptionalObjects(args, ["attributes", "terms"]);
   if (objects) return objects;
-  if (args.supply_discovery_enabled !== undefined && typeof args.supply_discovery_enabled !== "boolean") {
+  if (
+    args.supply_discovery_enabled !== undefined &&
+    typeof args.supply_discovery_enabled !== "boolean"
+  ) {
     return "supply_discovery_enabled must be a boolean";
   }
-  if (args.supply_discovery_expires_at !== undefined && args.supply_discovery_expires_at !== null) {
+  if (
+    args.supply_discovery_expires_at !== undefined &&
+    args.supply_discovery_expires_at !== null
+  ) {
     const expiry = requiredString(args, "supply_discovery_expires_at", 64);
     if (expiry) return expiry;
-    if (!Number.isFinite(Date.parse(args.supply_discovery_expires_at as string))) {
+    if (
+      !Number.isFinite(Date.parse(args.supply_discovery_expires_at as string))
+    ) {
       return "supply_discovery_expires_at must be a valid date-time";
     }
   }
@@ -180,7 +207,12 @@ function validateIntentUpdate(args: Record<string, unknown>): string | null {
   if (participant) return participant;
   const narrative = requiredString(args, "narrative", 10_000);
   if (narrative) return narrative;
-  const version = integerArgument(args, "expected_version", 1, Number.MAX_SAFE_INTEGER);
+  const version = integerArgument(
+    args,
+    "expected_version",
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
   if (version) return version;
   return validateOptionalObjects(args, ["attributes", "terms"]);
 }
@@ -196,7 +228,9 @@ function validateProfileUpsert(args: Record<string, unknown>): string | null {
   if (scope) return scope;
   const participant = uuidArgument(args, "participant_id");
   if (participant) return participant;
-  return typeof recordArgument(args, "profile") === "string" ? recordArgument(args, "profile") as string : null;
+  return typeof recordArgument(args, "profile") === "string"
+    ? (recordArgument(args, "profile") as string)
+    : null;
 }
 
 function validateBehaviorRecord(args: Record<string, unknown>): string | null {
@@ -206,7 +240,8 @@ function validateBehaviorRecord(args: Record<string, unknown>): string | null {
   if (participant) return participant;
   const eventType = requiredString(args, "event_type", 64);
   if (eventType) return eventType;
-  if (!/^[a-z][a-z0-9._:-]{1,63}$/.test(args.event_type as string)) return "event_type must be a lowercase taxonomy key";
+  if (!/^[a-z][a-z0-9._:-]{1,63}$/.test(args.event_type as string))
+    return "event_type must be a lowercase taxonomy key";
   const intent = optionalUuid(args, "intent_id");
   if (intent) return intent;
   const offer = optionalUuid(args, "offer_id");
@@ -229,7 +264,8 @@ function validatePreferenceSet(args: Record<string, unknown>): string | null {
   if (participant) return participant;
   const offer = uuidArgument(args, "offer_id");
   if (offer) return offer;
-  if (!["saved", "dismissed", "neutral"].includes(args.state as string)) return "state must be saved, dismissed, or neutral";
+  if (!["saved", "dismissed", "neutral"].includes(args.state as string))
+    return "state must be saved, dismissed, or neutral";
   return optionalString(args, "reason", 500);
 }
 
@@ -261,6 +297,38 @@ function validateOffer(args: Record<string, unknown>): string | null {
   return optionalUuid(args, "asset_id", true);
 }
 
+function validateOfferUpdate(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const party = uuidArgument(args, "supply_party_id");
+  if (party) return party;
+  const offer = uuidArgument(args, "offer_id");
+  if (offer) return offer;
+  const displayName = requiredString(args, "display_name", 500);
+  if (displayName) return displayName;
+  const version = integerArgument(
+    args,
+    "expected_version",
+    1,
+    Number.MAX_SAFE_INTEGER,
+  );
+  if (version) return version;
+  const attributes = recordArgument(args, "attributes");
+  if (typeof attributes === "string") return attributes;
+  const terms = recordArgument(args, "terms");
+  return typeof terms === "string" ? terms : null;
+}
+
+function validateOfferWithdraw(args: Record<string, unknown>): string | null {
+  const scope = requiredScope(args);
+  if (scope) return scope;
+  const party = uuidArgument(args, "supply_party_id");
+  if (party) return party;
+  const offer = uuidArgument(args, "offer_id");
+  if (offer) return offer;
+  return integerArgument(args, "expected_version", 1, Number.MAX_SAFE_INTEGER);
+}
+
 function validateOfferMatch(args: Record<string, unknown>): string | null {
   const scope = requiredScope(args);
   if (scope) return scope;
@@ -281,7 +349,9 @@ function validateDemandMatch(args: Record<string, unknown>): string | null {
   return optionalInteger(args, "limit", 1, 100);
 }
 
-function validateDemandDiscoveryUpdate(args: Record<string, unknown>): string | null {
+function validateDemandDiscoveryUpdate(
+  args: Record<string, unknown>,
+): string | null {
   const scope = requiredScope(args);
   if (scope) return scope;
   const intent = uuidArgument(args, "intent_id");
@@ -292,7 +362,8 @@ function validateDemandDiscoveryUpdate(args: Record<string, unknown>): string | 
   if (args.expires_at !== undefined && args.expires_at !== null) {
     const expiry = requiredString(args, "expires_at", 64);
     if (expiry) return expiry;
-    if (!Number.isFinite(Date.parse(args.expires_at as string))) return "expires_at must be a valid date-time";
+    if (!Number.isFinite(Date.parse(args.expires_at as string)))
+      return "expires_at must be a valid date-time";
   }
   return null;
 }
@@ -304,19 +375,28 @@ function validateIntroduction(args: Record<string, unknown>): string | null {
     const error = uuidArgument(args, key);
     if (error) return error;
   }
-  if (typeof args.score !== "number" || !Number.isFinite(args.score) || args.score < 0 || args.score > 1) {
+  if (
+    typeof args.score !== "number" ||
+    !Number.isFinite(args.score) ||
+    args.score < 0 ||
+    args.score > 1
+  ) {
     return "score must be a finite number between 0 and 1";
   }
   const idempotency = requiredString(args, "idempotency_key", 240);
   if (idempotency) return idempotency;
   const expiresAt = requiredString(args, "expires_at", 64);
   if (expiresAt) return expiresAt;
-  if (!Number.isFinite(Date.parse(args.expires_at as string))) return "expires_at must be a valid date-time";
-  if (args.reasons !== undefined) return stringArrayArgument(args, "reasons", 24, 500);
+  if (!Number.isFinite(Date.parse(args.expires_at as string)))
+    return "expires_at must be a valid date-time";
+  if (args.reasons !== undefined)
+    return stringArrayArgument(args, "reasons", 24, 500);
   return optionalUuid(args, "introduction_id");
 }
 
-function validateIntroductionList(args: Record<string, unknown>): string | null {
+function validateIntroductionList(
+  args: Record<string, unknown>,
+): string | null {
   const scope = requiredScope(args);
   if (scope) return scope;
   return uuidArgument(args, "participant_id");
@@ -345,50 +425,82 @@ function optionalPlatformPath(args: Record<string, unknown>): string | null {
   return platformPathArgument(args, "platformPath");
 }
 
-function platformPathArgument(args: Record<string, unknown>, key: string): string | null {
+function platformPathArgument(
+  args: Record<string, unknown>,
+  key: string,
+): string | null {
   const value = args[key];
-  if (typeof value !== "string" || value.length > 512 || !PLATFORM_PATH_PATTERN.test(value)) {
+  if (
+    typeof value !== "string" ||
+    value.length > 512 ||
+    !PLATFORM_PATH_PATTERN.test(value)
+  ) {
     return `${key} must be a normalized platform path`;
   }
   return null;
 }
 
-function uuidArgument(args: Record<string, unknown>, key: string): string | null {
+function uuidArgument(
+  args: Record<string, unknown>,
+  key: string,
+): string | null {
   const value = args[key];
   return typeof value === "string" && UUID_PATTERN.test(value)
     ? null
     : `${key} must be a UUID`;
 }
 
-function optionalUuid(args: Record<string, unknown>, key: string, nullable = false): string | null {
+function optionalUuid(
+  args: Record<string, unknown>,
+  key: string,
+  nullable = false,
+): string | null {
   if (args[key] === undefined || (nullable && args[key] === null)) return null;
   return uuidArgument(args, key);
 }
 
-function requiredString(args: Record<string, unknown>, key: string, maximum: number): string | null {
+function requiredString(
+  args: Record<string, unknown>,
+  key: string,
+  maximum: number,
+): string | null {
   const value = args[key];
-  return typeof value === "string" && value.trim().length > 0 && value.length <= maximum
+  return typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length <= maximum
     ? null
     : `${key} must contain 1..${maximum} characters`;
 }
 
-function optionalString(args: Record<string, unknown>, key: string, maximum: number): string | null {
+function optionalString(
+  args: Record<string, unknown>,
+  key: string,
+  maximum: number,
+): string | null {
   if (args[key] === undefined) return null;
   return requiredString(args, key, maximum);
 }
 
-function recordArgument(args: Record<string, unknown>, key: string): Record<string, unknown> | string {
+function recordArgument(
+  args: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | string {
   const value = args[key];
-  if (!value || typeof value !== "object" || Array.isArray(value)) return `${key} must be an object`;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return `${key} must be an object`;
   try {
-    if (Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_OBJECT_BYTES) return `${key} is too large`;
+    if (Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_OBJECT_BYTES)
+      return `${key} is too large`;
   } catch {
     return `${key} must be JSON serializable`;
   }
   return value as Record<string, unknown>;
 }
 
-function validateOptionalObjects(args: Record<string, unknown>, keys: string[]): string | null {
+function validateOptionalObjects(
+  args: Record<string, unknown>,
+  keys: string[],
+): string | null {
   for (const key of keys) {
     if (args[key] === undefined) continue;
     const value = recordArgument(args, key);
@@ -404,20 +516,38 @@ function stringArrayArgument(
   maximumLength: number,
 ): string | null {
   const value = args[key];
-  if (!Array.isArray(value) || value.length > maximumItems || value.some((item) => typeof item !== "string" || item.length > maximumLength)) {
+  if (
+    !Array.isArray(value) ||
+    value.length > maximumItems ||
+    value.some(
+      (item) => typeof item !== "string" || item.length > maximumLength,
+    )
+  ) {
     return `${key} must be an array of at most ${maximumItems} strings`;
   }
   return null;
 }
 
-function integerArgument(args: Record<string, unknown>, key: string, minimum: number, maximum: number): string | null {
+function integerArgument(
+  args: Record<string, unknown>,
+  key: string,
+  minimum: number,
+  maximum: number,
+): string | null {
   const value = args[key];
-  return Number.isSafeInteger(value) && (value as number) >= minimum && (value as number) <= maximum
+  return Number.isSafeInteger(value) &&
+    (value as number) >= minimum &&
+    (value as number) <= maximum
     ? null
     : `${key} must be an integer between ${minimum} and ${maximum}`;
 }
 
-function optionalInteger(args: Record<string, unknown>, key: string, minimum: number, maximum: number): string | null {
+function optionalInteger(
+  args: Record<string, unknown>,
+  key: string,
+  minimum: number,
+  maximum: number,
+): string | null {
   if (args[key] === undefined) return null;
   return integerArgument(args, key, minimum, maximum);
 }

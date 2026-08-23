@@ -29,9 +29,11 @@ import { isRootEmailAuthConfigured, sendConfiguredAuthEmail } from "./mail";
 import { sendConfiguredPhoneOtp } from "./sms";
 import { isProductionEnvironment } from "./runtime";
 import { readManagedNationalIdentityConfig } from "./national-identity-config";
+import { isUuid } from "./uuid";
 
 const database = new Pool({
-  connectionString: process.env.MATCHPLANE_DATABASE_URL ?? process.env.DATABASE_URL,
+  connectionString:
+    process.env.MATCHPLANE_DATABASE_URL ?? process.env.DATABASE_URL,
   max: Number(process.env.MATCHPLANE_AUTH_POOL_SIZE ?? 10),
 });
 
@@ -39,16 +41,24 @@ const database = new Pool({
 // Better Auth APIs for credentials, sessions, roles, and API-key verification.
 export const authDatabase = database;
 
-const configuredBaseURL = process.env.BETTER_AUTH_URL?.trim()
-  || process.env.NEXT_PUBLIC_BETTER_AUTH_URL?.trim()
-  || "http://localhost:4173";
+const configuredBaseURL =
+  process.env.BETTER_AUTH_URL?.trim() ||
+  process.env.NEXT_PUBLIC_BETTER_AUTH_URL?.trim() ||
+  "http://localhost:4173";
 const baseURL = configuredBaseURL.replace(/\/$/, "");
+const parsedBaseURL = requiredAbsoluteUrl(baseURL, "BETTER_AUTH_URL");
 
-const configuredRootAdminEmail = process.env.MATCHPLANE_ROOT_ADMIN_EMAIL?.trim().toLowerCase();
+const configuredRootAdminEmail =
+  process.env.MATCHPLANE_ROOT_ADMIN_EMAIL?.trim().toLowerCase();
 const configuredSecret = process.env.BETTER_AUTH_SECRET?.trim();
 const isProductionBuild = process.env.NEXT_PHASE === "phase-production-build";
-const secret = configuredSecret ?? (isProductionBuild ? randomBytes(32).toString("base64url") : undefined);
-const trustedOrigins = parseTrustedOrigins(baseURL, process.env.BETTER_AUTH_TRUSTED_ORIGINS);
+const secret =
+  configuredSecret ??
+  (isProductionBuild ? randomBytes(32).toString("base64url") : undefined);
+const trustedOrigins = parseTrustedOrigins(
+  baseURL,
+  process.env.BETTER_AUTH_TRUSTED_ORIGINS,
+);
 // MatchPlane's explicit deployment profile takes precedence over Next.js' build mode. Local
 // Compose intentionally uses NODE_ENV=production for an optimized bundle while retaining the
 // development profile and its local-only defaults.
@@ -59,8 +69,9 @@ const isProductionRuntime = isProductionEnvironment();
 // verification step, even if an operator accidentally carries the development variable into a
 // production deployment.
 const allowDevAuthBootstrap =
-  (process.env.MATCHPLANE_ENVIRONMENT === "development" || process.env.MATCHPLANE_ENVIRONMENT === "test")
-  && process.env.MATCHPLANE_ALLOW_DEMO_BOOTSTRAP === "true";
+  (process.env.MATCHPLANE_ENVIRONMENT === "development" ||
+    process.env.MATCHPLANE_ENVIRONMENT === "test") &&
+  process.env.MATCHPLANE_ALLOW_DEMO_BOOTSTRAP === "true";
 const configuredSocialProviders = configuredOAuthProviders();
 const oidcEnabled = process.env.MATCHPLANE_OIDC_ENABLED !== "false";
 const oidcIssuer = `${baseURL}/api/auth`;
@@ -72,7 +83,9 @@ const oidcIssuer = `${baseURL}/api/auth`;
  */
 export function rootPlatformReferenceId(): string {
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  return tenantId && isUuid(tenantId) ? `root-platform:${tenantId}` : "root-platform";
+  return tenantId && isUuid(tenantId)
+    ? `root-platform:${tenantId}`
+    : "root-platform";
 }
 
 if (
@@ -80,12 +93,16 @@ if (
   !isProductionBuild &&
   (!secret || secret.startsWith("CHANGE_ME") || secret.length < 32)
 ) {
-  throw new Error("BETTER_AUTH_SECRET must be configured for the Next.js authentication service");
+  throw new Error(
+    "BETTER_AUTH_SECRET must be configured for the Next.js authentication service",
+  );
 }
 
 if (isProductionRuntime && !isProductionBuild) {
   if (!process.env.MATCHPLANE_DATABASE_URL?.trim()) {
-    throw new Error("MATCHPLANE_DATABASE_URL must be configured for the Next.js authentication service");
+    throw new Error(
+      "MATCHPLANE_DATABASE_URL must be configured for the Next.js authentication service",
+    );
   }
   if (!isHttpsOrigin(baseURL)) {
     throw new Error("BETTER_AUTH_URL must be an HTTPS origin in production");
@@ -93,8 +110,13 @@ if (isProductionRuntime && !isProductionBuild) {
   // A missing address is a safe, observable first-run state: the web service can expose the
   // bounded setup status and tell the operator what to configure.  A supplied placeholder is
   // still fatal so a deployment can never accidentally promote an example account.
-  if (configuredRootAdminEmail && isPlaceholderEmail(configuredRootAdminEmail)) {
-    throw new Error("MATCHPLANE_ROOT_ADMIN_EMAIL must be an operator-owned address in production");
+  if (
+    configuredRootAdminEmail &&
+    isPlaceholderEmail(configuredRootAdminEmail)
+  ) {
+    throw new Error(
+      "MATCHPLANE_ROOT_ADMIN_EMAIL must be an operator-owned address in production",
+    );
   }
 }
 
@@ -114,6 +136,14 @@ export const auth = betterAuth({
   // would turn CSRF protection into an allow-any-origin policy. Operators may explicitly add
   // known front-end origins through BETTER_AUTH_TRUSTED_ORIGINS.
   trustedOrigins,
+  rateLimit: {
+    enabled: true,
+    window: 10,
+    max: 100,
+    // Session hydration is a read-only, cookie-bound check. Keeping it on the shared
+    // IP bucket lets one stale browser tab make every other signed-in tab appear logged out.
+    customRules: { "/get-session": false },
+  },
   account: {
     accountLinking: {
       enabled: true,
@@ -124,6 +154,13 @@ export const auth = betterAuth({
       // explicit authenticated link flow; it never becomes an implicit email-account match.
       trustedProviders: ["wechat"],
       allowDifferentEmails: true,
+    },
+  },
+  user: {
+    additionalFields: {
+      marketplaceRole: { type: "string", required: false, input: true },
+      legalTermsVersion: { type: "number", required: false, input: true },
+      legalPrivacyVersion: { type: "number", required: false, input: true },
     },
   },
   emailAndPassword: {
@@ -156,62 +193,73 @@ export const auth = betterAuth({
       }),
   },
   plugins: [
-    ...(oidcEnabled ? [jwt({
-      jwks: {
-        keyPairConfig: { alg: "EdDSA", crv: "Ed25519" },
-        rotationInterval: 60 * 60 * 24 * 30,
-        gracePeriod: 60 * 60 * 24 * 30,
-      },
-      jwt: {
-        issuer: oidcIssuer,
-        expirationTime: "15m",
-      },
-      // OAuth/OIDC owns its own tokens. Do not add a signed JWT to ordinary
-      // Better Auth session responses where it could be mistaken for a platform
-      // capability.
-      disableSettingJwtHeader: true,
-    }), oauthProvider({
-      scopes: ["openid", "profile", "email"],
-      loginPage: "/login",
-      consentPage: "/oauth/consent",
-      requirePKCE: true,
-      allowDynamicClientRegistration: false,
-      clientRegistrationDefaultScopes: ["openid", "profile", "email"],
-      clientRegistrationAllowedScopes: ["openid", "profile", "email"],
-      grantTypes: ["authorization_code", "refresh_token"],
-      disableJwtPlugin: false,
-      storeClientSecret: "hashed",
-      storeTokens: "hashed",
-      prefix: {
-        opaqueAccessToken: "mp_at_",
-        refreshToken: "mp_rt_",
-        clientSecret: "mp_cs_",
-      },
-      advertisedMetadata: {
-        scopes_supported: ["openid", "profile", "email"],
-        claims_supported: [
-          "sub",
-          "iss",
-          "aud",
-          "exp",
-          "iat",
-          "sid",
-          "email",
-          "email_verified",
-          "name",
-        ],
-      },
-      silenceWarnings: {
-        oauthAuthServerConfig: true,
-        openidConfig: true,
-      },
-      // Cross-origin clients are root-managed confidential applications.  Keep the
-      // ownership scope stable across root administrators while rejecting all
-      // organization-scoped users from the provider's CRUD surface.
-      clientReference: ({ user }) => isRootPlatformRole(user?.role) ? rootPlatformReferenceId() : undefined,
-      clientPrivileges: ({ action, user }) =>
-        isRootPlatformRole(user?.role) && ["create", "read", "update", "delete", "list", "rotate"].includes(action),
-    })] : []),
+    ...(oidcEnabled
+      ? [
+          jwt({
+            jwks: {
+              keyPairConfig: { alg: "EdDSA", crv: "Ed25519" },
+              rotationInterval: 60 * 60 * 24 * 30,
+              gracePeriod: 60 * 60 * 24 * 30,
+            },
+            jwt: {
+              issuer: oidcIssuer,
+              expirationTime: "15m",
+            },
+            // OAuth/OIDC owns its own tokens. Do not add a signed JWT to ordinary
+            // Better Auth session responses where it could be mistaken for a platform
+            // capability.
+            disableSettingJwtHeader: true,
+          }),
+          oauthProvider({
+            scopes: ["openid", "profile", "email"],
+            loginPage: "/login",
+            consentPage: "/oauth/consent",
+            requirePKCE: true,
+            allowDynamicClientRegistration: false,
+            clientRegistrationDefaultScopes: ["openid", "profile", "email"],
+            clientRegistrationAllowedScopes: ["openid", "profile", "email"],
+            grantTypes: ["authorization_code", "refresh_token"],
+            disableJwtPlugin: false,
+            storeClientSecret: "hashed",
+            storeTokens: "hashed",
+            prefix: {
+              opaqueAccessToken: "mp_at_",
+              refreshToken: "mp_rt_",
+              clientSecret: "mp_cs_",
+            },
+            advertisedMetadata: {
+              scopes_supported: ["openid", "profile", "email"],
+              claims_supported: [
+                "sub",
+                "iss",
+                "aud",
+                "exp",
+                "iat",
+                "sid",
+                "email",
+                "email_verified",
+                "name",
+              ],
+            },
+            silenceWarnings: {
+              oauthAuthServerConfig: true,
+              openidConfig: true,
+            },
+            // Cross-origin clients are root-managed confidential applications.  Keep the
+            // ownership scope stable across root administrators while rejecting all
+            // organization-scoped users from the provider's CRUD surface.
+            clientReference: ({ user }) =>
+              isRootPlatformRole(user?.role)
+                ? rootPlatformReferenceId()
+                : undefined,
+            clientPrivileges: ({ action, user }) =>
+              isRootPlatformRole(user?.role) &&
+              ["create", "read", "update", "delete", "list", "rotate"].includes(
+                action,
+              ),
+          }),
+        ]
+      : []),
     emailOTP({
       otpLength: 6,
       expiresIn: 5 * 60,
@@ -225,7 +273,9 @@ export const auth = betterAuth({
         const resettingPassword = data.type === "forget-password";
         return sendConfiguredAuthEmail({
           recipient: data.email,
-          subject: resettingPassword ? "重置你的 MatchPlane 密码" : "你的 MatchPlane 登录验证码",
+          subject: resettingPassword
+            ? "重置你的 MatchPlane 密码"
+            : "你的 MatchPlane 登录验证码",
           text: `你的 MatchPlane${resettingPassword ? "密码重置" : "登录"}验证码是 ${data.otp}。验证码 5 分钟内有效，请勿转发给他人。`,
           html: `<p>你的 MatchPlane${resettingPassword ? "密码重置" : "登录"}验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:0.3em">${escapeHtml(data.otp)}</p><p>验证码 5 分钟内有效，请勿转发给他人。</p>`,
         });
@@ -242,11 +292,18 @@ export const auth = betterAuth({
     }),
     passkey({
       rpName: "MatchPlane",
-      rpID: new URL(baseURL).hostname,
+      rpID: parsedBaseURL.hostname,
       origin: baseURL,
     }),
     ...(configuredSocialProviders.length
-      ? [genericOAuth({ config: configuredSocialProviders.map((provider) => ({ ...provider, disableImplicitSignUp: true })) })]
+      ? [
+          genericOAuth({
+            config: configuredSocialProviders.map((provider) => ({
+              ...provider,
+              disableImplicitSignUp: true,
+            })),
+          }),
+        ]
       : []),
     apiKey({
       configId: "platform",
@@ -279,7 +336,7 @@ export const auth = betterAuth({
       adminRoles: ["rootSuperAdmin"],
       defaultRole: "user",
     }),
-  organization({
+    organization({
       ac: organizationAccessControl,
       roles: {
         owner: organizationOwner,
@@ -298,7 +355,11 @@ export const auth = betterAuth({
             tenantId: { type: "string", required: false, input: false },
             domainId: { type: "string", required: false, input: false },
             sourceRepository: { type: "string", required: false, input: false },
-            parentOrganizationId: { type: "string", required: false, input: false },
+            parentOrganizationId: {
+              type: "string",
+              required: false,
+              input: false,
+            },
           },
         },
         member: {
@@ -309,28 +370,34 @@ export const auth = betterAuth({
       },
     }),
   ],
-  schema: {
-    user: {
-      additionalFields: {
-        marketplaceRole: { type: "string", required: false, input: true },
-        legalTermsVersion: { type: "number", required: false, input: true },
-        legalPrivacyVersion: { type: "number", required: false, input: true },
-      },
-    },
-  },
   databaseHooks: {
     user: {
       create: {
         before: async (user) => {
           const legal = await currentLegalVersions();
-          const acceptedTermsVersion = legalVersionFromUser(user, "legalTermsVersion");
-          const acceptedPrivacyVersion = legalVersionFromUser(user, "legalPrivacyVersion");
-          if (!legal || acceptedTermsVersion !== legal.terms || acceptedPrivacyVersion !== legal.privacy) {
+          const acceptedTermsVersion = legalVersionFromUser(
+            user,
+            "legalTermsVersion",
+          );
+          const acceptedPrivacyVersion = legalVersionFromUser(
+            user,
+            "legalPrivacyVersion",
+          );
+          if (
+            !legal ||
+            acceptedTermsVersion !== legal.terms ||
+            acceptedPrivacyVersion !== legal.privacy
+          ) {
             throw new Error("请先阅读并同意当前用户协议和隐私政策");
           }
-          const acceptedLegalData = { legalTermsVersion: legal.terms, legalPrivacyVersion: legal.privacy };
+          const acceptedLegalData = {
+            legalTermsVersion: legal.terms,
+            legalPrivacyVersion: legal.privacy,
+          };
           if (await hasReservedSuperAdminInvite(user.email)) {
-            return { data: { ...user, ...acceptedLegalData, role: "rootSuperAdmin" } };
+            return {
+              data: { ...user, ...acceptedLegalData, role: "rootSuperAdmin" },
+            };
           }
           if (!allowDevAuthBootstrap && !(await isRootEmailAuthConfigured())) {
             throw new Error("普通用户注册暂未开放");
@@ -338,7 +405,10 @@ export const auth = betterAuth({
           return { data: { ...user, ...acceptedLegalData } };
         },
         after: async (user) => {
-          if ((user as typeof user & { role?: string | null }).role === "rootSuperAdmin") {
+          if (
+            (user as typeof user & { role?: string | null }).role ===
+            "rootSuperAdmin"
+          ) {
             await consumeReservedSuperAdminInvite(user.email, user.id);
           }
           await recordLegalAcceptance(user);
@@ -348,8 +418,12 @@ export const auth = betterAuth({
     session: {
       create: {
         before: async (session, context) => {
-          const user = await context?.context.internalAdapter.findUserById(session.userId);
-          const role = (user as typeof user & { role?: string | null } | null)?.role ?? "user";
+          const user = await context?.context.internalAdapter.findUserById(
+            session.userId,
+          );
+          const role =
+            (user as (typeof user & { role?: string | null }) | null)?.role ??
+            "user";
           if (role === "user" && user?.emailVerified !== true) {
             throw new Error("普通账号完成邮箱验证后才能登录");
           }
@@ -367,7 +441,10 @@ export const auth = betterAuth({
 async function hasReservedSuperAdminInvite(email: string): Promise<boolean> {
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!tenantId || !isUuid(tenantId)) return false;
-  const result = await authDatabase.query<{ registration_email: string | null; target_email: string | null }>(
+  const result = await authDatabase.query<{
+    registration_email: string | null;
+    target_email: string | null;
+  }>(
     `SELECT registration_email, target_email
        FROM root_superadmin_invites
       WHERE tenant_id = $1::uuid
@@ -377,14 +454,23 @@ async function hasReservedSuperAdminInvite(email: string): Promise<boolean> {
   );
   const invite = result.rows[0];
   if (!invite?.registration_email) return false;
-  return invite.registration_email.toLowerCase() === email.toLowerCase()
-    && (!invite.target_email || invite.target_email.toLowerCase() === email.toLowerCase());
+  return (
+    invite.registration_email.toLowerCase() === email.toLowerCase() &&
+    (!invite.target_email ||
+      invite.target_email.toLowerCase() === email.toLowerCase())
+  );
 }
 
-async function currentLegalVersions(): Promise<{ terms: number; privacy: number } | null> {
+async function currentLegalVersions(): Promise<{
+  terms: number;
+  privacy: number;
+} | null> {
   const tenantId = await legalTenantId();
   if (!tenantId) return null;
-  const result = await authDatabase.query<{ kind: "terms" | "privacy"; version: string }>(
+  const result = await authDatabase.query<{
+    kind: "terms" | "privacy";
+    version: string;
+  }>(
     `SELECT kind, version::text FROM mall_legal_documents
       WHERE tenant_id = $1::uuid AND kind = ANY($2::text[])`,
     [tenantId, ["terms", "privacy"]],
@@ -393,16 +479,34 @@ async function currentLegalVersions(): Promise<{ terms: number; privacy: number 
   const privacy = result.rows.find((row) => row.kind === "privacy");
   const termsVersion = Number(terms?.version);
   const privacyVersion = Number(privacy?.version);
-  if (!Number.isSafeInteger(termsVersion) || termsVersion < 1 || !Number.isSafeInteger(privacyVersion) || privacyVersion < 1) return null;
+  if (
+    !Number.isSafeInteger(termsVersion) ||
+    termsVersion < 1 ||
+    !Number.isSafeInteger(privacyVersion) ||
+    privacyVersion < 1
+  )
+    return null;
   return { terms: termsVersion, privacy: privacyVersion };
 }
 
-function legalVersionFromUser(user: unknown, key: "legalTermsVersion" | "legalPrivacyVersion"): number | null {
-  const value = user && typeof user === "object" ? (user as Record<string, unknown>)[key] : undefined;
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+function legalVersionFromUser(
+  user: unknown,
+  key: "legalTermsVersion" | "legalPrivacyVersion",
+): number | null {
+  const value =
+    user && typeof user === "object"
+      ? (user as Record<string, unknown>)[key]
+      : undefined;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
 }
 
-async function recordLegalAcceptance(user: { id: string; legalTermsVersion?: unknown; legalPrivacyVersion?: unknown }): Promise<void> {
+async function recordLegalAcceptance(user: {
+  id: string;
+  legalTermsVersion?: unknown;
+  legalPrivacyVersion?: unknown;
+}): Promise<void> {
   const tenantId = await legalTenantId();
   if (!tenantId) return;
   const termsVersion = legalVersionFromUser(user, "legalTermsVersion");
@@ -430,10 +534,13 @@ async function legalTenantId(): Promise<string | null> {
       ORDER BY tenant.created_at ASC
       LIMIT 2`,
   );
-  return result.rows.length === 1 ? result.rows[0]?.id ?? null : null;
+  return result.rows.length === 1 ? (result.rows[0]?.id ?? null) : null;
 }
 
-async function consumeReservedSuperAdminInvite(email: string, userId: string): Promise<void> {
+async function consumeReservedSuperAdminInvite(
+  email: string,
+  userId: string,
+): Promise<void> {
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!tenantId || !isUuid(tenantId)) return;
   await authDatabase.query(
@@ -463,9 +570,16 @@ export async function applyPlatformAdminInviteRole(input: {
 
   if (input.role === "rootAdmin") {
     if (userWithRole.role !== "rootSuperAdmin") {
-      await context.internalAdapter.updateUser(input.userId, { role: "rootAdmin" });
+      await context.internalAdapter.updateUser(input.userId, {
+        role: "rootAdmin",
+      });
     }
-    return { userId: input.userId, organizationId: input.organizationId, role: userWithRole.role === "rootSuperAdmin" ? "rootSuperAdmin" : "rootAdmin" };
+    return {
+      userId: input.userId,
+      organizationId: input.organizationId,
+      role:
+        userWithRole.role === "rootSuperAdmin" ? "rootSuperAdmin" : "rootAdmin",
+    };
   }
 
   // The plugin context returned by this Better Auth build is structurally compatible with
@@ -482,29 +596,63 @@ export async function applyPlatformAdminInviteRole(input: {
       userId: input.userId,
       role: "admin",
     });
-    return { userId: input.userId, organizationId: input.organizationId, role: "admin" };
+    return {
+      userId: input.userId,
+      organizationId: input.organizationId,
+      role: "admin",
+    };
   }
   if (member.role !== "owner" && member.role !== "admin") {
     await organizationAdapter.updateMember(member.id, "admin");
   }
-  return { userId: input.userId, organizationId: input.organizationId, role: member.role === "owner" ? "owner" : "admin" };
+  return {
+    userId: input.userId,
+    organizationId: input.organizationId,
+    role: member.role === "owner" ? "owner" : "admin",
+  };
 }
 
 function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) =>
-    ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    })[character] ?? character,
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character] ?? character,
   );
 }
 
-function parseTrustedOrigins(base: string, additional: string | undefined): string[] {
-  const values = [base, ...(additional ?? "").split(",").map((value) => value.trim()).filter(Boolean)];
-  return [...new Set(values.map((value) => new URL(value).origin))];
+function parseTrustedOrigins(
+  base: string,
+  additional: string | undefined,
+): string[] {
+  const values = [
+    base,
+    ...(additional ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ];
+  return [
+    ...new Set(
+      values.map(
+        (value) =>
+          requiredAbsoluteUrl(value, "BETTER_AUTH_TRUSTED_ORIGINS").origin,
+      ),
+    ),
+  ];
+}
+
+function requiredAbsoluteUrl(value: string, field: string): URL {
+  try {
+    return new URL(value);
+  } catch (cause) {
+    throw new Error(`${field} must contain valid absolute URLs`, { cause });
+  }
 }
 
 function isHttpsOrigin(value: string): boolean {
@@ -515,12 +663,12 @@ function isHttpsOrigin(value: string): boolean {
   }
 }
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
 function isPlaceholderEmail(value: string): boolean {
-  return value.endsWith("@example.com") || value.endsWith("@example.org") || value.endsWith("@example.net");
+  return (
+    value.endsWith("@example.com") ||
+    value.endsWith("@example.org") ||
+    value.endsWith("@example.net")
+  );
 }
 
 function isRootPlatformRole(role: unknown): boolean {
@@ -555,83 +703,180 @@ export function configuredFallbackOAuthProviderIds(): string[] {
 
 function configuredOAuthProviders(): GenericOAuthConfig[] {
   const definitions = [
-    { providerId: "national_identity", envKey: "NATIONAL_IDENTITY", defaultScopes: ["openid"] },
-    { providerId: "google", envKey: "GOOGLE", defaultScopes: ["openid", "profile", "email"] },
-    { providerId: "wechat", envKey: "WECHAT", defaultScopes: ["openid", "profile", "email"] },
-    { providerId: "qq", envKey: "QQ", defaultScopes: ["openid", "profile", "email"] },
-    { providerId: "alipay", envKey: "ALIPAY", defaultScopes: ["openid", "profile", "email"] },
+    {
+      providerId: "national_identity",
+      envKey: "NATIONAL_IDENTITY",
+      defaultScopes: ["openid"],
+    },
+    {
+      providerId: "google",
+      envKey: "GOOGLE",
+      defaultScopes: ["openid", "profile", "email"],
+    },
+    {
+      providerId: "wechat",
+      envKey: "WECHAT",
+      defaultScopes: ["openid", "profile", "email"],
+    },
+    {
+      providerId: "qq",
+      envKey: "QQ",
+      defaultScopes: ["openid", "profile", "email"],
+    },
+    {
+      providerId: "alipay",
+      envKey: "ALIPAY",
+      defaultScopes: ["openid", "profile", "email"],
+    },
   ] as const;
 
   return definitions.flatMap(({ providerId, envKey, defaultScopes }) => {
     const prefix = `MATCHPLANE_${envKey}_OAUTH_`;
-    const managedNationalIdentity = providerId === "national_identity"
-      ? readManagedNationalIdentityConfig()
-      : null;
+    const managedNationalIdentity =
+      providerId === "national_identity"
+        ? readManagedNationalIdentityConfig()
+        : null;
     // A saved but disabled national-identity record intentionally wins over
     // deployment variables so an operator can turn the integration off from
     // the mall settings without deleting credentials from the host.
     if (managedNationalIdentity && !managedNationalIdentity.enabled) return [];
-    const clientId = managedNationalIdentity?.clientId ?? process.env[`${prefix}CLIENT_ID`]?.trim();
-    const clientSecret = managedNationalIdentity?.clientSecret ?? process.env[`${prefix}CLIENT_SECRET`]?.trim();
+    const clientId =
+      managedNationalIdentity?.clientId ??
+      process.env[`${prefix}CLIENT_ID`]?.trim();
+    const clientSecret =
+      managedNationalIdentity?.clientSecret ??
+      process.env[`${prefix}CLIENT_SECRET`]?.trim();
     // Some approved identity gateways publish OIDC discovery, while others
     // provide a fixed authorization/token/userinfo contract.  Never invent a
     // public endpoint here: operators must supply the URLs from their signed
     // application-access agreement or official SDK gateway.
-    const discoveryUrl = safeOAuthUrl(managedNationalIdentity?.discoveryUrl ?? process.env[`${prefix}DISCOVERY_URL`]);
-    const authorizationUrl = safeOAuthUrl(managedNationalIdentity?.authorizationUrl ?? process.env[`${prefix}AUTHORIZATION_URL`]);
-    const tokenUrl = safeOAuthUrl(managedNationalIdentity?.tokenUrl ?? process.env[`${prefix}TOKEN_URL`]);
-    const userInfoUrl = safeOAuthUrl(managedNationalIdentity?.userInfoUrl ?? process.env[`${prefix}USERINFO_URL`]);
-    const hasEndpointContract = Boolean(discoveryUrl || (authorizationUrl && tokenUrl && userInfoUrl));
+    const discoveryUrl = safeOAuthUrl(
+      managedNationalIdentity?.discoveryUrl ??
+        process.env[`${prefix}DISCOVERY_URL`],
+    );
+    const authorizationUrl = safeOAuthUrl(
+      managedNationalIdentity?.authorizationUrl ??
+        process.env[`${prefix}AUTHORIZATION_URL`],
+    );
+    const tokenUrl = safeOAuthUrl(
+      managedNationalIdentity?.tokenUrl ?? process.env[`${prefix}TOKEN_URL`],
+    );
+    const userInfoUrl = safeOAuthUrl(
+      managedNationalIdentity?.userInfoUrl ??
+        process.env[`${prefix}USERINFO_URL`],
+    );
+    const hasEndpointContract = Boolean(
+      discoveryUrl || (authorizationUrl && tokenUrl && userInfoUrl),
+    );
     if (!clientId || !clientSecret || !hasEndpointContract) {
-      const anyConfigured = [clientId, clientSecret, discoveryUrl, authorizationUrl, tokenUrl, userInfoUrl].some(Boolean);
-      if (anyConfigured) console.warn(`${providerId} OAuth is not enabled: complete ${prefix} configuration is required`);
-      return [];
-    }
-
-    return [{
-      providerId,
-      name: providerId === "national_identity" ? "国家网络身份认证" : providerId,
-      clientId,
-      clientSecret,
-      ...(discoveryUrl ? { discoveryUrl, requireIdTokenVerification: true } : {
+      const anyConfigured = [
+        clientId,
+        clientSecret,
+        discoveryUrl,
         authorizationUrl,
         tokenUrl,
         userInfoUrl,
-      }),
-      accountSubject: ({ profile }) => {
-        const subject = firstProfileString(profile, providerId === "national_identity"
-          ? ["sub", "id", "network_id", "net_id", "user_id", "uid", "openid"]
-          : ["sub", "id", "openid", "unionid", "user_id", "uid"]);
-        if (!subject) throw new Error(`${providerId} OAuth profile has no stable subject`);
-        // The national service's subject is an opaque network identifier, but
-        // hashing it before persisting still keeps raw identity material out of
-        // the Better Auth account table while preserving stable linking.
-        return providerId === "national_identity" ? opaqueIdentitySubject(subject) : subject;
-      },
-      scopes: managedNationalIdentity?.scopes ?? parseOAuthScopes(process.env[`${prefix}SCOPES`], defaultScopes),
-      mapProfileToUser: (profile: Record<string, unknown>) => {
-        const subject = firstProfileString(profile, providerId === "national_identity"
-          ? ["sub", "id", "network_id", "net_id", "user_id", "uid", "openid"]
-          : ["sub", "id", "openid", "unionid", "user_id", "uid"]);
-        const email = providerId === "national_identity"
-          ? `national-${opaqueIdentitySubject(subject || "account")}@identity.matchplane.invalid`
-          : firstProfileString(profile, ["email", "email_address"])
-            ?? `${providerId}.${subject || "account"}@oauth.matchplane.invalid`;
-        return {
-          name: firstProfileString(profile, ["name", "nickname", "nick_name"]) ?? (providerId === "national_identity" ? "网络身份用户" : `${providerId} 用户`),
-          email,
-          // Never treat the mere presence of an email field as proof that the provider
-          // verified it.  This keeps an unverified social profile from becoming the
-          // configured root-admin identity or silently linking to a password account.
-          // The national provider normally does not return an email at all; its
-          // synthetic address is an internal Better Auth key, not a contact route.
-          emailVerified: providerId === "national_identity"
-            ? false
-            : firstProfileBoolean(profile, ["email_verified", "emailVerified", "verified_email"]),
-          image: firstProfileString(profile, ["avatar", "avatar_url", "headimgurl", "picture"]),
-        };
-      },
-    } satisfies GenericOAuthConfig];
+      ].some(Boolean);
+      if (anyConfigured)
+        console.warn(
+          `${providerId} OAuth is not enabled: complete ${prefix} configuration is required`,
+        );
+      return [];
+    }
+
+    return [
+      {
+        providerId,
+        name:
+          providerId === "national_identity" ? "国家网络身份认证" : providerId,
+        clientId,
+        clientSecret,
+        ...(discoveryUrl
+          ? { discoveryUrl, requireIdTokenVerification: true }
+          : {
+              authorizationUrl,
+              tokenUrl,
+              userInfoUrl,
+            }),
+        accountSubject: ({ profile }) => {
+          const subject = firstProfileString(
+            profile,
+            providerId === "national_identity"
+              ? [
+                  "sub",
+                  "id",
+                  "network_id",
+                  "net_id",
+                  "user_id",
+                  "uid",
+                  "openid",
+                ]
+              : ["sub", "id", "openid", "unionid", "user_id", "uid"],
+          );
+          if (!subject)
+            throw new Error(
+              `${providerId} OAuth profile has no stable subject`,
+            );
+          // The national service's subject is an opaque network identifier, but
+          // hashing it before persisting still keeps raw identity material out of
+          // the Better Auth account table while preserving stable linking.
+          return providerId === "national_identity"
+            ? opaqueIdentitySubject(subject)
+            : subject;
+        },
+        scopes:
+          managedNationalIdentity?.scopes ??
+          parseOAuthScopes(process.env[`${prefix}SCOPES`], defaultScopes),
+        mapProfileToUser: (profile: Record<string, unknown>) => {
+          const subject = firstProfileString(
+            profile,
+            providerId === "national_identity"
+              ? [
+                  "sub",
+                  "id",
+                  "network_id",
+                  "net_id",
+                  "user_id",
+                  "uid",
+                  "openid",
+                ]
+              : ["sub", "id", "openid", "unionid", "user_id", "uid"],
+          );
+          const email =
+            providerId === "national_identity"
+              ? `national-${opaqueIdentitySubject(subject || "account")}@identity.matchplane.invalid`
+              : (firstProfileString(profile, ["email", "email_address"]) ??
+                `${providerId}.${subject || "account"}@oauth.matchplane.invalid`);
+          return {
+            name:
+              firstProfileString(profile, ["name", "nickname", "nick_name"]) ??
+              (providerId === "national_identity"
+                ? "网络身份用户"
+                : `${providerId} 用户`),
+            email,
+            // Never treat the mere presence of an email field as proof that the provider
+            // verified it.  This keeps an unverified social profile from becoming the
+            // configured root-admin identity or silently linking to a password account.
+            // The national provider normally does not return an email at all; its
+            // synthetic address is an internal Better Auth key, not a contact route.
+            emailVerified:
+              providerId === "national_identity"
+                ? false
+                : firstProfileBoolean(profile, [
+                    "email_verified",
+                    "emailVerified",
+                    "verified_email",
+                  ]),
+            image: firstProfileString(profile, [
+              "avatar",
+              "avatar_url",
+              "headimgurl",
+              "picture",
+            ]),
+          };
+        },
+      } satisfies GenericOAuthConfig,
+    ];
   });
 }
 
@@ -647,7 +892,10 @@ function safeOAuthUrl(value: string | undefined): string | undefined {
   }
 }
 
-function parseOAuthScopes(value: string | undefined, defaults: readonly string[] = ["openid", "profile", "email"]): string[] {
+function parseOAuthScopes(
+  value: string | undefined,
+  defaults: readonly string[] = ["openid", "profile", "email"],
+): string[] {
   const scopes = (value ?? defaults.join(","))
     .split(",")
     .map((scope) => scope.trim())
@@ -656,23 +904,33 @@ function parseOAuthScopes(value: string | undefined, defaults: readonly string[]
 }
 
 function opaqueIdentitySubject(value: string): string {
-  return createHash("sha256").update(`matchplane:national-identity:${value}`).digest("hex");
+  return createHash("sha256")
+    .update(`matchplane:national-identity:${value}`)
+    .digest("hex");
 }
 
-function firstProfileString(profile: Record<string, unknown>, keys: string[]): string | undefined {
+function firstProfileString(
+  profile: Record<string, unknown>,
+  keys: string[],
+): string | undefined {
   for (const key of keys) {
     const value = profile[key];
     if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (typeof value === "number" && Number.isFinite(value))
+      return String(value);
   }
   return undefined;
 }
 
-function firstProfileBoolean(profile: Record<string, unknown>, keys: string[]): boolean {
+function firstProfileBoolean(
+  profile: Record<string, unknown>,
+  keys: string[],
+): boolean {
   for (const key of keys) {
     const value = profile[key];
     if (typeof value === "boolean") return value;
-    if (typeof value === "string" && /^(true|1|yes)$/i.test(value.trim())) return true;
+    if (typeof value === "string" && /^(true|1|yes)$/i.test(value.trim()))
+      return true;
   }
   return false;
 }

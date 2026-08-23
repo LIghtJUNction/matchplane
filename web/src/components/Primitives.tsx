@@ -1,16 +1,27 @@
 "use client";
 
 import { useRef } from "react";
-import type { ComponentType, MouseEvent, ReactNode } from "react";
-import { ArrowUpRight, ChevronRight, Sparkles } from "lucide-react";
-import { motion } from "motion/react";
+import type { MouseEvent } from "react";
+import { ChevronRight, Sparkles } from "lucide-react";
 
-import type { Accent, ActivityItem } from "../types";
+import type { Accent } from "../types";
 
 export const spring = { type: "spring" as const, bounce: 0, duration: 0.38 };
-export const momentumSpring = { type: "spring" as const, bounce: 0.18, duration: 0.4 };
+export const momentumSpring = {
+  type: "spring" as const,
+  bounce: 0.18,
+  duration: 0.4,
+};
 
-export function Brand({ label = "MatchPlane", logoUrl, homeHref = "#top" }: { label?: string; logoUrl?: string; homeHref?: string }) {
+export function Brand({
+  label = "MatchPlane",
+  logoUrl,
+  homeHref = "#top",
+}: {
+  label?: string;
+  logoUrl?: string;
+  homeHref?: string;
+}) {
   const clickState = useRef({ count: 0, lastAt: 0 });
 
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -26,35 +37,24 @@ export function Brand({ label = "MatchPlane", logoUrl, homeHref = "#top" }: { la
   };
 
   return (
-    <a className="brand" href={homeHref} aria-label={`${label} 首页`} onClick={handleClick}>
+    <a
+      className="brand"
+      href={homeHref}
+      aria-label={`${label} 首页`}
+      onClick={handleClick}
+    >
       <span className="brand-mark" aria-hidden="true">
-        {logoUrl ? <img src={logoUrl} alt="" /> : <><span /><span /></>}
+        {logoUrl ? (
+          <img src={logoUrl} alt="" />
+        ) : (
+          <>
+            <span />
+            <span />
+          </>
+        )}
       </span>
       <span>{label}</span>
     </a>
-  );
-}
-
-export function IconButton({
-  label,
-  children,
-  onClick,
-}: {
-  label: string;
-  children: ReactNode;
-  onClick?: () => void;
-}) {
-  return (
-    <motion.button
-      className="icon-button"
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-      whileTap={{ scale: 0.92 }}
-      transition={spring}
-    >
-      {children}
-    </motion.button>
   );
 }
 
@@ -87,31 +87,6 @@ export function SectionHeading({
   );
 }
 
-export function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  tone = "plain",
-}: {
-  icon: ComponentType<{ size?: number; strokeWidth?: number; "aria-hidden"?: boolean }>;
-  label: string;
-  value: string;
-  detail: string;
-  tone?: "plain" | "cactus" | "clay" | "heather";
-}) {
-  return (
-    <motion.article className={`metric-card metric-${tone}`} layout transition={spring}>
-      <span className="metric-icon">
-        <Icon size={19} strokeWidth={1.8} aria-hidden={true} />
-      </span>
-      <p>{label}</p>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </motion.article>
-  );
-}
-
 export function ListingVisual({
   accent,
   compact = false,
@@ -126,9 +101,16 @@ export function ListingVisual({
   alt?: string;
 }) {
   return (
-    <div className={`listing-visual accent-${accent}${compact ? " listing-compact" : ""}${imageUrl ? " has-product-image" : ""}`}>
+    <div
+      className={`listing-visual accent-${accent}${compact ? " listing-compact" : ""}${imageUrl ? " has-product-image" : ""}`}
+    >
       {imageUrl ? (
-        <img src={imageUrl} alt={alt} loading={compact ? "lazy" : "eager"} decoding="async" />
+        <img
+          src={imageUrl}
+          alt={alt}
+          loading={compact ? "lazy" : "eager"}
+          decoding="async"
+        />
       ) : (
         <>
           <span className="organic-shape organic-one" />
@@ -138,31 +120,5 @@ export function ListingVisual({
       )}
       {label ? <span className="visual-label">{label}</span> : null}
     </div>
-  );
-}
-
-export function ActivityList({ items }: { items: ActivityItem[] }) {
-  return (
-    <ol className="activity-list">
-      {items.map((item) => (
-        <li key={`${item.title}-${item.time}`}>
-          <span className={`activity-dot tone-${item.tone}`} aria-hidden="true" />
-          <div>
-            <strong>{item.title}</strong>
-            <p>{item.detail}</p>
-          </div>
-          <time>{item.time}</time>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-export function InlineLink({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
-  return (
-    <button className="inline-link" type="button" onClick={onClick}>
-      {children}
-      <ArrowUpRight size={15} aria-hidden="true" />
-    </button>
   );
 }

@@ -5,6 +5,8 @@
 ```sh
 matchplane doctor --json
 matchplane status --json
+matchplane catalog-projections status --limit 20
+matchplane catalog-projections replay <dead-job-uuid> --reason "adapter upgraded to catalog v2"
 matchplane migrate
 matchplane provision-root --tenant-slug <slug> --tenant-name <name> --admin-email <operator-email>
 matchplane admin-invite --role root-admin
@@ -19,6 +21,8 @@ matchplane mcp serve
 `provision-root` 是干净安装时的身份初始化步骤。该命令要求运营者提供租户 slug 与展示名，支持可选的首个域名 slug/name/UUID，并通过 `--admin-email`（或 `MATCHPLANE_ROOT_ADMIN_EMAIL`）仅用于打印下一步配置分配。该命令仅在运营者未提供时生成 UUIDv7 标识符，执行迁移，执行幂等的创建/验证事务，并打印生成的 `MATCHPLANE_ROOT_TENANT_ID`、管理员邮箱和登录路径。它不会创建目录、资产 schema、列表、支付提供商或任何业务样例数据。若与现有 ID 或 slug 冲突会失败，而不是覆盖持久化配置。后续要新增域名时，请复用首次调用输出中的 `--tenant-id`，并携带新的域名参数；省略 `--tenant-id` 会生成新 UUID，并且这不是隐式查找。
 
 `admin-invite` 是唯一的管理员入驻入口。它在数据库中只保存 SHA-256 token 摘要，默认 24 小时过期且最多 7 天，只能兑换一次；原始 token 只出现在 CLI 输出的注册 URL 中。首次部署必须先由已验证的 `MATCHPLANE_ROOT_ADMIN_EMAIL` 登录并在 Web 初始化 Better Auth 根组织，之后 `root-admin` 才能自动定位该根组织；`subplatform-admin` 必须显式指定目标组织 UUID。CLI URL 自带 `next` 回跳参数。管理员和普通用户使用同一个 `/login` 表单，Better Auth 建立并验证会话后服务端才兑换邀请并授予 root 角色或组织 admin 成员关系。不要把 URL 写入日志、工单或 shell 历史；如果泄露，请删除对应邀请或等待过期后重新签发。
+
+`catalog-projections status` 从进程环境或主机受保护的 MatchPlane 服务配置中读取数据库连接，仅返回各状态计数、最老可执行/dead age，以及最多 100 条不含 payload、endpoint URL 或 token 的 processing/retry/dead 摘要。`catalog-projections replay` 只接受精确的 dead job UUID 和必填的可打印 `--reason`：事务会锁住 dead row、重新读取当前 canonical offer 与 active immutable registration；destination 未变化时复用原 request ID，已经变化时 supersede 旧行并创建当前 destination job。成功操作会写入 `marketplace.offer.projection.replayed` 平台审计事件。它不会重放旧 payload，也不能操作 pending/processing/acked 行。只读 MCP 仅暴露 status，绝不暴露 replay。
 
 `passwd` 是服务器上的根管理员维护命令。它只接受 `rootSuperAdmin` 或 `rootAdmin` 账号，自动从主机受保护的 MatchPlane 配置读取默认管理员与数据库连接，因此常规维护只需一个命令；未配置默认管理员时才在 TTY 中询问邮箱。新密码默认通过隐藏的 TTY 两次读取；`--password-stdin` 可用于从 secret manager 传入一行密码。密码不会出现在命令参数或日志中，成功后会撤销目标账号的全部 Better Auth 会话：
 
@@ -47,15 +51,16 @@ sudo matchplane passwd
 
 ## MCP stdio 合约
 
-`matchplane mcp serve` 为 MCP 客户端实现换行分隔的 JSON-RPC。它为四个只读工具提供 `initialize`、`tools/list` 与 `tools/call`：
+`matchplane mcp serve` 为 MCP 客户端实现换行分隔的 JSON-RPC。它为五个只读工具提供 `initialize`、`tools/list` 与 `tools/call`：
 
 - `platform.status` — 探测网关、支付与 web 的就绪 URL；
 - `platform.health` — 给简化客户端返回同一套受限健康报告；
 - `platform.doctor` — 校验已加载的 `MATCHPLANE_*` 配置和生产门禁。
-- `platform.ai.status` — 只读检查平台托管 Agent 的服务端 URL origin、协议、模型和密钥是否齐全。
+- `platform.ai.status` — 只读检查平台托管 Agent 的服务端 URL origin、协议、模型和密钥是否齐全；它优先读取 Web 管理员保存到主机受保护目录的启用配置，并在该配置不可用时回退到 `MATCHPLANE_ROUTER_AI_*` 环境变量，与实际路由器的选择顺序一致；
+- `platform.catalog_projections.status` — 返回 secret-free projection 状态、lag age 与有界问题列表；`limit` 只能是 1–100。它不提供 replay 或任意 SQL。
   结果保留用于兼容性的首个 `error` 字段，同时额外包含 `errors` 数组，列出所有检测到的阻塞项，便于运营者或 Agent 一次性准备变更集，而不是每次只处理一个失败检查项。敏感值会被脱敏，配置加载器在工作负载启动时依然会快速失败。
 
-URL 使用运营配置项（`MATCHPLANE_GATEWAY_HEALTH_URL`、`MATCHPLANE_PAYMENT_HEALTH_URL` 和 `MATCHPLANE_WEB_HEALTH_URL`），默认指向 loopback。输出包含状态码和脱敏错误，不包含凭据与连接字符串。`platform.status`、`platform.doctor` 和 `platform.ai.status` 还会返回 `hosted_agent` 摘要：它只包含 origin、协议、模型名、`key_configured` 和不含 secret 的修复提示，不会把完整 endpoint、API key 或 prompt 打出来。该服务不会提供 shell 执行、任意 HTTP 转发、数据库写入、支付动作或联系人数据。平台撮合与子平台检索仍在各自的已认证 HTTP/MCP 合约之下，本运维服务器不具备放行权限。web 服务在 `/api/mcp` 提供已认证的 HTTP MCP 门面；其 `platform.match` 工具转发与 chat API 相同的受限路由请求，并接受 Better Auth 会话或有作用域的组织 API key。它支持可选的 `idempotency_key`（最多 240 个可打印字符）；同一调用方、同一规范化平台路径与同一 key 的重试会返回原始路由结果而不再触发托管模型调用，而不同意图内容会被判定为冲突并拒绝。并发重复请求会返回 `409` 并带 `Retry-After: 2`，可在首请求完成后重试。`platform.agent.handoff` 工具会接收调用方自费的 `matchplane.agent/v1` 报文，持久化幂等 handoff，并仅返回活跃的直系子节点能力。它不会调用根模型：外部需求方/供给方 Agent 自行承担 provider 凭据与 token 账单。机器调用请使用带显式 `agent:handoff` 权限的组织 API key。
+健康 URL 使用运营配置项（`MATCHPLANE_GATEWAY_HEALTH_URL`、`MATCHPLANE_PAYMENT_HEALTH_URL` 和 `MATCHPLANE_WEB_HEALTH_URL`），默认指向 loopback。输出包含状态码和脱敏错误，不包含凭据与连接字符串。`platform.status`、`platform.doctor` 和 `platform.ai.status` 还会返回 `hosted_agent` 摘要：它只包含 origin、协议、模型名、`key_configured` 和不含 secret 的修复提示，不会把完整 endpoint、API key、主机文件内容或 prompt 打出来。该服务不会提供 shell 执行、任意 HTTP 转发、数据库写入、支付动作或联系人数据。平台撮合与子平台检索仍在各自的已认证 HTTP/MCP 合约之下，本运维服务器不具备放行权限。web 服务在 `/api/mcp` 提供已认证的 HTTP MCP 门面；其 `platform.match` 工具转发与 chat API 相同的受限路由请求，并接受 Better Auth 会话或有作用域的组织 API key。它支持可选的 `idempotency_key`（最多 240 个可打印字符）；同一调用方、同一规范化平台路径与同一 key 的重试会返回原始路由结果而不再触发托管模型调用，而不同意图内容会被判定为冲突并拒绝。并发重复请求会返回 `409` 并带 `Retry-After: 2`，可在首请求完成后重试。`platform.agent.handoff` 工具会接收调用方自费的 `matchplane.agent/v1` 报文，持久化幂等 handoff，并仅返回活跃的直系子节点能力。它不会调用根模型：外部需求方/供给方 Agent 自行承担 provider 凭据与 token 账单。机器调用请使用带显式 `agent:handoff` 权限的组织 API key。
 
 HTTP 门面在转发前会先校验声明的作用域与预算合约：平台路径必须标准化，tenant/domain/party 标识符必须是 UUID，marketplace 调用必须显式带 `platform_path`，且 Agent handoff 始终调用方自费。Rust 网关依然是最终授权与领域 schema 的仲裁者；这层早期校验仅是确定性的 MCP 边界，不授予实际访问。
 

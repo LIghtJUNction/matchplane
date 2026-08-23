@@ -1,4 +1,8 @@
-export type WorkspaceRole = "buyer" | "seller" | "platform" | "subplatform_admin";
+export type WorkspaceRole =
+  | "buyer"
+  | "seller"
+  | "platform"
+  | "subplatform_admin";
 
 export type Accent = "cactus" | "clay" | "heather" | "oat";
 
@@ -18,7 +22,11 @@ export interface AssetListing {
   subtitle: string;
   description?: string;
   imageUrl?: string;
+  imageUrls?: string[];
+  storeId?: string;
   storeName?: string;
+  likeTotal?: string;
+  viewerLikeCount?: number;
   price: string;
   /** Exact canonical price used for deterministic comparison and basket calculations. */
   priceAmountMinor?: string;

@@ -6,6 +6,7 @@ import { isMountedPlatformPath, isPlatformPathAccessibleByOrganization } from ".
 import { authenticatePlatformRequest, type PlatformRequestActor } from "./platform-request-auth";
 import { invokeSubplatformMcpTool, resolveSubplatformMcpEndpoint } from "./platform-agent-tool";
 import { isActivePlatformPathVisible } from "./platform-visibility";
+import { isUuid } from "./lib/uuid";
 
 export interface ChildToolExecution {
   ok: boolean;
@@ -90,9 +91,4 @@ function failure(status: number, error: string): ChildToolExecution {
 function parentPlatformPath(platformPath: string): string {
   const slash = platformPath.lastIndexOf("/");
   return slash <= 0 ? "/" : platformPath.slice(0, slash);
-}
-
-function isUuid(value: unknown): value is string {
-  return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

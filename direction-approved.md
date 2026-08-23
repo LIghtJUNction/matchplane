@@ -29,12 +29,12 @@ Reference material supplied in the conversation:
 
 - Screenshot of 链动小铺's public landing page.
 - Merchant guide covering registration, payment setup, store settings, catalogue, orders, after-sales, wallet, and support.
-- Public URLs: https://www.ldxp.cn/ and https://www.ldxp.cn/merchant/login
+- Public URLs: <https://www.ldxp.cn/> and <https://www.ldxp.cn/merchant/login>
 
 ## Approved interpretation
 
 - One modern marketplace direction, not another conceptual art round.
-- Public page: conventional top navigation, clear value proposition, AI shopping input, browseable real store cards, and real product cards after search.
+- Public page: conventional top navigation, clear value proposition, AI shopping input, browsable real store cards, and real product cards after search.
 - Merchant workspace: use the reference's task clarity, but only expose MatchPlane capabilities that are actually wired.
 - Do not copy 链动小铺 branding, rates, guarantees, card-key limits, payment promises, complaint windows, or contact information.
 - Do not fabricate stores or products. Empty states remain honest until approved records exist.

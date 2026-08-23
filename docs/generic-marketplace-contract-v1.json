@@ -74,6 +74,18 @@
           "expires_at": { "type": ["string", "null"], "format": "date-time" }
         }
       },
+      "update": {
+        "method": "PATCH",
+        "path": "/v1/marketplace/offers/{offer_id}",
+        "required": ["tenant_id", "domain_id", "supply_party_id", "display_name", "attributes", "terms", "expected_version"],
+        "description": "Owner or same-domain administrator replaces editable fields at an optimistic version; active or withdrawn offers return to draft for moderation."
+      },
+      "withdraw": {
+        "method": "POST",
+        "path": "/v1/marketplace/offers/{offer_id}/withdraw",
+        "required": ["tenant_id", "domain_id", "supply_party_id", "expected_version"],
+        "description": "Owner or same-domain administrator withdraws a draft or active offer without deleting its history."
+      },
       "match": { "method": "POST", "path": "/v1/marketplace/intents/{intent_id}/matches" },
       "demandMatch": { "method": "POST", "path": "/v1/marketplace/offers/{offer_id}/demand-matches", "description": "Supply-side ranking of explicitly discoverable demand summaries; participant IDs and contacts are omitted." },
       "activate": { "method": "POST", "path": "/v1/admin/marketplace/offers/{offer_id}/activate" }
@@ -133,6 +145,7 @@
     "Every write is tenant-scoped and domain-scoped; the short-lived marketplace party capability is exchanged for one exact mounted platform path before the request is sent.",
     "Demand and supply capabilities are kernel sides; buyer/seller terminology remains a vertical adapter concern.",
     "Caller IDs and idempotency keys are replay-safe; a changed payload returns a conflict.",
+    "Offer edits and withdrawals require the latest expected_version. A supply participant manages only its own offers unless the authenticated capability has the same-domain admin/both role.",
     "Agent scores and reasons are advisory and cannot grant contact, payment, or transaction authority.",
     "Supply discovery is opt-in per demand intent and returns an anonymous summary only; contact still requires the demand introduction and supply consent transitions.",
     "A vertical may implement retrieval with its own MCP/Skill and any vector database, or use the deterministic fallback."
@@ -147,6 +160,8 @@
     "marketplace.preference.set",
     "marketplace.sales.handoff",
     "marketplace.offer.create",
+    "marketplace.offer.update",
+    "marketplace.offer.withdraw",
     "marketplace.offer.match",
     "marketplace.demand.match",
     "marketplace.intent.discovery.update",

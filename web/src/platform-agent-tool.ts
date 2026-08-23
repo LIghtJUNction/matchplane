@@ -1,8 +1,10 @@
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
-
 import { authDatabase } from "./lib/auth";
+import {
+  hasOnlyPublicAddresses,
+  isPrivateOrReservedIpLiteral,
+} from "./lib/public-endpoint";
 import { runtimeEnvironment } from "./lib/runtime";
+import { isUuid } from "./lib/uuid";
 
 /**
  * Server-side configuration and transport for a subplatform-owned MCP server.
@@ -103,7 +105,11 @@ async function resolveSubplatformMcpEndpointInternal(
   const rootTenantId = environment.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (rootTenantId && isUuid(rootTenantId)) {
     try {
-      const result = await authDatabase.query<{ url: string; tokenEnv: string | null; status: string }>(
+      const result = await authDatabase.query<{
+        url: string;
+        tokenEnv: string | null;
+        status: string;
+      }>(
         `SELECT endpoint AS url, token_env AS "tokenEnv", status
            FROM platform_federation_bindings
           WHERE tenant_id = $1::uuid AND mcp_server_key = $2
@@ -113,12 +119,20 @@ async function resolveSubplatformMcpEndpointInternal(
       );
       const binding = result.rows[0];
       if (binding) {
-        if (!allowNonActiveForHealth && binding.status !== "active") return null;
-        const endpoint = readEndpointEntry(serverKey, {
-          url: binding.url,
-          ...(binding.tokenEnv ? { tokenEnv: binding.tokenEnv } : {}),
-        }, environment);
-        return endpoint && await hasSafeResolvedAddresses(endpoint.url, environment) ? endpoint : null;
+        if (!allowNonActiveForHealth && binding.status !== "active")
+          return null;
+        const endpoint = readEndpointEntry(
+          serverKey,
+          {
+            url: binding.url,
+            ...(binding.tokenEnv ? { tokenEnv: binding.tokenEnv } : {}),
+          },
+          environment,
+        );
+        return endpoint &&
+          (await hasSafeResolvedAddresses(endpoint.url, environment))
+          ? endpoint
+          : null;
       }
     } catch {
       // Fresh installations may not have applied the federation migration yet. The explicit
@@ -126,7 +140,9 @@ async function resolveSubplatformMcpEndpointInternal(
     }
   }
   const endpoint = readSubplatformMcpEndpoint(serverKey, environment);
-  return endpoint && await hasSafeResolvedAddresses(endpoint.url, environment) ? endpoint : null;
+  return endpoint && (await hasSafeResolvedAddresses(endpoint.url, environment))
+    ? endpoint
+    : null;
 }
 
 /**
@@ -139,7 +155,10 @@ export async function validateSubplatformMcpEndpointUrl(
   value: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<boolean> {
-  const normalized = normalizeEndpointUrl(value, runtimeEnvironment(environment));
+  const normalized = normalizeEndpointUrl(
+    value,
+    runtimeEnvironment(environment),
+  );
   return normalized ? hasSafeResolvedAddresses(normalized, environment) : false;
 }
 
@@ -155,11 +174,16 @@ export async function prepareSubplatformMcpEndpoint(input: {
   environment?: NodeJS.ProcessEnv;
 }): Promise<SubplatformMcpEndpoint | null> {
   const environment = input.environment ?? process.env;
-  const endpoint = readEndpointEntry(input.serverKey, {
-    url: input.url,
-    ...(input.tokenEnv ? { tokenEnv: input.tokenEnv } : {}),
-  }, environment);
-  if (!endpoint || !(await hasSafeResolvedAddresses(endpoint.url, environment))) return null;
+  const endpoint = readEndpointEntry(
+    input.serverKey,
+    {
+      url: input.url,
+      ...(input.tokenEnv ? { tokenEnv: input.tokenEnv } : {}),
+    },
+    environment,
+  );
+  if (!endpoint || !(await hasSafeResolvedAddresses(endpoint.url, environment)))
+    return null;
   return endpoint;
 }
 
@@ -174,13 +198,19 @@ function readEndpointEntry(
 
   let bearerToken: string | null = null;
   if (entry.tokenEnv !== undefined) {
-    if (typeof entry.tokenEnv !== "string" || !ENV_NAME_PATTERN.test(entry.tokenEnv)) return null;
+    if (
+      typeof entry.tokenEnv !== "string" ||
+      !ENV_NAME_PATTERN.test(entry.tokenEnv)
+    )
+      return null;
     const value = environment[entry.tokenEnv]?.trim();
     if (!value || value.length > 8_192) return null;
     bearerToken = value;
   }
 
-  const timeoutMs = readTimeout(environment.MATCHPLANE_SUBPLATFORM_MCP_TIMEOUT_MS);
+  const timeoutMs = readTimeout(
+    environment.MATCHPLANE_SUBPLATFORM_MCP_TIMEOUT_MS,
+  );
   return { serverKey, url, bearerToken, timeoutMs };
 }
 
@@ -202,7 +232,8 @@ export async function invokeSubplatformMcpTool(input: {
     "x-matchplane-request-id": input.requestId,
     "x-matchplane-agent-subject": input.actorSubject,
   });
-  if (input.endpoint.bearerToken) headers.set("authorization", `Bearer ${input.endpoint.bearerToken}`);
+  if (input.endpoint.bearerToken)
+    headers.set("authorization", `Bearer ${input.endpoint.bearerToken}`);
 
   let response: Response;
   try {
@@ -248,7 +279,8 @@ export async function probeSubplatformMcpEndpoint(input: {
     accept: "application/json",
     "content-type": "application/json",
   });
-  if (input.endpoint.bearerToken) headers.set("authorization", `Bearer ${input.endpoint.bearerToken}`);
+  if (input.endpoint.bearerToken)
+    headers.set("authorization", `Bearer ${input.endpoint.bearerToken}`);
   try {
     const response = await fetcher(input.endpoint.url, {
       method: "POST",
@@ -257,7 +289,11 @@ export async function probeSubplatformMcpEndpoint(input: {
         jsonrpc: "2.0",
         id: "matchplane-health",
         method: "initialize",
-        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "matchplane", version: "1" } },
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "matchplane", version: "1" },
+        },
       }),
       signal: AbortSignal.timeout(input.endpoint.timeoutMs),
       redirect: "error",
@@ -265,8 +301,18 @@ export async function probeSubplatformMcpEndpoint(input: {
     });
     const body = await readJsonResponse(response);
     const result = body.payload.result;
-    if (!response.ok || !body.ok || "error" in body.payload || !isRecord(result) || result.isError === true) {
-      return { ok: false, status: response.status, error: "远端 MCP initialize 未成功" };
+    if (
+      !response.ok ||
+      !body.ok ||
+      "error" in body.payload ||
+      !isRecord(result) ||
+      result.isError === true
+    ) {
+      return {
+        ok: false,
+        status: response.status,
+        error: "远端 MCP initialize 未成功",
+      };
     }
     return { ok: true, status: response.status };
   } catch (error) {
@@ -280,15 +326,25 @@ function hasMcpError(payload: Record<string, unknown>): boolean {
   return isRecord(result) && result.isError === true;
 }
 
-function normalizeEndpointUrl(value: string, environment: string | undefined): string | null {
+function normalizeEndpointUrl(
+  value: string,
+  environment: string | undefined,
+): string | null {
   if (value.length === 0 || value.length > 2_048) return null;
   try {
     const url = new URL(value);
     if (url.username || url.password || url.hash) return null;
-    if (environment === "production" && isPrivateIpLiteral(url.hostname)) return null;
+    if (
+      environment === "production" &&
+      isPrivateOrReservedIpLiteral(url.hostname)
+    )
+      return null;
     if (environment === "production") {
       if (url.protocol !== "https:") return null;
-    } else if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) {
+    } else if (
+      url.protocol !== "https:" &&
+      !(url.protocol === "http:" && isLoopback(url.hostname))
+    ) {
       return null;
     }
     return url.toString();
@@ -297,67 +353,53 @@ function normalizeEndpointUrl(value: string, environment: string | undefined): s
   }
 }
 
-async function hasSafeResolvedAddresses(value: string, environment: NodeJS.ProcessEnv): Promise<boolean> {
-  if (runtimeEnvironment(environment) !== "production") return true;
-  try {
-    const hostname = new URL(value).hostname;
-    if (isIP(hostname.replace(/^\[|\]$/g, ""))) return !isPrivateIpLiteral(hostname);
-    const answers = await lookup(hostname, { all: true, verbatim: true });
-    return answers.length > 0 && answers.every((answer) => !isPrivateIpLiteral(answer.address));
-  } catch {
-    return false;
-  }
+async function hasSafeResolvedAddresses(
+  value: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<boolean> {
+  return (
+    runtimeEnvironment(environment) !== "production" ||
+    hasOnlyPublicAddresses(value)
+  );
 }
 
 function readTimeout(value: string | undefined): number {
   const parsed = Number.parseInt(value ?? String(DEFAULT_TIMEOUT_MS), 10);
-  return Number.isSafeInteger(parsed) ? Math.max(1_000, Math.min(MAX_TIMEOUT_MS, parsed)) : DEFAULT_TIMEOUT_MS;
+  return Number.isSafeInteger(parsed)
+    ? Math.max(1_000, Math.min(MAX_TIMEOUT_MS, parsed))
+    : DEFAULT_TIMEOUT_MS;
 }
 
 function isLoopback(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  return (
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+  );
 }
 
-function isPrivateIpLiteral(hostname: string): boolean {
-  const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  const version = isIP(normalized);
-  if (version === 4) {
-    const parts = normalized.split(".").map(Number);
-    const [first, second, third] = parts;
-    return first === 0
-      || first === 10
-      || first === 127
-      || (first === 169 && second === 254)
-      || (first === 172 && second >= 16 && second <= 31)
-      || (first === 192 && second === 168)
-      || (first === 192 && second === 0)
-      || (first === 192 && second === 2)
-      || (first === 192 && second === 88 && third === 99)
-      || (first === 100 && second >= 64 && second <= 127)
-      || (first === 198 && (second === 18 || second === 19))
-      || (first === 198 && second === 51)
-      || (first === 203 && second === 0 && third === 113)
-      || first >= 224;
-  }
-  if (version === 6) {
-    if (normalized.startsWith("::ffff:")) return isPrivateIpLiteral(normalized.slice(7));
-    return normalized === "::"
-      || normalized === "::1"
-      || normalized.startsWith("fc")
-      || normalized.startsWith("fd")
-      || /^fe[89ab]/.test(normalized);
-  }
-  return false;
-}
-
-async function readJsonResponse(response: Response): Promise<SubplatformMcpCallResult> {
+async function readJsonResponse(
+  response: Response,
+): Promise<SubplatformMcpCallResult> {
   try {
-    const declaredLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
-    if (Number.isSafeInteger(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
-      return { ok: false, status: 502, payload: { error: "subplatform MCP response exceeds 256 KiB" } };
+    const declaredLength = Number.parseInt(
+      response.headers.get("content-length") ?? "",
+      10,
+    );
+    if (
+      Number.isSafeInteger(declaredLength) &&
+      declaredLength > MAX_RESPONSE_BYTES
+    ) {
+      return {
+        ok: false,
+        status: 502,
+        payload: { error: "subplatform MCP response exceeds 256 KiB" },
+      };
     }
     if (!response.body) {
-      return { ok: false, status: 502, payload: { error: "subplatform MCP response has no body" } };
+      return {
+        ok: false,
+        status: 502,
+        payload: { error: "subplatform MCP response has no body" },
+      };
     }
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -369,7 +411,11 @@ async function readJsonResponse(response: Response): Promise<SubplatformMcpCallR
         total += value.byteLength;
         if (total > MAX_RESPONSE_BYTES) {
           await reader.cancel();
-          return { ok: false, status: 502, payload: { error: "subplatform MCP response exceeds 256 KiB" } };
+          return {
+            ok: false,
+            status: 502,
+            payload: { error: "subplatform MCP response exceeds 256 KiB" },
+          };
         }
         chunks.push(value);
       }
@@ -383,36 +429,50 @@ async function readJsonResponse(response: Response): Promise<SubplatformMcpCallR
       offset += chunk.byteLength;
     }
     const text = new TextDecoder().decode(bytes);
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    const payloadText = contentType.includes("text/event-stream") ? lastSseData(text) : text;
+    const contentType =
+      response.headers.get("content-type")?.toLowerCase() ?? "";
+    const payloadText = contentType.includes("text/event-stream")
+      ? lastSseData(text)
+      : text;
     const payload = JSON.parse(payloadText) as unknown;
     if (!isRecord(payload)) {
-      return { ok: false, status: 502, payload: { error: "subplatform MCP response must be a JSON object" } };
+      return {
+        ok: false,
+        status: 502,
+        payload: { error: "subplatform MCP response must be a JSON object" },
+      };
     }
     return { ok: true, status: response.status, payload };
   } catch {
-    return { ok: false, status: 502, payload: { error: "subplatform MCP response was not valid JSON" } };
+    return {
+      ok: false,
+      status: 502,
+      payload: { error: "subplatform MCP response was not valid JSON" },
+    };
   }
 }
 
 function lastSseData(value: string): string {
   const messages = value
     .split(/\r?\n\r?\n/)
-    .flatMap((block) => block.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()))
+    .flatMap((block) =>
+      block
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim()),
+    )
     .filter((line) => line && line !== "[DONE]");
   return messages.at(-1) ?? "";
 }
 
 function safeTransportError(error: unknown): string {
-  if (error instanceof DOMException && error.name === "TimeoutError") return "subplatform MCP request timed out";
-  if (error instanceof Error && error.name === "AbortError") return "subplatform MCP request timed out";
+  if (error instanceof DOMException && error.name === "TimeoutError")
+    return "subplatform MCP request timed out";
+  if (error instanceof Error && error.name === "AbortError")
+    return "subplatform MCP request timed out";
   return "subplatform MCP endpoint is unavailable";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

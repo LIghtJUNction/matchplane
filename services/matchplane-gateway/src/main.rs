@@ -219,6 +219,14 @@ async fn main() -> anyhow::Result<()> {
             patch(generic_marketplace::update_demand_discovery),
         )
         .route(
+            "/v1/marketplace/offers/{offer_id}",
+            patch(generic_marketplace::update_offer),
+        )
+        .route(
+            "/v1/marketplace/offers/{offer_id}/withdraw",
+            post(generic_marketplace::withdraw_offer),
+        )
+        .route(
             "/v1/marketplace/offers/{offer_id}/demand-matches",
             post(generic_marketplace::demand_matches),
         )

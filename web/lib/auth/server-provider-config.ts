@@ -6,12 +6,12 @@ import type {
   PublicPlatformSettings,
 } from "./provider-config";
 
-export type AIWireProtocol =
+type AIWireProtocol =
   | "openai-compatible"
   | "anthropic-messages"
   | "gemini-generate-content";
 
-export type OAuthEndpointContract =
+type OAuthEndpointContract =
   | { discoveryUrl: string }
   | {
       authorizationUrl: string;
@@ -20,7 +20,7 @@ export type OAuthEndpointContract =
     };
 
 /** Server-only OAuth configuration. `credentialSecretRef` is never a raw secret. */
-export interface ServerOAuthProviderConfig {
+interface ServerOAuthProviderConfig {
   id: string;
   name: string;
   enabled: boolean;
@@ -31,7 +31,7 @@ export interface ServerOAuthProviderConfig {
 }
 
 /** Server-only AI configuration. The model protocol remains explicit for custom gateways. */
-export interface ServerAIProviderConfig {
+interface ServerAIProviderConfig {
   id: string;
   name: string;
   enabled: boolean;
@@ -48,7 +48,7 @@ export interface ServerPlatformSettings {
   defaultAiProviderId?: string;
 }
 
-export function isConfiguredOAuthProvider(provider: ServerOAuthProviderConfig): boolean {
+function isConfiguredOAuthProvider(provider: ServerOAuthProviderConfig): boolean {
   return provider.enabled
     && isProviderId(provider.id)
     && provider.name.trim().length > 0
@@ -58,7 +58,7 @@ export function isConfiguredOAuthProvider(provider: ServerOAuthProviderConfig): 
     && hasValidOAuthEndpoints(provider.endpoints);
 }
 
-export function isConfiguredAIProvider(provider: ServerAIProviderConfig): boolean {
+function isConfiguredAIProvider(provider: ServerAIProviderConfig): boolean {
   return provider.enabled
     && isProviderId(provider.id)
     && provider.name.trim().length > 0

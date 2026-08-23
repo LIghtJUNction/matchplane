@@ -8,7 +8,10 @@ import {
   requireFederationAdmin,
   validateFederationParent,
 } from "../../../../../src/federation-admin";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  RequestBodyTooLargeError,
+} from "../../../../../src/lib/body-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,27 +23,40 @@ export async function POST(request: Request): Promise<Response> {
   let body: InviteRequest;
   try {
     const value = await readJsonBody<unknown>(request, 32 * 1024);
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new SyntaxError("object required");
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new SyntaxError("object required");
     body = value as InviteRequest;
   } catch (error) {
     return jsonError(
-      error instanceof RequestBodyTooLargeError ? "联邦邀请请求过大" : "请求必须是有效 JSON",
+      error instanceof RequestBodyTooLargeError
+        ? "联邦邀请请求过大"
+        : "请求必须是有效 JSON",
       error instanceof RequestBodyTooLargeError ? 413 : 400,
     );
   }
   const domainId = typeof body.domainId === "string" ? body.domainId : "";
   if (!isUuid(domainId)) return jsonError("domainId 必须是 UUID", 400);
-  const requestedParentOrganizationId = typeof body.parentOrganizationId === "string" && body.parentOrganizationId
-    ? body.parentOrganizationId
-    : null;
-  const parentOrganizationId = await readRootOrganizationId(guard.admin.rootTenantId);
+  const requestedParentOrganizationId =
+    typeof body.parentOrganizationId === "string" && body.parentOrganizationId
+      ? body.parentOrganizationId
+      : null;
+  const parentOrganizationId = await readRootOrganizationId(
+    guard.admin.rootTenantId,
+  );
   if (!parentOrganizationId || !isUuid(parentOrganizationId)) {
-    return jsonError("请先初始化商城，再邀请外部店铺", 409);
+    return jsonError("商城初始化完成后即可邀请外部店铺", 409);
   }
-  if (requestedParentOrganizationId && requestedParentOrganizationId !== parentOrganizationId) {
+  if (
+    requestedParentOrganizationId &&
+    requestedParentOrganizationId !== parentOrganizationId
+  ) {
     return jsonError("外部店铺只能直接接入商城，不能嵌套在其他店铺中", 400);
   }
-  const parentError = await validateFederationParent(guard.admin.rootTenantId, parentOrganizationId, domainId);
+  const parentError = await validateFederationParent(
+    guard.admin.rootTenantId,
+    parentOrganizationId,
+    domainId,
+  );
   if (parentError) return jsonError(parentError, 400);
   const expiresInHours = boundedInteger(body.expiresInHours, 24, 1, 168);
   const token = `mpf_${randomBytes(32).toString("base64url")}`;
@@ -52,21 +68,38 @@ export async function POST(request: Request): Promise<Response> {
      VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, decode($5, 'hex'),
              clock_timestamp() + make_interval(hours => $6::int), $7)
      RETURNING id::text, expires_at AS "expiresAt"`,
-    [inviteId, guard.admin.rootTenantId, parentOrganizationId, domainId, tokenHash, expiresInHours, guard.admin.userId],
+    [
+      inviteId,
+      guard.admin.rootTenantId,
+      parentOrganizationId,
+      domainId,
+      tokenHash,
+      expiresInHours,
+      guard.admin.userId,
+    ],
   );
   const expiresAt = result.rows[0]?.expiresAt;
   const baseUrl = normalizeBaseUrl(
-    process.env.BETTER_AUTH_URL?.trim() || process.env.NEXT_PUBLIC_BETTER_AUTH_URL?.trim() || "http://localhost:4173",
+    process.env.BETTER_AUTH_URL?.trim() ||
+      process.env.NEXT_PUBLIC_BETTER_AUTH_URL?.trim() ||
+      "http://localhost:4173",
   );
-  return NextResponse.json({
-    inviteId,
-    parentOrganizationId,
-    domainId,
-    expiresAt,
-    enrollmentToken: token,
-    enrollmentUrl: `${baseUrl}/api/platform/federation/enroll`,
-    secretHandling: "enrollmentToken 只在本次响应返回；交给远端平台管理员后不要写入仓库或日志。",
-  }, { status: 201, headers: { "cache-control": "no-store", pragma: "no-cache" } });
+  return NextResponse.json(
+    {
+      inviteId,
+      parentOrganizationId,
+      domainId,
+      expiresAt,
+      enrollmentToken: token,
+      enrollmentUrl: `${baseUrl}/api/platform/federation/enroll`,
+      secretHandling:
+        "enrollmentToken 只在本次响应返回；交给远端平台管理员后不要写入仓库或日志。",
+    },
+    {
+      status: 201,
+      headers: { "cache-control": "no-store", pragma: "no-cache" },
+    },
+  );
 }
 
 /** List invite and binding state without returning any token or secret. */
@@ -95,7 +128,10 @@ export async function GET(request: Request): Promise<Response> {
       [guard.admin.rootTenantId],
     ),
   ]);
-  return NextResponse.json({ invites: invites.rows, bindings: bindings.rows }, { headers: { "cache-control": "no-store" } });
+  return NextResponse.json(
+    { invites: invites.rows, bindings: bindings.rows },
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 interface InviteRequest {
@@ -104,7 +140,9 @@ interface InviteRequest {
   expiresInHours?: unknown;
 }
 
-async function readRootOrganizationId(tenantId: string): Promise<string | null> {
+async function readRootOrganizationId(
+  tenantId: string,
+): Promise<string | null> {
   const result = await authDatabase.query<{ id: string }>(
     `SELECT id::text FROM "organization"
       WHERE "tenantId" = $1 AND "rootPlatform" = true AND "parentOrganizationId" IS NULL
@@ -114,15 +152,30 @@ async function readRootOrganizationId(tenantId: string): Promise<string | null> 
   return result.rows[0]?.id ?? null;
 }
 
-function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
-  const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
-  return Number.isSafeInteger(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback;
+function boundedInteger(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : Number.parseInt(String(value ?? ""), 10);
+  return Number.isSafeInteger(parsed)
+    ? Math.max(minimum, Math.min(maximum, parsed))
+    : fallback;
 }
 
 function normalizeBaseUrl(value: string): string {
   try {
     const url = new URL(value);
-    if (!((url.protocol === "https:") || (url.protocol === "http:" && url.hostname === "localhost"))) {
+    if (
+      !(
+        url.protocol === "https:" ||
+        (url.protocol === "http:" && url.hostname === "localhost")
+      )
+    ) {
       return "http://localhost:4173";
     }
     url.search = "";

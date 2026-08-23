@@ -12,7 +12,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use matchplane_config::{AppConfig, ConfigurationDiagnostics, Environment};
 use matchplane_domain::{DomainId, TenantId};
 use matchplane_storage::{
-    PgStore, ProvisionRootDomain, ProvisionRootPlatform, ProvisionedRootPlatform,
+    CatalogProjectionStatus, PgStore, ProvisionRootDomain, ProvisionRootPlatform,
+    ProvisionedRootPlatform,
 };
 use reqwest::Client;
 use rpassword::prompt_password;
@@ -142,6 +143,11 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect or explicitly replay child-catalog projection jobs.
+    CatalogProjections {
+        #[command(subcommand)]
+        command: CatalogProjectionCommand,
+    },
     /// Start one named workload under a process supervisor.
     Serve {
         /// Workload to start. The child inherits the current environment and standard streams.
@@ -206,6 +212,24 @@ enum SecretCommand {
         /// Read one secret line from stdin instead of opening a hidden TTY prompt.
         #[arg(long)]
         secret_stdin: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CatalogProjectionCommand {
+    /// Return secret-free state counts and a bounded recent problem list.
+    Status {
+        /// Maximum number of retry/processing/dead rows to include.
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: u32,
+    },
+    /// Replay exactly one dead-lettered job after re-reading current canonical state.
+    Replay {
+        /// Exact durable job UUID from the status report.
+        job_id: Uuid,
+        /// Printable operator reason persisted in the platform audit event.
+        #[arg(long)]
+        reason: String,
     },
 }
 
@@ -276,6 +300,12 @@ async fn main() -> Result<()> {
         }
         Command::Doctor { json: _ } => doctor().await,
         Command::Status { json: _ } => status().await,
+        Command::CatalogProjections {
+            command: CatalogProjectionCommand::Status { limit },
+        } => catalog_projection_status_command(limit).await,
+        Command::CatalogProjections {
+            command: CatalogProjectionCommand::Replay { job_id, reason },
+        } => replay_catalog_projection_job_command(job_id, &reason).await,
         Command::Serve { service, args } => serve(service, &args),
         Command::Mcp {
             command: McpCommand::Serve,
@@ -527,11 +557,7 @@ async fn create_admin_invite(
     .await
     .context("administrator invite could not be stored")?;
 
-    let base_url = normalize_admin_base_url(
-        base_url
-            .or_else(|| env::var("BETTER_AUTH_URL").ok())
-            .unwrap_or_else(|| "http://localhost:4173".to_owned()),
-    )?;
+    let base_url = configured_admin_base_url(base_url)?;
     let next = match role {
         AdminInviteRole::RootAdmin => "/?role=platform".to_owned(),
         AdminInviteRole::SubplatformAdmin => format!("/{target_slug}?role=subplatform_admin"),
@@ -643,11 +669,7 @@ async fn create_super_admin_invite(
         .await
         .context("super-admin invite transaction could not commit")?;
 
-    let base_url = normalize_admin_base_url(
-        base_url
-            .or_else(|| env::var("BETTER_AUTH_URL").ok())
-            .unwrap_or_else(|| "http://localhost:4173".to_owned()),
-    )?;
+    let base_url = configured_admin_base_url(base_url)?;
     let next = "/?role=platform";
     let encoded_next: String = url::form_urlencoded::byte_serialize(next.as_bytes()).collect();
     println!(
@@ -1071,11 +1093,7 @@ async fn create_federation_invite(
     .await
     .context("federation invite could not be stored")?;
 
-    let base_url = normalize_admin_base_url(
-        base_url
-            .or_else(|| env::var("BETTER_AUTH_URL").ok())
-            .unwrap_or_else(|| "http://localhost:4173".to_owned()),
-    )?;
+    let base_url = configured_admin_base_url(base_url)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
@@ -1098,6 +1116,14 @@ fn admin_invite_role_value(role: AdminInviteRole) -> &'static str {
         AdminInviteRole::RootAdmin => "rootAdmin",
         AdminInviteRole::SubplatformAdmin => "subplatform_admin",
     }
+}
+
+fn configured_admin_base_url(base_url: Option<String>) -> Result<String> {
+    normalize_admin_base_url(
+        base_url
+            .or_else(|| env::var("BETTER_AUTH_URL").ok())
+            .unwrap_or_else(|| "http://localhost:4173".to_owned()),
+    )
 }
 
 fn normalize_admin_base_url(value: String) -> Result<String> {
@@ -1256,6 +1282,47 @@ async fn status() -> Result<()> {
     }
 }
 
+async fn catalog_projection_status_report(limit: u32) -> Result<CatalogProjectionStatus> {
+    let config = load_password_maintenance_config()
+        .context("catalog projection database configuration is unavailable")?;
+    let store = PgStore::connect(&config.database_url, 2)
+        .await
+        .context("catalog projection status could not connect to PostgreSQL")?;
+    store
+        .catalog_projection_status(limit)
+        .await
+        .context("catalog projection status query failed")
+}
+
+async fn catalog_projection_status_command(limit: u32) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&catalog_projection_status_report(limit).await?)
+            .context("catalog projection status encoding failed")?
+    );
+    Ok(())
+}
+
+async fn replay_catalog_projection_job_command(job_id: Uuid, reason: &str) -> Result<()> {
+    validate_operator_uuid(job_id, "job_id")?;
+    let config = load_password_maintenance_config()
+        .context("catalog projection database configuration is unavailable")?;
+    let store = PgStore::connect(&config.database_url, 2)
+        .await
+        .context("catalog projection replay could not connect to PostgreSQL")?;
+    let operator_request_id = format!("host-cli:{}", Uuid::now_v7());
+    let outcome = store
+        .replay_catalog_projection_job(job_id, &operator_request_id, reason)
+        .await
+        .context("catalog projection replay failed")?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&outcome)
+            .context("catalog projection replay encoding failed")?
+    );
+    Ok(())
+}
+
 fn serve(service: Service, args: &[String]) -> Result<()> {
     let mut command = if matches!(service, Service::Web) {
         ProcessCommand::new(resolve_web_node())
@@ -1347,6 +1414,19 @@ async fn handle_mcp_request(request: JsonRpcRequest) -> Result<Option<JsonRpcRes
             Some("platform.ai.status") => {
                 JsonRpcResponse::success(id, tool_result(hosted_agent_report()))
             }
+            Some("platform.catalog_projections.status") => {
+                match mcp_catalog_projection_limit(&request.params) {
+                    Ok(limit) => match catalog_projection_status_report(limit).await {
+                        Ok(report) => JsonRpcResponse::success(id, tool_result(report)),
+                        Err(_) => JsonRpcResponse::error(
+                            id,
+                            -32000,
+                            "catalog projection status is unavailable".to_owned(),
+                        ),
+                    },
+                    Err(message) => JsonRpcResponse::error(id, -32602, message),
+                }
+            }
             Some("platform.health") => {
                 JsonRpcResponse::success(id, tool_result(probe_status().await))
             }
@@ -1366,6 +1446,7 @@ fn tool_list() -> Value {
             { "name": "platform.status", "description": "Probe MatchPlane readiness endpoints without exposing secrets.", "inputSchema": { "type": "object", "additionalProperties": false } },
             { "name": "platform.doctor", "description": "Validate loaded configuration and production safety gates.", "inputSchema": { "type": "object", "additionalProperties": false } },
             { "name": "platform.ai.status", "description": "Report the server-side hosted Agent configuration without exposing its key or URL path.", "inputSchema": { "type": "object", "additionalProperties": false } },
+            { "name": "platform.catalog_projections.status", "description": "Return secret-free child catalog projection counts, lag ages, and a bounded problem list.", "inputSchema": { "type": "object", "additionalProperties": false, "properties": { "limit": { "type": "integer", "minimum": 1, "maximum": 100 } } } },
             { "name": "platform.health", "description": "Return the same bounded read-only health report as platform.status.", "inputSchema": { "type": "object", "additionalProperties": false } }
         ]
     })
@@ -1373,6 +1454,28 @@ fn tool_list() -> Value {
 
 fn mcp_tool_name(params: &Value) -> Option<&str> {
     params.get("name").and_then(Value::as_str)
+}
+
+fn mcp_catalog_projection_limit(params: &Value) -> Result<u32, String> {
+    let Some(arguments) = params.get("arguments") else {
+        return Ok(20);
+    };
+    let Some(arguments) = arguments.as_object() else {
+        return Err("catalog projection status arguments must be an object".to_owned());
+    };
+    if arguments.keys().any(|key| key != "limit") {
+        return Err("catalog projection status contains an unsupported argument".to_owned());
+    }
+    let Some(limit) = arguments.get("limit") else {
+        return Ok(20);
+    };
+    let Some(limit) = limit.as_u64().and_then(|value| u32::try_from(value).ok()) else {
+        return Err("catalog projection status limit must be an integer".to_owned());
+    };
+    if !(1..=100).contains(&limit) {
+        return Err("catalog projection status limit must be between 1 and 100".to_owned());
+    }
+    Ok(limit)
 }
 
 fn tool_result<T: Serialize>(value: T) -> Value {
@@ -1553,17 +1656,59 @@ struct HostedAgentReport {
     issues: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ManagedHostedAgentConfig {
+    endpoint: String,
+    model: String,
+    protocol: String,
+    enabled: bool,
+}
+
+const MANAGED_ROUTER_CONFIG_PATH: &str = "/etc/matchplane/secrets/root-email/platform-router.json";
+const MANAGED_ROUTER_KEY_PATH: &str = "/etc/matchplane/secrets/root-email/platform-router.key";
+
 fn hosted_agent_report() -> HostedAgentReport {
-    hosted_agent_report_from_values(
-        env::var("MATCHPLANE_ENVIRONMENT")
-            .ok()
-            .as_deref()
-            .unwrap_or("development"),
+    let environment =
+        env::var("MATCHPLANE_ENVIRONMENT").unwrap_or_else(|_| "development".to_owned());
+    let environment_report = hosted_agent_report_from_values(
+        &environment,
         env::var("MATCHPLANE_ROUTER_AI_URL").ok().as_deref(),
         env::var("MATCHPLANE_ROUTER_AI_KEY").ok().as_deref(),
         env::var("MATCHPLANE_ROUTER_AI_MODEL").ok().as_deref(),
         env::var("MATCHPLANE_ROUTER_AI_PROTOCOL").ok().as_deref(),
-    )
+    );
+    let Some(managed_report) = managed_hosted_agent_report(&environment) else {
+        return environment_report;
+    };
+    if managed_report.configured || !environment_report.configured {
+        managed_report
+    } else {
+        environment_report
+    }
+}
+
+fn managed_hosted_agent_report(environment: &str) -> Option<HostedAgentReport> {
+    let config = fs::read_to_string(MANAGED_ROUTER_CONFIG_PATH).ok()?;
+    let key = fs::read_to_string(MANAGED_ROUTER_KEY_PATH).ok();
+    hosted_agent_report_from_managed_values(environment, &config, key.as_deref())
+}
+
+fn hosted_agent_report_from_managed_values(
+    environment: &str,
+    config: &str,
+    key: Option<&str>,
+) -> Option<HostedAgentReport> {
+    let config: ManagedHostedAgentConfig = serde_json::from_str(config).ok()?;
+    if !config.enabled {
+        return None;
+    }
+    Some(hosted_agent_report_from_values(
+        environment,
+        Some(&config.endpoint),
+        key,
+        Some(&config.model),
+        Some(&config.protocol),
+    ))
 }
 
 fn hosted_agent_report_from_values(
@@ -1586,19 +1731,19 @@ fn hosted_agent_report_from_values(
         .map(str::to_owned);
     let mut issues = Vec::new();
     if endpoint_origin.is_none() {
-        issues.push("MATCHPLANE_ROUTER_AI_URL is missing or invalid".to_owned());
+        issues.push("hosted Agent endpoint is missing or invalid".to_owned());
     }
     if !key_configured {
-        issues.push("MATCHPLANE_ROUTER_AI_KEY is not configured".to_owned());
+        issues.push("hosted Agent key is not configured".to_owned());
     }
     if model.is_none() {
-        issues.push("MATCHPLANE_ROUTER_AI_MODEL is not configured".to_owned());
+        issues.push("hosted Agent model is not configured".to_owned());
     }
     if !matches!(
         protocol.as_str(),
         "openai-compatible" | "anthropic-messages" | "gemini-generate-content"
     ) {
-        issues.push("MATCHPLANE_ROUTER_AI_PROTOCOL is unsupported".to_owned());
+        issues.push("hosted Agent protocol is unsupported".to_owned());
     }
     if environment.trim().eq_ignore_ascii_case("production")
         && endpoint
@@ -1688,9 +1833,10 @@ mod tests {
     use super::{
         AdminInviteRole, AuthCommand, Cli, Command, SecretCommand, Service,
         admin_invite_role_value, better_auth_derived_key, dotenv_value,
-        hosted_agent_report_from_values, normalize_admin_base_url, resolve_web_node_with,
-        safe_endpoint_origin, select_root_admin_email, service_command, sha256,
-        valid_root_email_secret_slot, validate_operator_email, validate_operator_uuid,
+        hosted_agent_report_from_managed_values, hosted_agent_report_from_values,
+        normalize_admin_base_url, resolve_web_node_with, safe_endpoint_origin,
+        select_root_admin_email, service_command, sha256, valid_root_email_secret_slot,
+        validate_operator_email, validate_operator_uuid,
     };
     use clap::Parser;
     use uuid::Uuid;
@@ -1738,22 +1884,23 @@ mod tests {
     }
 
     #[test]
-    fn operator_uuid_rejects_nil_and_non_rfc_versions() {
+    fn operator_uuid_rejects_nil_and_non_rfc_versions() -> anyhow::Result<()> {
         assert!(validate_operator_uuid(Uuid::nil(), "--tenant-id").is_err());
         assert!(
             validate_operator_uuid(
-                Uuid::parse_str("00000000-0000-9000-8000-000000000001").unwrap(),
+                Uuid::parse_str("00000000-0000-9000-8000-000000000001")?,
                 "--tenant-id",
             )
             .is_err()
         );
         assert!(
             validate_operator_uuid(
-                Uuid::parse_str("00000000-0000-7000-8000-000000000001").unwrap(),
+                Uuid::parse_str("00000000-0000-7000-8000-000000000001")?,
                 "--tenant-id",
             )
             .is_ok()
         );
+        Ok(())
     }
 
     #[test]
@@ -1776,18 +1923,19 @@ mod tests {
     }
 
     #[test]
-    fn better_auth_hash_matches_the_node_scrypt_fixture() {
+    fn better_auth_hash_matches_the_node_scrypt_fixture() -> anyhow::Result<()> {
         let (salt, expected_key) = "2fed236420c93b71f823a22012f34f9a:9a4c013d8e168bda79db6de1e0ffc7607db2be2f0850c1f4daa0a8fc04afb12e7b67ce60cc8f5bd0a206ef4181ad0d5d70012e445c7b171becbd0fd9d814923f"
             .split_once(':')
-            .expect("fixture must contain a salt separator");
+            .ok_or_else(|| anyhow::anyhow!("fixture must contain a salt separator"))?;
         assert_eq!(
-            better_auth_derived_key("MatchPlane-CLI-Test-2026!", salt).unwrap(),
+            better_auth_derived_key("MatchPlane-CLI-Test-2026!", salt)?,
             expected_key
         );
+        Ok(())
     }
 
     #[test]
-    fn auth_passwd_should_accept_the_legacy_reset_password_alias() {
+    fn auth_passwd_should_accept_the_legacy_reset_password_alias() -> anyhow::Result<()> {
         let cli = Cli::try_parse_from([
             "matchplane",
             "auth",
@@ -1795,8 +1943,7 @@ mod tests {
             "--email",
             "admin@matx.tech",
             "--password-stdin",
-        ])
-        .unwrap();
+        ])?;
 
         assert!(matches!(
             cli.command,
@@ -1807,12 +1954,12 @@ mod tests {
                 },
             }
         ));
+        Ok(())
     }
 
     #[test]
-    fn auth_passwd_should_not_require_an_email_argument() {
-        let cli =
-            Cli::try_parse_from(["matchplane", "auth", "passwd", "--password-stdin"]).unwrap();
+    fn auth_passwd_should_not_require_an_email_argument() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["matchplane", "auth", "passwd", "--password-stdin"])?;
 
         assert!(matches!(
             cli.command,
@@ -1823,11 +1970,12 @@ mod tests {
                 },
             }
         ));
+        Ok(())
     }
 
     #[test]
-    fn top_level_passwd_should_not_require_an_email_argument() {
-        let cli = Cli::try_parse_from(["matchplane", "passwd", "--password-stdin"]).unwrap();
+    fn top_level_passwd_should_not_require_an_email_argument() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["matchplane", "passwd", "--password-stdin"])?;
 
         assert!(matches!(
             cli.command,
@@ -1836,12 +1984,12 @@ mod tests {
                 password_stdin: true,
             }
         ));
+        Ok(())
     }
 
     #[test]
-    fn root_email_secret_command_accepts_a_safe_slot() {
-        let cli = Cli::try_parse_from(["matchplane", "secret", "put", "--slot", "smtp-password"])
-            .unwrap();
+    fn root_email_secret_command_accepts_a_safe_slot() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["matchplane", "secret", "put", "--slot", "smtp-password"])?;
         assert!(matches!(
             cli.command,
             Command::Secret {
@@ -1850,17 +1998,17 @@ mod tests {
         ));
         assert!(valid_root_email_secret_slot("smtp.password_2026"));
         assert!(!valid_root_email_secret_slot("../smtp-password"));
+        Ok(())
     }
 
     #[test]
-    fn super_admin_invite_command_accepts_an_optional_email_binding() {
+    fn super_admin_invite_command_accepts_an_optional_email_binding() -> anyhow::Result<()> {
         let cli = Cli::try_parse_from([
             "matchplane",
             "super-admin-invite",
             "--email",
             "owner@matx.tech",
-        ])
-        .unwrap();
+        ])?;
         assert!(matches!(
             cli.command,
             Command::SuperAdminInvite {
@@ -1869,6 +2017,7 @@ mod tests {
                 base_url: None,
             } if email == "owner@matx.tech"
         ));
+        Ok(())
     }
 
     #[test]
@@ -1911,6 +2060,34 @@ mod tests {
     }
 
     #[test]
+    fn hosted_agent_report_accepts_an_enabled_managed_provider() -> anyhow::Result<()> {
+        let report = hosted_agent_report_from_managed_values(
+            "production",
+            r#"{"endpoint":"https://managed.example/v1/chat","model":"managed/model","protocol":"openai-compatible","enabled":true,"assistantInstructions":"ignored by operations output"}"#,
+            Some("server-only-key"),
+        )
+        .ok_or_else(|| anyhow::anyhow!("enabled managed provider should produce a report"))?;
+
+        assert!(report.configured);
+        assert_eq!(
+            report.endpoint_origin.as_deref(),
+            Some("https://managed.example")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hosted_agent_report_ignores_a_disabled_managed_provider() {
+        let report = hosted_agent_report_from_managed_values(
+            "production",
+            r#"{"endpoint":"https://managed.example/v1/chat","model":"managed/model","protocol":"openai-compatible","enabled":false}"#,
+            Some("server-only-key"),
+        );
+
+        assert!(report.is_none());
+    }
+
+    #[test]
     fn hosted_agent_report_accepts_a_secure_supported_provider() {
         let report = hosted_agent_report_from_values(
             "production",
@@ -1948,12 +2125,12 @@ mod tests {
     }
 
     #[test]
-    fn admin_base_url_strips_query_and_fragment() {
+    fn admin_base_url_strips_query_and_fragment() -> anyhow::Result<()> {
         assert_eq!(
-            normalize_admin_base_url("https://matx.tech/console/?old=1#fragment".to_owned())
-                .unwrap(),
+            normalize_admin_base_url("https://matx.tech/console/?old=1#fragment".to_owned())?,
             "https://matx.tech/console"
         );
         assert!(normalize_admin_base_url("ftp://matx.tech".to_owned()).is_err());
+        Ok(())
     }
 }

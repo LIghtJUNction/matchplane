@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -212,8 +213,4 @@ function isOrganizationName(value: string): boolean {
 
 function isOrganizationSlug(value: string): boolean {
   return /^[a-z0-9][a-z0-9-]{1,62}$/.test(value);
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

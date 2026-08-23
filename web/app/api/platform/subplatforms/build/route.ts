@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { authDatabase } from "../../../../../src/lib/auth";
 import { hasValidConfiguredSubplatformBuilderToken } from "../../../../../src/subplatform-builder";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../../src/lib/body-limit";
+import { isUuid } from "../../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -148,8 +149,4 @@ function isSafeRelativePath(value: string, maximum: number): boolean {
     && !value.startsWith("/")
     && !value.includes("\\")
     && !value.split("/").some((segment) => segment === "" || segment === "." || segment === "..");
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

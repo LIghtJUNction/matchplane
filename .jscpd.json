@@ -1,0 +1,15 @@
+{
+  "minLines": 15,
+  "minTokens": 80,
+  "mode": "strict",
+  "threshold": 5,
+  "ignore": [
+    "**/*.test.*",
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/target/**",
+    "deploy/helm/**",
+    "migrations/**",
+    "subplatforms/auto/**"
+  ]
+}

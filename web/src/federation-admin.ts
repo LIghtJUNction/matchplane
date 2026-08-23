@@ -1,5 +1,7 @@
 import { auth, authDatabase } from "./lib/auth";
 import { hasTrustedBrowserOrigin } from "./lib/request-origin";
+import { isUuid } from "./lib/uuid";
+export { isUuid };
 
 export interface FederationAdmin {
   userId: string;
@@ -62,11 +64,6 @@ export async function validateFederationParent(
     [tenantId, domainId],
   );
   return domain.rowCount === 1 ? null : "domain 不存在、停用或不属于当前 root tenant";
-}
-
-export function isUuid(value: unknown): value is string {
-  return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export function jsonError(error: string, status: number): Response {

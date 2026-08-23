@@ -2,16 +2,25 @@ import { createHash } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { auth, applyPlatformAdminInviteRole, authDatabase } from "../../../../src/lib/auth";
+import {
+  auth,
+  applyPlatformAdminInviteRole,
+  authDatabase,
+} from "../../../../src/lib/auth";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  RequestBodyTooLargeError,
+} from "../../../../src/lib/body-limit";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Redeem a CLI-issued administrator link exactly once for the current Better Auth user. */
 export async function POST(request: Request): Promise<Response> {
-  if (!hasTrustedBrowserOrigin(request)) return jsonError("请求来源未被平台信任", 403);
+  if (!hasTrustedBrowserOrigin(request))
+    return jsonError("请求来源未被平台信任", 403);
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return jsonError("Better Auth session is required", 401);
   // A CLI invitation grants an administrative role; do not let an unverified
@@ -19,7 +28,7 @@ export async function POST(request: Request): Promise<Response> {
   // identity providers that are trusted for admin use must map their verified
   // proof to Better Auth's emailVerified flag before the invite can be redeemed.
   if (session.user.emailVerified !== true) {
-    return jsonError("请先完成账号验证，再兑换管理员注册链接", 403);
+    return jsonError("完成账号验证后即可兑换管理员注册链接", 403);
   }
 
   let input: Record<string, unknown>;
@@ -27,7 +36,9 @@ export async function POST(request: Request): Promise<Response> {
     input = await readJsonBody<Record<string, unknown>>(request, 16 * 1024);
   } catch (error) {
     return jsonError(
-      error instanceof RequestBodyTooLargeError ? "管理员注册链接请求过大" : "请求必须是有效 JSON",
+      error instanceof RequestBodyTooLargeError
+        ? "管理员注册链接请求过大"
+        : "请求必须是有效 JSON",
       error instanceof RequestBodyTooLargeError ? 413 : 400,
     );
   }
@@ -68,7 +79,10 @@ export async function POST(request: Request): Promise<Response> {
       await client.query("ROLLBACK");
       return jsonError("管理员注册链接无效或已过期", 410);
     }
-    if (invite.targetEmail && invite.targetEmail.toLowerCase() !== session.user.email.toLowerCase()) {
+    if (
+      invite.targetEmail &&
+      invite.targetEmail.toLowerCase() !== session.user.email.toLowerCase()
+    ) {
       await client.query("ROLLBACK");
       return jsonError("管理员邀请仅限指定邮箱注册", 403);
     }
@@ -81,9 +95,10 @@ export async function POST(request: Request): Promise<Response> {
       return jsonError("子平台管理员邀请不能指向根组织", 409);
     }
     const claimIsActive = Boolean(
-      invite.claimedBy
-      && invite.claimedBy !== session.user.id
-      && (!invite.claimExpiresAt || new Date(invite.claimExpiresAt).getTime() > Date.now()),
+      invite.claimedBy &&
+        invite.claimedBy !== session.user.id &&
+        (!invite.claimExpiresAt ||
+          new Date(invite.claimExpiresAt).getTime() > Date.now()),
     );
     if (claimIsActive) {
       await client.query("ROLLBACK");
@@ -134,35 +149,44 @@ export async function POST(request: Request): Promise<Response> {
       throw new Error("管理员邀请认领状态已改变");
     }
     await client.query("COMMIT");
-    return NextResponse.json({
-      redeemed: true,
-      organizationId: invite.organizationId,
-      role: applied.role,
-    }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json(
+      {
+        redeemed: true,
+        organizationId: invite.organizationId,
+        role: applied.role,
+      },
+      { headers: { "cache-control": "no-store" } },
+    );
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (invite && !roleApplicationAttempted) {
       // Release a failed claim immediately when possible. If the database is unavailable, the
       // lease expires on its own and the same user can retry without issuing a replacement link.
-      await client.query("BEGIN").then(async () => {
-        await client.query(
-          `UPDATE platform_admin_invites
+      await client
+        .query("BEGIN")
+        .then(async () => {
+          await client.query(
+            `UPDATE platform_admin_invites
               SET claimed_by = NULL, claimed_at = NULL, claim_expires_at = NULL
             WHERE id = $1::uuid AND used_at IS NULL AND claimed_by = $2::uuid`,
-          [invite?.inviteId, session.user.id],
-        );
-        await client.query("COMMIT");
-      }).catch(async () => {
-        await client.query("ROLLBACK").catch(() => undefined);
-      });
+            [invite?.inviteId, session.user.id],
+          );
+          await client.query("COMMIT");
+        })
+        .catch(async () => {
+          await client.query("ROLLBACK").catch(() => undefined);
+        });
     } else if (invite && roleApplicationAttempted) {
       // Keep the short claim lease. A retry by the same verified user can idempotently apply the
       // role again and mark the invite; a different account must not inherit a role from a token
       // whose cross-store completion is still uncertain.
-      console.warn("platform admin invite role applied; retaining claim lease after completion failure", {
-        inviteId: invite.inviteId,
-        userId: session.user.id,
-      });
+      console.warn(
+        "platform admin invite role applied; retaining claim lease after completion failure",
+        {
+          inviteId: invite.inviteId,
+          userId: session.user.id,
+        },
+      );
     }
     console.error("platform admin invite redemption failed", error);
     return jsonError("管理员邀请暂时无法兑换，请稍后重试", 503);
@@ -183,21 +207,21 @@ interface InviteRow {
 }
 
 function parseToken(value: unknown): string | null {
-  return typeof value === "string" && /^mpa_[0-9a-f]{64}$/.test(value) ? value : null;
+  return typeof value === "string" && /^mpa_[0-9a-f]{64}$/.test(value)
+    ? value
+    : null;
 }
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function isUuid(value: unknown): value is string {
-  return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
 function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, {
-    status,
-    headers: { "cache-control": "no-store" },
-  });
+  return NextResponse.json(
+    { error },
+    {
+      status,
+      headers: { "cache-control": "no-store" },
+    },
+  );
 }

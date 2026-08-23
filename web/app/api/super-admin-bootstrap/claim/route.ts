@@ -3,26 +3,42 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { authDatabase } from "../../../../src/lib/auth";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
+import {
+  readJsonBody,
+  RequestBodyTooLargeError,
+} from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Reserve a CLI-issued first-super-admin link for exactly one registration email. */
 export async function POST(request: Request): Promise<Response> {
-  if (!hasTrustedBrowserOrigin(request)) return error("请求来源未被平台信任", 403);
+  if (!hasTrustedBrowserOrigin(request))
+    return error("请求来源未被平台信任", 403);
   let body: Record<string, unknown>;
   try {
     const value = await readJsonBody<unknown>(request, 16 * 1024);
-    if (!value || typeof value !== "object" || Array.isArray(value)) return error("请求必须是对象", 400);
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return error("请求必须是对象", 400);
     body = value as Record<string, unknown>;
   } catch (cause) {
-    return error(cause instanceof RequestBodyTooLargeError ? "请求过大" : "请求必须是有效 JSON", cause instanceof RequestBodyTooLargeError ? 413 : 400);
+    return error(
+      cause instanceof RequestBodyTooLargeError
+        ? "请求过大"
+        : "请求必须是有效 JSON",
+      cause instanceof RequestBodyTooLargeError ? 413 : 400,
+    );
   }
-  const token = typeof body.token === "string" && /^mpsa_[0-9a-f]{64}$/.test(body.token) ? body.token : null;
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  if (!token || !isEmail(email)) return error("超级管理员注册链接无效或已过期", 400);
+  const token =
+    typeof body.token === "string" && /^mpsa_[0-9a-f]{64}$/.test(body.token)
+      ? body.token
+      : null;
+  const email =
+    typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!token || !isEmail(email))
+    return error("超级管理员注册链接无效或已过期", 400);
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!isUuid(tenantId)) return error("root tenant 尚未配置", 503);
 
@@ -36,7 +52,10 @@ export async function POST(request: Request): Promise<Response> {
       await client.query("ROLLBACK");
       return error("超级管理员已经存在，注册链接不再可用", 409);
     }
-    const inviteResult = await client.query<{ target_email: string | null; registration_email: string | null }>(
+    const inviteResult = await client.query<{
+      target_email: string | null;
+      registration_email: string | null;
+    }>(
       `SELECT target_email, registration_email
          FROM root_superadmin_invites
         WHERE tenant_id = $1::uuid
@@ -47,11 +66,17 @@ export async function POST(request: Request): Promise<Response> {
       [tenantId, digest(token)],
     );
     const invite = inviteResult.rows[0];
-    if (!invite || (invite.target_email && invite.target_email.toLowerCase() !== email)) {
+    if (
+      !invite ||
+      (invite.target_email && invite.target_email.toLowerCase() !== email)
+    ) {
       await client.query("ROLLBACK");
       return error("超级管理员注册链接无效或已过期", 410);
     }
-    if (invite.registration_email && invite.registration_email.toLowerCase() !== email) {
+    if (
+      invite.registration_email &&
+      invite.registration_email.toLowerCase() !== email
+    ) {
       await client.query("ROLLBACK");
       return error("注册链接已绑定到其他邮箱", 409);
     }
@@ -62,7 +87,10 @@ export async function POST(request: Request): Promise<Response> {
       [tenantId, email],
     );
     await client.query("COMMIT");
-    return NextResponse.json({ claimed: true }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json(
+      { claimed: true },
+      { headers: { "cache-control": "no-store" } },
+    );
   } catch {
     await client.query("ROLLBACK").catch(() => undefined);
     return error("超级管理员注册链接暂时不可用", 503);
@@ -79,10 +107,9 @@ function isEmail(value: string): boolean {
   return value.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-function isUuid(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(value);
-}
-
 function error(message: string, status: number): Response {
-  return NextResponse.json({ error: message }, { status, headers: { "cache-control": "no-store" } });
+  return NextResponse.json(
+    { error: message },
+    { status, headers: { "cache-control": "no-store" } },
+  );
 }

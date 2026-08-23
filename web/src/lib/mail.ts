@@ -10,6 +10,7 @@ import {
   getRootEmailConfig,
   readRootEmailCredential,
 } from "./root-email-config";
+import { isUuid } from "./uuid";
 
 const database = new Pool({
   connectionString: process.env.MATCHPLANE_DATABASE_URL ?? process.env.DATABASE_URL,
@@ -331,10 +332,6 @@ function isSecretReference(value: string): boolean {
 function isWithin(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
   return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function isEmailAddress(value: string): boolean {

@@ -17,7 +17,7 @@ use matchplane_payments::{
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 use url::Url;
 
 use crate::{
@@ -125,6 +125,16 @@ pub struct PageQuery {
     tenant_id: matchplane_domain::TenantId,
     limit: Option<u16>,
     offset: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FinancialReportQuery {
+    tenant_id: matchplane_domain::TenantId,
+    source_type: String,
+    source_ref: String,
+    from: String,
+    to: String,
+    limit: Option<u16>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1229,6 +1239,29 @@ pub async fn admin_invoices(
         .map_err(ApiError::from)
 }
 
+pub async fn admin_financial_report(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<FinancialReportQuery>,
+    headers: HeaderMap,
+) -> Result<Json<crate::store::FinancialReport>, ApiError> {
+    require_admin(&state, &headers)?;
+    validate_source_reference(Some(&query.source_type), Some(&query.source_ref))?;
+    let (from, to) = financial_report_window(&query.from, &query.to)?;
+    state
+        .store
+        .financial_report(
+            query.tenant_id,
+            &query.source_type,
+            &query.source_ref,
+            from,
+            to,
+            query.limit.unwrap_or(250).clamp(1, 500),
+        )
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
 pub async fn mutate_gateway(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1556,6 +1589,28 @@ fn validate_actor(actor: &str) -> Result<(), ApiError> {
     }
 }
 
+fn financial_report_window(
+    from: &str,
+    to: &str,
+) -> Result<(OffsetDateTime, OffsetDateTime), ApiError> {
+    let from = OffsetDateTime::parse(from, &Rfc3339).map_err(|_| {
+        ApiError::bad_request("financial report from must be an RFC 3339 timestamp")
+    })?;
+    let to = OffsetDateTime::parse(to, &Rfc3339)
+        .map_err(|_| ApiError::bad_request("financial report to must be an RFC 3339 timestamp"))?;
+    if to <= from {
+        return Err(ApiError::bad_request(
+            "financial report to must be later than from",
+        ));
+    }
+    if to - from > Duration::days(366) {
+        return Err(ApiError::bad_request(
+            "financial report window cannot exceed 366 days",
+        ));
+    }
+    Ok((from, to))
+}
+
 fn page_limit(value: Option<u16>) -> u16 {
     value.unwrap_or(25).clamp(1, 100)
 }
@@ -1798,5 +1853,12 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn financial_report_window_is_positive_and_bounded() {
+        assert!(financial_report_window("2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z").is_ok());
+        assert!(financial_report_window("2026-09-01T00:00:00Z", "2026-08-01T00:00:00Z").is_err());
+        assert!(financial_report_window("2025-01-01T00:00:00Z", "2026-09-01T00:00:00Z").is_err());
     }
 }

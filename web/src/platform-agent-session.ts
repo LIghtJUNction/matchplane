@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { isUuid } from "./lib/uuid";
+export { isUuid };
 
 export const AGENT_PARTY_ROLES = ["buyer", "seller"] as const;
 export type AgentPartyRole = (typeof AGENT_PARTY_ROLES)[number];
@@ -106,11 +108,6 @@ export function isPlatformPath(value: unknown): value is string {
   return typeof value === "string"
     && value.length <= 512
     && (value === "/" || /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(value));
-}
-
-export function isUuid(value: unknown): value is string {
-  return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

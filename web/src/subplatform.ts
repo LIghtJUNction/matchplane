@@ -1,3 +1,5 @@
+import type { InterfaceLocale } from "./lib/preferences";
+
 export type PricingMode = "fixed" | "range" | "negotiable" | "none";
 
 export interface PricingConfig {
@@ -7,23 +9,12 @@ export interface PricingConfig {
   label?: string;
 }
 
-export interface ContactField {
-  key: string;
-  label: string;
-  type?: "text" | "tel" | "email";
-  required?: boolean;
-  placeholder?: string;
-}
-
-const ROOT_DEFAULT_CONTACT_FIELDS: ContactField[] = [
-  { key: "phone", label: "手机号", type: "tel", placeholder: "例如：138 0000 0000" },
-  { key: "wechat", label: "微信号", type: "text", placeholder: "填写可用于联系的微信号" },
-];
-
 export interface ChatUiConfig {
   /** Optional headline copy owned by the mounted platform package. */
   buyerHeadlines?: string[];
   sellerHeadlines?: string[];
+  /** Root-home typewriter phrases configured by the mall operator. */
+  homePlaceholderPhrases?: string[];
   /** Initial consent choice for contact-free supply discovery. */
   demandDiscoveryDefault?: boolean;
   listingEyebrow?: string;
@@ -81,7 +72,6 @@ export interface SubplatformConfig {
       placeholder?: string;
       options?: string[];
     }>;
-    contactFields?: ContactField[];
   };
   assetSchema?: Record<string, unknown>;
   /** Capability names exposed by the package's authenticated Agent/MCP server. */
@@ -107,7 +97,6 @@ export function resolveSubplatform(pathname = "/"): SubplatformConfig {
         description: "把需求交给合适的供给方。",
         pricing: { mode: "none" },
         marketplaceContract: "generic-v1",
-        ui: { contactFields: ROOT_DEFAULT_CONTACT_FIELDS },
       }
     : {
         slug,
@@ -132,30 +121,65 @@ function pathnameOnly(value: string): string {
 }
 
 /** Load a registered subplatform manifest without embedding vertical data in root. */
-export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig> {
+export async function loadSubplatform(
+  pathname = "/",
+): Promise<SubplatformConfig> {
   const base = resolveSubplatform(pathname);
   if (!base.manifestUrl) {
     // The public shell needs only the mall's display name. Operational setup state and database
     // identifiers remain behind the authenticated mall console.
     try {
-      const response = await fetch("/api/mall/settings", { headers: { accept: "application/json" } });
+      const response = await fetch("/api/mall/settings", {
+        headers: { accept: "application/json" },
+      });
       if (!response.ok) return base;
-      const body = await response.json() as {
-        mall?: { name?: unknown; logoUrl?: unknown } | null;
+      const body = (await response.json()) as {
+        mall?: {
+          name?: unknown;
+          logoUrl?: unknown;
+          placeholderPhrases?: unknown;
+        } | null;
       };
       const name = body.mall?.name;
-      const brandLogoUrl = typeof body.mall?.logoUrl === "string" && body.mall.logoUrl.startsWith("/api/mall/logo")
-        ? body.mall.logoUrl
-        : undefined;
-      return typeof name === "string" && name.trim()
-        ? { ...base, brandName: name.trim(), label: name.trim(), brandLogoUrl }
-        : base;
+      const brandLogoUrl =
+        typeof body.mall?.logoUrl === "string" &&
+        body.mall.logoUrl.startsWith("/api/mall/logo")
+          ? body.mall.logoUrl
+          : undefined;
+      const homePlaceholderPhrases = Array.isArray(
+        body.mall?.placeholderPhrases,
+      )
+        ? body.mall.placeholderPhrases.filter(
+            (phrase): phrase is string =>
+              typeof phrase === "string" && phrase.trim().length > 0,
+          )
+        : [];
+      const brandName =
+        typeof name === "string" && name.trim() ? name.trim() : base.brandName;
+      return {
+        ...base,
+        brandName,
+        label: brandName,
+        brandLogoUrl,
+        ui: homePlaceholderPhrases.length
+          ? {
+              ...base.ui,
+              chat: {
+                ...base.ui?.chat,
+                homePlaceholderPhrases,
+              },
+            }
+          : base.ui,
+      };
     } catch {
       return base;
     }
   }
   try {
-    const response = await fetch(base.manifestUrl, { headers: { accept: "application/json" } });
+    // pi-lens-ignore: ts-ssrf
+    const response = await fetch(base.manifestUrl, {
+      headers: { accept: "application/json" },
+    });
     if (!response.ok) return base;
     const manifest = (await response.json()) as {
       displayName?: string;
@@ -175,7 +199,6 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
         copy?: Record<string, string>;
         filters?: NonNullable<SubplatformConfig["ui"]>["filters"];
         supplyFields?: NonNullable<SubplatformConfig["ui"]>["supplyFields"];
-        contactFields?: NonNullable<SubplatformConfig["ui"]>["contactFields"];
       };
       assetSchema?: Record<string, unknown>;
       agent?: { mcpTools?: unknown };
@@ -183,9 +206,14 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
         hosted?: { entry?: string; url?: string; digest?: string };
       };
     };
-    const pricing = validPricing(manifest.pricing)
-      ?? (manifest.currency?.trim()
-        ? { mode: "fixed" as const, currency: manifest.currency.trim(), currencyScale: manifest.currencyScale }
+    const pricing =
+      validPricing(manifest.pricing) ??
+      (manifest.currency?.trim()
+        ? {
+            mode: "fixed" as const,
+            currency: manifest.currency.trim(),
+            currencyScale: manifest.currencyScale,
+          }
         : { mode: "none" as const });
     return {
       ...base,
@@ -194,16 +222,22 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
       // calls and capability scopes use.
       path: base.path,
       brandName: manifest.displayName?.trim() || base.brandName,
-      label: manifest.label?.trim() || manifest.displayName?.trim() || base.label,
+      label:
+        manifest.label?.trim() || manifest.displayName?.trim() || base.label,
       description: manifest.description?.trim() || base.description,
       tenantId: manifest.tenantId,
       domainId: manifest.domainId,
       organizationId: manifest.organizationId,
       assetSchemaId: manifest.assetSchemaId,
-      currencyScale: Number.isInteger(manifest.currencyScale) ? manifest.currencyScale : undefined,
+      currencyScale: Number.isInteger(manifest.currencyScale)
+        ? manifest.currencyScale
+        : undefined,
       currency: manifest.currency?.trim() || undefined,
       pricing,
-      marketplaceContract: manifest.marketplaceContract === "legacy-v1" ? "legacy-v1" : "generic-v1",
+      marketplaceContract:
+        manifest.marketplaceContract === "legacy-v1"
+          ? "legacy-v1"
+          : "generic-v1",
       email: manifest.email,
       ui: validUi(manifest.ui),
       assetSchema: validAssetSchema(manifest.assetSchema),
@@ -218,7 +252,10 @@ export async function loadSubplatform(pathname = "/"): Promise<SubplatformConfig
 function validMcpTools(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
-    .filter((tool): tool is string => typeof tool === "string" && /^[a-z0-9][a-z0-9._:-]{1,127}$/.test(tool))
+    .filter(
+      (tool): tool is string =>
+        typeof tool === "string" && /^[a-z0-9][a-z0-9._:-]{1,127}$/.test(tool),
+    )
     .slice(0, 64);
 }
 
@@ -244,42 +281,132 @@ export function subplatformCopy(
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+export function subplatformFieldValue(
+  key: string,
+  value: unknown,
+  locale: InterfaceLocale = "zh",
+): string {
+  if (typeof value === "boolean")
+    return value
+      ? locale === "en"
+        ? "Yes"
+        : "是"
+      : locale === "en"
+        ? "No"
+        : "否";
+  if (key === "delivery_mode" && typeof value === "string") {
+    const labels =
+      locale === "en"
+        ? {
+            shipping: "Shipping",
+            local_pickup: "Local pickup",
+            digital: "Digital delivery",
+            mixed: "Shipping or pickup",
+          }
+        : {
+            shipping: "快递寄送",
+            local_pickup: "到店自取",
+            digital: "线上交付",
+            mixed: "快递或自取",
+          };
+    if (value in labels) return labels[value as keyof typeof labels];
+  }
+  if (key === "condition" && typeof value === "string") {
+    const labels =
+      locale === "en"
+        ? { new: "New", used: "Used", refurbished: "Refurbished" }
+        : { new: "全新", used: "二手", refurbished: "翻新" };
+    if (value in labels) return labels[value as keyof typeof labels];
+  }
+  return String(value);
+}
+
 /** Resolve a human label for a schema attribute without exposing machine keys in the UI. */
 export function subplatformFieldLabel(
   subplatform: SubplatformConfig,
   key: string,
+  locale: InterfaceLocale = "zh",
 ): string {
-  const configured = subplatform.ui?.supplyFields?.find((field) => field.key === key)?.label;
+  const configured = subplatform.ui?.supplyFields?.find(
+    (field) => field.key === key,
+  )?.label;
   if (configured?.trim()) return configured.trim();
   const properties = subplatform.assetSchema?.properties;
-  if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+  if (
+    properties &&
+    typeof properties === "object" &&
+    !Array.isArray(properties)
+  ) {
     const descriptor = (properties as Record<string, unknown>)[key];
-    if (descriptor && typeof descriptor === "object" && !Array.isArray(descriptor)) {
+    if (
+      descriptor &&
+      typeof descriptor === "object" &&
+      !Array.isArray(descriptor)
+    ) {
       const title = (descriptor as { title?: unknown }).title;
       if (typeof title === "string" && title.trim()) return title.trim();
     }
   }
-  return key.replace(/[_.-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+  const generic =
+    locale === "en"
+      ? {
+          category: "Category",
+          delivery_mode: "Delivery",
+          stock_quantity: "Available stock",
+          condition: "Condition",
+          location: "Location",
+          verified: "Verified",
+        }
+      : {
+          category: "商品分类",
+          delivery_mode: "交付方式",
+          stock_quantity: "可售库存",
+          condition: "商品状况",
+          location: "所在地区",
+          verified: "已核验",
+        };
+  if (key in generic) return generic[key as keyof typeof generic];
+  return key
+    .replace(/[_.-]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-/** Resolve a configured contact channel label, including the root platform's default channels. */
-export function subplatformContactLabel(subplatform: SubplatformConfig, key: string): string {
-  const configured = subplatform.ui?.contactFields?.find((field) => field.key === key)?.label;
-  if (configured?.trim()) return configured.trim();
-  return ROOT_DEFAULT_CONTACT_FIELDS.find((field) => field.key === key)?.label ?? key;
+/** Resolve labels for contact values released by the platform consent flow. */
+export function subplatformContactLabel(
+  _subplatform: SubplatformConfig,
+  key: string,
+): string {
+  return key === "email" ? "邮箱" : key === "phone" ? "手机号" : key;
 }
 
-function validPricing(value: PricingConfig | undefined): PricingConfig | undefined {
+function validPricing(
+  value: PricingConfig | undefined,
+): PricingConfig | undefined {
   if (!value || typeof value !== "object") return undefined;
   const mode = value.mode;
-  if (mode !== "fixed" && mode !== "range" && mode !== "negotiable" && mode !== "none") return undefined;
-  const currency = typeof value.currency === "string" && /^[A-Z]{3}$/.test(value.currency.trim().toUpperCase())
-    ? value.currency.trim().toUpperCase()
-    : undefined;
-  const currencyScale = typeof value.currencyScale === "number" && Number.isInteger(value.currencyScale) && value.currencyScale >= 0 && value.currencyScale <= 18
-    ? value.currencyScale
-    : undefined;
-  const label = typeof value.label === "string" && value.label.trim().length <= 120 ? value.label.trim() : undefined;
+  if (
+    mode !== "fixed" &&
+    mode !== "range" &&
+    mode !== "negotiable" &&
+    mode !== "none"
+  )
+    return undefined;
+  const currency =
+    typeof value.currency === "string" &&
+    /^[A-Z]{3}$/.test(value.currency.trim().toUpperCase())
+      ? value.currency.trim().toUpperCase()
+      : undefined;
+  const currencyScale =
+    typeof value.currencyScale === "number" &&
+    Number.isInteger(value.currencyScale) &&
+    value.currencyScale >= 0 &&
+    value.currencyScale <= 18
+      ? value.currencyScale
+      : undefined;
+  const label =
+    typeof value.label === "string" && value.label.trim().length <= 120
+      ? value.label.trim()
+      : undefined;
   return {
     mode,
     ...(currency ? { currency } : {}),
@@ -288,70 +415,109 @@ function validPricing(value: PricingConfig | undefined): PricingConfig | undefin
   };
 }
 
-function validUi(value: SubplatformConfig["ui"] | undefined): SubplatformConfig["ui"] | undefined {
+function validUi(
+  value: SubplatformConfig["ui"] | undefined,
+): SubplatformConfig["ui"] | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const chat = value.chat && typeof value.chat === "object"
-    ? (() => {
-        const entries: Array<[string, string | string[] | boolean]> = [];
-        for (const [key, item] of Object.entries(value.chat)) {
-          if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key)) continue;
-          if (key === "demandDiscoveryDefault" && typeof item === "boolean") {
-            entries.push([key, item]);
-            continue;
+  const chat =
+    value.chat && typeof value.chat === "object"
+      ? (() => {
+          const entries: Array<[string, string | string[] | boolean]> = [];
+          for (const [key, item] of Object.entries(value.chat)) {
+            if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key)) continue;
+            if (key === "demandDiscoveryDefault" && typeof item === "boolean") {
+              entries.push([key, item]);
+              continue;
+            }
+            if (typeof item === "string" && item.length <= 500) {
+              entries.push([key, item]);
+              continue;
+            }
+            if (
+              key === "buyerHeadlines" ||
+              key === "sellerHeadlines" ||
+              key === "buyerHeadlinesEn" ||
+              key === "sellerHeadlinesEn"
+            ) {
+              if (!Array.isArray(item)) continue;
+              const headlines = item
+                .filter(
+                  (headline): headline is string =>
+                    typeof headline === "string" &&
+                    headline.trim().length > 0 &&
+                    headline.length <= 160,
+                )
+                .map((headline) => headline.trim())
+                .slice(0, 12);
+              if (headlines.length) entries.push([key, headlines]);
+            }
           }
-          if (typeof item === "string" && item.length <= 500) {
-            entries.push([key, item]);
-            continue;
-          }
-          if (key === "buyerHeadlines" || key === "sellerHeadlines" || key === "buyerHeadlinesEn" || key === "sellerHeadlinesEn") {
-            if (!Array.isArray(item)) continue;
-            const headlines = item
-              .filter((headline): headline is string => typeof headline === "string" && headline.trim().length > 0 && headline.length <= 160)
-              .map((headline) => headline.trim())
-              .slice(0, 12);
-            if (headlines.length) entries.push([key, headlines]);
-          }
-        }
-        return Object.fromEntries(entries) as ChatUiConfig;
-      })()
-    : undefined;
-  const copy = value.copy && typeof value.copy === "object"
-    ? Object.fromEntries(Object.entries(value.copy).filter(([key, item]) => /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) && typeof item === "string" && item.length <= 500))
-    : undefined;
+          return Object.fromEntries(entries) as ChatUiConfig;
+        })()
+      : undefined;
+  const copy =
+    value.copy && typeof value.copy === "object"
+      ? Object.fromEntries(
+          Object.entries(value.copy).filter(
+            ([key, item]) =>
+              /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(key) &&
+              typeof item === "string" &&
+              item.length <= 500,
+          ),
+        )
+      : undefined;
   const filters = Array.isArray(value.filters)
-    ? value.filters.filter((filter) => filter && typeof filter.key === "string" && /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(filter.key)
-      && typeof filter.label === "string" && filter.label.length <= 200
-      && (filter.source === "trust" || filter.source === "price" || filter.source === "attribute")
-      && (!filter.attribute || /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(filter.attribute))
-      && (!filter.value || typeof filter.value === "string" && filter.value.length <= 200))
-      .slice(0, 32)
+    ? value.filters
+        .filter(
+          (filter) =>
+            filter &&
+            typeof filter.key === "string" &&
+            /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(filter.key) &&
+            typeof filter.label === "string" &&
+            filter.label.length <= 200 &&
+            (filter.source === "trust" ||
+              filter.source === "price" ||
+              filter.source === "attribute") &&
+            (!filter.attribute ||
+              /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(filter.attribute)) &&
+            (!filter.value ||
+              (typeof filter.value === "string" && filter.value.length <= 200)),
+        )
+        .slice(0, 32)
     : undefined;
   const supplyFields = Array.isArray(value.supplyFields)
-    ? value.supplyFields.filter((field) => field && typeof field.key === "string" && /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(field.key)
-      && typeof field.label === "string" && field.label.length <= 200
-      && (!field.options || (Array.isArray(field.options) && field.options.every((option) => typeof option === "string" && option.length <= 200))))
-      .slice(0, 64)
+    ? value.supplyFields
+        .filter(
+          (field) =>
+            field &&
+            typeof field.key === "string" &&
+            /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(field.key) &&
+            typeof field.label === "string" &&
+            field.label.length <= 200 &&
+            (!field.options ||
+              (Array.isArray(field.options) &&
+                field.options.every(
+                  (option) =>
+                    typeof option === "string" && option.length <= 200,
+                ))),
+        )
+        .slice(0, 64)
     : undefined;
-  const contactFields = Array.isArray(value.contactFields)
-    ? value.contactFields.filter((field): field is ContactField => Boolean(field)
-      && typeof field.key === "string" && /^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/.test(field.key)
-      && typeof field.label === "string" && field.label.length <= 200
-      && (!field.type || field.type === "text" || field.type === "tel" || field.type === "email")
-      && (!field.placeholder || typeof field.placeholder === "string" && field.placeholder.length <= 200))
-      .slice(0, 32)
-    : undefined;
-  if (!chat && !copy && !filters?.length && !supplyFields?.length && !contactFields?.length) return undefined;
+  if (!chat && !copy && !filters?.length && !supplyFields?.length)
+    return undefined;
   return {
     ...(chat ? { chat } : {}),
     ...(copy ? { copy } : {}),
     ...(filters?.length ? { filters } : {}),
     ...(supplyFields?.length ? { supplyFields } : {}),
-    ...(contactFields?.length ? { contactFields } : {}),
   };
 }
 
-function validAssetSchema(value: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+function validAssetSchema(
+  value: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   try {
     return JSON.stringify(value).length <= 64_000 ? value : undefined;
   } catch {
@@ -363,7 +529,8 @@ function validHostedArtifact(
   value: { entry?: string; url?: string; digest?: string } | undefined,
 ): SubplatformConfig["pluginArtifact"] {
   if (!value || !value.entry || !value.url || !value.digest) return undefined;
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,255}$/.test(value.entry)) return undefined;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,255}$/.test(value.entry))
+    return undefined;
   if (!/^\/api\/platform\/plugin-assets\//.test(value.url)) return undefined;
   if (!/^[0-9a-f]{64}$/i.test(value.digest)) return undefined;
   return { entry: value.entry, url: value.url, digest: value.digest };

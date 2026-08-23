@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matchplane.dev/schemas/catalog/v2.json",
+  "title": "MatchPlane monotonic child catalog projection ABI v2",
+  "description": "The root sends a versioned digest-bound canonical offer projection to a child-owned catalog adapter. Adapters must never replace a higher canonical_version and must reject a same-version digest conflict.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "request_id",
+    "canonical_version",
+    "projection_digest",
+    "scope",
+    "offer"
+  ],
+  "properties": {
+    "protocol": { "const": "matchplane.catalog/v2" },
+    "request_id": { "type": "string", "format": "uuid" },
+    "canonical_version": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "projection_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "domain_id", "platform_path"],
+      "properties": {
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "domain_id": { "type": "string", "format": "uuid" },
+        "platform_path": {
+          "type": "string",
+          "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)$",
+          "maxLength": 512
+        }
+      }
+    },
+    "offer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "offer_id",
+        "external_key",
+        "display_name",
+        "attributes",
+        "terms",
+        "status",
+        "attachments"
+      ],
+      "properties": {
+        "offer_id": { "type": "string", "format": "uuid" },
+        "external_key": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "attributes": { "type": "object", "maxProperties": 256 },
+        "terms": { "type": "object", "maxProperties": 256 },
+        "status": {
+          "enum": ["draft", "active", "reserved", "sold", "withdrawn", "expired"]
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^media://[A-Za-z0-9][A-Za-z0-9._:/-]{1,511}$"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "acknowledgement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "request_id",
+        "scope",
+        "offer_id",
+        "canonical_version",
+        "applied_version",
+        "projection_digest",
+        "status",
+        "indexed",
+        "applied"
+      ],
+      "properties": {
+        "protocol": { "const": "matchplane.catalog/v2" },
+        "request_id": { "type": "string", "format": "uuid" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "offer_id": { "type": "string", "format": "uuid" },
+        "canonical_version": { "type": "integer", "minimum": 1 },
+        "applied_version": { "type": "integer", "minimum": 1 },
+        "projection_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "status": {
+          "enum": ["draft", "active", "reserved", "sold", "withdrawn", "expired"]
+        },
+        "indexed": { "type": "boolean" },
+        "applied": { "type": "boolean" }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_id", "domain_id", "platform_path"],
+      "properties": {
+        "tenant_id": { "type": "string", "format": "uuid" },
+        "domain_id": { "type": "string", "format": "uuid" },
+        "platform_path": {
+          "type": "string",
+          "pattern": "^/(?:[a-z0-9-]+(?:/[a-z0-9-]+)*)$",
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}

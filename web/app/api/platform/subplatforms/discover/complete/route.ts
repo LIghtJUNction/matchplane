@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { authDatabase } from "../../../../../../src/lib/auth";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../../../src/lib/body-limit";
 import { hasValidConfiguredSubplatformBuilderToken } from "../../../../../../src/subplatform-builder";
+import { isUuid } from "../../../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -68,5 +69,4 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
-function isUuid(value: unknown): value is string { return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
 function jsonError(error: string, status: number): Response { return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } }); }

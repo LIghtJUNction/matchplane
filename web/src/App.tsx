@@ -6,51 +6,64 @@ import {
   ChevronLeft,
   LogIn,
   LogOut,
+  ShieldCheck,
   Store,
   UserRound,
 } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 
-import { BuyerDashboard } from "./components/BuyerDashboard";
 import { ListingSheet, ModeDialog } from "./components/Overlays";
 import { PlatformDashboard } from "./components/PlatformDashboard";
 import { PreferenceControls } from "./components/PreferenceControls";
 import { Brand, spring } from "./components/Primitives";
 import { SubplatformAdminDashboard } from "./components/SubplatformAdminDashboard";
 import { PluginHost } from "./components/PluginHost";
-import { MatchChat } from "./components/MatchChat";
+import { MarketplaceHome } from "./components/MarketplaceHome";
 import { IdentityBindingsPanel } from "./components/IdentityBindingsPanel";
 import { PasskeyPanel } from "./components/PasskeyPanel";
 import { SessionPanel } from "./components/SessionPanel";
 import { PersonalProfilePanel } from "./components/PersonalProfilePanel";
+import { NotificationBell } from "./components/NotificationBell";
 import { PlatformFooter } from "./components/PlatformFooter";
 import { PlatformMenu } from "./components/PlatformMenu";
-import { StorefrontDirectory } from "./components/StorefrontDirectory";
+import { StorefrontView } from "./components/StorefrontView";
 import { HostedStoreOnboarding } from "./components/HostedStoreOnboarding";
 import { WorkspaceSettingsDialog } from "./components/WorkspaceSettingsDialog";
-import { loadSubplatform, resolveSubplatform, subplatformCopy, subplatformFieldLabel, type SubplatformConfig } from "./subplatform";
-import { localizedSubplatformCopy } from "./lib/localized-copy";
+import { ChangePasswordPanel } from "./components/ChangePasswordPanel";
+import {
+  loadSubplatform,
+  resolveSubplatform,
+  subplatformCopy,
+  type SubplatformConfig,
+} from "./subplatform";
 import {
   createMarketplaceIntroduction,
   createMarketplaceIntent,
   createMarketplaceSalesHandoff,
   browseMallCatalog,
+  getMarketplaceOfferLikes,
   getMarketplaceProfile,
   getOwnedStores,
   requestMarketplaceContact,
   createBuyerIntroduction,
   clearPartySessionCache,
   getPaymentSetting,
-  type RecommendedBackendListing,
+  type MallAssistantContactConsentAction,
   type StoreSummary,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
+  MarketplaceApiError,
+  notifyStoreCustomerHandoff,
+  setMarketplaceOfferLikeCount,
   switchPaymentMode,
 } from "./api";
 import { getMarketplaceSession } from "./lib/marketplace-session";
 import { authClient, authFetchOptions } from "./lib/auth-client";
 import { useInterfacePreferences } from "./lib/preferences";
+import { mapRecommendations } from "./marketplace-listings";
 import type { AssetListing, WorkspaceRole } from "./types";
+
+const AUTH_PENDING_KEY = "matchplane.auth.pending";
 
 interface AuthenticatedUser {
   id: string;
@@ -60,11 +73,20 @@ interface AuthenticatedUser {
   role?: string | null;
 }
 
+type AccountSettingsSection = "profile" | "account" | "stores";
+
+interface StoreConsoleContext {
+  subplatform: SubplatformConfig;
+  store: StoreSummary;
+}
+
 export function App({ initialPath = "/" }: { initialPath?: string }) {
   const { theme, locale, setTheme, setLocale } = useInterfacePreferences();
   const ui = appCopy(locale);
   const [role, setRole] = useState<WorkspaceRole>("buyer");
-  const [subplatform, setSubplatform] = useState<SubplatformConfig>(() => resolveSubplatform(initialPath));
+  const [subplatform, setSubplatform] = useState<SubplatformConfig>(() =>
+    resolveSubplatform(initialPath),
+  );
   const [listings, setListings] = useState<AssetListing[]>([]);
   const [catalogResolved, setCatalogResolved] = useState(false);
   const [listing, setListing] = useState<AssetListing | null>(null);
@@ -75,11 +97,13 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthenticatedUser | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
-  const [myStoresOpen, setMyStoresOpen] = useState(false);
+  const [accountSettingsSection, setAccountSettingsSection] =
+    useState<AccountSettingsSection | null>(null);
   const [storeConsoleOpen, setStoreConsoleOpen] = useState(false);
+  const [storeConsoleContext, setStoreConsoleContext] =
+    useState<StoreConsoleContext | null>(null);
   const [storeConsoleRequested, setStoreConsoleRequested] = useState(false);
-  const [accountOpen, setAccountOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [publishProductRequested, setPublishProductRequested] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [pluginFailed, setPluginFailed] = useState(false);
   const [ownedStores, setOwnedStores] = useState<StoreSummary[]>([]);
@@ -106,30 +130,36 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   useEffect(() => {
     const requestedPath = window.location.pathname;
-    const url = new URL(window.location.href);
-    const accountTarget = url.searchParams.get("account");
+    const searchParams = new URLSearchParams(window.location.search);
+    const accountTarget = searchParams.get("account");
     let cleanWorkspaceTarget = false;
     if (accountTarget === "identity") {
-      setAccountOpen(true);
-      url.searchParams.delete("account");
+      setAccountSettingsSection("account");
+      searchParams.delete("account");
       cleanWorkspaceTarget = true;
     }
     if (accountTarget === "profile") {
-      setProfileOpen(true);
-      url.searchParams.delete("account");
+      setAccountSettingsSection("profile");
+      searchParams.delete("account");
       cleanWorkspaceTarget = true;
     }
-    if (url.searchParams.get("stores") === "1") {
-      setMyStoresOpen(true);
-      url.searchParams.delete("stores");
+    if (searchParams.get("stores") === "1") {
+      setAccountSettingsSection("stores");
+      searchParams.delete("stores");
       cleanWorkspaceTarget = true;
     }
-    if (url.searchParams.get("console") === "products") {
+    if (searchParams.get("console") === "products") {
       setStoreConsoleRequested(true);
-      url.searchParams.delete("console");
+      searchParams.delete("console");
       cleanWorkspaceTarget = true;
     }
-    if (cleanWorkspaceTarget) window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    if (searchParams.get("publish") === "1") setPublishProductRequested(true);
+    if (cleanWorkspaceTarget)
+      window.history.replaceState(
+        null,
+        "",
+        relativeBrowserLocation(searchParams),
+      );
     setSubplatform(resolveSubplatform(requestedPath));
     void loadSubplatform(requestedPath).then(setSubplatform);
     const requestedRole = roleFromLocation();
@@ -137,28 +167,60 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     // Never render a privileged or supply workspace while the Better Auth
     // session check is still pending. The authenticated effect below restores
     // the requested role only after a real session is available.
-    setRole(requiresAuthenticatedWorkspace(requestedRole) ? "buyer" : requestedRole);
+    setRole(
+      requiresAuthenticatedWorkspace(requestedRole) ? "buyer" : requestedRole,
+    );
     setListing(listingFromLocation());
     setHydrated(true);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    // A session is cookie-backed and therefore arrives asynchronously after a
-    // hard refresh. Keep the header neutral until that check has completed;
-    // also discard an older request when a subplatform transition starts a
-    // newer one, so a late failure cannot briefly replace a valid session.
+    // A transient session-check failure (rate limiting, gateway restart, or a
+    // short network interruption) is not evidence that the user signed out.
+    // Retry it without redirecting; only a successful anonymous response may
+    // send an authenticated workspace to the login screen.
     setAuthResolved(false);
-    void authClient
-      .getSession({ fetchOptions: authFetchOptions(subplatform.slug) })
-      .then(({ data }) => {
+    const resolveSession = async () => {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        let result: Awaited<ReturnType<typeof authClient.getSession>>;
+        try {
+          result = await authClient.getSession({
+            fetchOptions: authFetchOptions(subplatform.slug),
+          });
+        } catch (error) {
+          if (cancelled) return;
+          if (attempt < 4) {
+            await waitForAuthRetry(attempt);
+            continue;
+          }
+          setAuthResolved(true);
+          setNotice(authSessionFailureMessage(error));
+          return;
+        }
         if (cancelled) return;
-        const user = data?.user as AuthenticatedUser | undefined;
+        if (result.error) {
+          if (attempt < 4 && isTransientAuthError(result.error)) {
+            await waitForAuthRetry(attempt);
+            continue;
+          }
+          setAuthResolved(true);
+          setNotice(authSessionFailureMessage(result.error));
+          return;
+        }
+
+        const user = result.data?.user as AuthenticatedUser | undefined;
+        if (!user?.id && hasRecentPendingAuthentication() && attempt < 4) {
+          await waitForAuthRetry(attempt);
+          continue;
+        }
+        window.sessionStorage.removeItem(AUTH_PENDING_KEY);
         setAuthUser(user?.id ? user : null);
         setAuthResolved(true);
         const requestedRole = requestedRoleRef.current;
         const userRole = user?.role;
-        const isRootManager = userRole === "rootSuperAdmin" || userRole === "rootAdmin";
+        const isRootManager =
+          userRole === "rootSuperAdmin" || userRole === "rootAdmin";
         if (requiresAuthenticatedWorkspace(requestedRole) && !user) {
           setRole("buyer");
           window.location.assign(loginHref(requestedRole));
@@ -172,17 +234,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         if (user && requiresAuthenticatedWorkspace(requestedRole)) {
           setRole(requestedRole);
         }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAuthUser(null);
-        setAuthResolved(true);
-        const requestedRole = requestedRoleRef.current;
-        if (requiresAuthenticatedWorkspace(requestedRole)) {
-          setRole("buyer");
-          window.location.assign(loginHref(requestedRole));
-        }
-      });
+        return;
+      }
+    };
+    void resolveSession();
     return () => {
       cancelled = true;
     };
@@ -193,27 +248,47 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     if (!authUser?.id) {
       setOwnedStores([]);
       setOwnedStoresResolved(false);
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
     setOwnedStoresResolved(false);
-    void getOwnedStores()
-      .then((stores) => { if (!cancelled) setOwnedStores(stores); })
-      .catch(() => { if (!cancelled) setOwnedStores([]); })
-      .finally(() => { if (!cancelled) setOwnedStoresResolved(true); });
-    return () => { cancelled = true; };
+    void getOwnedStoresWithRetry()
+      .then((stores) => {
+        if (!cancelled) setOwnedStores(stores);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setNotice(
+            error instanceof Error
+              ? error.message
+              : "我的店铺暂时无法读取，请稍后重试",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setOwnedStoresResolved(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [authUser?.id]);
 
   useEffect(() => {
     let cancelled = false;
     if (!hydrated) {
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
     if (catalogPathRef.current !== subplatform.path) {
       catalogPathRef.current = subplatform.path;
       catalogInteractionRef.current = false;
     }
     setCatalogResolved(false);
-    void browseMallCatalog(subplatform.slug === "root" ? {} : { storePath: subplatform.path })
+    void browseMallCatalog(
+      subplatform.slug === "root" ? {} : { storePath: subplatform.path },
+    )
       .then(({ recommendations }) => {
         if (!cancelled && !catalogInteractionRef.current) {
           setListings(mapRecommendations(recommendations, subplatform, locale));
@@ -225,17 +300,92 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       .finally(() => {
         if (!cancelled) setCatalogResolved(true);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [hydrated, locale, subplatform.path, subplatform.slug]);
 
-  const currentManagedStore = subplatform.slug === "root"
-    ? null
-    : ownedStores.find((store) => store.path === subplatform.path) ?? null;
-  const managesCurrentStore = currentManagedStore !== null;
-  const canManageCurrentStore = authUser?.role === "rootSuperAdmin"
-    || authUser?.role === "rootAdmin"
-    || currentManagedStore?.membershipRole === "owner"
-    || currentManagedStore?.membershipRole === "mall_operator";
+  const listingOfferIds = listings
+    .flatMap((item) => item.offerId ?? listingIdFromBackend(item) ?? [])
+    .filter((offerId, position, all) => all.indexOf(offerId) === position)
+    .sort((left, right) => left.localeCompare(right))
+    .join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!authUser?.id || !listingOfferIds) {
+      if (!authUser?.id) {
+        setListings((current) =>
+          current.map((item) =>
+            item.viewerLikeCount ? { ...item, viewerLikeCount: 0 } : item,
+          ),
+        );
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+    void getMarketplaceOfferLikes(listingOfferIds.split(","))
+      .then((states) => {
+        if (cancelled) return;
+        const byOfferId = new Map(
+          states.map((state) => [state.offerId, state]),
+        );
+        setListings((current) =>
+          current.map((item) => {
+            const offerId = item.offerId ?? listingIdFromBackend(item);
+            const state = offerId ? byOfferId.get(offerId) : undefined;
+            return state
+              ? {
+                  ...item,
+                  likeTotal: state.likeTotal,
+                  viewerLikeCount: state.viewerLikeCount,
+                }
+              : item;
+          }),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id, listingOfferIds]);
+
+  const currentManagedStore =
+    subplatform.slug === "root"
+      ? null
+      : (ownedStores.find((store) => store.path === subplatform.path) ?? null);
+  const selectedManagedStore = listing
+    ? (ownedStores.find(
+        (store) =>
+          (listing.storeId && store.id === listing.storeId) ||
+          store.path === listing.platformPath,
+      ) ?? null)
+    : null;
+  const canManageStoreConsole = canManageStore(
+    authUser,
+    storeConsoleContext?.store ?? null,
+  );
+
+  const openStoreConsoleFor = useCallback(
+    async (store: StoreSummary) => {
+      try {
+        const storeSubplatform = await loadSubplatform(store.path);
+        setStoreConsoleContext({ subplatform: storeSubplatform, store });
+        setStoreConsoleOpen(true);
+      } catch (error) {
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : locale === "en"
+              ? "The store workspace is temporarily unavailable."
+              : "店铺工作台暂时不可用",
+        );
+        setAccountSettingsSection("stores");
+      }
+    },
+    [locale],
+  );
 
   useEffect(() => {
     if (!storeConsoleRequested || !ownedStoresResolved) return;
@@ -244,15 +394,294 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       window.location.assign(loginHref("buyer"));
       return;
     }
-    if (!managesCurrentStore) {
+    if (!currentManagedStore) {
       setNotice("只有店主或店铺运营人员可以管理这家店");
       return;
     }
+    setStoreConsoleContext({ subplatform, store: currentManagedStore });
     setStoreConsoleOpen(true);
-  }, [authUser, managesCurrentStore, ownedStoresResolved, storeConsoleRequested]);
+  }, [
+    authUser,
+    currentManagedStore,
+    ownedStoresResolved,
+    storeConsoleRequested,
+    subplatform,
+  ]);
+
+  useEffect(() => {
+    if (!authResolved || !authUser || typeof window === "undefined") return;
+    const requested = new URLSearchParams(window.location.search).get(
+      "accountSection",
+    );
+    if (requested === "account" || requested === "profile" || requested === "stores")
+      setAccountSettingsSection(requested);
+  }, [authResolved, authUser]);
+
+  useEffect(() => {
+    if (!publishProductRequested || !authResolved) return;
+    if (!authUser) {
+      window.location.assign(
+        `/login?next=${encodeURIComponent("/?publish=1")}`,
+      );
+      return;
+    }
+    if (!ownedStoresResolved) return;
+
+    setPublishProductRequested(false);
+    const searchParams = new URLSearchParams(window.location.search);
+    searchParams.delete("publish");
+    window.history.replaceState(
+      null,
+      "",
+      relativeBrowserLocation(searchParams),
+    );
+    if (ownedStores.length === 1) {
+      void openStoreConsoleFor(ownedStores[0]);
+      return;
+    }
+    setAccountSettingsSection("stores");
+  }, [
+    authResolved,
+    authUser,
+    ownedStores,
+    ownedStoresResolved,
+    publishProductRequested,
+    openStoreConsoleFor,
+  ]);
+
+  const publishProduct = () => {
+    if (!authResolved || (authUser && !ownedStoresResolved)) {
+      setPublishProductRequested(true);
+      setNotice(locale === "en" ? "Loading your stores…" : "正在读取你的店铺…");
+      return;
+    }
+    if (!authUser) {
+      window.location.assign(
+        `/login?next=${encodeURIComponent("/?publish=1")}`,
+      );
+      return;
+    }
+    if (ownedStores.length === 1) {
+      void openStoreConsoleFor(ownedStores[0]);
+      return;
+    }
+    setAccountSettingsSection("stores");
+  };
 
   const openSignIn = () => {
     window.location.assign(loginHref(role));
+  };
+
+  const likeListing = async (target: AssetListing) => {
+    if (!authUser) {
+      openSignIn();
+      return;
+    }
+    const offerId = target.offerId ?? listingIdFromBackend(target);
+    if (!offerId) {
+      setNotice("这个商品暂不支持点赞");
+      return;
+    }
+    const expectedCount = target.viewerLikeCount ?? 0;
+    if (expectedCount >= 5) return;
+    try {
+      const state = await setMarketplaceOfferLikeCount({
+        offerId,
+        count: expectedCount + 1,
+        expectedCount,
+      });
+      const applyState = (item: AssetListing) =>
+        (item.offerId ?? listingIdFromBackend(item)) === offerId
+          ? {
+              ...item,
+              likeTotal: state.likeTotal,
+              viewerLikeCount: state.viewerLikeCount,
+            }
+          : item;
+      setListings((current) => current.map(applyState));
+      setListing((current) => (current ? applyState(current) : current));
+    } catch (error) {
+      if (error instanceof MarketplaceApiError && error.status === 401) {
+        openSignIn();
+        return;
+      }
+      if (error instanceof MarketplaceApiError && error.status === 409) {
+        const [state] = await getMarketplaceOfferLikes([offerId]).catch(
+          () => [],
+        );
+        if (state) {
+          setListings((current) =>
+            current.map((item) =>
+              (item.offerId ?? listingIdFromBackend(item)) === offerId
+                ? {
+                    ...item,
+                    likeTotal: state.likeTotal,
+                    viewerLikeCount: state.viewerLikeCount,
+                  }
+                : item,
+            ),
+          );
+          return;
+        }
+      }
+      setNotice(error instanceof Error ? error.message : "点赞失败");
+    }
+  };
+
+  const requestStoreContactConsent = async (
+    action: MallAssistantContactConsentAction,
+  ) => {
+    if (!isLiveMarketplaceEnabled())
+      throw new Error("当前环境未连接真实撮合 API");
+    if (!subplatform.domainId || subplatform.slug === "root")
+      throw new Error("当前店铺尚未完成联系交换配置");
+    const selected = listings.find(
+      (item) =>
+        item.offerId === action.productId || item.id === action.productId,
+    );
+    if (!selected?.offerId)
+      throw new Error("同意卡关联的商品已经下架，请继续咨询 AI 店长");
+    const session = await getMarketplaceSession({
+      subplatform: subplatform.slug,
+      platformPath: subplatform.path,
+      tenantId: subplatform.tenantId,
+      domainId: subplatform.domainId,
+      role: "buyer",
+    });
+    if (!session) {
+      const next = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+      throw new Error("请先登录再确认联系方式交换");
+    }
+    const intent = await createMarketplaceIntent({
+      session,
+      domainId: subplatform.domainId,
+      side: "demand",
+      narrative: `我同意使用账号中已验证的联系方式，进一步了解并购买“${selected.title}”`,
+      attributes: {
+        source: "store_ai_contact_consent",
+        offer_id: selected.offerId,
+        platform_path: subplatform.path,
+      },
+      supplyDiscoveryEnabled: false,
+      idempotencyKey: `store-ai-contact-${selected.offerId}`,
+    });
+    const profile = await getMarketplaceProfile({
+      session,
+      domainId: subplatform.domainId,
+    }).catch(() => null);
+    const handoff = await createMarketplaceSalesHandoff({
+      session,
+      domainId: subplatform.domainId,
+      intentId: intent.intent_id,
+      summary: {
+        source: "store_ai_contact_consent",
+        offer_id: selected.offerId,
+        offer_title: selected.title,
+        platform_path: subplatform.path,
+        analysis: action.reason,
+        intent_strength: "high",
+        product_ids: [selected.offerId],
+        profile: profile?.profile ?? null,
+        ai_continues: true,
+        contact_consent: "accepted",
+      },
+      idempotencyKey: `store-ai-consent-handoff-${intent.intent_id}-${selected.offerId}`,
+    });
+    const introduction = await createMarketplaceIntroduction({
+      session,
+      domainId: subplatform.domainId,
+      intentId: intent.intent_id,
+      offerId: selected.offerId,
+      score: (selected.matchScore ?? 0) / 100,
+      idempotencyKey: `store-ai-consent-${Date.now()}`,
+    });
+    const introductionId =
+      typeof introduction.introduction_id === "string"
+        ? introduction.introduction_id
+        : null;
+    if (!introductionId)
+      throw new Error("撮合结果缺少介绍编号，未发送联系申请");
+    await requestMarketplaceContact({
+      session,
+      domainId: subplatform.domainId,
+      introductionId,
+    });
+    const handoffId =
+      typeof handoff.handoff_id === "string" ? handoff.handoff_id : null;
+    if (handoffId)
+      await notifyStoreCustomerHandoff(subplatform.path, handoffId);
+    window.dispatchEvent(new Event("matchplane.contact.updated"));
+    setNotice("联系申请已发送；只有店员也同意后才会交换已验证绑定");
+  };
+
+  const requestStoreAiHandoff = async (input: {
+    requestId: string;
+    summary: string;
+    intent: "warm" | "high" | "urgent";
+    productIds: string[];
+  }) => {
+    if (!subplatform.domainId || subplatform.slug === "root")
+      throw new Error("当前店铺尚未接入客户跟进能力");
+    const session = await getMarketplaceSession({
+      subplatform: subplatform.slug,
+      platformPath: subplatform.path,
+      tenantId: subplatform.tenantId,
+      domainId: subplatform.domainId,
+      role: "buyer",
+    });
+    if (!session) {
+      const next = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+      throw new Error("请先登录再请求人工介入");
+    }
+    const signalKey = stableIdempotencyPart(
+      [
+        subplatform.path,
+        input.intent,
+        input.summary,
+        ...[...input.productIds].sort(),
+      ].join("\n"),
+    );
+    const intent = await createMarketplaceIntent({
+      session,
+      domainId: subplatform.domainId,
+      side: "demand",
+      narrative: input.summary,
+      attributes: {
+        source: "store_ai_manager",
+        platform_path: subplatform.path,
+        product_ids: input.productIds,
+        intent_strength: input.intent,
+      },
+      supplyDiscoveryEnabled: false,
+      idempotencyKey: `store-ai-intent-${signalKey}`,
+    });
+    const handoff = await createMarketplaceSalesHandoff({
+      session,
+      domainId: subplatform.domainId,
+      intentId: intent.intent_id,
+      summary: {
+        source: "store_ai_manager",
+        platform_path: subplatform.path,
+        analysis: input.summary,
+        intent_strength: input.intent,
+        product_ids: input.productIds,
+        ai_continues: true,
+        contact_consent: "not_requested",
+      },
+      idempotencyKey: `store-ai-handoff-${signalKey}`,
+    });
+    const handoffId =
+      typeof handoff.handoff_id === "string" ? handoff.handoff_id : null;
+    if (!handoffId) throw new Error("人工介入记录缺少编号");
+    await notifyStoreCustomerHandoff(subplatform.path, handoffId);
+    window.dispatchEvent(new Event("matchplane.contact.updated"));
+    setNotice(
+      locale === "en"
+        ? "Store staff were notified. The AI manager remains available."
+        : "已通知店员，AI 店长会继续和你对话。",
+    );
   };
 
   const openStoreCenter = () => {
@@ -261,25 +690,29 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       window.location.assign("/login?next=" + encodeURIComponent("/?stores=1"));
       return;
     }
-    setMyStoresOpen(true);
+    setAccountSettingsSection("stores");
   };
 
   const signOut = async () => {
     try {
-      const result = await authClient.signOut({ fetchOptions: authFetchOptions(subplatform.slug) });
+      const result = await authClient.signOut({
+        fetchOptions: authFetchOptions(subplatform.slug),
+      });
       if (result.error) throw new Error(result.error.message || "退出登录失败");
       clearPartySessionCache();
       setAuthUser(null);
-      setMyStoresOpen(false);
+      setAccountSettingsSection(null);
       setStoreConsoleOpen(false);
-      setAccountOpen(false);
-      setProfileOpen(false);
       setAccountMenuOpen(false);
       setRole("buyer");
       requestedRoleRef.current = "buyer";
-      const url = new URL(window.location.href);
-      url.searchParams.delete("role");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      const searchParams = new URLSearchParams(window.location.search);
+      searchParams.delete("role");
+      window.history.replaceState(
+        null,
+        "",
+        relativeBrowserLocation(searchParams),
+      );
       setNotice(ui.signedOut);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : ui.signOutFailed);
@@ -288,10 +721,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const url = new URL(window.location.href);
-    if (role === "buyer") url.searchParams.delete("role");
-    else url.searchParams.set("role", role);
-    window.history.replaceState(null, "", url);
+    const searchParams = new URLSearchParams(window.location.search);
+    if (role === "buyer") searchParams.delete("role");
+    else searchParams.set("role", role);
+    window.history.replaceState(
+      null,
+      "",
+      relativeBrowserLocation(searchParams),
+    );
   }, [hydrated, role]);
 
   useEffect(() => {
@@ -319,11 +756,15 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           setPaymentMode(setting.active_mode);
           setPaymentModeVersion(setting.version);
           setModeDialogOpen(false);
-          setNotice(`支付系统已切换为${setting.active_mode === "test" ? "测试" : "生产"}模式`);
+          setNotice(
+            `支付系统已切换为${setting.active_mode === "test" ? "测试" : "生产"}模式`,
+          );
         })
         .catch((error) => {
           setModeDialogOpen(false);
-          setNotice(error instanceof Error ? error.message : "支付模式切换失败");
+          setNotice(
+            error instanceof Error ? error.message : "支付模式切换失败",
+          );
         });
       return;
     }
@@ -332,25 +773,46 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     setNotice(`支付系统已切换为${nextMode === "test" ? "测试" : "生产"}模式`);
   };
 
-  const genericWorkspace: ReactNode = role === "platform" ? (
-    <PlatformDashboard
-      paymentMode={paymentMode}
-      rootRole={authUser?.role}
-      onRequestModeChange={() => setModeDialogOpen(true)}
-      onBrandUpdated={(brand) => setSubplatform((current) => current.slug === "root"
-        ? { ...current, brandName: brand.name, label: brand.name, brandLogoUrl: brand.logoUrl ?? undefined }
-        : current)}
-      onNotice={setNotice}
-    />
-  ) : (
-    <BuyerDashboard listings={listings} locale={locale} onOpenListing={setListing} onNotice={setNotice} subplatform={subplatform} />
-  );
-  const fullscreenPlugin = subplatform.slug !== "root"
-    && Boolean(subplatform.pluginArtifact)
-    && !pluginFailed
-    && role === "buyer"
-    && !storeConsoleOpen
-    && !storeConsoleRequested;
+  const genericWorkspace: ReactNode =
+    role === "platform" ? (
+      <PlatformDashboard
+        paymentMode={paymentMode}
+        rootRole={authUser?.role}
+        onRequestModeChange={() => setModeDialogOpen(true)}
+        onBrandUpdated={(brand) =>
+          setSubplatform((current) =>
+            current.slug === "root"
+              ? {
+                  ...current,
+                  brandName: brand.name,
+                  label: brand.name,
+                  brandLogoUrl: brand.logoUrl ?? undefined,
+                }
+              : current,
+          )
+        }
+        onNotice={setNotice}
+      />
+    ) : (
+      <StorefrontView
+        catalogResolved={catalogResolved}
+        listings={listings}
+        locale={locale}
+        onOpenListing={setListing}
+        onLikeListing={likeListing}
+        onNotice={setNotice}
+        onHumanHandoff={requestStoreAiHandoff}
+        onContactConsent={requestStoreContactConsent}
+        subplatform={subplatform}
+      />
+    );
+  const fullscreenPlugin =
+    subplatform.slug !== "root" &&
+    Boolean(subplatform.pluginArtifact) &&
+    !pluginFailed &&
+    role === "platform" &&
+    !storeConsoleOpen &&
+    !storeConsoleRequested;
   const pluginWorkspace = subplatform.pluginArtifact ? (
     <PluginHost
       fullscreen={fullscreenPlugin}
@@ -368,8 +830,13 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   return (
     <MotionConfig reducedMotion="user" transition={spring}>
-      <div id="top" className={`app-shell${fullscreenPlugin ? " is-subplatform-fullscreen" : ""}`}>
-        <a className="skip-link" href="#main-content">{ui.skipToContent}</a>
+      <div
+        id="top"
+        className={`app-shell${fullscreenPlugin ? " is-subplatform-fullscreen" : ""}`}
+      >
+        <a className="skip-link" href="#main-content">
+          {ui.skipToContent}
+        </a>
         {fullscreenPlugin ? (
           <header className="subplatform-fullscreen-header">
             <a
@@ -380,11 +847,27 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             >
               <ChevronLeft size={25} strokeWidth={1.75} aria-hidden="true" />
             </a>
-            {managesCurrentStore ? (
-              <button className="subplatform-manage-link" type="button" onClick={() => setStoreConsoleOpen(true)}>
-                <Store size={16} aria-hidden="true" />{ui.manageStore}
-              </button>
-            ) : null}
+            <div className="subplatform-fullscreen-actions">
+              {currentManagedStore ? (
+                <button
+                  className="subplatform-manage-link"
+                  type="button"
+                  onClick={() => {
+                    setStoreConsoleContext({
+                      subplatform,
+                      store: currentManagedStore,
+                    });
+                    setStoreConsoleOpen(true);
+                  }}
+                >
+                  <Store size={16} aria-hidden="true" />
+                  {ui.manageStore}
+                </button>
+              ) : null}
+              {authUser ? (
+                <NotificationBell locale={locale} userId={authUser.id} />
+              ) : null}
+            </div>
           </header>
         ) : (
           <header className="app-header">
@@ -392,14 +875,31 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               <div className="brand-cluster">
                 <Brand
                   label={subplatform.brandName}
-                  logoUrl={subplatform.slug === "root" ? subplatform.brandLogoUrl : undefined}
-                  homeHref={subplatform.slug === "root" ? "#top" : subplatform.path}
+                  logoUrl={
+                    subplatform.slug === "root"
+                      ? subplatform.brandLogoUrl
+                      : undefined
+                  }
+                  homeHref={
+                    subplatform.slug === "root" ? "#top" : subplatform.path
+                  }
                 />
-                {subplatform.slug === "root" ? <PlatformMenu locale={locale} /> : null}
-                {subplatform.slug !== "root" ? <a className="root-platform-link" href="/">{ui.rootPlatform}</a> : null}
+                {subplatform.slug === "root" ? (
+                  <PlatformMenu locale={locale} />
+                ) : null}
+                {subplatform.slug === "root" ? null : (
+                  <a className="root-platform-link" href="/">
+                    {ui.rootPlatform}
+                  </a>
+                )}
               </div>
               <div className="header-actions">
-                <PreferenceControls theme={theme} locale={locale} onThemeChange={setTheme} onLocaleChange={setLocale} />
+                <PreferenceControls
+                  theme={theme}
+                  locale={locale}
+                  onThemeChange={setTheme}
+                  onLocaleChange={setLocale}
+                />
                 <motion.button
                   className="header-store-action"
                   type="button"
@@ -408,7 +908,15 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   transition={spring}
                 >
                   <Store size={17} aria-hidden="true" />
-                  <span>{ui.storeCenter}</span>
+                  <span>{authUser ? ui.myStores : ui.openStore}</span>
+                  {authUser && ownedStoresResolved ? (
+                    <strong
+                      className="header-store-count"
+                      aria-label={`${ui.myStores}: ${ownedStores.length}`}
+                    >
+                      {ownedStores.length}
+                    </strong>
+                  ) : null}
                 </motion.button>
                 {!authUser && authResolved ? (
                   <motion.button
@@ -422,11 +930,15 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     <span>{ui.signIn}</span>
                   </motion.button>
                 ) : null}
-                {authUser?.role === "rootSuperAdmin" || authUser?.role === "rootAdmin" ? (
+                {authUser?.role === "rootSuperAdmin" ||
+                authUser?.role === "rootAdmin" ? (
                   <a className="header-admin-action" href="/?role=platform">
                     <UserRound size={17} aria-hidden="true" />
                     <span>{ui.platformAdmin}</span>
                   </a>
+                ) : null}
+                {authUser ? (
+                  <NotificationBell locale={locale} userId={authUser.id} />
                 ) : null}
                 {authUser ? (
                   <div className="account-menu-anchor">
@@ -440,18 +952,78 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                       whileTap={{ scale: 0.95 }}
                       transition={spring}
                     >
-                      <span className="profile-button-avatar">{authUser.image ? <img src={authUser.image} alt="" /> : <UserRound size={18} aria-hidden="true" />}</span>
-                      <span className="profile-copy"><strong>{authUser.name || ui.user}</strong><small>{roleLabel(role, locale, subplatform)}</small></span>
+                      <span className="profile-button-avatar">
+                        {authUser.image ? (
+                          <img src={authUser.image} alt="" />
+                        ) : (
+                          <UserRound size={18} aria-hidden="true" />
+                        )}
+                      </span>
+                      <span className="profile-copy">
+                        <strong>{authUser.name || ui.user}</strong>
+                        <small>{roleLabel(role, locale, subplatform)}</small>
+                      </span>
                     </motion.button>
                     {accountMenuOpen ? (
-                      <div className="account-menu" role="menu" aria-label={ui.accountMenu}>
-                        <div className="account-menu-identity"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></div>
-                        <div className="account-menu-links">
-                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setProfileOpen(true); }}><UserRound size={16} aria-hidden="true" />{ui.profile}</button>
-                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setAccountOpen(true); }}><UserRound size={16} aria-hidden="true" />{ui.account}</button>
-                          <button type="button" role="menuitem" onClick={() => { setAccountMenuOpen(false); setMyStoresOpen(true); }}><Store size={16} aria-hidden="true" />{ui.myStores}</button>
+                      <div
+                        className="account-menu"
+                        role="menu"
+                        aria-label={ui.accountMenu}
+                      >
+                        <div className="account-menu-identity">
+                          <strong>{authUser.name || ui.user}</strong>
+                          <small>{authUser.email || ui.unifiedIdentity}</small>
                         </div>
-                        <button className="account-menu-signout" type="button" role="menuitem" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
+                        <div className="account-menu-links">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setAccountMenuOpen(false);
+                              setAccountSettingsSection("profile");
+                            }}
+                          >
+                            <UserRound size={16} aria-hidden="true" />
+                            {ui.profile}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setAccountMenuOpen(false);
+                              setAccountSettingsSection("account");
+                            }}
+                          >
+                            <UserRound size={16} aria-hidden="true" />
+                            {ui.account}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            aria-label={ui.myStores}
+                            onClick={() => {
+                              setAccountMenuOpen(false);
+                              setAccountSettingsSection("stores");
+                            }}
+                          >
+                            <Store size={16} aria-hidden="true" />
+                            <span>{ui.myStores}</span>
+                            {ownedStoresResolved ? (
+                              <strong className="account-menu-count">
+                                {ownedStores.length}
+                              </strong>
+                            ) : null}
+                          </button>
+                        </div>
+                        <button
+                          className="account-menu-signout"
+                          type="button"
+                          role="menuitem"
+                          onClick={() => void signOut()}
+                        >
+                          <LogOut size={16} aria-hidden="true" />
+                          {ui.signOut}
+                        </button>
                       </div>
                     ) : null}
                   </div>
@@ -461,8 +1033,16 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           </header>
         )}
 
-        <main id="main-content" className={fullscreenPlugin ? "subplatform-fullscreen-main" : undefined} tabIndex={-1}>
-          {fullscreenPlugin ? pluginWorkspace : (
+        <main
+          id="main-content"
+          className={
+            fullscreenPlugin ? "subplatform-fullscreen-main" : undefined
+          }
+          tabIndex={-1}
+        >
+          {fullscreenPlugin ? (
+            pluginWorkspace
+          ) : (
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={role}
@@ -471,103 +1051,214 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                 exit={{ opacity: 0, y: -8 }}
                 transition={spring}
               >
-                {role === "buyer" ? (
-                  <MatchChat
-                    compact={subplatform.slug === "root"}
-                    role={role}
+                {role === "buyer" && subplatform.slug === "root" ? (
+                  <MarketplaceHome
+                    catalogResolved={catalogResolved}
+                    listings={listings}
                     locale={locale}
                     onNotice={setNotice}
+                    onOpenListing={setListing}
+                    onLikeListing={likeListing}
+                    onPublishProduct={publishProduct}
                     onRecommendations={(recommendations) => {
                       catalogInteractionRef.current = true;
-                      setListings(mapRecommendations(recommendations, subplatform, locale));
+                      setListings(
+                        mapRecommendations(
+                          recommendations,
+                          subplatform,
+                          locale,
+                        ),
+                      );
                     }}
                     subplatform={subplatform}
                   />
-                ) : null}
-                {subplatform.slug === "root" && catalogResolved && listings.length === 0
-                  ? <div className="root-empty-directory"><StorefrontDirectory locale={locale} /></div>
-                  : null}
-                {subplatform.pluginArtifact && (role === "platform" || (role === "buyer" && listings.length > 0))
-                  ? pluginWorkspace
-                  : genericWorkspace}
+                ) : subplatform.pluginArtifact && role === "platform" ? (
+                  pluginWorkspace
+                ) : (
+                  genericWorkspace
+                )}
               </motion.div>
             </AnimatePresence>
           )}
         </main>
         {fullscreenPlugin ? null : <PlatformFooter subplatform={subplatform} />}
 
-        {!authUser ? null : <WorkspaceSettingsDialog
-          open={myStoresOpen}
-          onClose={() => setMyStoresOpen(false)}
-          title={ui.myStores}
-          description={ui.myStoresDescription}
-          className="workspace-settings-dialog-wide"
-          closeLabel={ui.closeMyStores}
-          backdropLabel={ui.closeMyStoresDialog}
-        >
-          <div className="workspace-settings-overview">
-            <HostedStoreOnboarding locale={locale} onNotice={setNotice} />
-          </div>
-        </WorkspaceSettingsDialog>}
+        {!authUser || !storeConsoleContext ? null : (
+          <WorkspaceSettingsDialog
+            open={storeConsoleOpen}
+            onClose={() => setStoreConsoleOpen(false)}
+            title={
+              storeConsoleContext.subplatform.label ||
+              storeConsoleContext.store.displayName
+            }
+            description={ui.manageStore}
+            className="workspace-settings-dialog-wide workspace-settings-dialog-store-console"
+            closeLabel={ui.closeStoreConsole}
+            backdropLabel={ui.closeStoreConsoleDialog}
+          >
+            <SubplatformAdminDashboard
+              locale={locale}
+              onNotice={setNotice}
+              subplatform={storeConsoleContext.subplatform}
+              store={storeConsoleContext.store}
+              canManageStore={canManageStoreConsole}
+              initialSection={requestedStoreConsoleSection()}
+              onStoreUpdated={(updated) => {
+                setStoreConsoleContext((current) =>
+                  current && current.store.id === updated.id
+                    ? { ...current, store: { ...current.store, ...updated } }
+                    : current,
+                );
+                setOwnedStores((current) =>
+                  current.map((store) =>
+                    store.id === updated.id ? { ...store, ...updated } : store,
+                  ),
+                );
+              }}
+            />
+          </WorkspaceSettingsDialog>
+        )}
 
-        {!authUser || !managesCurrentStore ? null : <WorkspaceSettingsDialog
-          open={storeConsoleOpen}
-          onClose={() => setStoreConsoleOpen(false)}
-          title={subplatform.label || subplatform.brandName}
-          description={ui.manageStore}
-          className="workspace-settings-dialog-wide"
-          closeLabel={ui.closeStoreConsole}
-          backdropLabel={ui.closeStoreConsoleDialog}
-        >
-          <SubplatformAdminDashboard
-            locale={locale}
-            onNotice={setNotice}
-            subplatform={subplatform}
-            store={currentManagedStore!}
-            canManageStore={canManageCurrentStore}
-            onStoreUpdated={(updated) => setOwnedStores((current) => current.map((store) => store.id === updated.id ? { ...store, ...updated } : store))}
-          />
-        </WorkspaceSettingsDialog>}
-
-        {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
-          open={profileOpen}
-          onClose={() => setProfileOpen(false)}
-          title={ui.profile}
-          description={ui.profileDescription}
-          closeLabel={ui.closeProfile}
-          backdropLabel={ui.closeProfileDialog}
-        >
-          <PersonalProfilePanel
-            onNotice={setNotice}
-            onAvatarChanged={(image) => setAuthUser((current) => current ? { ...current, image } : current)}
-          />
-        </WorkspaceSettingsDialog>}
-
-        {fullscreenPlugin || !authUser ? null : <WorkspaceSettingsDialog
-          open={accountOpen}
-          onClose={() => setAccountOpen(false)}
-          title={ui.account}
-          description={ui.accountDescription}
-          closeLabel={ui.closeAccount}
-          backdropLabel={ui.closeAccountDialog}
-        >
-          <div className="workspace-settings-overview">
-            <section className="workspace-settings-section workspace-account-section" aria-labelledby="workspace-account-title">
-              <div className="workspace-settings-section-heading">
-                <h3 id="workspace-account-title">{ui.account}</h3>
-                <span>{roleLabel(role, locale, subplatform)}</span>
+        {fullscreenPlugin || !authUser ? null : (
+          <WorkspaceSettingsDialog
+            open={Boolean(accountSettingsSection)}
+            onClose={() => {
+              setAccountSettingsSection(null);
+              requestAnimationFrame(() =>
+                document
+                  .querySelector<HTMLButtonElement>(".profile-button")
+                  ?.focus(),
+              );
+            }}
+            title={
+              accountSettingsSection === "account"
+                ? ui.account
+                : accountSettingsSection === "stores"
+                  ? `${ui.myStores}${ownedStoresResolved ? ` · ${ownedStores.length}` : ""}`
+                  : ui.profile
+            }
+            description={
+              accountSettingsSection === "account"
+                ? ui.accountDescription
+                : accountSettingsSection === "stores"
+                  ? ui.myStoresDescription
+                  : ui.profileDescription
+            }
+            className={
+              accountSettingsSection === "stores"
+                ? "workspace-settings-dialog-wide workspace-settings-dialog-stores"
+                : undefined
+            }
+            closeLabel={
+              accountSettingsSection === "stores"
+                ? ui.closeMyStores
+                : accountSettingsSection === "profile"
+                  ? ui.closeProfile
+                  : ui.closeAccount
+            }
+            backdropLabel={
+              accountSettingsSection === "stores"
+                ? ui.closeMyStoresDialog
+                : accountSettingsSection === "profile"
+                  ? ui.closeProfileDialog
+                  : ui.closeAccountDialog
+            }
+            navigation={[
+              { id: "profile", label: ui.profile, icon: UserRound },
+              { id: "account", label: ui.account, icon: ShieldCheck },
+              {
+                id: "stores",
+                label: ui.myStores,
+                icon: Store,
+                count: ownedStoresResolved ? ownedStores.length : undefined,
+              },
+            ]}
+            navigationLabel={locale === "en" ? "Account settings" : "账号设置"}
+            activeNavigationId={accountSettingsSection ?? "profile"}
+            onNavigationChange={(id) =>
+              setAccountSettingsSection(id as AccountSettingsSection)
+            }
+            searchLabel={locale === "en" ? "Search settings" : "搜索设置"}
+            emptyNavigationLabel={
+              locale === "en" ? "No settings found" : "没有匹配的设置"
+            }
+          >
+            {accountSettingsSection === "account" ? (
+              <div className="workspace-settings-overview">
+                <section
+                  className="workspace-settings-section workspace-account-section"
+                  aria-labelledby="workspace-account-title"
+                >
+                  <div className="workspace-settings-section-heading">
+                    <h3 id="workspace-account-title">{ui.account}</h3>
+                    <span>{roleLabel(role, locale, subplatform)}</span>
+                  </div>
+                  <div className="workspace-account-row">
+                    <span className="workspace-account-avatar">
+                      {authUser.image ? (
+                        <img src={authUser.image} alt="" />
+                      ) : (
+                        <UserRound size={19} aria-hidden="true" />
+                      )}
+                    </span>
+                    <span className="workspace-account-copy">
+                      <strong>{authUser.name || ui.user}</strong>
+                      <small>{authUser.email || ui.unifiedIdentity}</small>
+                    </span>
+                    <button
+                      className="workspace-account-action"
+                      type="button"
+                      onClick={() => void signOut()}
+                    >
+                      <LogOut size={16} aria-hidden="true" />
+                      {ui.signOut}
+                    </button>
+                  </div>
+                </section>
+                <ChangePasswordPanel
+                  email={authUser.email}
+                  locale={locale}
+                  onNotice={setNotice}
+                />
+                <IdentityBindingsPanel
+                  locale={locale}
+                  subplatform={subplatform}
+                  onNotice={setNotice}
+                />
+                <PasskeyPanel
+                  locale={locale}
+                  subplatform={subplatform}
+                  accountLabel={authUser.email}
+                  onNotice={setNotice}
+                />
+                <SessionPanel
+                  locale={locale}
+                  subplatform={subplatform}
+                  onNotice={setNotice}
+                />
               </div>
-              <div className="workspace-account-row">
-                <span className="workspace-account-avatar">{authUser.image ? <img src={authUser.image} alt="" /> : <UserRound size={19} aria-hidden="true" />}</span>
-                <span className="workspace-account-copy"><strong>{authUser.name || ui.user}</strong><small>{authUser.email || ui.unifiedIdentity}</small></span>
-                <button className="workspace-account-action" type="button" onClick={() => void signOut()}><LogOut size={16} aria-hidden="true" />{ui.signOut}</button>
+            ) : accountSettingsSection === "stores" ? (
+              <div className="workspace-settings-overview">
+                <HostedStoreOnboarding
+                  locale={locale}
+                  onNotice={setNotice}
+                  initialStores={ownedStores}
+                  onStoresChange={setOwnedStores}
+                  onManageStore={(store) => void openStoreConsoleFor(store)}
+                />
               </div>
-            </section>
-            <PasskeyPanel locale={locale} subplatform={subplatform} accountLabel={authUser.email} onNotice={setNotice} />
-            <IdentityBindingsPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
-            <SessionPanel locale={locale} subplatform={subplatform} onNotice={setNotice} />
-          </div>
-        </WorkspaceSettingsDialog>}
+            ) : (
+              <PersonalProfilePanel
+                onNotice={setNotice}
+                onAvatarChanged={(image) =>
+                  setAuthUser((current) =>
+                    current ? { ...current, image } : current,
+                  )
+                }
+              />
+            )}
+          </WorkspaceSettingsDialog>
+        )}
 
         <ListingSheet
           listing={listing}
@@ -575,30 +1266,52 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           locale={locale}
           onClose={closeListing}
           contactDisabled={!isLiveMarketplaceEnabled()}
+          onManage={
+            selectedManagedStore
+              ? () => {
+                  closeListing();
+                  window.location.assign(
+                    `${selectedManagedStore.path}?console=products`,
+                  );
+                }
+              : undefined
+          }
           onContact={async (selected) => {
             const selectedPath = selected.platformPath || subplatform.path;
-            const selectedSubplatform = selectedPath !== subplatform.path && selected.subplatform
-              ? {
-                  ...(await loadSubplatform(selectedPath)),
-                  path: selectedPath,
-                  slug: selected.subplatform,
-                  ...(selected.tenantId ? { tenantId: selected.tenantId } : {}),
-                  ...(selected.domainId ? { domainId: selected.domainId } : {}),
-                }
-              : subplatform;
-            const selectedTenantId = selected.tenantId || selectedSubplatform.tenantId;
-            const selectedDomainId = selected.domainId || selectedSubplatform.domainId;
+            const selectedSubplatform =
+              selectedPath !== subplatform.path && selected.subplatform
+                ? {
+                    ...(await loadSubplatform(selectedPath)),
+                    path: selectedPath,
+                    slug: selected.subplatform,
+                    ...(selected.tenantId
+                      ? { tenantId: selected.tenantId }
+                      : {}),
+                    ...(selected.domainId
+                      ? { domainId: selected.domainId }
+                      : {}),
+                  }
+                : subplatform;
+            const selectedTenantId =
+              selected.tenantId || selectedSubplatform.tenantId;
+            const selectedDomainId =
+              selected.domainId || selectedSubplatform.domainId;
             if (!isLiveMarketplaceEnabled()) {
               setNotice("当前环境未连接真实撮合 API，未发送联系申请");
               return;
             }
             const isGenericOffer = Boolean(selected.offerId);
-            const listingId = isGenericOffer ? null : listingIdFromBackend(selected);
+            const listingId = isGenericOffer
+              ? null
+              : listingIdFromBackend(selected);
             if (!isGenericOffer && !listingId) {
               setNotice("商品必须来自已接入店铺的真实目录；当前未发送申请");
               return;
             }
-            if (!selectedDomainId || (!isGenericOffer && !selectedSubplatform.currency)) {
+            if (
+              !selectedDomainId ||
+              (!isGenericOffer && !selectedSubplatform.currency)
+            ) {
               setNotice("当前店铺尚未完成身份与价格配置；当前未发送申请");
               return;
             }
@@ -612,23 +1325,29 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               });
               if (!session) {
                 const next = `${window.location.pathname}${window.location.search}`;
-                window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+                window.location.assign(
+                  `/login?next=${encodeURIComponent(next)}`,
+                );
                 return;
               }
               if (isGenericOffer && selected.offerId) {
-                const selectedIntentId = selected.intentId ?? (await createMarketplaceIntent({
-                  session,
-                  domainId: selectedDomainId,
-                  side: "demand",
-                  narrative: `我想进一步了解并购买“${selected.title}”`,
-                  attributes: {
-                    source: "public_storefront",
-                    offer_id: selected.offerId,
-                    platform_path: selectedPath,
-                  },
-                  supplyDiscoveryEnabled: false,
-                  idempotencyKey: `public-offer-${selected.offerId}`,
-                })).intent_id;
+                const selectedIntentId =
+                  selected.intentId ??
+                  (
+                    await createMarketplaceIntent({
+                      session,
+                      domainId: selectedDomainId,
+                      side: "demand",
+                      narrative: `我想进一步了解并购买“${selected.title}”`,
+                      attributes: {
+                        source: "public_storefront",
+                        offer_id: selected.offerId,
+                        platform_path: selectedPath,
+                      },
+                      supplyDiscoveryEnabled: false,
+                      idempotencyKey: `public-offer-${selected.offerId}`,
+                    })
+                  ).intent_id;
                 const profile = await getMarketplaceProfile({
                   session,
                   domainId: selectedDomainId,
@@ -644,12 +1363,22 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                       offer_title: selected.title,
                       platform_path: selectedPath,
                       profile: profile?.profile ?? null,
-                      match_level: selected.matchScore === undefined
-                        ? null
-                        : selected.matchScore >= 80 ? "very_suitable" : selected.matchScore >= 60 ? "suitable" : selected.matchScore >= 40 ? "possible" : "weak",
+                      match_level:
+                        selected.matchScore === undefined
+                          ? null
+                          : selected.matchScore >= 80
+                            ? "very_suitable"
+                            : selected.matchScore >= 60
+                              ? "suitable"
+                              : selected.matchScore >= 40
+                                ? "possible"
+                                : "weak",
                       reasons: selected.reasons ?? [],
                       risks: selected.risks ?? [],
-                      recent_offer_ids: listings.filter((item) => item.platformPath === selectedPath).map((item) => item.offerId ?? item.id).slice(0, 32),
+                      recent_offer_ids: listings
+                        .filter((item) => item.platformPath === selectedPath)
+                        .map((item) => item.offerId ?? item.id)
+                        .slice(0, 32),
                       saved_offer_ids: readSavedOfferIds(selectedPath),
                     },
                     idempotencyKey: `web-handoff-${selectedIntentId}-${selected.offerId}`,
@@ -665,10 +1394,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   score: (selected.matchScore ?? 0) / 100,
                   idempotencyKey: `web-introduction-${Date.now()}`,
                 });
-                const introductionId = typeof introduction.introduction_id === "string"
-                  ? introduction.introduction_id
-                  : null;
-                if (!introductionId) throw new Error("撮合结果缺少介绍编号，未发送联系申请");
+                const introductionId =
+                  typeof introduction.introduction_id === "string"
+                    ? introduction.introduction_id
+                    : null;
+                if (!introductionId)
+                  throw new Error("撮合结果缺少介绍编号，未发送联系申请");
                 await requestMarketplaceContact({
                   session,
                   domainId: selectedDomainId,
@@ -679,18 +1410,27 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                   session,
                   domainId: selectedDomainId,
                   listingId,
-                  narrative: subplatformCopy(selectedSubplatform, "contactIntentNarrative", "希望与供给方直接沟通并完成后续协商"),
+                  narrative: subplatformCopy(
+                    selectedSubplatform,
+                    "contactIntentNarrative",
+                    "希望与供给方直接沟通并完成后续协商",
+                  ),
                   requirements: {},
                   currency: selectedSubplatform.currency,
                   currencyScale: selectedSubplatform.currencyScale ?? 0,
                   exposureKey: `web-contact-${Date.now()}`,
                 });
               }
-              closeListing();
               window.dispatchEvent(new Event("matchplane.contact.updated"));
-              setNotice("联系申请已写入撮合系统，等待供给方明确同意后交换联系方式");
+              setNotice(
+                "联系申请已写入撮合系统，等待供给方明确同意后交换联系方式",
+              );
             } catch (error) {
-              setNotice(error instanceof Error ? error.message : "联系申请未发送，请稍后重试");
+              setNotice(
+                error instanceof Error
+                  ? error.message
+                  : "联系申请未发送，请稍后重试",
+              );
             }
           }}
         />
@@ -701,10 +1441,80 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           onConfirm={confirmModeChange}
         />
 
-        {notice ? <p className="visually-hidden" role="status">{notice}</p> : null}
+        {notice ? (
+          <p className="visually-hidden" role="status">
+            {notice}
+          </p>
+        ) : null}
       </div>
     </MotionConfig>
   );
+}
+
+function isTransientAuthError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return true;
+  const status =
+    typeof (error as { status?: unknown }).status === "number"
+      ? (error as { status: number }).status
+      : typeof (error as { statusCode?: unknown }).statusCode === "number"
+        ? (error as { statusCode: number }).statusCode
+        : null;
+  return status === null || status === 408 || status === 429 || status >= 500;
+}
+
+function authSessionFailureMessage(error: unknown): string {
+  const status =
+    error && typeof error === "object"
+      ? ((error as { status?: unknown }).status ??
+        (error as { statusCode?: unknown }).statusCode)
+      : null;
+  return status === 429
+    ? "登录状态检查过于频繁，请稍后刷新；当前会话不会被清除"
+    : "暂时无法确认登录状态，请刷新后重试；当前会话不会被清除";
+}
+
+function hasRecentPendingAuthentication(): boolean {
+  const startedAt = Number.parseInt(
+    window.sessionStorage.getItem(AUTH_PENDING_KEY) ?? "",
+    10,
+  );
+  return Number.isFinite(startedAt) && Date.now() - startedAt < 15_000;
+}
+
+async function getOwnedStoresWithRetry(): Promise<StoreSummary[]> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await getOwnedStores();
+    } catch (error) {
+      if (attempt >= 3 || !isTransientAuthError(error)) throw error;
+      await waitForAuthRetry(attempt);
+    }
+  }
+  return [];
+}
+
+function waitForAuthRetry(attempt: number): Promise<void> {
+  return new Promise((resolve) =>
+    window.setTimeout(resolve, (attempt + 1) * 300),
+  );
+}
+
+function stableIdempotencyPart(value: string): string {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function requestedStoreConsoleSection(): "products" | "customers" {
+  if (typeof window === "undefined") return "products";
+  return new URLSearchParams(window.location.search).get(
+    "storeConsoleSection",
+  ) === "customers"
+    ? "customers"
+    : "products";
 }
 
 function roleFromLocation(): WorkspaceRole {
@@ -719,11 +1529,31 @@ function requiresAuthenticatedWorkspace(role: WorkspaceRole): boolean {
 }
 
 /** Keep the intended workspace through Better Auth without trusting an external redirect. */
+function canManageStore(
+  user: AuthenticatedUser | null,
+  store: StoreSummary | null,
+): boolean {
+  return Boolean(
+    user &&
+      store &&
+      (user.role === "rootSuperAdmin" ||
+        user.role === "rootAdmin" ||
+        store.membershipRole === "owner" ||
+        store.membershipRole === "mall_operator"),
+  );
+}
+
+function relativeBrowserLocation(searchParams: URLSearchParams): string {
+  const query = searchParams.toString();
+  return `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+}
+
 function loginHref(role: WorkspaceRole): string {
-  if (typeof window === "undefined") return `/login?role=${encodeURIComponent(role)}`;
-  const current = new URL(window.location.href);
-  current.searchParams.set("role", role);
-  const next = `${current.pathname}${current.search}${current.hash}`;
+  if (typeof window === "undefined")
+    return `/login?role=${encodeURIComponent(role)}`;
+  const searchParams = new URLSearchParams(window.location.search);
+  searchParams.set("role", role);
+  const next = relativeBrowserLocation(searchParams);
   return `/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`;
 }
 
@@ -732,16 +1562,16 @@ function parentPlatformHref(path: string, role: WorkspaceRole): string {
   return role === "buyer" ? "/" : `/?role=${encodeURIComponent(role)}`;
 }
 
-function roleLabel(role: WorkspaceRole, locale: "zh" | "en", subplatform: SubplatformConfig): string {
+function roleLabel(
+  role: WorkspaceRole,
+  locale: "zh" | "en",
+  subplatform: SubplatformConfig,
+): string {
   void subplatform;
   if (locale === "en") {
-    return role === "buyer"
-      ? "Account"
-      : "Mall operator";
+    return role === "buyer" ? "Account" : "Mall operator";
   }
-  return role === "buyer"
-    ? "统一账号"
-    : "商城运营";
+  return role === "buyer" ? "统一账号" : "商城运营";
 }
 
 function appCopy(locale: "zh" | "en") {
@@ -751,8 +1581,10 @@ function appCopy(locale: "zh" | "en") {
       backToParent: "Back to mall",
       rootPlatform: "Mall",
       myStores: "My stores",
-      storeCenter: "Merchant center",
-      myStoresDescription: "Open a store or manage one you already run.",
+      openStore: "Open a store",
+      storeCenter: "My stores",
+      myStoresDescription:
+        "See every store you own or help run, then browse it or manage its products.",
       closeMyStores: "Close my stores",
       closeMyStoresDialog: "Close my stores dialog",
       manageStore: "Manage this store",
@@ -760,9 +1592,15 @@ function appCopy(locale: "zh" | "en") {
       closeStoreConsoleDialog: "Close store management dialog",
       account: "Account",
       accountMenu: "Account menu",
-      accountDescription: "Manage your account identity and sign out.",
+      accountDescription:
+        "Manage your password, passkeys, identity bindings, and signed-in devices.",
       profile: "Profile",
       profileDescription: "Choose your avatar and introduce yourself.",
+      contact: "Contact details",
+      contactDescription:
+        "Set the buyer contact channels that can be shared only after mutual consent.",
+      closeContact: "Close contact details",
+      closeContactDialog: "Close contact details dialog",
       closeProfile: "Close profile",
       closeProfileDialog: "Close profile dialog",
       closeAccount: "Close account",
@@ -784,8 +1622,10 @@ function appCopy(locale: "zh" | "en") {
     backToParent: "返回商城",
     rootPlatform: "商城首页",
     myStores: "我的店铺",
-    storeCenter: "商家中心",
-    myStoresDescription: "开设店铺，或管理你已经在经营的店铺。",
+    openStore: "开一家店",
+    storeCenter: "我的店铺",
+    myStoresDescription:
+      "查看你拥有或参与运营的全部店铺，再进入浏览或直接管理商品。",
     closeMyStores: "关闭我的店铺",
     closeMyStoresDialog: "关闭我的店铺对话框",
     manageStore: "管理这家店",
@@ -793,9 +1633,13 @@ function appCopy(locale: "zh" | "en") {
     closeStoreConsoleDialog: "关闭店铺管理对话框",
     account: "账号",
     accountMenu: "账号菜单",
-    accountDescription: "管理当前账号与登录状态。",
+    accountDescription: "管理密码、通行密钥、身份绑定和登录设备。",
     profile: "个人资料",
     profileDescription: "设置头像和个人简介。",
+    contact: "联系方式",
+    contactDescription: "设置买家自己的联系方式；只有双方同意后才会交换。",
+    closeContact: "关闭联系方式",
+    closeContactDialog: "关闭联系方式对话框",
     closeProfile: "关闭个人资料",
     closeProfileDialog: "关闭个人资料对话框",
     closeAccount: "关闭账号",
@@ -822,131 +1666,15 @@ function listingFromLocation(): AssetListing | null {
 function readSavedOfferIds(platformPath: string): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const value = JSON.parse(window.localStorage.getItem(`matchplane.saved.${platformPath}`) ?? "[]") as unknown;
+    const value = JSON.parse(
+      window.localStorage.getItem(`matchplane.saved.${platformPath}`) ?? "[]",
+    ) as unknown;
     return Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === "string").slice(0, 32)
+      ? value
+          .filter((item): item is string => typeof item === "string")
+          .slice(0, 32)
       : [];
   } catch {
     return [];
-  }
-}
-
-function mapRecommendations(items: RecommendedBackendListing[], subplatform: SubplatformConfig, locale: "zh" | "en"): AssetListing[] {
-  return items.flatMap((item, index) => {
-    const id = item.listing_id ?? item.offer_id;
-    if (!id) return [];
-    const attributes = item.attributes && typeof item.attributes === "object" && !Array.isArray(item.attributes)
-      ? item.attributes
-      : {};
-    const configuredLabels = item.field_labels && typeof item.field_labels === "object" && !Array.isArray(item.field_labels)
-      ? item.field_labels as Record<string, unknown>
-      : {};
-    const facts = Object.entries(attributes)
-      .filter(([key]) => key !== "description" && key !== "attachments")
-      .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
-      .slice(0, 4)
-      .map(([label, value]) => ({
-        label: typeof configuredLabels[label] === "string" && configuredLabels[label].trim()
-          ? configuredLabels[label] as string
-          : subplatformFieldLabel(subplatform, label),
-        key: label,
-        value: String(value),
-      }));
-    const storeName = typeof item.store_name === "string" && item.store_name.trim() ? item.store_name.trim() : undefined;
-    const subtitle = storeName ?? facts.slice(0, 2).map((fact) => `${fact.label} ${fact.value}`).join(" · ");
-    const description = typeof attributes.description === "string" && attributes.description.trim()
-      ? attributes.description.trim()
-      : undefined;
-    const imageUrl = typeof item.image_url === "string" && item.image_url.trim() ? item.image_url.trim() : undefined;
-    const location = typeof item.location === "string" && item.location.trim() ? item.location.trim() : undefined;
-    const terms = item.terms && typeof item.terms === "object" && !Array.isArray(item.terms) ? item.terms : {};
-    const currencyScale = item.currency_scale;
-    const termAmount = typeof terms.amount_minor === "string" ? terms.amount_minor : undefined;
-    const termAmountMin = typeof terms.amount_min_minor === "string" ? terms.amount_min_minor : undefined;
-    const termAmountMax = typeof terms.amount_max_minor === "string" ? terms.amount_max_minor : undefined;
-    const termCurrency = typeof terms.currency === "string" ? terms.currency : undefined;
-    const termScale = typeof terms.currency_scale === "number" && Number.isInteger(terms.currency_scale)
-      ? terms.currency_scale
-      : undefined;
-    const termPriceRange = termAmountMin && termAmountMax && termCurrency && termScale !== undefined
-      ? `${formatMoney(termAmountMin, termCurrency, termScale)} – ${formatMoney(termAmountMax, termCurrency, termScale)}`
-      : undefined;
-    const pricingMode = typeof terms.pricing_mode === "string" ? terms.pricing_mode : undefined;
-    const pricingNote = stringAttribute(terms, ["pricing_note", "pricing_label"]);
-    const price = item.asking_amount && item.currency && typeof currencyScale === "number" && Number.isInteger(currencyScale)
-      ? formatMoney(item.asking_amount, item.currency, currencyScale)
-      : termAmount && termCurrency && termScale !== undefined
-        ? formatMoney(termAmount, termCurrency, termScale)
-        : termPriceRange
-          ? termPriceRange
-          : pricingMode === "negotiable"
-            ? pricingNote ?? localizedSubplatformCopy(subplatform, locale, "negotiablePriceLabel", "可议价", "Negotiable")
-            : pricingMode === "none"
-              ? pricingNote ?? localizedSubplatformCopy(subplatform, locale, "noPriceLabel", "面议", "Price on request")
-              : stringAttribute(terms, ["display_price", "price_label", "price"]) ?? "—";
-    return [{
-      id,
-      tenantId: item.tenant_id,
-      domainId: item.domain_id,
-      platformPath: typeof item.platform_path === "string" ? item.platform_path : subplatform.path,
-      subplatform: typeof item.subplatform === "string" ? item.subplatform : subplatform.slug,
-      title: item.display_name,
-      subtitle,
-      description,
-      imageUrl,
-      storeName,
-      price,
-      ...(termAmount && termCurrency && termScale !== undefined ? {
-        priceAmountMinor: termAmount,
-        priceCurrency: termCurrency,
-        priceCurrencyScale: termScale,
-      } : item.asking_amount && item.currency && typeof currencyScale === "number" && Number.isInteger(currencyScale) ? {
-        priceAmountMinor: item.asking_amount,
-        priceCurrency: item.currency,
-        priceCurrencyScale: currencyScale,
-      } : {}),
-      location,
-      matchScore: Math.round(Math.max(0, Math.min(1, item.match_score ?? 0)) * 100),
-      accent: (["cactus", "clay", "heather", "oat"] as const)[index % 4],
-      facts,
-      reasons: item.match_reasons ?? (typeof item.reasons === "object" && Array.isArray(item.reasons) ? item.reasons.filter((reason): reason is string => typeof reason === "string") : undefined),
-      risks: item.match_risks ?? (typeof item.risks === "object" && Array.isArray(item.risks) ? item.risks.filter((risk): risk is string => typeof risk === "string") : undefined),
-      trust: stringArrayAttribute(item, ["trust", "verification_labels", "verificationLabels"]),
-      seller: storeName,
-      response: stringAttribute(item, ["response", "seller_response", "sellerResponse"]),
-      offerId: item.offer_id,
-      intentId: typeof item.intent_id === "string" ? item.intent_id : undefined,
-    }];
-  });
-}
-
-function stringAttribute(value: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    if (typeof value[key] === "string" && value[key].trim()) return value[key].trim();
-  }
-  return undefined;
-}
-
-function stringArrayAttribute(value: Record<string, unknown>, keys: string[]): string[] | undefined {
-  for (const key of keys) {
-    const candidate = value[key];
-    if (Array.isArray(candidate)) {
-      const items = candidate.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
-      if (items.length) return items.slice(0, 8);
-    }
-  }
-  return undefined;
-}
-
-function formatMoney(amount: string, currency: string, scale: number): string {
-  try {
-    const numeric = BigInt(amount);
-    const divisor = 10n ** BigInt(Math.max(0, scale));
-    const whole = numeric / divisor;
-    const remainder = (numeric < 0n ? -numeric : numeric) % divisor;
-    if (scale === 0) return `${currency} ${whole}`;
-    return `${currency} ${whole}.${remainder.toString().padStart(scale, "0")}`;
-  } catch {
-    return `${currency} ${amount}`;
   }
 }

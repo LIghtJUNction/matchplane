@@ -4,8 +4,16 @@ import type { PoolClient } from "pg";
 import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
-import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
-import { ManagedImageError, persistManagedImage, readManagedImage, removeManagedImage } from "../../../../src/lib/managed-image";
+import {
+  readJsonBody,
+  RequestBodyTooLargeError,
+} from "../../../../src/lib/body-limit";
+import {
+  ManagedImageError,
+  persistManagedImage,
+  readManagedImage,
+  removeManagedImage,
+} from "../../../../src/lib/managed-image";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 
 export const runtime = "nodejs";
@@ -19,7 +27,10 @@ export async function GET(): Promise<Response> {
     `SELECT brand_logo_key AS "logoKey" FROM tenants WHERE id = $1::uuid AND status = 'active' LIMIT 1`,
     [tenantId],
   );
-  const bytes = await readManagedImage(result.rows[0]?.logoKey ?? null, "brand");
+  const bytes = await readManagedImage(
+    result.rows[0]?.logoKey ?? null,
+    "brand",
+  );
   if (!bytes) return notFound();
   return new Response(new Uint8Array(bytes), {
     headers: {
@@ -33,7 +44,8 @@ export async function GET(): Promise<Response> {
 
 /** Only the marketplace owner may replace the shared public brand mark. */
 export async function POST(request: Request): Promise<Response> {
-  if (!hasTrustedBrowserOrigin(request)) return jsonError("请求来源未被商城信任", 403);
+  if (!hasTrustedBrowserOrigin(request))
+    return jsonError("请求来源未被商城信任", 403);
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return jsonError("请先登录", 401);
   if ((session.user as { role?: unknown }).role !== "rootSuperAdmin") {
@@ -41,23 +53,39 @@ export async function POST(request: Request): Promise<Response> {
   }
   let input: { dataBase64?: unknown; expectedVersion?: unknown };
   try {
-    input = await readJsonBody(request, 6 * 1024 * 1024) as typeof input;
+    input = (await readJsonBody(request, 6 * 1024 * 1024)) as typeof input;
   } catch (error) {
-    return jsonError(error instanceof RequestBodyTooLargeError ? "Logo 图片不能超过 4 MiB" : "请求必须是有效 JSON", error instanceof RequestBodyTooLargeError ? 413 : 400);
+    return jsonError(
+      error instanceof RequestBodyTooLargeError
+        ? "Logo 图片不能超过 4 MiB"
+        : "请求必须是有效 JSON",
+      error instanceof RequestBodyTooLargeError ? 413 : 400,
+    );
   }
-  if (typeof input.dataBase64 !== "string") return jsonError("请上传有效的 Logo 图片", 400);
-  const expectedVersion = typeof input.expectedVersion === "number" && Number.isSafeInteger(input.expectedVersion) && input.expectedVersion > 0
-    ? input.expectedVersion
-    : null;
+  if (typeof input.dataBase64 !== "string")
+    return jsonError("请上传有效的 Logo 图片", 400);
+  const expectedVersion =
+    typeof input.expectedVersion === "number" &&
+    Number.isSafeInteger(input.expectedVersion) &&
+    input.expectedVersion > 0
+      ? input.expectedVersion
+      : null;
   if (!expectedVersion) return jsonError("expectedVersion 必须是正整数", 400);
   const tenantId = configuredTenantId();
   if (!tenantId) return jsonError("商城尚未完成初始化", 503);
 
   let image: { key: string; bytes: number };
   try {
-    image = await persistManagedImage({ scope: "brand", ownerId: tenantId, dataBase64: input.dataBase64 });
+    image = await persistManagedImage({
+      scope: "brand",
+      ownerId: tenantId,
+      dataBase64: input.dataBase64,
+    });
   } catch (error) {
-    return jsonError(error instanceof ManagedImageError ? error.message : "Logo 保存失败", 400);
+    return jsonError(
+      error instanceof ManagedImageError ? error.message : "Logo 保存失败",
+      400,
+    );
   }
 
   let client: PoolClient | undefined;
@@ -80,13 +108,26 @@ export async function POST(request: Request): Promise<Response> {
       `INSERT INTO platform_audit_events
         (id, tenant_id, platform_path, actor_auth_user_id, event_type, outcome, metadata)
        VALUES ($1::uuid, $2::uuid, '/', $3::uuid, 'mall.brand.logo.updated', 'success', $4::jsonb)`,
-      [randomUUID(), tenantId, session.user.id, JSON.stringify({ bytes: image.bytes })],
+      [
+        randomUUID(),
+        tenantId,
+        session.user.id,
+        JSON.stringify({ bytes: image.bytes }),
+      ],
     );
     await client.query("COMMIT");
     const mall = updated.rows[0]!;
-    return NextResponse.json({
-      mall: { name: mall.name, slug: mall.slug, version: Number(mall.version), logoUrl: `/api/mall/logo?v=${mall.version}` },
-    }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json(
+      {
+        mall: {
+          name: mall.name,
+          slug: mall.slug,
+          version: Number(mall.version),
+          logoUrl: `/api/mall/logo?v=${mall.version}`,
+        },
+      },
+      { headers: { "cache-control": "no-store" } },
+    );
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
     await removeManagedImage(image.key, "brand");
@@ -105,13 +146,23 @@ interface MallRow {
 
 function configuredTenantId(): string | null {
   const value = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim() ?? "";
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(value) ? value : null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  )
+    ? value
+    : null;
 }
 
 function jsonError(error: string, status: number): Response {
-  return NextResponse.json({ error }, { status, headers: { "cache-control": "no-store" } });
+  return NextResponse.json(
+    { error },
+    { status, headers: { "cache-control": "no-store" } },
+  );
 }
 
 function notFound(): Response {
-  return NextResponse.json({ error: "Logo 尚未设置" }, { status: 404, headers: { "cache-control": "no-store" } });
+  return NextResponse.json(
+    { error: "Logo 尚未设置" },
+    { status: 404, headers: { "cache-control": "no-store" } },
+  );
 }

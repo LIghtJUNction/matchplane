@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://matchplane.dev/schemas/catalog/v1.json",
-  "title": "MatchPlane child catalog upsert ABI v1",
-  "description": "The root sends a canonical, opaque offer projection to a child-owned catalog adapter. The child owns indexing and ranking; the root owns publication state and scope.",
+  "title": "MatchPlane legacy child catalog upsert ABI v1",
+  "description": "Compatibility-only, unversioned input. The root sends a canonical, opaque offer projection to a child-owned catalog adapter; new root relays use catalog v2 with canonical_version, projection_digest and a structured monotonic ACK. The child owns indexing and ranking; the root owns publication state and scope.",
   "type": "object",
   "additionalProperties": false,
   "required": ["protocol", "request_id", "scope", "offer"],

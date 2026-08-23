@@ -23,6 +23,7 @@ import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 import { readJsonBody, RequestBodyTooLargeError } from "../../../../src/lib/body-limit";
 import { normalizeMatchIdempotencyKey } from "../../../../src/platform-match-idempotency";
 import { admitPlatformAiCall } from "../../../../src/platform-ai-admission";
+import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
 
@@ -484,8 +485,4 @@ function normalizePlatformPath(value: string | undefined): string | null {
   const normalized = `/${value.split("/").filter(Boolean).join("/")}`;
   if (normalized === "/") return normalized;
   return /^\/[a-z0-9-]+(?:\/[a-z0-9-]+)*$/.test(normalized) ? normalized : null;
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

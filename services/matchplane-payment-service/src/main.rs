@@ -159,6 +159,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/v1/admin/invoices", get(api::admin_invoices))
         .route(
+            "/v1/admin/financial-report",
+            get(api::admin_financial_report),
+        )
+        .route(
             "/v1/admin/payment-routes",
             get(api::admin_routes).post(api::mutate_route),
         )

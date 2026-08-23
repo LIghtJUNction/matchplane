@@ -31,7 +31,12 @@
   },
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target node --format esm",
+    "check": "tsc --noEmit",
     "prepublishOnly": "bun run build",
     "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "typescript": "7.0.2"
   }
 }

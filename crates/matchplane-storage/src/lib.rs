@@ -1,5 +1,6 @@
 //! PostgreSQL repositories, migrations, transactional outbox, and consumer inbox primitives.
 
+mod catalog_projection;
 mod federation;
 mod generic_marketplace;
 mod marketplace;
@@ -14,6 +15,10 @@ mod vectors;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use thiserror::Error;
 
+pub use catalog_projection::{
+    CatalogProjectionCounts, CatalogProjectionProblem, CatalogProjectionReplayOutcome,
+    CatalogProjectionStatus,
+};
 pub use generic_marketplace::{
     AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,
     CreateMarketplaceOffer, CreateMarketplaceSalesHandoff, MarketplaceBehaviorEventOutcome,
@@ -23,7 +28,8 @@ pub use generic_marketplace::{
     MarketplaceOfferOutcome, MarketplaceOfferPreference, MarketplaceSalesHandoff,
     MatchMarketplaceDemands, MatchMarketplaceOffers, RecordMarketplaceBehaviorEvent,
     RequestMarketplaceContact, SetMarketplaceOfferPreference, UpdateMarketplaceDemandDiscovery,
-    UpdateMarketplaceIntent, UpsertMarketplaceIntentProfile,
+    UpdateMarketplaceIntent, UpdateMarketplaceOffer, UpsertMarketplaceIntentProfile,
+    WithdrawMarketplaceOffer,
 };
 pub use marketplace::{
     AcceptContactExchange, ApproveMarketplaceListingSubmission, AuthenticatedParty,

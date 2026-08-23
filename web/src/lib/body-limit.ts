@@ -13,30 +13,62 @@ export class ResponseBodyTooLargeError extends Error {
 }
 
 /** Read a JSON request with a byte cap that also covers chunked transfer encoding. */
-export async function readJsonBody<T>(request: Request, maximumBytes: number): Promise<T> {
-  const declaredLength = Number.parseInt(request.headers.get("content-length") ?? "", 10);
+export async function readJsonBody<T>(
+  request: Request,
+  maximumBytes: number,
+): Promise<T> {
+  const declaredLength = Number.parseInt(
+    request.headers.get("content-length") ?? "",
+    10,
+  );
   if (Number.isSafeInteger(declaredLength) && declaredLength > maximumBytes) {
     throw new RequestBodyTooLargeError(maximumBytes);
   }
   if (!request.body) throw new SyntaxError("empty request body");
-  const bytes = await readBoundedBytes(request.body, maximumBytes, () => new RequestBodyTooLargeError(maximumBytes));
-  return JSON.parse(new TextDecoder().decode(bytes)) as T;
+  const bytes = await readBoundedBytes(
+    request.body,
+    maximumBytes,
+    () => new RequestBodyTooLargeError(maximumBytes),
+  );
+  return parseJson<T>(new TextDecoder().decode(bytes));
 }
 
 /** Read an upstream JSON response with a byte cap that also covers chunked transfer encoding. */
-export async function readJsonResponseBody<T>(response: Response, maximumBytes: number): Promise<T> {
-  return JSON.parse(await readResponseTextBody(response, maximumBytes)) as T;
+export async function readJsonResponseBody<T>(
+  response: Response,
+  maximumBytes: number,
+): Promise<T> {
+  return parseJson<T>(await readResponseTextBody(response, maximumBytes));
 }
 
 /** Read an upstream response as text with a byte cap that also covers chunked transfer encoding. */
-export async function readResponseTextBody(response: Response, maximumBytes: number): Promise<string> {
-  const declaredLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+export async function readResponseTextBody(
+  response: Response,
+  maximumBytes: number,
+): Promise<string> {
+  const declaredLength = Number.parseInt(
+    response.headers.get("content-length") ?? "",
+    10,
+  );
   if (Number.isSafeInteger(declaredLength) && declaredLength > maximumBytes) {
     throw new ResponseBodyTooLargeError(maximumBytes);
   }
   if (!response.body) throw new SyntaxError("empty response body");
-  const bytes = await readBoundedBytes(response.body, maximumBytes, () => new ResponseBodyTooLargeError(maximumBytes));
+  const bytes = await readBoundedBytes(
+    response.body,
+    maximumBytes,
+    () => new ResponseBodyTooLargeError(maximumBytes),
+  );
   return new TextDecoder().decode(bytes);
+}
+
+function parseJson<T>(value: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    if (error instanceof SyntaxError) throw error;
+    throw new SyntaxError("invalid JSON", { cause: error });
+  }
 }
 
 async function readBoundedBytes(
@@ -59,7 +91,11 @@ async function readBoundedBytes(
     } catch (error) {
       // Stop a chunked/slow stream as soon as its bounded budget is exceeded. Releasing the
       // reader alone leaves an unread stream attached to the request/response in some runtimes.
-      await reader.cancel().catch(() => undefined);
+      try {
+        await reader.cancel();
+      } catch {
+        // Preserve the original read/size failure when cancellation also fails.
+      }
       throw error;
     }
   } finally {
