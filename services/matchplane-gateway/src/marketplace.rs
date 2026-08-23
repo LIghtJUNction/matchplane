@@ -5,10 +5,12 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
 };
+use matchplane_application::MarketplaceService;
 use matchplane_domain::{
     AssetId, AssetSchemaId, BuyerRequestId, DomainId, MarketplacePartyId, OfflineDealId,
     PromotionCampaignId, TenantId, VehicleListingId, ViewingAppointmentId,
 };
+use matchplane_http::request_fingerprint;
 use matchplane_storage::{
     AcceptContactExchange, ApproveMarketplaceListingSubmission, AuthenticatedParty,
     ConfirmOfflineDeal, CreateBuyerVehicleRequest, CreateMarketplaceListingSubmission,
@@ -22,8 +24,6 @@ use matchplane_storage::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use matchplane_application::MarketplaceService;
-use matchplane_http::request_fingerprint;
 use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;

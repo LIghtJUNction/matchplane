@@ -403,7 +403,12 @@ async fn place_order(
     } else {
         StatusCode::ACCEPTED
     };
-    Ok((status, Json(AcceptedResponse { outcome: result.outcome })))
+    Ok((
+        status,
+        Json(AcceptedResponse {
+            outcome: result.outcome,
+        }),
+    ))
 }
 
 async fn order(

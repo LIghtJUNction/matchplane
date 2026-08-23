@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use matchplane_domain::{
-    DomainId, MarketplaceIntentId, MarketplaceOfferId, MarketplacePartyId,
-    MatchIntroductionId, TenantId,
+    DomainId, MarketplaceIntentId, MarketplaceOfferId, MarketplacePartyId, MatchIntroductionId,
+    TenantId,
 };
 use matchplane_storage::{
     AuthenticatedParty, CreateMarketplaceIntent, CreateMarketplaceIntroduction,

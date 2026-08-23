@@ -6,10 +6,8 @@ use matchplane_storage::{PgStore, StorageError, StoredOrder, SubmitOrder, Submit
 #[async_trait]
 pub trait OrderWriter: Send + Sync {
     /// Persists a new order command.
-    async fn submit_order(
-        &self,
-        request: &SubmitOrder,
-    ) -> Result<SubmitOrderOutcome, StorageError>;
+    async fn submit_order(&self, request: &SubmitOrder)
+    -> Result<SubmitOrderOutcome, StorageError>;
 
     /// Loads a stored order by identifier.
     async fn order(&self, order_id: OrderId) -> Result<StoredOrder, StorageError>;

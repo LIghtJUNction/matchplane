@@ -133,11 +133,7 @@ impl ApiError {
 
     /// Returns a 500 internal error with an explicit client-visible message.
     pub fn internal_message(message: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            message,
-        )
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
     }
 
     /// Returns a 503 dependency-unavailable error and logs the underlying detail.

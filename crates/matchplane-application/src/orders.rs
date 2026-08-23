@@ -70,9 +70,7 @@ where
         let price = parse_price(&command.price)?;
         let quantity = parse_quantity(&command.quantity)?;
         let reservation_amount = reservation_amount(command.side, price, quantity)?;
-        let submitted_at = command
-            .submitted_at
-            .unwrap_or_else(OffsetDateTime::now_utc);
+        let submitted_at = command.submitted_at.unwrap_or_else(OffsetDateTime::now_utc);
         if command
             .expires_at
             .is_some_and(|expiry| expiry <= submitted_at)

@@ -149,6 +149,9 @@ mod tests {
             .build();
 
         assert_eq!(registry.len(), 1);
-        assert_eq!(registry.get_enabled("google").expect("provider").name, "Google v2");
+        assert_eq!(
+            registry.get_enabled("google").expect("provider").name,
+            "Google v2"
+        );
     }
 }
