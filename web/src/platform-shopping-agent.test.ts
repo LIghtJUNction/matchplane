@@ -609,8 +609,10 @@ describe("platform shopping agent", () => {
     });
 
     const reply = await answerPlatformShoppingQuestion({
-      question: "给我这款的参数，下一步先让我确认",
-      messages: [{ role: "user", content: "给我这款的参数，下一步先让我确认" }],
+      question: "给我这款的参数，并提供继续或暂不两个选择",
+      messages: [
+        { role: "user", content: "给我这款的参数，并提供继续或暂不两个选择" },
+      ],
       stores: [],
     });
 
@@ -643,6 +645,46 @@ describe("platform shopping agent", () => {
         productIds: ["offer-a"],
       }),
     ]);
+  });
+
+  it("forces an explicit confirmation tool instead of relying on prose", async () => {
+    generateText.mockImplementationOnce(async (options) => {
+      await options.tools.confirm_action.execute({
+        question: "继续执行下一步？",
+        confirmLabel: "继续",
+        cancelLabel: "取消",
+        confirmValue: "确认继续执行下一步",
+        cancelValue: "取消下一步",
+      });
+      return {
+        text: "",
+        finishReason: "tool-calls",
+        usage: { inputTokens: 16, outputTokens: 8, totalTokens: 24 },
+        steps: [{ toolCalls: [{ toolName: "confirm_action" }] }],
+      };
+    });
+
+    const reply = await answerPlatformShoppingQuestion({
+      question: "执行下一步前请让我确认是否继续",
+      messages: [{ role: "user", content: "执行下一步前请让我确认是否继续" }],
+      stores: [],
+    });
+
+    expect(reply.text).toBe("继续执行下一步？");
+    expect(reply.toolCalls).toEqual(["confirm_action"]);
+    expect(reply.uiActions).toEqual([
+      {
+        type: "choice",
+        id: "choice-1",
+        kind: "confirmation",
+        question: "继续执行下一步？",
+        options: [
+          { id: "confirm", label: "继续", value: "确认继续执行下一步" },
+          { id: "cancel", label: "取消", value: "取消下一步" },
+        ],
+      },
+    ]);
+    expect(generateText.mock.calls[0]?.[0].stopWhen).toEqual({ count: 1 });
   });
 
   it("returns the real choice question when the model finishes without prose", async () => {
