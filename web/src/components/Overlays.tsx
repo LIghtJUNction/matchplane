@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  BadgeCheck,
   CalendarDays,
   Check,
   ChevronLeft,
@@ -10,7 +9,6 @@ import {
   MessageCircle,
   Phone,
   ShieldCheck,
-  Sparkles,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -212,13 +210,6 @@ export function ListingSheet({
                   ))}
                 </div>
               ) : null}
-              {listing.matchScore !== undefined ? (
-                <div className="sheet-match">
-                  <Sparkles size={15} aria-hidden="true" />{" "}
-                  {matchLevelForScore(listing.matchScore, locale)} ·{" "}
-                  {copy("matchLabel", "匹配", "match")}
-                </div>
-              ) : null}
               <h2 id="listing-sheet-title">{listing.title}</h2>
               <p className="sheet-subtitle">{listing.subtitle}</p>
               {listing.description ? (
@@ -289,14 +280,6 @@ export function ListingSheet({
                         <small>{listing.response}</small>
                       ) : null}
                     </div>
-                    <BadgeCheck
-                      size={20}
-                      aria-label={copy(
-                        "verifiedSupplyLabel",
-                        "供给方身份已核验",
-                        "Supply identity verified",
-                      )}
-                    />
                   </div>
                   {listing.trust?.length ? (
                     <ul>
@@ -443,24 +426,6 @@ interface ModeDialogProps {
   onClose: () => void;
   onConfirm: () => void;
   resourceLabel?: string;
-}
-
-function matchLevelForScore(score: number, locale: InterfaceLocale): string {
-  if (locale === "en")
-    return score >= 80
-      ? "Strong fit"
-      : score >= 60
-        ? "Good fit"
-        : score >= 40
-          ? "Possible fit"
-          : "Weak fit";
-  return score >= 80
-    ? "非常适合"
-    : score >= 60
-      ? "比较适合"
-      : score >= 40
-        ? "一般"
-        : "不太适合";
 }
 
 export function ModeDialog({

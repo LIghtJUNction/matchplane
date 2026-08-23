@@ -1,6 +1,5 @@
 "use client";
 
-import { Badge } from "@appica/ui-react/badge";
 import { Button } from "@appica/ui-react/button";
 import { ArrowRight, Heart } from "lucide-react";
 import { useState } from "react";
@@ -42,8 +41,6 @@ export function MarketplaceListingCard({
   const viewerLikeCount = listing.viewerLikeCount ?? 0;
   const likeTotal = listing.likeTotal ?? "0";
   const sellerLabel = listing.storeName || listing.seller || listing.subtitle;
-  const showMatchScore =
-    listing.matchScore !== undefined && Boolean(listing.intentId);
   const showSubtitle = Boolean(
     listing.subtitle && listing.subtitle !== sellerLabel,
   );
@@ -99,11 +96,6 @@ export function MarketplaceListingCard({
       <div className="flex min-w-0 flex-col lg:px-1 lg:pt-4">
         <div className="flex items-center justify-between gap-2 text-xs text-foreground-muted">
           <span className="truncate">{sellerLabel}</span>
-          {showMatchScore ? (
-            <Badge variant="success" size="xs">
-              {Math.round(listing.matchScore ?? 0)}%
-            </Badge>
-          ) : null}
         </div>
         <button
           className="mt-1 line-clamp-2 text-left text-base font-semibold leading-snug text-foreground-intense"

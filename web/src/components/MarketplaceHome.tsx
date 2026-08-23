@@ -11,11 +11,12 @@ import {
 import { useMemo, useState, type ReactNode } from "react";
 
 import type { RecommendedBackendListing } from "../api";
-import type { InterfaceLocale } from "../lib/preferences";
+import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
 import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 import { MatchChat } from "./MatchChat";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
+import { PreferenceControls } from "./PreferenceControls";
 import { Brand } from "./Primitives";
 import { StorefrontDirectory } from "./StorefrontDirectory";
 
@@ -23,6 +24,9 @@ interface MarketplaceHomeProps {
   catalogResolved: boolean;
   listings: AssetListing[];
   locale: InterfaceLocale;
+  theme: InterfaceTheme;
+  onLocaleChange: (locale: InterfaceLocale) => void;
+  onThemeChange: (theme: InterfaceTheme) => void;
   onNotice: (message: string) => void;
   onOpenListing: (listing: AssetListing) => void;
   onLikeListing: (listing: AssetListing) => Promise<void>;
@@ -61,18 +65,6 @@ function MarketplaceLoading({ locale }: { locale: InterfaceLocale }) {
         />
       ))}
     </div>
-  );
-}
-
-function MarketplaceHero({ locale }: { locale: InterfaceLocale }) {
-  return (
-    <section className="root-marketplace-hero">
-      <div>
-        <h1>
-          {locale === "en" ? "Where should we start?" : "我们先从哪里开始呢？"}
-        </h1>
-      </div>
-    </section>
   );
 }
 
@@ -172,7 +164,6 @@ interface MarketplaceSearchPanelProps {
   onLikeListing: (listing: AssetListing) => Promise<void>;
   onNotice: (message: string) => void;
   onOpenListing: (listing: AssetListing) => void;
-  onPublishProduct: () => void;
   onRecommendations: (recommendations: RecommendedBackendListing[]) => void;
   subplatform: SubplatformConfig;
 }
@@ -185,7 +176,6 @@ function MarketplaceSearchPanel({
   onLikeListing,
   onNotice,
   onOpenListing,
-  onPublishProduct,
   onRecommendations,
   subplatform,
 }: MarketplaceSearchPanelProps) {
@@ -206,25 +196,6 @@ function MarketplaceSearchPanel({
           onRecommendations={onRecommendations}
           subplatform={subplatform}
         />
-        <nav
-          className="root-marketplace-quick-actions"
-          aria-label={
-            locale === "en" ? "Marketplace shortcuts" : "商城快捷入口"
-          }
-        >
-          <a href="#products">
-            <PackageOpen aria-hidden="true" />
-            <span>{locale === "en" ? "Browse products" : "浏览商品"}</span>
-          </a>
-          <a href="#stores">
-            <Store aria-hidden="true" />
-            <span>{locale === "en" ? "Browse stores" : "浏览店铺"}</span>
-          </a>
-          <button type="button" onClick={onPublishProduct}>
-            <ShoppingBag aria-hidden="true" />
-            <span>{locale === "en" ? "List a product" : "发布商品"}</span>
-          </button>
-        </nav>
         {categories.length > 1 ? (
           <fieldset className="root-marketplace-inline-categories">
             <legend className="sr-only">
@@ -294,8 +265,8 @@ function MarketplaceProducts({
           </strong>
           <p className="mt-1 text-sm leading-6 text-foreground-muted">
             {locale === "en"
-              ? "You can still describe what you need or browse the live stores below."
-              : "现在仍可直接描述需求，或继续浏览下方已营业店铺。"}
+              ? "You can still describe what you need above, or browse the live stores below."
+              : "现在仍可在上方描述需求，或继续浏览下方已营业店铺。"}
           </p>
         </div>
         <button
@@ -311,7 +282,7 @@ function MarketplaceProducts({
 
   return (
     <section
-      className="mx-auto max-w-[76rem] px-4 py-12 sm:px-6 lg:py-16"
+      className="root-marketplace-products"
       id="products"
       aria-labelledby="marketplace-products-title"
     >
@@ -341,6 +312,9 @@ export function MarketplaceHome({
   catalogResolved,
   listings,
   locale,
+  theme,
+  onLocaleChange,
+  onThemeChange,
   onNotice,
   onOpenListing,
   onLikeListing,
@@ -367,6 +341,7 @@ export function MarketplaceHome({
 
   return (
     <div className="root-marketplace-page min-h-screen bg-background-subtle text-foreground">
+      <div className="root-marketplace-atmosphere" aria-hidden="true" />
       <MarketplaceSidebar
         categories={categories}
         category={effectiveCategory}
@@ -377,7 +352,14 @@ export function MarketplaceHome({
       />
       <div className="root-marketplace-main">
         <section className="root-marketplace-stage" id="marketplace-chat">
-          <MarketplaceHero locale={locale} />
+          <div className="root-marketplace-prefs">
+            <PreferenceControls
+              theme={theme}
+              locale={locale}
+              onThemeChange={onThemeChange}
+              onLocaleChange={onLocaleChange}
+            />
+          </div>
           <MarketplaceSearchPanel
             categories={categories}
             category={effectiveCategory}
@@ -386,7 +368,6 @@ export function MarketplaceHome({
             onLikeListing={onLikeListing}
             onNotice={onNotice}
             onOpenListing={onOpenListing}
-            onPublishProduct={onPublishProduct}
             onRecommendations={onRecommendations}
             subplatform={subplatform}
           />
@@ -399,11 +380,8 @@ export function MarketplaceHome({
           onLikeListing={onLikeListing}
           onPublishProduct={onPublishProduct}
         />
-        <div
-          className="mx-auto max-w-[76rem] px-4 pb-24 pt-4 sm:px-6"
-          id="stores"
-        >
-          <StorefrontDirectory home locale={locale} />
+        <div className="root-marketplace-stores" id="stores">
+          <StorefrontDirectory locale={locale} />
         </div>
       </div>
     </div>
