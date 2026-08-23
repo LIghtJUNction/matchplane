@@ -2,7 +2,7 @@
 
 use std::{fs::File, io::BufReader, path::Path};
 
-use fred::rustls::{ClientConfig, RootCertStore};
+use fred::rustls::{ClientConfig, RootCertStore, crypto::ring};
 use fred::{
     clients::Client,
     interfaces::{ClientLike, KeysInterface, LuaInterface},
@@ -92,7 +92,12 @@ pub enum CacheError {
     Json(#[from] serde_json::Error),
 }
 
+fn install_default_crypto_provider() {
+    let _ = ring::default_provider().install_default();
+}
+
 fn tls_client_config(path: &Path) -> Result<ClientConfig, CacheError> {
+    install_default_crypto_provider();
     let mut reader = BufReader::new(File::open(path)?);
     let certificates = rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
     if certificates.is_empty() {
@@ -284,5 +289,19 @@ return 1
             .map(|json| serde_json::from_str(&json))
             .transpose()
             .map_err(CacheError::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fred::rustls::crypto::CryptoProvider;
+
+    use super::*;
+
+    #[test]
+    fn installs_ring_as_the_process_crypto_provider() {
+        install_default_crypto_provider();
+
+        assert!(CryptoProvider::get_default().is_some());
     }
 }
