@@ -725,46 +725,20 @@ describe("platform shopping agent", () => {
         platform_path: "/test-store",
       },
     ]);
-    generateText.mockImplementationOnce(async (options) => {
-      await options.tools.search_public_products.execute({
-        query: "测试商品",
-        requirements: [],
-      });
-      await options.tools.request_human_handoff.execute({
-        summary: "用户明确希望购买并询问交付时间。",
-        intent: "high",
-        productIds: ["offer-1", "not-in-catalog"],
-      });
-      await options.tools.request_human_handoff.execute({
-        summary: "重复调用",
-        intent: "urgent",
-        productIds: [],
-      });
-      await options.tools.request_contact_consent.execute({
-        productId: "offer-1",
-        reason: "店员需要确认交付时间。",
-      });
-      return {
-        text: "我已经通知店员介入，你仍可以继续问我；是否交换联系方式由你决定。",
-        usage: { inputTokens: 24, outputTokens: 16, totalTokens: 40 },
-        steps: [
-          {
-            toolCalls: [
-              { toolName: "search_public_products" },
-              { toolName: "request_human_handoff" },
-              { toolName: "request_contact_consent" },
-            ],
-          },
-        ],
-      };
+    generateText.mockResolvedValueOnce({
+      text: "请再具体一点。",
+      usage: { inputTokens: 24, outputTokens: 16, totalTokens: 40 },
+      steps: [{ toolCalls: [] }],
     });
 
     const reply = await answerPlatformShoppingQuestion({
-      question: "我想买这件商品，能让店员确认交付时间吗？",
+      question:
+        "我想买这件商品，请让店员确认交付时间，并询问我是否同意交换联系方式。",
       messages: [
         {
           role: "user",
-          content: "我想买这件商品，能让店员确认交付时间吗？",
+          content:
+            "我想买这件商品，请让店员确认交付时间，并询问我是否同意交换联系方式。",
         },
       ],
       stores: [
@@ -785,23 +759,27 @@ describe("platform shopping agent", () => {
       storeContext: { path: "/test-store", name: "测试小店" },
     });
 
-    expect(reply.text).toContain("仍可以继续问我");
+    expect(reply.text).toContain("已通知店员介入");
+    expect(reply.text).toContain("未经你确认不会交换");
     expect(reply.uiActions).toEqual([
       {
         type: "human_handoff",
         id: "human-handoff-1",
-        summary: "用户明确希望购买并询问交付时间。",
+        summary:
+          "我想买这件商品，请让店员确认交付时间，并询问我是否同意交换联系方式。",
         intent: "high",
         productIds: ["offer-1"],
       },
       {
         type: "contact_consent",
         id: "contact-consent-1",
-        reason: "店员需要确认交付时间。",
+        reason:
+          "我想买这件商品，请让店员确认交付时间，并询问我是否同意交换联系方式。",
         productId: "offer-1",
       },
       { type: "products", productIds: ["offer-1"] },
     ]);
+    expect(searchPublicStoreOffers).toHaveBeenCalledTimes(1);
     expect(generateText.mock.calls[0]?.[0].system).toContain("AI 店长");
     expect(generateText.mock.calls[0]?.[0].system).toContain(
       "不能替用户同意",
