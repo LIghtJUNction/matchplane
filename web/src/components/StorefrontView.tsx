@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { ArrowLeft, MessageCircle, PackageOpen, Store, X } from "lucide-react";
 
-import type { MallAssistantContactConsentAction } from "../api";
+import {
+  listingIdFromBackend,
+  type MallAssistantContactConsentAction,
+} from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
@@ -16,7 +19,7 @@ export function StorefrontView({
   listings,
   locale,
   onOpenListing,
-  onLikeListing = async () => undefined,
+  onLikeListing,
   onNotice = () => undefined,
   onHumanHandoff,
   onContactConsent,
@@ -141,7 +144,12 @@ export function StorefrontView({
                   listing={listing}
                   locale={locale}
                   onOpen={() => onOpenListing(listing)}
-                  onLike={() => onLikeListing(listing)}
+                  onLike={
+                    onLikeListing &&
+                    (listing.offerId ?? listingIdFromBackend(listing))
+                      ? () => onLikeListing(listing)
+                      : undefined
+                  }
                 />
               ))}
             </div>

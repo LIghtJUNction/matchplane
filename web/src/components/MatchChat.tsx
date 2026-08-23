@@ -26,6 +26,7 @@ import {
   getMarketplaceOfferMatches,
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
+  listingIdFromBackend,
   uploadMarketplaceAttachment,
   querySubplatformRetrieval,
   updateMarketplaceIntent,
@@ -2048,8 +2049,10 @@ export function MatchChat({
                       listing={recommendation}
                       locale={locale}
                       onOpen={() => onOpenListing?.(recommendation)}
-                      onLike={() =>
-                        onLikeListing?.(recommendation) ?? Promise.resolve()
+                      onLike={
+                        onLikeListing && (recommendation.offerId ?? listingIdFromBackend(recommendation))
+                          ? () => onLikeListing(recommendation)
+                          : undefined
                       }
                     />
                   ))}

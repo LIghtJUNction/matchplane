@@ -288,7 +288,12 @@ export function HostedStoreOnboarding({
                         if (invite?.storeId !== store.id)
                           void generateInvite(store.id);
                       }}
-                      disabled={invitingStoreId !== null}
+                      disabled={
+                        invitingStoreId !== null || invite?.storeId === store.id
+                      }
+                      aria-disabled={
+                        invite?.storeId === store.id ? true : undefined
+                      }
                     >
                       <UserPlus size={15} aria-hidden="true" />
                       {inviteLabel}

@@ -57,6 +57,20 @@ describe("MarketplaceListingCard likes", () => {
       }),
     ).toBeDisabled();
   });
+
+  it("does not render a like control when liking is unavailable", () => {
+    render(
+      <MarketplaceListingCard
+        listing={{ ...listing, offerId: undefined, id: "demo-listing" }}
+        locale="zh"
+        onOpen={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /点赞/ }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("MarketplaceHome actions", () => {

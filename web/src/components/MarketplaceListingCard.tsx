@@ -4,6 +4,7 @@ import { Button } from "@appica/ui-react/button";
 import { ArrowRight, Heart } from "lucide-react";
 import { useState } from "react";
 
+import { listingIdFromBackend } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 import type { AssetListing } from "../types";
 
@@ -33,13 +34,15 @@ export function MarketplaceListingCard({
   listing: AssetListing;
   locale: InterfaceLocale;
   onOpen: () => void;
-  onLike: () => Promise<void>;
+  onLike?: () => Promise<void>;
   compact?: boolean;
 }) {
   const [liking, setLiking] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const viewerLikeCount = listing.viewerLikeCount ?? 0;
   const likeTotal = listing.likeTotal ?? "0";
+  const likeOfferId = listing.offerId ?? listingIdFromBackend(listing);
+  const likeEnabled = Boolean(onLike && likeOfferId);
   const sellerLabel = listing.storeName || listing.seller || listing.subtitle;
   const showSubtitle = Boolean(
     listing.subtitle && listing.subtitle !== sellerLabel,
@@ -67,37 +70,39 @@ export function MarketplaceListingCard({
             {listing.title.slice(0, 2)}
           </div>
         )}
-        <Button
-          className="marketplace-like-button absolute right-2 top-2 bg-background/90"
-          type="button"
-          variant="ghost"
-          aria-label={likeLabel(
-            locale,
-            listing.title,
-            viewerLikeCount,
-            likeTotal,
-          )}
-          aria-pressed={viewerLikeCount > 0}
-          disabled={liking || viewerLikeCount >= 5}
-          title={
-            viewerLikeCount >= 5
-              ? locale === "en"
-                ? "Like limit reached (5)"
-                : "已达点赞上限（5）"
-              : undefined
-          }
-          onClick={() => {
-            if (viewerLikeCount >= 5) return;
-            setLiking(true);
-            void onLike().finally(() => setLiking(false));
-          }}
-        >
-          <Heart
-            fill={viewerLikeCount > 0 ? "currentColor" : "none"}
-            aria-hidden="true"
-          />
-          <span aria-live="polite">{likeTotal}</span>
-        </Button>
+        {likeEnabled ? (
+          <Button
+            className="marketplace-like-button absolute right-2 top-2 bg-background/90"
+            type="button"
+            variant="ghost"
+            aria-label={likeLabel(
+              locale,
+              listing.title,
+              viewerLikeCount,
+              likeTotal,
+            )}
+            aria-pressed={viewerLikeCount > 0}
+            disabled={liking || viewerLikeCount >= 5}
+            title={
+              viewerLikeCount >= 5
+                ? locale === "en"
+                  ? "Like limit reached (5)"
+                  : "已达点赞上限（5）"
+                : undefined
+            }
+            onClick={() => {
+              if (!onLike || viewerLikeCount >= 5) return;
+              setLiking(true);
+              void onLike().finally(() => setLiking(false));
+            }}
+          >
+            <Heart
+              fill={viewerLikeCount > 0 ? "currentColor" : "none"}
+              aria-hidden="true"
+            />
+            <span aria-live="polite">{likeTotal}</span>
+          </Button>
+        ) : null}
       </div>
       <div className="flex min-w-0 flex-col lg:px-1 lg:pt-4">
         <div className="flex items-center justify-between gap-2 text-xs text-foreground-muted">

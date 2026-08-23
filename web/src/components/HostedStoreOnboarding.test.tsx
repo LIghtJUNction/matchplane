@@ -95,5 +95,6 @@ describe("hosted store onboarding", () => {
     const link = await screen.findByLabelText<HTMLInputElement>("协作邀请链接");
     expect(link.value).toContain("/admin/register?token=");
     expect(screen.getByText(/每条链接限一人于 7 天内使用/)).toBeInTheDocument();
+    expect(inviteButton).toBeDisabled();
   });
 });
