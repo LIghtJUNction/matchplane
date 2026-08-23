@@ -22,6 +22,8 @@ use matchplane_storage::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use matchplane_application::MarketplaceService;
+use matchplane_http::request_fingerprint;
 use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
@@ -1281,32 +1283,11 @@ pub(super) async fn authenticate(
     tenant_id: TenantId,
     party_id: MarketplacePartyId,
 ) -> Result<AuthenticatedParty, ApiError> {
-    let authorization = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| ApiError::unauthorized("party bearer token is required"))?;
-    let token = authorization
-        .strip_prefix("Bearer ")
-        .filter(|token| token.len() >= 64)
-        .ok_or_else(|| ApiError::unauthorized("party bearer token is invalid"))?;
-    let token_hash = Sha256::digest(token.as_bytes());
-    let platform_path = platform_path_from_headers(headers, false)?;
     state
-        .store
-        .authenticate_marketplace_party(
-            tenant_id,
-            party_id,
-            token_hash.as_slice(),
-            None,
-            platform_path.as_deref(),
-        )
+        .marketplace
+        .authenticate(headers, tenant_id, party_id)
         .await
-        .map_err(|error| match error {
-            matchplane_storage::StorageError::Forbidden(_) => {
-                ApiError::unauthorized("party bearer token is invalid")
-            }
-            other => ApiError::from(other),
-        })
+        .map_err(Into::into)
 }
 
 pub(super) async fn authenticate_domain(
@@ -1316,61 +1297,22 @@ pub(super) async fn authenticate_domain(
     party_id: MarketplacePartyId,
     domain_id: DomainId,
 ) -> Result<AuthenticatedParty, ApiError> {
-    let authorization = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| ApiError::unauthorized("party bearer token is required"))?;
-    let token = authorization
-        .strip_prefix("Bearer ")
-        .filter(|token| token.len() >= 64)
-        .ok_or_else(|| ApiError::unauthorized("party bearer token is invalid"))?;
-    let token_hash = Sha256::digest(token.as_bytes());
-    // Domain alone is not enough in a recursive federation: sibling nodes may share a domain.
-    // Require the exact path and let storage compare it with the capability's bound path.
-    let platform_path = platform_path_from_headers(headers, true)?
-        .expect("required platform path header must produce a value");
     state
-        .store
-        .authenticate_marketplace_party(
-            tenant_id,
-            party_id,
-            token_hash.as_slice(),
-            Some(domain_id),
-            Some(&platform_path),
-        )
+        .marketplace
+        .authenticate_domain(headers, tenant_id, party_id, domain_id)
         .await
-        .map_err(|error| match error {
-            matchplane_storage::StorageError::Forbidden(_) => {
-                ApiError::unauthorized("party bearer token is invalid")
-            }
-            other => ApiError::from(other),
-        })
+        .map_err(Into::into)
 }
 
 fn platform_path_from_headers(
     headers: &HeaderMap,
     required: bool,
 ) -> Result<Option<String>, ApiError> {
-    let Some(value) = headers.get("x-matchplane-platform-path") else {
-        if required {
-            return Err(ApiError::bad_request(
-                "x-matchplane-platform-path is required for child platform capabilities".to_owned(),
-            ));
-        }
-        return Ok(None);
-    };
-    let value = value
-        .to_str()
-        .map_err(|_| ApiError::bad_request("platform path header is invalid".to_owned()))?;
-    normalize_platform_path(value).map(Some)
+    matchplane_http::platform_path_from_headers(headers, required).map_err(Into::into)
 }
 
 pub(super) fn require_role(party: &AuthenticatedParty, role: &str) -> Result<(), ApiError> {
-    if party.role == role || party.role == "both" {
-        Ok(())
-    } else {
-        Err(ApiError::forbidden(format!("{role} role is required")))
-    }
+    MarketplaceService::<matchplane_storage::PgStore>::ensure_role(party, role).map_err(Into::into)
 }
 
 /// Generic marketplace APIs use neutral demand/supply sides. The legacy party projection keeps
@@ -1380,18 +1322,8 @@ pub(super) fn require_marketplace_side(
     party: &AuthenticatedParty,
     side: &str,
 ) -> Result<(), ApiError> {
-    let allowed = matches!(side, "demand" | "supply")
-        && party
-            .marketplace_sides
-            .iter()
-            .any(|capability| capability == side);
-    if allowed {
-        Ok(())
-    } else {
-        Err(ApiError::forbidden(format!(
-            "marketplace {side} capability is required"
-        )))
-    }
+    MarketplaceService::<matchplane_storage::PgStore>::ensure_marketplace_side(party, side)
+        .map_err(Into::into)
 }
 
 fn default_promotion_policy() -> String {
@@ -1511,15 +1443,6 @@ fn decrypt_viewing(
     let location = serde_json::from_slice(&plaintext)
         .map_err(|error| ApiError::internal(format!("stored location is invalid: {error}")))?;
     Ok(ViewingResponse { viewing, location })
-}
-
-pub(super) fn request_fingerprint(headers: &HeaderMap) -> Option<Vec<u8>> {
-    let request_id = headers.get("x-request-id")?.to_str().ok()?;
-    let user_agent = headers
-        .get(header::USER_AGENT)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-    Some(Sha256::digest(format!("{request_id}\n{user_agent}").as_bytes()).to_vec())
 }
 
 fn validate_text(value: &str, field: &str, maximum: usize) -> Result<(), ApiError> {
