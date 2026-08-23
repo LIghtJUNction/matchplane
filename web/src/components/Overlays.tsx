@@ -1,13 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
   LockKeyhole,
-  MapPin,
-  MessageCircle,
-  Phone,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -76,6 +72,8 @@ export function ListingSheet({
     try {
       await onContact(listing);
       setContactSubmitted(true);
+    } catch {
+      // Host surfaces the failure notice; keep the sheet actionable.
     } finally {
       setContactSubmitting(false);
     }
@@ -146,7 +144,6 @@ export function ListingSheet({
               >
                 <ListingVisual
                   accent={listing.accent}
-                  label={listing.trust?.[0]}
                   imageUrl={images[activeImageIndex] ?? listing.imageUrl}
                   alt={
                     images.length > 1
@@ -281,13 +278,6 @@ export function ListingSheet({
                       ) : null}
                     </div>
                   </div>
-                  {listing.trust?.length ? (
-                    <ul>
-                      {listing.trust.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  ) : null}
                 </section>
               ) : null}
 
@@ -300,43 +290,17 @@ export function ListingSheet({
                     <h3>
                       {copy(
                         "contactTitle",
-                        "匹配后直接联系供给方",
-                        "Contact the supply side after a match",
+                        "申请联系需双方同意",
+                        "Contact needs mutual consent",
                       )}
                     </h3>
                     <p>
                       {copy(
                         "contactDescription",
-                        "平台确认撮合与服务安排后，双方联系方式按权限解锁；后续可以在线下完成。",
-                        "Contact details unlock after the platform confirms the match and arrangements; you can continue offline.",
+                        "提交后只写入撮合申请。只有双方明确同意后，才解锁已验证的联系方式。",
+                        "This only records a match request. Verified contact details unlock only after both sides explicitly agree.",
                       )}
                     </p>
-                  </div>
-                  <div className="contact-options">
-                    <span>
-                      <MessageCircle size={15} aria-hidden="true" />
-                      {copy(
-                        "inPlatformContactLabel",
-                        "站内沟通",
-                        "In-platform chat",
-                      )}
-                    </span>
-                    <span>
-                      <Phone size={15} aria-hidden="true" />
-                      {copy(
-                        "contactChannelsLabel",
-                        "联系方式",
-                        "Contact channels",
-                      )}
-                    </span>
-                    <span>
-                      <CalendarDays size={15} aria-hidden="true" />
-                      {copy("appointmentLabel", "预约协商", "Arrange a time")}
-                    </span>
-                    <span>
-                      <MapPin size={15} aria-hidden="true" />
-                      {copy("locationLabel", "地点受控", "Location controlled")}
-                    </span>
                   </div>
                 </section>
               ) : null}
@@ -353,22 +317,13 @@ export function ListingSheet({
                       )}
                     </small>
                   ) : (
-                    <>
-                      <small>
-                        {copy(
-                          "platformFeeLabel",
-                          "商城服务费",
-                          "Mall service fee",
-                        )}
-                      </small>
-                      <strong>
-                        {copy(
-                          "platformFeeDescription",
-                          "按当前店铺披露规则结算",
-                          "Settled under the active store disclosure",
-                        )}
-                      </strong>
-                    </>
+                    <small>
+                      {copy(
+                        "contactFooterHint",
+                        "不会自动交换电话或微信",
+                        "Phone and WeChat are never shared automatically",
+                      )}
+                    </small>
                   )}
                 </div>
               ) : null}

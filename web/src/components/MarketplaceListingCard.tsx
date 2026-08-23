@@ -78,8 +78,14 @@ export function MarketplaceListingCard({
             likeTotal,
           )}
           aria-pressed={viewerLikeCount > 0}
-          aria-disabled={viewerLikeCount >= 5}
-          disabled={liking}
+          disabled={liking || viewerLikeCount >= 5}
+          title={
+            viewerLikeCount >= 5
+              ? locale === "en"
+                ? "Like limit reached (5)"
+                : "已达点赞上限（5）"
+              : undefined
+          }
           onClick={() => {
             if (viewerLikeCount >= 5) return;
             setLiking(true);

@@ -71,23 +71,13 @@ const PENDING_CHAT_KEY = "matchplane.pending-chat";
 const MAX_CHAT_TARGETS = 4;
 const CHAT_TARGET_CONCURRENCY = 3;
 const HOME_PLACEHOLDER_EXAMPLES = {
-  zh: [
-    "5万内，省油的通勤车",
-    "耐用的轻薄笔记本",
-    "小户型、好打理的单椅",
-    "1000元内的降噪耳机",
-  ],
-  en: [
-    "A fuel-efficient commuter car",
-    "A durable lightweight laptop",
-    "An easy-care chair for a small room",
-    "Noise-cancelling headphones under 1,000",
-  ],
+  zh: ["描述想买的东西和预算"],
+  en: ["Describe what you want and your budget"],
 } as const;
 
 function useHomePlaceholder(
   locale: InterfaceLocale,
-  enabled: boolean,
+  _enabled: boolean,
   configuredPhrases?: string[],
 ) {
   const phrases = configuredPhrases?.length
@@ -95,61 +85,7 @@ function useHomePlaceholder(
     : locale === "en"
       ? HOME_PLACEHOLDER_EXAMPLES.en
       : HOME_PLACEHOLDER_EXAMPLES.zh;
-  const phraseSignature = phrases.join("\u0000");
-  const [typed, setTyped] = useState<{
-    locale: InterfaceLocale;
-    value: string;
-  }>({ locale, value: phrases[0] });
-
-  useEffect(() => {
-    setTyped({ locale, value: phrases[0] });
-  }, [locale, phraseSignature]);
-
-  useEffect(() => {
-    if (
-      !enabled ||
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    )
-      return;
-    let phraseIndex = 0;
-    let characterIndex = phrases[0].length;
-    let deleting = true;
-    let timer = 0;
-
-    const tick = () => {
-      const phrase = phrases[phraseIndex];
-      if (deleting) {
-        characterIndex -= 1;
-        setTyped({
-          locale,
-          value: phrase.slice(0, Math.max(0, characterIndex)),
-        });
-        if (characterIndex <= 0) {
-          deleting = false;
-          phraseIndex = (phraseIndex + 1) % phrases.length;
-          timer = window.setTimeout(tick, 260);
-          return;
-        }
-        timer = window.setTimeout(tick, 34);
-        return;
-      }
-
-      const nextPhrase = phrases[phraseIndex];
-      characterIndex += 1;
-      setTyped({ locale, value: nextPhrase.slice(0, characterIndex) });
-      if (characterIndex >= nextPhrase.length) {
-        deleting = true;
-        timer = window.setTimeout(tick, 1200);
-        return;
-      }
-      timer = window.setTimeout(tick, 68);
-    };
-
-    timer = window.setTimeout(tick, 1200);
-    return () => window.clearTimeout(timer);
-  }, [enabled, locale, phraseSignature]);
-
-  return typed.locale === locale ? typed.value : phrases[0];
+  return phrases[0];
 }
 
 interface ChatMessage {

@@ -102,11 +102,6 @@ function mapRecommendation(
     listing.risks =
       item.match_risks ?? stringList(dynamicItem.risks) ?? undefined;
   }
-  listing.trust = firstStringList(dynamicItem, [
-    "trust",
-    "verification_labels",
-    "verificationLabels",
-  ]);
 
   return listing;
 }
@@ -240,17 +235,6 @@ function firstString(value: UnknownFields, keys: string[]): string | undefined {
   for (const key of keys) {
     const candidate = stringValue(value[key]);
     if (candidate) return candidate;
-  }
-  return undefined;
-}
-
-function firstStringList(
-  value: UnknownFields,
-  keys: string[],
-): string[] | undefined {
-  for (const key of keys) {
-    const candidate = stringList(value[key]);
-    if (candidate?.length) return candidate;
   }
   return undefined;
 }

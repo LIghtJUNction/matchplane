@@ -235,7 +235,7 @@ describe("MatchPlane workspaces", () => {
     await user.click(screen.getAllByRole("button", { name: "发布商品" })[0]);
 
     expect(
-      await screen.findByRole("heading", { name: "你的店铺" }),
+      await screen.findByRole("dialog", { name: /^我的店铺/ }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "开一家店" }),
@@ -306,7 +306,7 @@ describe("MatchPlane workspaces", () => {
 
     await openConsoleFromAccountMenu(user);
     expect(
-      await screen.findByRole("heading", { name: "你的店铺" }),
+      await screen.findByRole("dialog", { name: /^我的店铺/ }),
     ).toBeInTheDocument();
     const manageProducts = await screen.findByRole("button", {
       name: "管理商品",
@@ -732,7 +732,7 @@ describe("MatchPlane workspaces", () => {
     expect(screen.getByRole("status")).toHaveTextContent("已退出当前账号");
   });
 
-  it("keeps theme and language controls near the shopping aid", async () => {
+  it("keeps theme and language controls in the header", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);

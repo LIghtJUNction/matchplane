@@ -55,7 +55,7 @@ describe("MarketplaceListingCard likes", () => {
       screen.getByRole("button", {
         name: "测试商品：已点 5 个赞，达到上限，共 15 个赞",
       }),
-    ).toHaveAttribute("aria-disabled", "true");
+    ).toBeDisabled();
   });
 });
 
@@ -68,9 +68,6 @@ describe("MarketplaceHome actions", () => {
         catalogResolved
         listings={[]}
         locale="zh"
-        theme="light"
-        onLocaleChange={vi.fn()}
-        onThemeChange={vi.fn()}
         onLikeListing={vi.fn(async () => undefined)}
         onNotice={vi.fn()}
         onOpenListing={vi.fn()}
