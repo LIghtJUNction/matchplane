@@ -4,6 +4,7 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use opentelemetry::{global, trace::TracerProvider as _};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{Resource, trace::SdkTracerProvider};
+use rustls::crypto::ring;
 use thiserror::Error;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -53,6 +54,10 @@ pub enum ObservabilityError {
     Shutdown(String),
 }
 
+fn install_default_crypto_provider() {
+    let _ = ring::default_provider().install_default();
+}
+
 /// Installs JSON tracing and a Prometheus recorder once per process.
 ///
 /// # Errors
@@ -63,6 +68,7 @@ pub fn init(
     filter: &str,
     otlp_endpoint: &str,
 ) -> Result<Telemetry, ObservabilityError> {
+    install_default_crypto_provider();
     let env_filter = EnvFilter::try_new(filter)?;
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
@@ -131,6 +137,9 @@ mod tests {
 
     #[tokio::test]
     async fn https_otlp_exporter_builds_with_workspace_tls_features() {
+        install_default_crypto_provider();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+
         let result = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic()
             .with_endpoint("https://localhost:4317")

@@ -2044,6 +2044,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "rustls",
  "thiserror 2.0.20",
  "tokio",
  "tracing",

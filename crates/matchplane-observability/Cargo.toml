@@ -11,6 +11,7 @@ metrics-exporter-prometheus.workspace = true
 opentelemetry.workspace = true
 opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
+rustls.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
