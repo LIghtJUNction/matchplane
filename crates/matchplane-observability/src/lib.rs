@@ -124,3 +124,18 @@ pub async fn shutdown_signal() {
         () = terminate => {},
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn https_otlp_exporter_builds_with_workspace_tls_features() {
+        let result = opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint("https://localhost:4317")
+            .build();
+
+        assert!(result.is_ok(), "HTTPS OTLP exporter failed: {result:?}");
+    }
+}
