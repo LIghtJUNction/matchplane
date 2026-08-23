@@ -25,15 +25,53 @@ interface PublicOfferRow {
 const HOSTED_MEDIA_REFERENCE =
   /^media:\/\/hosted\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 
-/** Read only active, store-owned product projections; no party or contact field is selected. */
-export async function searchPublicStoreOffers(input: {
+export type PublicOfferSearchSort =
+  | "relevance"
+  | "latest"
+  | "popularity"
+  | "price_asc"
+  | "price_desc";
+
+export interface PublicOfferSearchInput {
   stores: PublicStore[];
   narrative: string;
   intent?: PublicShoppingIntent;
+  storePaths?: string[];
+  sort?: PublicOfferSearchSort;
+  offset?: number;
   limit?: number;
-}): Promise<RecommendedBackendListing[]> {
-  if (!input.stores.length) return [];
-  const storeIds = input.stores.map((store) => store.id);
+}
+
+export interface PublicOfferSearchPage {
+  items: RecommendedBackendListing[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+}
+
+/** Read only active, store-owned product projections; no party or contact field is selected. */
+export async function searchPublicStoreOffers(
+  input: PublicOfferSearchInput,
+): Promise<RecommendedBackendListing[]> {
+  return (await searchPublicStoreOfferPage(input)).items;
+}
+
+/** Read a bounded, deterministic page that can be safely exposed to an AI retrieval tool. */
+export async function searchPublicStoreOfferPage(
+  input: PublicOfferSearchInput,
+): Promise<PublicOfferSearchPage> {
+  const limit = Math.max(1, Math.min(48, input.limit ?? 24));
+  const offset = Math.max(0, Math.min(500, input.offset ?? 0));
+  const requestedPaths = new Set(
+    (input.storePaths ?? []).map((path) => path.trim()).filter(Boolean),
+  );
+  const scopedStores = requestedPaths.size
+    ? input.stores.filter((store) => requestedPaths.has(store.path))
+    : input.stores;
+  if (!scopedStores.length)
+    return { items: [], total: 0, offset, limit, hasMore: false };
+  const storeIds = scopedStores.map((store) => store.id);
   const result = await authDatabase.query<PublicOfferRow>(
     `WITH ranked_offers AS (
        SELECT offer.id::text,
@@ -97,9 +135,13 @@ export async function searchPublicStoreOffers(input: {
     [storeIds, input.narrative.slice(0, 8_000)],
   );
 
-  const maximum = Math.max(1, Math.min(48, input.limit ?? 24));
-  return rankRows(result.rows, input.narrative, input.intent)
-    .flatMap(
+  const ranked = rankRows(result.rows, input.narrative, input.intent);
+  const sort = input.sort ?? "relevance";
+  if (sort !== "relevance")
+    ranked.sort((left, right) =>
+      compareRankedOffers(left.row, right.row, sort),
+    );
+  const publicOffers = ranked.flatMap(
       ({
         row,
         score,
@@ -147,8 +189,61 @@ export async function searchPublicStoreOffers(input: {
           },
         ];
       },
-    )
-    .slice(0, maximum);
+    );
+  return {
+    items: publicOffers.slice(offset, offset + limit),
+    total: publicOffers.length,
+    offset,
+    limit,
+    hasMore: offset + limit < publicOffers.length,
+  };
+}
+
+function compareRankedOffers(
+  left: PublicOfferRow,
+  right: PublicOfferRow,
+  sort: Exclude<PublicOfferSearchSort, "relevance">,
+): number {
+  if (sort === "latest")
+    return String(right.publishedAt ?? "").localeCompare(
+      String(left.publishedAt ?? ""),
+    );
+  if (sort === "popularity")
+    return compareBigInt(integerText(right.likeTotal), integerText(left.likeTotal));
+  const direction = sort === "price_asc" ? 1 : -1;
+  const leftPrice = publicPrice(left.terms);
+  const rightPrice = publicPrice(right.terms);
+  const currencyOrder = leftPrice.currency.localeCompare(rightPrice.currency);
+  if (currencyOrder) return currencyOrder;
+  const scale = Math.max(leftPrice.scale, rightPrice.scale);
+  const leftAmount =
+    leftPrice.amount * 10n ** BigInt(scale - leftPrice.scale);
+  const rightAmount =
+    rightPrice.amount * 10n ** BigInt(scale - rightPrice.scale);
+  return direction * compareBigInt(leftAmount, rightAmount);
+}
+
+function publicPrice(value: unknown): {
+  currency: string;
+  amount: bigint;
+  scale: number;
+} {
+  const terms = record(value);
+  const rawScale = Number(terms.currency_scale);
+  return {
+    currency: text(terms.currency),
+    amount: integerText(terms.amount_minor),
+    scale: Number.isInteger(rawScale) ? Math.max(0, Math.min(18, rawScale)) : 0,
+  };
+}
+
+function integerText(value: unknown): bigint {
+  const textValue = String(value ?? "");
+  return /^\d+$/.test(textValue) ? BigInt(textValue) : 0n;
+}
+
+function compareBigInt(left: bigint, right: bigint): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function rankRows(

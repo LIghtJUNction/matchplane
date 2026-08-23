@@ -128,7 +128,7 @@ export function saveManagedPlatformRouterConfig(input: {
       512,
     ),
     assistantTemperature: boundedNumber(input.assistantTemperature, 0.2, 0, 1),
-    assistantMaxSteps: boundedInteger(input.assistantMaxSteps, 3, 2, 8),
+    assistantMaxSteps: boundedInteger(input.assistantMaxSteps, 5, 2, 8),
     assistantTimeoutMs: boundedInteger(
       input.assistantTimeoutMs,
       20_000,
@@ -211,7 +211,7 @@ function normalizeStoredConfig(
       512,
     ),
     assistantTemperature: boundedNumber(value.assistantTemperature, 0.2, 0, 1),
-    assistantMaxSteps: boundedInteger(value.assistantMaxSteps, 3, 2, 8),
+    assistantMaxSteps: boundedInteger(value.assistantMaxSteps, 5, 2, 8),
     assistantTimeoutMs: boundedInteger(
       value.assistantTimeoutMs,
       20_000,

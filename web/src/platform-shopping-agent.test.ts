@@ -13,6 +13,18 @@ const searchPublicStoreOffers = vi.hoisted(() =>
     ): Promise<Record<string, unknown>[]> => [],
   ),
 );
+const searchPublicStoreOfferPage = vi.hoisted(() =>
+  vi.fn(async (input: Record<string, unknown>) => {
+    const items = await searchPublicStoreOffers(input);
+    return {
+      items,
+      total: items.length,
+      offset: Number(input.offset ?? 0),
+      limit: Number(input.limit ?? 6),
+      hasMore: false,
+    };
+  }),
+);
 
 vi.mock("ai", () => ({
   generateText,
@@ -39,7 +51,10 @@ vi.mock("./lib/platform-router-config", () => ({
   }),
 }));
 
-vi.mock("./storefront-search", () => ({ searchPublicStoreOffers }));
+vi.mock("./storefront-search", () => ({
+  searchPublicStoreOfferPage,
+  searchPublicStoreOffers,
+}));
 
 import {
   answerPlatformShoppingQuestion,
@@ -52,6 +67,7 @@ import {
 afterEach(() => {
   generateText.mockReset();
   createOpenAICompatible.mockClear();
+  searchPublicStoreOfferPage.mockClear();
   searchPublicStoreOffers.mockClear();
 });
 
@@ -326,6 +342,7 @@ describe("platform shopping agent", () => {
       {
         type: "choice",
         id: "choice-1",
+        kind: "question",
         question: "你更看重哪一点？",
         options: [
           { id: "option-1", label: "价格更低", value: "我更看重价格" },
@@ -347,9 +364,7 @@ describe("platform shopping agent", () => {
     await expect(
       answerPlatformShoppingQuestion({
         question: "先问我一个问题并给我几个选项",
-        messages: [
-          { role: "user", content: "先问我一个问题并给我几个选项" },
-        ],
+        messages: [{ role: "user", content: "先问我一个问题并给我几个选项" }],
         stores: [],
       }),
     ).rejects.toThrow("AI 模型未返回有效的澄清选项");
@@ -417,10 +432,25 @@ describe("platform shopping agent", () => {
         });
         await options.tools.compare_products.execute({
           productIds: ["offer-a", "offer-b"],
+          fields: ["memory_gb"],
+        });
+        await options.tools.show_product_comparison.execute({
+          productIds: ["offer-a", "offer-b"],
+          fields: ["memory_gb"],
+          title: "轻薄本对比",
         });
         await options.tools.calculate_total.execute({
-          amounts: [399_900, 459_900],
-          quantities: [1, 1],
+          items: [
+            { productId: "offer-a", quantity: 1 },
+            { productId: "offer-b", quantity: 1 },
+          ],
+        });
+        await options.tools.show_price_summary.execute({
+          items: [
+            { productId: "offer-a", quantity: 1 },
+            { productId: "offer-b", quantity: 1 },
+          ],
+          title: "两款合计",
         });
         return {
           text: "两款合计 CNY 8598.00。",
@@ -432,7 +462,9 @@ describe("platform shopping agent", () => {
                 { toolName: "search_public_products" },
                 { toolName: "show_products" },
                 { toolName: "compare_products" },
+                { toolName: "show_product_comparison" },
                 { toolName: "calculate_total" },
+                { toolName: "show_price_summary" },
               ],
             },
           ],
@@ -484,7 +516,25 @@ describe("platform shopping agent", () => {
       "search_public_products",
       "show_products",
       "compare_products",
+      "show_product_comparison",
       "calculate_total",
+      "show_price_summary",
+    ]);
+    expect(second.uiActions).toEqual([
+      expect.objectContaining({
+        type: "products",
+        presentation: "comparison",
+        title: "两款合计",
+        comparison: expect.objectContaining({
+          fields: ["store", "price", "memory_gb"],
+        }),
+        priceSummary: {
+          currency: "CNY",
+          currencyScale: 2,
+          totalMinor: "859800",
+          formatted: "CNY 8598.00",
+        },
+      }),
     ]);
     expect(searchPublicStoreOffers).toHaveBeenCalledTimes(4);
     expect(searchPublicStoreOffers.mock.calls[3]?.[0]).toEqual(
@@ -498,6 +548,101 @@ describe("platform shopping agent", () => {
         }),
       }),
     );
+  });
+
+  it("returns grounded details, retrieval facets, and an explicit confirmation action", async () => {
+    const products = [
+      {
+        offer_id: "offer-a",
+        display_name: "轻薄本 A",
+        store_name: "电子店",
+        attributes: { description: "通勤", memory_gb: 16, color: "灰色" },
+        terms: { amount_minor: "399900", currency: "CNY", currency_scale: 2 },
+        platform_path: "/electronics",
+        match_score: 0.93,
+        match_reasons: ["符合预算"],
+        match_risks: [],
+      },
+    ];
+    searchPublicStoreOffers.mockResolvedValue(products);
+    let details: unknown;
+    let facets: unknown;
+    generateText.mockImplementationOnce(async (options) => {
+      await options.tools.search_public_products.execute({
+        query: "轻薄本 A",
+        requirements: [],
+        storePaths: ["/electronics"],
+        sort: "relevance",
+        offset: 0,
+        limit: 6,
+      });
+      details = await options.tools.get_product_details.execute({
+        productIds: ["offer-a"],
+      });
+      facets = await options.tools.summarize_search_results.execute({});
+      await options.tools.show_products.execute({
+        productIds: ["offer-a"],
+        title: "符合条件",
+      });
+      await options.tools.confirm_action.execute({
+        question: "继续联系店铺？",
+        confirmLabel: "继续",
+        cancelLabel: "暂不",
+        confirmValue: "确认继续联系店铺",
+        cancelValue: "暂不联系",
+      });
+      return {
+        text: "轻薄本 A 配备 16GB 内存；是否继续由你确认。",
+        usage: { inputTokens: 30, outputTokens: 12, totalTokens: 42 },
+        steps: [
+          {
+            toolCalls: [
+              { toolName: "search_public_products" },
+              { toolName: "get_product_details" },
+              { toolName: "summarize_search_results" },
+              { toolName: "show_products" },
+              { toolName: "confirm_action" },
+            ],
+          },
+        ],
+      };
+    });
+
+    const reply = await answerPlatformShoppingQuestion({
+      question: "给我这款的参数，下一步先让我确认",
+      messages: [{ role: "user", content: "给我这款的参数，下一步先让我确认" }],
+      stores: [],
+    });
+
+    expect(details).toEqual({
+      products: [
+        expect.objectContaining({
+          id: "offer-a",
+          attributes: expect.objectContaining({ memory_gb: "16", color: "灰色" }),
+          matchScore: 0.93,
+          matchReasons: ["符合预算"],
+        }),
+      ],
+    });
+    expect(facets).toEqual(
+      expect.objectContaining({
+        productCount: 1,
+        stores: [{ name: "电子店", count: 1 }],
+        availableFields: expect.arrayContaining(["memory_gb", "color"]),
+      }),
+    );
+    expect(reply.uiActions).toEqual([
+      expect.objectContaining({
+        type: "choice",
+        kind: "confirmation",
+        question: "继续联系店铺？",
+      }),
+      expect.objectContaining({
+        type: "products",
+        title: "符合条件",
+        productIds: ["offer-a"],
+      }),
+    ]);
   });
 
   it("returns the real choice question when the model finishes without prose", async () => {
@@ -575,7 +720,7 @@ describe("platform shopping agent", () => {
         messages: [{ role: "user", content: "对比两款通勤轻薄本" }],
         stores: [],
       }),
-    ).rejects.toThrow("AI 模型未按协议完成商品计算");
+    ).rejects.toThrow("AI 模型未按协议完成必要的检索与工具调用");
   });
 
   it("rejects an empty model response instead of synthesizing a product answer", async () => {
@@ -700,9 +845,14 @@ describe("platform shopping agent", () => {
         ask_user: expect.anything(),
         list_public_stores: expect.anything(),
         search_public_products: expect.anything(),
+        get_product_details: expect.anything(),
+        summarize_search_results: expect.anything(),
         show_products: expect.anything(),
         compare_products: expect.anything(),
+        show_product_comparison: expect.anything(),
         calculate_total: expect.anything(),
+        show_price_summary: expect.anything(),
+        confirm_action: expect.anything(),
         calculate_numbers: expect.anything(),
       }),
     );
@@ -744,7 +894,17 @@ describe("platform shopping agent", () => {
         query: "预算 20 元的测试商品",
         requirements: [],
       }),
-    ).resolves.toEqual([expect.objectContaining({ price: "CNY 12.34" })]);
+    ).resolves.toEqual(
+      expect.objectContaining({
+        products: [expect.objectContaining({ price: "CNY 12.34" })],
+        page: {
+          total: 1,
+          offset: 0,
+          limit: 6,
+          hasMore: false,
+        },
+      }),
+    );
   });
 
   it("keeps store AI active while proposing idempotent staff handoff and contact consent", async () => {
@@ -809,12 +969,10 @@ describe("platform shopping agent", () => {
           "我想买这件商品，请让店员确认交付时间，并询问我是否同意交换联系方式。",
         productId: "offer-1",
       },
-      { type: "products", productIds: ["offer-1"] },
+      { type: "products", productIds: ["offer-1"], presentation: "grid" },
     ]);
     expect(searchPublicStoreOffers).toHaveBeenCalledTimes(1);
     expect(generateText.mock.calls[0]?.[0].system).toContain("AI 店长");
-    expect(generateText.mock.calls[0]?.[0].system).toContain(
-      "不能替用户同意",
-    );
+    expect(generateText.mock.calls[0]?.[0].system).toContain("不能替用户同意");
   });
 });

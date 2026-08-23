@@ -4,7 +4,10 @@ const { query } = vi.hoisted(() => ({ query: vi.fn() }));
 
 vi.mock("./lib/auth", () => ({ authDatabase: { query } }));
 
-import { searchPublicStoreOffers } from "./storefront-search";
+import {
+  searchPublicStoreOfferPage,
+  searchPublicStoreOffers,
+} from "./storefront-search";
 import type { PublicStore } from "./store-directory";
 
 const store: PublicStore = {
@@ -182,6 +185,69 @@ describe("public storefront search", () => {
     expect(
       products.every((product) => (product.match_reasons?.length ?? 0) > 0),
     ).toBe(true);
+  });
+
+  it("returns a scoped, sorted page with exact pagination metadata", async () => {
+    const row = (id: string, amountMinor: string) => ({
+      id,
+      displayName: `商品 ${amountMinor}`,
+      attributes: {
+        description: "公开商品",
+        attachments: [
+          {
+            kind: "image",
+            attachment_ref: `media://hosted/${id}`,
+            file_name: `${id}.webp`,
+            media_type: "image/webp",
+          },
+        ],
+      },
+      terms: {
+        pricing_mode: "fixed",
+        amount_minor: amountMinor,
+        currency: "CNY",
+        currency_scale: 2,
+      },
+      storeName: "相机屋",
+      storeSlug: "camera-house",
+      storePath: "/camera-house",
+      integrationKind: "hosted",
+      publishedAt: "2026-08-21T00:00:00Z",
+      likeTotal: "0",
+    });
+    query.mockResolvedValue({
+      rows: [
+        row("40000000-0000-4000-8000-000000000021", "10000"),
+        row("40000000-0000-4000-8000-000000000022", "30000"),
+        row("40000000-0000-4000-8000-000000000023", "20000"),
+      ],
+    });
+
+    const page = await searchPublicStoreOfferPage({
+      stores: [
+        store,
+        {
+          ...store,
+          id: "10000000-0000-4000-8000-000000000002",
+          slug: "other-store",
+          path: "/other-store",
+        },
+      ],
+      narrative: "公开商品",
+      storePaths: ["/camera-house"],
+      sort: "price_desc",
+      offset: 1,
+      limit: 1,
+    });
+
+    expect(page).toEqual({
+      items: [expect.objectContaining({ display_name: "商品 20000" })],
+      total: 3,
+      offset: 1,
+      limit: 1,
+      hasMore: true,
+    });
+    expect(query.mock.calls[0]?.[1]).toEqual([[store.id], "公开商品"]);
   });
 
   it("rejects unsafe image URLs instead of presenting a fabricated product card", async () => {
