@@ -427,6 +427,23 @@ export function isPlatformRouterConfigured(): boolean {
   return configuredPlatformRouter() !== null;
 }
 
+function openAiCompatibleBaseUrl(endpoint: string): string {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return endpoint.replace(/\/+$/, "");
+  }
+  const path = url.pathname
+    .replace(/\/+$/, "")
+    .replace(/\/chat\/completions$/, "")
+    .replace(/\/responses$/, "");
+  url.pathname = path.endsWith("/v1") ? path : `${path}/v1`;
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 interface AssistantCatalogProduct {
   id: string;
   name: string;
@@ -705,7 +722,7 @@ export async function reviseShoppingMemoryWithAi(input: {
     await input.admitCall?.();
     const provider = createOpenAICompatible({
       name: "matchplane",
-      baseURL: `${router.endpoint.replace(/\/$/, "")}/v1`,
+      baseURL: openAiCompatibleBaseUrl(router.endpoint),
       apiKey: router.apiKey,
     });
     let revision: z.infer<typeof shoppingMemoryRevisionSchema> | null = null;
@@ -796,7 +813,7 @@ export async function answerPlatformShoppingQuestion(input: {
     await input.admitCall?.();
     const provider = createOpenAICompatible({
       name: "matchplane",
-      baseURL: `${router.endpoint.replace(/\/$/, "")}/v1`,
+      baseURL: openAiCompatibleBaseUrl(router.endpoint),
       apiKey: router.apiKey,
     });
     const visibleStores = input.stores.map((store) => ({
