@@ -684,6 +684,7 @@ describe("platform shopping agent", () => {
         ],
       },
     ]);
+    expect(generateText.mock.calls[0]?.[0].toolChoice).toBe("required");
     expect(generateText.mock.calls[0]?.[0].stopWhen).toEqual({ count: 1 });
   });
 
