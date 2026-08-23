@@ -1904,7 +1904,9 @@ export function MatchChat({
     >
       <div
         className={
-          hideMarketingHeading ? "home-chat-a11y-heading sr-only" : "match-chat-heading"
+          hideMarketingHeading
+            ? "home-chat-a11y-heading sr-only"
+            : "match-chat-heading"
         }
       >
         <div className={hideMarketingHeading ? "sr-only" : undefined}>
@@ -2052,7 +2054,9 @@ export function MatchChat({
                       locale={locale}
                       onOpen={() => onOpenListing?.(recommendation)}
                       onLike={
-                        onLikeListing && (recommendation.offerId ?? listingIdFromBackend(recommendation))
+                        onLikeListing &&
+                        (recommendation.offerId ??
+                          listingIdFromBackend(recommendation))
                           ? () => onLikeListing(recommendation)
                           : undefined
                       }
@@ -2166,7 +2170,7 @@ export function MatchChat({
             type="button"
             onClick={() => inputRef.current?.form?.requestSubmit()}
           >
-            {locale === "en" ? "Retry" : "重试"}
+            {locale === "en" ? "Retry answer" : "重试回答"}
           </button>
         </div>
       ) : null}

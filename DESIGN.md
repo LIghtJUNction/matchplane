@@ -1,105 +1,93 @@
 ---
-name: "matchplane-archive-wall"
+name: "matchplane-contemporary-store"
 colors:
   background: "--background"
   surface: "--surface"
   text: "--foreground"
   primary: "--primary"
-  accent: "--archive-orange"
+  accent: "--retail-blue"
 ---
 
-# Design System: MatchPlane Archive Wall
+# Design System: MatchPlane Contemporary Store
 
 ## Visual Theme & Atmosphere
 
-- [confirmed] 全站采用“球鞋档案墙”的跨品类转译：档案盒、纸板、纸巾内衬、油墨字和色签。不得复制鞋类品牌、鞋盒商标或潮牌装饰。
-- [confirmed] 商品图片和真实数据是主角；档案盒只负责组织和操作暗示。
-- [confirmed] 公开商城、店铺、登录、设置、商家后台和商城运营后台属于同一视觉世界。公开面疏朗，工具面紧凑。
-- [confirmed] 禁用玻璃拟态、装饰渐变、大面积柔光、卡片套卡片和无语义胶囊。
+- [confirmed] 全站采用“当代选品店”方向：冷白或柔灰背景、清晰商品摄影、克制蓝色动作和低噪声信息层级。
+- [confirmed] 商品、店铺和真实状态是视觉主角；品牌框架保持轻量，不使用大面积纯黑、工业档案感、海报巨字或等高三栏。
+- [confirmed] 公开商城、店铺、登录、设置、商家后台和运营后台属于同一套产品界面。公开面强调浏览，工具面强调效率。
+- [confirmed] 禁用玻璃拟态、装饰渐变、卡片套卡片、无语义胶囊和用于填充版面的装饰物。
 
 ## Color Palette & Roles
 
-- [observed] 油墨：`--ink: #11100e`，用于主文字、轨道、关键边框和主要动作。
-- [observed] 纸巾白：`--archive-tissue: #fffdf7`，用于商品端标、表单和内容工作面。
-- [observed] 纸板：`--archive-board: #b87745`，用于商品盒和登录外盒。
-- [observed] 接缝橙：`--archive-orange: #ff571f`，用于焦点、当前项、对话接缝和关键提示；不得铺满长篇正文背景。
-- [observed] 色签：`--archive-blue`、`--archive-yellow`、`--archive-green`、`--archive-pink`，只区分来源或类别，不单独表达状态。
-- [confirmed] 暗色主题保持同样的材料关系和对比层级，不把所有表面涂成同一黑色。
+- [observed] 页面底色：`--background: #f5f7f9`，承载公开商城和工具壳。
+- [observed] 内容表面：`--surface: #ffffff`，用于 Hero、表单、Dialog 和必要的状态面板。
+- [observed] 主文字：`--foreground: #1b1d21`；次要文字使用 `--muted`，不得依赖低对比灰传达关键状态。
+- [observed] 动作蓝：`--primary` / `--retail-blue`，用于主要按钮、焦点和明确链接，不铺满大块背景。
+- [confirmed] 暗色主题使用炭灰背景和分层表面，不把页面、卡片、导航和遮罩涂成同一黑色。
+- [confirmed] 成功、警告、失败状态同时使用文字或图标，不只依赖颜色。
 
 ## Typography Rules
 
-- [observed] 标题使用 `--archive-display`：`Avenir Next Condensed` / `Arial Narrow` / 系统中文无衬线后备。
-- [observed] 编号、眉题和机器状态使用 `--archive-mono`。
-- [confirmed] 大标题短、窄、密；正文保持正常字宽和舒适行高。营销标题不能挤掉首屏中的真实商品或明确状态。
-- [confirmed] 界面文案直说动作和结果，避免使用成对的步骤铺垫连接句式。
+- [confirmed] 标题使用现代系统无衬线，紧凑字距和正常字宽；商品名、价格与状态优先可扫读。
+- [confirmed] 首页标题在桌面保持约 3.5rem 上限，移动端约 2.35rem；不得挤掉首屏商品或状态。
+- [confirmed] 眉题只用于来源或区段定位，使用小号蓝色字，不制造海报式视觉噪声。
+- [confirmed] 界面文案直接说明动作和结果，避免步骤式铺垫句和口号收尾。
 
 ## Layout Principles
 
-- [confirmed] 全角色共享一套 Chrome。Chrome 承载品牌、全局目的地、偏好、通知和账号；Stage 承载当前任务；Clerk 是唯一对话输入区；Status 显示真实反馈。
-- [confirmed] 根商城桌面为三段结构：16rem 墨色 Rail、弹性商品 Stage、21–27rem Clerk。商品与对话同时保留在视口中。
-- [confirmed] 56rem 以下隐藏 Rail。目录是默认内容，Clerk 由固定动作唤起为底部 sheet；页面中不得复制第二个输入框。
-- [confirmed] 店铺沿用商品盒墙；店长对话使用同一 Clerk 材料，桌面靠右、移动端靠底。
-- [confirmed] 设置使用墨色索引轨和纸巾内容面。商家与运营后台沿用同一壳，采用发丝分隔、列表和表格，避免仪表盘卡片海。
-- [confirmed] 页面宽度由内容任务决定；公开目录上限 96rem，操作记录优先横向可扫读。
+- [confirmed] 公开商城使用全宽轻顶栏，不设置左侧 Rail。内容由 Hero、商品 Stage、店铺目录自然纵向展开。
+- [confirmed] 商品 Stage 桌面最多四列，中等宽度三列，移动端两列；图片面积必须大于商品元信息面积。
+- [confirmed] Clerk 是唯一对话输入区。公开商城默认只显示右下角入口，展开后使用右侧浮层；移动端使用可关闭的底部面板。
+- [confirmed] Hero 说明页面目的并承载关键入口，但不得占据整个首屏。真实商品、加载、失败或空态应在首屏范围内出现。
+- [confirmed] 设置、商家和运营页面沿用相同颜色、边框、按钮与表单语法；密集数据使用列表或表格，不堆叠仪表盘卡片。
+- [confirmed] 登录桌面采用双面板构图，移动端保留完整表单并移除非必要装饰面。
 
 ## Component Styling
 
-- [confirmed] 商品卡是可抽出的档案盒：真实媒体、稳定编号、店铺色签、商品名、价格和明确查看动作。盒子允许硬边阴影，普通工具面不使用这种阴影。
-- [confirmed] Button 保持矩形、44px 触摸高度和可见边界。主要动作用油墨或接缝橙；破坏性动作必须保留文字标签。
-- [confirmed] Badge 只表达状态或数量；Tag 只表达分类筛选；不得用胶囊代替普通文字或容器。
-- [confirmed] Dialog 用于会打断任务的确认、账号、设置和详情。移动 Clerk 是可关闭的底部 sheet，不伪装成 Dialog。
-- [confirmed] 空态、加载、失败均属于内容区域，必须说明当前事实和可执行动作；通知不可只放在视觉隐藏区域。
-- [confirmed] 表单标签常驻；placeholder 只能补充示例。错误紧邻控件，提交中保留动作上下文。
+- [confirmed] 商品卡以无外框或极轻边界呈现：真实媒体、店铺、名称、价格和明确查看动作。图片使用稳定比例和小半径圆角。
+- [confirmed] Button 保持清晰边界和至少 44px 触摸高度。主要动作使用蓝底，次要动作使用白色或透明表面。
+- [confirmed] Badge 只表达状态或数量，Tag 只表达筛选。普通说明文字不得包进胶囊。
+- [confirmed] 空态、加载和失败属于商品区域，必须陈述事实并提供可执行动作；失败不得破坏网格或在窄屏形成竖排文字。
+- [confirmed] 表单标签常驻，placeholder 仅作示例。错误紧邻控件，提交中保留用户输入和动作上下文。
+- [confirmed] AI 回答失败时保留原问题，说明失败，并提供文案明确的“重试回答”操作。
 
 ## Motion & Interaction
 
-- [confirmed] 商品盒在精确指针 hover 时可轻微抽出；图片只做极小尺度放大。其他页面不使用无目的漂浮动画。
-- [confirmed] 触控按下反馈为 1px 位移；移动 Clerk 使用短距离、可中断的底部位移动画。
-- [confirmed] `prefers-reduced-motion` 下移除盒子、图片、sheet 和骨架动画，不影响状态变化。
+- [confirmed] 精确指针 hover 只允许商品卡轻微上移、图片极小缩放和图标短距离位移。
+- [confirmed] Clerk 展开与关闭使用短时淡入和位移，动画可被用户操作打断。
+- [confirmed] `prefers-reduced-motion` 下移除位移、缩放、面板和骨架动画，不影响状态变化。
 
 ## Accessibility
 
-- [confirmed] 所有交互目标至少 44×44px，键盘焦点使用 3px 接缝橙外框，并保留 3px offset。
-- [confirmed] 状态不能只靠颜色；在线状态、点赞、错误和权限均需要文字或语义属性。
-- [confirmed] 对话区具备命名，消息流使用 live region；移动 Clerk 支持 Escape、关闭按钮和命名遮罩。
-- [confirmed] Dialog 恢复焦点，设置导航有可访问名称，320px 宽度下所有动作可达。
-- [confirmed] 商品图片使用商品名作为替代文本；纯装饰盒盖、编号和色块隐藏于辅助技术。
+- [confirmed] 所有主要交互目标至少 44×44px，键盘焦点清晰且不被裁切。
+- [confirmed] 商品图片使用商品名作为替代文本，纯装饰图标隐藏于辅助技术。
+- [confirmed] Clerk 入口暴露 `aria-expanded` 和面板关系；关闭后隐藏的输入框不能留在可访问树中。
+- [confirmed] Dialog 和浮层恢复焦点，移动 Clerk 支持关闭按钮、命名遮罩与 Escape。
+- [confirmed] 320px 宽度下关键内容、登录、商品动作和失败恢复均可达。
 
 ## Source Evidence & Confidence
 
-- [observed] path: `web/src/archive-ui.css`
-  sha256: `190fc6745a23a76a96b8c9a312b6f815e104488bd34d3d8da34b989d0ce37a42`
+- [observed] path: `web/src/retail-ui.css`
+  sha256: `12379ff8bfd6df9bfd18a1b6e357d9792249d1b396fbc721bc14ccaa88cfac2e`
   confidence: high
 - [observed] path: `web/src/components/MarketplaceHome.tsx`
-  sha256: `a4c803f99013bb7147a77ab3275165afe3828b8ecf02a91e95ff1259b1387675`
+  sha256: `973101ac0f1c9c58ee686d208e0c9379212c54cbf5bf16b6e601a1708ba2eafd`
   confidence: high
 - [observed] path: `web/src/components/MarketplaceListingCard.tsx`
   sha256: `412bcab6153b268a6390a028b46d4ba7dae0a543130d842ee6056cb12331bd10`
   confidence: high
 - [observed] path: `web/src/App.tsx`
-  sha256: `9907ae4f7375836fd98e175f210aea5837c93944809beb0398df48b14c94b51c`
+  sha256: `4671781821d2e05a1238ea028e2c78b1702e7866fc300b2e31f64a680e6c0aa0`
   confidence: high
-- [observed] path: `web/src/hooks/useMarketplaceCatalog.ts`
-  sha256: `6375376b04ff6e3b8cd6f76cd9e6f0f850292392776ec9940ac7287f9d289527`
-  confidence: high
-- [observed] path: `web/src/components/LoginScreen.tsx`
-  sha256: `7d54a8edf32e281c38dcca763dad694af4d3583fe515d116d65c977b7a2a4e84`
-  confidence: high
-- [observed] path: `web/src/components/WorkspaceSettingsDialog.tsx`
-  sha256: `8dfda976d536457951d30f4896be3aaa2dc4aeb9a8a9fee1e1b378fe4c214c81`
-  confidence: high
-- [observed] path: `web/src/components/PlatformDashboard.tsx`
-  sha256: `0c1bbe50b6d53da76f7395b1e3148db286922c8303c177e4a1a36e20c8fad10a`
-  confidence: high
-- [observed] path: `web/src/components/SubplatformAdminDashboard.tsx`
-  sha256: `fba8e5e1919698ceb3b00a86fb1909911bd4b4969fde50c9c22ed0bd6649fcea`
+- [observed] path: `web/src/components/MatchChat.tsx`
+  sha256: `af91fa6232cca5b912566fcce745070c8153a61460773cce100973be7ffabd35`
   confidence: high
 - [observed] path: `web/app/layout.tsx`
-  sha256: `730ff95287bebfab601d109e62a77dbb8288b7d5cc5718ed230c81415b183ec2`
+  sha256: `c87edd1df5740c7788a23c789a9c1c5bd65f2d81d09eed9d1febc5dc81863ab4`
   confidence: high
 
 ## Known Gaps & Exceptions
 
-- [confirmed] 第三方 subplatform 插件可保留自己的品牌色，但挂载壳、焦点、状态反馈和触摸目标仍遵循本基线。
-- [confirmed] 运营表格允许横向滚动；不得通过缩小到不可读字号来塞进移动视口。
-- [inferred confidence=medium] 真实目录为空时无法目视验证多种图片比例，商品盒仍需用实际生产目录持续抽查。
+- [confirmed] 第三方 subplatform 可保留自己的品牌色；挂载壳、焦点、状态反馈和触摸目标仍遵循本基线。
+- [confirmed] 运营表格允许横向滚动，不得通过缩小到不可读字号适配移动端。
+- [inferred confidence=medium] 生产目录可能为空；商品网格已用受控图片数据验证，仍需在真实商品上线后持续抽查图片比例与裁切。

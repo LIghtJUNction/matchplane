@@ -178,7 +178,7 @@ describe("MatchChat sending state", () => {
       recommendations: [],
       uiActions: [],
     });
-    await user.click(screen.getByRole("button", { name: "重试" }));
+    await user.click(screen.getByRole("button", { name: "重试回答" }));
 
     expect(
       await screen.findByText("可以。你具体想找什么？"),
@@ -491,10 +491,9 @@ describe("MatchChat sending state", () => {
     );
     expect(screen.getByText("已通知店员")).toBeVisible();
     expect(screen.getByText(/本次没有交换任何联系方式/)).toBeVisible();
-    expect(askMallShoppingAssistant).toHaveBeenCalledWith(
-      expect.any(Array),
-      { storePath: "/test-store" },
-    );
+    expect(askMallShoppingAssistant).toHaveBeenCalledWith(expect.any(Array), {
+      storePath: "/test-store",
+    });
   });
 
   it("sends prior user and assistant turns as bounded context", async () => {

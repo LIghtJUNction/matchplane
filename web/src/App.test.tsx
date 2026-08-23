@@ -120,8 +120,16 @@ afterEach(() => {
 
 describe("MatchPlane workspaces", () => {
   it("keeps the root entry focused on one public buyer chat and a visible sign-in entry", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
+    const assistantToggle = screen.getByRole("button", { name: "问选货员" });
+    expect(assistantToggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(assistantToggle);
     expect(
       screen.getByRole("heading", { name: "想找什么？" }),
     ).toBeInTheDocument();
@@ -637,6 +645,7 @@ describe("MatchPlane workspaces", () => {
     );
     render(<App />);
 
+    await user.click(screen.getByRole("button", { name: "问选货员" }));
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -670,6 +679,7 @@ describe("MatchPlane workspaces", () => {
     );
     render(<App />);
 
+    await user.click(screen.getByRole("button", { name: "问选货员" }));
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -702,6 +712,7 @@ describe("MatchPlane workspaces", () => {
     );
     render(<App />);
 
+    await user.click(screen.getByRole("button", { name: "问选货员" }));
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -740,6 +751,7 @@ describe("MatchPlane workspaces", () => {
       screen.getByRole("dialog", { name: /^我的店铺/ }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭我的店铺" }));
+    await user.click(screen.getByRole("button", { name: "问选货员" }));
 
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",

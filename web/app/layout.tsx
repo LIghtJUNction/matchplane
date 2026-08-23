@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import "../src/styles.css";
-import "../src/archive-ui.css";
+import "../src/retail-ui.css";
 
 export const metadata: Metadata = {
   title: "MatchPlane · 找到真正适合你的匹配",

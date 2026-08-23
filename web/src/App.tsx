@@ -711,7 +711,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     <MotionConfig reducedMotion="user" transition={spring}>
       <div
         id="top"
-        className={`app-shell archive-app-shell${fullscreenPlugin ? " is-subplatform-fullscreen" : ""}`}
+        className={`app-shell retail-app-shell${fullscreenPlugin ? " is-subplatform-fullscreen" : ""}`}
         data-workspace={role}
         data-platform={subplatform.slug}
       >
