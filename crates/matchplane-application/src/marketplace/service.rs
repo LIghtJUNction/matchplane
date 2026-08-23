@@ -11,18 +11,56 @@ use matchplane_storage::{
     AcceptMarketplaceContact, AuthenticatedParty, CreateMarketplaceIntent,
     CreateMarketplaceIntroduction, CreateMarketplaceOffer, CreateMarketplaceSalesHandoff,
     MarketplaceBehaviorEventOutcome, MarketplaceContactEnvelope, MarketplaceDemandCandidate,
-    MarketplaceIntent, MarketplaceIntentOutcome, MarketplaceIntentProfile,
-    MarketplaceIntroduction, MarketplaceIntroductionOutcome, MarketplaceOffer,
-    MarketplaceOfferCandidate, MarketplaceOfferOutcome, MarketplaceOfferPreference,
-    MarketplaceSalesHandoff, MatchMarketplaceDemands, MatchMarketplaceOffers,
-    RecordMarketplaceBehaviorEvent, RequestMarketplaceContact, SetMarketplaceOfferPreference,
-    StorageError, UpdateMarketplaceDemandDiscovery, UpdateMarketplaceIntent,
-    UpdateMarketplaceOffer, UpsertMarketplaceIntentProfile, WithdrawMarketplaceOffer,
+    MarketplaceIntent, MarketplaceIntentOutcome, MarketplaceIntentProfile, MarketplaceIntroduction,
+    MarketplaceIntroductionOutcome, MarketplaceOffer, MarketplaceOfferCandidate,
+    MarketplaceOfferOutcome, MarketplaceOfferPreference, MarketplaceSalesHandoff,
+    MatchMarketplaceDemands, MatchMarketplaceOffers, RecordMarketplaceBehaviorEvent,
+    RequestMarketplaceContact, SetMarketplaceOfferPreference, StorageError,
+    UpdateMarketplaceDemandDiscovery, UpdateMarketplaceIntent, UpdateMarketplaceOffer,
+    UpsertMarketplaceIntentProfile, WithdrawMarketplaceOffer,
 };
 
 use crate::ApplicationError;
 
 use super::ports::MarketplaceWriter;
+
+/// Seller-owned fields and scope required to update one marketplace offer.
+#[derive(Debug)]
+pub struct UpdateOfferCommand {
+    /// Tenant that owns the offer.
+    pub tenant_id: TenantId,
+    /// Domain that scopes the offer.
+    pub domain_id: DomainId,
+    /// Authenticated supply-side party performing the update.
+    pub actor_party_id: MarketplacePartyId,
+    /// Offer being updated.
+    pub offer_id: MarketplaceOfferId,
+    /// Public offer name.
+    pub display_name: String,
+    /// Domain-defined public attributes.
+    pub attributes: serde_json::Value,
+    /// Domain-defined commercial terms.
+    pub terms: serde_json::Value,
+    /// Optimistic-lock version expected by the caller.
+    pub expected_version: i64,
+}
+
+/// Scope and pagination for an authenticated marketplace offer listing.
+#[derive(Debug, Clone, Copy)]
+pub struct ListOffersQuery {
+    /// Tenant that owns the offers.
+    pub tenant_id: TenantId,
+    /// Domain that scopes the offers.
+    pub domain_id: DomainId,
+    /// Authenticated supply-side party requesting the listing.
+    pub supply_party_id: MarketplacePartyId,
+    /// Whether an administrator is requesting all offers in the domain.
+    pub domain_wide: bool,
+    /// Maximum number of offers to return.
+    pub limit: u16,
+    /// Number of offers to skip.
+    pub offset: u32,
+}
 
 /// Domain-neutral marketplace application service.
 #[derive(Debug, Clone)]
@@ -81,8 +119,11 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
         domain_id: DomainId,
     ) -> Result<AuthenticatedParty, ApplicationError> {
         let token_hash = party_bearer_token_hash(headers)?;
-        let platform_path = platform_path_from_headers(headers, true)?
-            .expect("required platform path header must produce a value");
+        let platform_path = platform_path_from_headers(headers, true)?.ok_or_else(|| {
+            ApplicationError::validation(
+                "x-matchplane-platform-path is required for child platform capabilities",
+            )
+        })?;
         self.writer
             .authenticate_marketplace_party(
                 tenant_id,
@@ -127,7 +168,8 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
             self.authenticate_domain(headers, tenant_id, participant_id, domain_id)
                 .await?;
         } else {
-            self.authenticate(headers, tenant_id, participant_id).await?;
+            self.authenticate(headers, tenant_id, participant_id)
+                .await?;
         }
         let intent = self.writer.marketplace_intent(tenant_id, intent_id).await?;
         if intent.participant_id != participant_id {
@@ -205,7 +247,10 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
             request.domain_id,
         )
         .await?;
-        let outcome = self.writer.record_marketplace_behavior_event(request).await?;
+        let outcome = self
+            .writer
+            .record_marketplace_behavior_event(request)
+            .await?;
         Ok((outcome.clone(), outcome.duplicate))
     }
 
@@ -360,32 +405,30 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
     pub async fn update_offer(
         &self,
         headers: &HeaderMap,
-        tenant_id: TenantId,
-        domain_id: DomainId,
-        actor_party_id: MarketplacePartyId,
-        offer_id: MarketplaceOfferId,
-        display_name: String,
-        attributes: serde_json::Value,
-        terms: serde_json::Value,
-        expected_version: i64,
+        command: UpdateOfferCommand,
     ) -> Result<MarketplaceOffer, ApplicationError> {
         let party = self
-            .authenticate_domain(headers, tenant_id, actor_party_id, domain_id)
+            .authenticate_domain(
+                headers,
+                command.tenant_id,
+                command.actor_party_id,
+                command.domain_id,
+            )
             .await?;
         require_marketplace_side(&party, "supply")?;
         self.writer
             .update_marketplace_offer(&UpdateMarketplaceOffer {
-                tenant_id,
-                domain_id,
-                actor_party_id,
+                tenant_id: command.tenant_id,
+                domain_id: command.domain_id,
+                actor_party_id: command.actor_party_id,
                 can_manage_domain: matches!(party.role.as_str(), "admin" | "both"),
                 platform_path: party.platform_path.clone(),
                 request_id: request_id_from_headers(headers),
-                offer_id,
-                display_name,
-                attributes,
-                terms,
-                expected_version,
+                offer_id: command.offer_id,
+                display_name: command.display_name,
+                attributes: command.attributes,
+                terms: command.terms,
+                expected_version: command.expected_version,
             })
             .await
             .map_err(ApplicationError::from)
@@ -424,45 +467,45 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
     pub async fn offers(
         &self,
         headers: &HeaderMap,
-        tenant_id: TenantId,
-        domain_id: DomainId,
-        supply_party_id: MarketplacePartyId,
-        domain_wide: bool,
-        limit: u16,
-        offset: u32,
+        query: ListOffersQuery,
     ) -> Result<Vec<MarketplaceOffer>, ApplicationError> {
-        if !(1..=100).contains(&limit) {
+        if !(1..=100).contains(&query.limit) {
             return Err(ApplicationError::validation(
                 "marketplace offer limit must be between 1 and 100",
             ));
         }
-        if offset > 10_000 {
+        if query.offset > 10_000 {
             return Err(ApplicationError::validation(
                 "marketplace offer offset must be between 0 and 10000",
             ));
         }
         let party = self
-            .authenticate_domain(headers, tenant_id, supply_party_id, domain_id)
+            .authenticate_domain(
+                headers,
+                query.tenant_id,
+                query.supply_party_id,
+                query.domain_id,
+            )
             .await?;
         require_marketplace_side(&party, "supply")?;
-        if domain_wide {
+        if query.domain_wide {
             require_role(&party, "admin")?;
             self.writer
                 .marketplace_offers_for_domain(
-                    tenant_id,
-                    domain_id,
-                    i64::from(limit),
-                    i64::from(offset),
+                    query.tenant_id,
+                    query.domain_id,
+                    i64::from(query.limit),
+                    i64::from(query.offset),
                 )
                 .await
         } else {
             self.writer
                 .marketplace_offers_for_party(
-                    tenant_id,
-                    domain_id,
-                    supply_party_id,
-                    i64::from(limit),
-                    i64::from(offset),
+                    query.tenant_id,
+                    query.domain_id,
+                    query.supply_party_id,
+                    i64::from(query.limit),
+                    i64::from(query.offset),
                 )
                 .await
         }
@@ -490,7 +533,12 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
         command: &CreateMarketplaceIntroduction,
     ) -> Result<(MarketplaceIntroductionOutcome, bool), ApplicationError> {
         let party = self
-            .authenticate_domain(headers, command.tenant_id, command.participant_id, domain_id)
+            .authenticate_domain(
+                headers,
+                command.tenant_id,
+                command.participant_id,
+                domain_id,
+            )
             .await?;
         require_marketplace_side(&party, "demand")?;
         let outcome = self.writer.create_marketplace_introduction(command).await?;
@@ -509,7 +557,8 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
             self.authenticate_domain(headers, tenant_id, participant_id, domain_id)
                 .await?;
         } else {
-            self.authenticate(headers, tenant_id, participant_id).await?;
+            self.authenticate(headers, tenant_id, participant_id)
+                .await?;
         }
         self.writer
             .marketplace_introductions_for_party(tenant_id, participant_id)
@@ -606,13 +655,20 @@ fn require_role(party: &AuthenticatedParty, role: &str) -> Result<(), Applicatio
     if party.role == role || party.role == "both" {
         Ok(())
     } else {
-        Err(ApplicationError::forbidden(format!("{role} role is required")))
+        Err(ApplicationError::forbidden(format!(
+            "{role} role is required"
+        )))
     }
 }
 
-fn require_marketplace_side(party: &AuthenticatedParty, side: &str) -> Result<(), ApplicationError> {
+fn require_marketplace_side(
+    party: &AuthenticatedParty,
+    side: &str,
+) -> Result<(), ApplicationError> {
     if !matches!(side, "demand" | "supply") {
-        return Err(ApplicationError::validation("side must be demand or supply"));
+        return Err(ApplicationError::validation(
+            "side must be demand or supply",
+        ));
     }
     let allowed = party
         .marketplace_sides

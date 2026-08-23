@@ -11,6 +11,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
 };
+use matchplane_application::{ListOffersQuery, UpdateOfferCommand};
 use matchplane_domain::{
     AssetId, DomainId, MarketplaceBehaviorEventId, MarketplaceIntentId, MarketplaceOfferId,
     MarketplacePartyId, MarketplaceSalesHandoffId, MatchIntroductionId, TenantId,
@@ -20,8 +21,8 @@ use matchplane_storage::{
     CreateMarketplaceSalesHandoff, MarketplaceDemandCandidate, MarketplaceIntent,
     MarketplaceIntroduction, MarketplaceIntroductionOutcome, MarketplaceOfferCandidate,
     MarketplaceOfferOutcome, MarketplaceOfferPreference, MarketplaceSalesHandoff,
-    RecordMarketplaceBehaviorEvent, SetMarketplaceOfferPreference, UpdateMarketplaceDemandDiscovery,
-    UpdateMarketplaceIntent, UpsertMarketplaceIntentProfile,
+    RecordMarketplaceBehaviorEvent, SetMarketplaceOfferPreference,
+    UpdateMarketplaceDemandDiscovery, UpdateMarketplaceIntent, UpsertMarketplaceIntentProfile,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -642,14 +643,16 @@ pub(super) async fn update_offer(
         .marketplace
         .update_offer(
             &headers,
-            parse_id::<TenantId>(&request.tenant_id)?,
-            parse_id::<DomainId>(&request.domain_id)?,
-            parse_id::<MarketplacePartyId>(&request.supply_party_id)?,
-            parse_id::<MarketplaceOfferId>(&offer_id)?,
-            request.display_name,
-            request.attributes,
-            request.terms,
-            request.expected_version,
+            UpdateOfferCommand {
+                tenant_id: parse_id::<TenantId>(&request.tenant_id)?,
+                domain_id: parse_id::<DomainId>(&request.domain_id)?,
+                actor_party_id: parse_id::<MarketplacePartyId>(&request.supply_party_id)?,
+                offer_id: parse_id::<MarketplaceOfferId>(&offer_id)?,
+                display_name: request.display_name,
+                attributes: request.attributes,
+                terms: request.terms,
+                expected_version: request.expected_version,
+            },
         )
         .await?;
     Ok(Json(offer))
@@ -684,12 +687,14 @@ pub(super) async fn offers(
         .marketplace
         .offers(
             &headers,
-            parse_id::<TenantId>(&query.tenant_id)?,
-            parse_id::<DomainId>(&query.domain_id)?,
-            parse_id::<MarketplacePartyId>(&query.supply_party_id)?,
-            query.domain_wide.unwrap_or(false),
-            query.limit.unwrap_or(50),
-            query.offset.unwrap_or(0),
+            ListOffersQuery {
+                tenant_id: parse_id::<TenantId>(&query.tenant_id)?,
+                domain_id: parse_id::<DomainId>(&query.domain_id)?,
+                supply_party_id: parse_id::<MarketplacePartyId>(&query.supply_party_id)?,
+                domain_wide: query.domain_wide.unwrap_or(false),
+                limit: query.limit.unwrap_or(50),
+                offset: query.offset.unwrap_or(0),
+            },
         )
         .await?;
     let mut response_headers = HeaderMap::new();

@@ -10,6 +10,6 @@ mod orders;
 mod ports;
 
 pub use error::ApplicationError;
-pub use marketplace::{MarketplaceService, MarketplaceWriter};
+pub use marketplace::{ListOffersQuery, MarketplaceService, MarketplaceWriter, UpdateOfferCommand};
 pub use orders::{OrderService, PlaceOrderCommand, PlaceOrderOutcome};
 pub use ports::OrderWriter;
