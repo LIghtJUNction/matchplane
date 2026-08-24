@@ -1,4 +1,12 @@
-import { existsSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsConstants,
+  existsSync,
+  fsyncSync,
+  openSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import {
   acquirePlatformRouterLock,
   PlatformRouterLockTimeoutError,
@@ -9,8 +17,12 @@ const mode = process.argv[2];
 
 if (mode === "lock") {
   await runLockChild();
+} else if (mode === "stale-lock") {
+  await runStaleLockChild();
 } else if (mode === "race-read") {
   await runRaceReader();
+} else if (mode === "audit-short-append") {
+  await runAuditShortAppendChild();
 } else {
   throw new Error("unknown transaction child mode");
 }
@@ -41,12 +53,73 @@ async function runLockChild(): Promise<void> {
   }
 }
 
+async function runStaleLockChild(): Promise<void> {
+  const root = requiredArgument(3);
+  const inspectedBarrier = requiredArgument(4);
+  const resumeBarrier = requiredArgument(5);
+  const resultBarrier = requiredArgument(6);
+  const timeoutMs = Number(requiredArgument(7));
+  try {
+    const handle = await acquirePlatformRouterLock({
+      root,
+      timeoutMs,
+      beforeStaleTakeover: async () => {
+        writeFileSync(inspectedBarrier, "inspected");
+        await waitForFile(resumeBarrier, 8_000);
+      },
+    });
+    writeFileSync(resultBarrier, JSON.stringify({ status: "acquired" }));
+    handle.release();
+  } catch (cause) {
+    writeFileSync(
+      resultBarrier,
+      JSON.stringify({
+        status:
+          cause instanceof PlatformRouterLockTimeoutError ? "timeout" : "error",
+        errorName: cause instanceof Error ? cause.name : "unknown",
+      }),
+    );
+    if (!(cause instanceof PlatformRouterLockTimeoutError)) process.exitCode = 1;
+  }
+}
+
+async function runAuditShortAppendChild(): Promise<void> {
+  const auditPath = requiredArgument(3);
+  const pausedBarrier = requiredArgument(4);
+  const resumeBarrier = requiredArgument(5);
+  const doneBarrier = requiredArgument(6);
+  const bytes = Buffer.from(`${requiredArgument(7)}\n`);
+  const descriptor = openSync(
+    auditPath,
+    fsConstants.O_APPEND | fsConstants.O_CREAT | fsConstants.O_WRONLY,
+    0o640,
+  );
+  try {
+    const firstLength = Math.max(1, Math.floor(bytes.length / 2));
+    const written = writeSync(descriptor, bytes, 0, firstLength, null);
+    if (written <= 0) throw new Error("short append made no progress");
+    writeFileSync(pausedBarrier, String(written));
+    await waitForFile(resumeBarrier, 8_000);
+    let offset = written;
+    while (offset < bytes.length) {
+      const count = writeSync(descriptor, bytes, offset, bytes.length - offset, null);
+      if (count <= 0) throw new Error("append completion made no progress");
+      offset += count;
+    }
+    fsyncSync(descriptor);
+    writeFileSync(doneBarrier, "done");
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 async function runRaceReader(): Promise<void> {
   const root = requiredArgument(3);
   const startBarrier = requiredArgument(4);
   const stopBarrier = requiredArgument(5);
   const resultBarrier = requiredArgument(6);
   await waitForFile(startBarrier, 8_000);
+  writeFileSync(`${startBarrier}.ready`, "ready");
   const models = new Set<string>();
   const errors: string[] = [];
   const deadline = Date.now() + 12_000;

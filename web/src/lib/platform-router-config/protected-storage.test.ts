@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  existsSync,
+  fstatSync,
+  fsyncSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -15,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createProtectedPlatformRouterStorage,
   credentialStorageEntry,
+  ProtectedStorageCommitUncertainError,
 } from "./protected-storage";
 
 const WEB_ROOT = path.resolve(
@@ -88,7 +92,7 @@ describe("protected platform router storage durability", () => {
     expect(readFileSync(destination, "utf8")).toBe(original);
   });
 
-  it("preserves the previous credential across rename and fsync failures", () => {
+  it("preserves the previous credential across rename and pre-publication fsync failures", () => {
     for (const failure of ["rename", "fsync"] as const) {
       const root = caseRoot(`failure-${failure}`);
       const destination = path.join(root, KEY_FILE);
@@ -122,6 +126,35 @@ describe("protected platform router storage durability", () => {
         "existing-private-value\n",
       );
     }
+  });
+
+  it("reports post-commit directory fsync failures as uncertain for replacement and deletion", () => {
+    const writeRoot = caseRoot("uncertain-write");
+    const writeDestination = path.join(writeRoot, KEY_FILE);
+    writeFileWithMode(writeDestination, "existing-private-value\n");
+    const writeStorage = createProtectedPlatformRouterStorage(writeRoot, {
+      fsync: ((descriptor: number) => {
+        if (fstatSync(descriptor).isDirectory()) {
+          throw Object.assign(new Error("directory fsync denied"), { code: "ENOSPC" });
+        }
+        fsyncSync(descriptor);
+      }) as typeof fsyncSync,
+    });
+    expect(() => writeStorage.write(credentialStorageEntry(KEY_FILE), SENTINEL, "API Key"))
+      .toThrow(ProtectedStorageCommitUncertainError);
+    expect(readFileSync(writeDestination, "utf8")).toBe(`${SENTINEL}\n`);
+
+    const removeRoot = caseRoot("uncertain-remove");
+    const removeDestination = path.join(removeRoot, KEY_FILE);
+    writeFileWithMode(removeDestination, "existing-private-value\n");
+    const removeStorage = createProtectedPlatformRouterStorage(removeRoot, {
+      fsync: (() => {
+        throw Object.assign(new Error("directory fsync denied"), { code: "ENOSPC" });
+      }) as typeof fsyncSync,
+    });
+    expect(() => removeStorage.remove(credentialStorageEntry(KEY_FILE)))
+      .toThrow(ProtectedStorageCommitUncertainError);
+    expect(existsSync(removeDestination)).toBe(false);
   });
 
   it("refuses symlink credential reads, writes, and removals without following them", () => {

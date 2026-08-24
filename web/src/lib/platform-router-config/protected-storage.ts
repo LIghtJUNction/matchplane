@@ -31,6 +31,13 @@ export interface ProtectedPlatformRouterStorage {
   remove(entry: PlatformRouterStorageEntry): void;
 }
 
+export class ProtectedStorageCommitUncertainError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ProtectedStorageCommitUncertainError";
+  }
+}
+
 export interface ProtectedStorageIo {
   open?: typeof openSync;
   write?: typeof writeSync;
@@ -108,6 +115,7 @@ export function createProtectedPlatformRouterStorage(
         `.${path.basename(destination)}.${nextId()}.tmp`,
       );
       let descriptor: number | null = null;
+      let committed = false;
       try {
         assertTrustedDirectory(root);
         assertRegularPathIfPresent(destination);
@@ -128,6 +136,7 @@ export function createProtectedPlatformRouterStorage(
         closeSync(descriptor);
         descriptor = null;
         rename(temporary, destination);
+        committed = true;
         fsyncDirectory(root, opener, sync);
       } catch (cause) {
         if (descriptor !== null) {
@@ -141,17 +150,31 @@ export function createProtectedPlatformRouterStorage(
         const failure = cleanupError
           ? new AggregateError([asError(cause), cleanupError])
           : cause;
+        if (committed) {
+          throw new ProtectedStorageCommitUncertainError(
+            `${label}已替换但目录同步失败，提交状态不确定`,
+            { cause: failure },
+          );
+        }
         throw new Error(`${label}无法写入受保护存储`, { cause: failure });
       }
     },
     remove(entry) {
       const target = entryPath(entry);
+      let committed = false;
       try {
         assertRegularPathIfPresent(target);
         unlink(target);
+        committed = true;
         fsyncDirectory(root, opener, sync);
       } catch (cause) {
-        if (isNodeErrorCode(cause, "ENOENT")) return;
+        if (!committed && isNodeErrorCode(cause, "ENOENT")) return;
+        if (committed) {
+          throw new ProtectedStorageCommitUncertainError(
+            "AI 受保护存储条目已删除但目录同步失败，提交状态不确定",
+            { cause },
+          );
+        }
         throw new Error("AI 受保护存储条目无法删除", { cause });
       }
     },
