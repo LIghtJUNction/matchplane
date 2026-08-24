@@ -32,6 +32,7 @@ pub use conversion_projection::{
     MarketplaceConversionJob, MarketplaceConversionProjectionOutcome,
     MarketplaceConversionRecoveryAction, MarketplaceConversionRecoveryOutcome,
 };
+pub use conversion_recovery::VerifiedHostOperator;
 pub use generic_marketplace::{
     AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,
     CreateMarketplaceOffer, CreateMarketplaceSalesHandoff, MarketplaceBehaviorEventOutcome,

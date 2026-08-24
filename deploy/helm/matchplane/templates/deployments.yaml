@@ -1,4 +1,7 @@
 {{- $root := . -}}
+{{- if ne (int .Values.conversionProjector.batchSize) 1 -}}
+{{- fail "conversionProjector.batchSize must be exactly 1 while the projector is serial" -}}
+{{- end -}}
 {{- $services := list
   (dict "name" "gateway" "binary" "matchplane-gateway" "replicas" .Values.gateway.replicas "port" 8080)
   (dict "name" "payment-service" "binary" "matchplane-payment-service" "replicas" .Values.paymentService.replicas "port" 8080)

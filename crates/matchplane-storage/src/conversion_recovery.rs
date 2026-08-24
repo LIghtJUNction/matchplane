@@ -9,6 +9,32 @@ use crate::{
 
 const SUPPORTED_SCHEMA_VERSION: i16 = 1;
 
+/// Proof that the caller checked the host process effective UID before opening recovery config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerifiedHostOperator {
+    effective_uid: u32,
+}
+
+impl VerifiedHostOperator {
+    /// Constructs host-operator proof only for the operating-system root identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Forbidden`] when `effective_uid` is not zero.
+    pub fn from_effective_uid(effective_uid: u32) -> Result<Self, StorageError> {
+        if effective_uid != 0 {
+            return Err(StorageError::Forbidden(
+                "conversion projection apply requires effective UID 0".to_owned(),
+            ));
+        }
+        Ok(Self { effective_uid })
+    }
+
+    const fn effective_uid(self) -> u32 {
+        self.effective_uid
+    }
+}
+
 impl PgStore {
     /// Validates or applies one host-operator recovery action to a dead conversion aggregate head.
     ///
@@ -24,9 +50,19 @@ impl PgStore {
         job_id: Uuid,
         action: MarketplaceConversionRecoveryAction,
         apply: bool,
+        host_operator: Option<VerifiedHostOperator>,
         operator_request_id: &str,
         reason: &str,
     ) -> Result<MarketplaceConversionRecoveryOutcome, StorageError> {
+        let host_operator_uid = match (apply, host_operator) {
+            (true, Some(operator)) => Some(operator.effective_uid()),
+            (true, None) => {
+                return Err(StorageError::Forbidden(
+                    "conversion projection apply requires a verified root host operator".to_owned(),
+                ));
+            }
+            (false, _) => None,
+        };
         let operator_request_id = bounded_operator_text(operator_request_id, 200, "request id")?;
         let reason = bounded_operator_text(reason, 200, "recovery reason")?;
         let mut transaction = self.pool().begin().await?;
@@ -217,7 +253,8 @@ impl PgStore {
             "aggregate_version": aggregate_version,
             "action": action,
             "reason": reason,
-            "host_operator": true
+            "host_operator": host_operator_uid == Some(0),
+            "host_operator_uid": host_operator_uid
         }))
         .execute(&mut *transaction)
         .await?;

@@ -10,13 +10,14 @@ use tracing::{error, info, warn};
 
 use crate::worker_metrics::WorkerMetrics;
 
+const SERIAL_CLAIM_LIMIT: i64 = 1;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct WorkerSettings {
-    pub(crate) batch_size: i64,
     pub(crate) poll_interval: Duration,
 }
 
-trait ConversionStore: Send + Sync {
+pub(crate) trait ConversionStore: Send + Sync {
     async fn claim_batch(
         &self,
         limit: i64,
@@ -64,8 +65,8 @@ impl ConversionStore for PgStore {
     }
 }
 
-pub(crate) async fn run_worker(
-    store: PgStore,
+pub(crate) async fn run_worker<S: ConversionStore>(
+    store: &S,
     settings: WorkerSettings,
     metrics: Arc<WorkerMetrics>,
     mut shutdown: watch::Receiver<bool>,
@@ -74,12 +75,12 @@ pub(crate) async fn run_worker(
         if *shutdown.borrow() {
             return;
         }
-        let claimed = store.claim_batch(settings.batch_size).await;
+        let claimed = store.claim_batch(SERIAL_CLAIM_LIMIT).await;
         match claimed {
             Ok(batch) => {
                 let is_empty = batch.jobs.is_empty();
-                handle_claim_batch(&store, batch, &metrics, &shutdown).await;
-                refresh_backlog(&store, &metrics).await;
+                handle_claim_batch(store, batch, &metrics, &shutdown).await;
+                refresh_backlog(store, &metrics).await;
                 if *shutdown.borrow() {
                     return;
                 }
@@ -289,7 +290,7 @@ mod tests {
         },
     };
 
-    use tokio::sync::watch;
+    use tokio::{sync::watch, time::timeout};
     use uuid::Uuid;
 
     use super::*;
@@ -298,6 +299,9 @@ mod tests {
         project_results:
             Mutex<VecDeque<Result<MarketplaceConversionProjectionOutcome, StorageError>>>,
         fail_results: Mutex<VecDeque<Result<MarketplaceConversionFailureOutcome, StorageError>>>,
+        unclaimed_jobs: Mutex<VecDeque<MarketplaceConversionJob>>,
+        claimed_jobs: Mutex<Vec<Uuid>>,
+        claim_limits: Mutex<Vec<i64>>,
         projected_jobs: AtomicUsize,
         shutdown_after_first: Option<watch::Sender<bool>>,
     }
@@ -310,9 +314,20 @@ mod tests {
             Self {
                 project_results: Mutex::new(project_results.into()),
                 fail_results: Mutex::new(fail_results.into()),
+                unclaimed_jobs: Mutex::new(VecDeque::new()),
+                claimed_jobs: Mutex::new(Vec::new()),
+                claim_limits: Mutex::new(Vec::new()),
                 projected_jobs: AtomicUsize::new(0),
                 shutdown_after_first: None,
             }
+        }
+
+        fn with_unclaimed_jobs(self, jobs: Vec<MarketplaceConversionJob>) -> Self {
+            self.unclaimed_jobs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend(jobs);
+            self
         }
 
         fn success() -> Self {
@@ -329,10 +344,34 @@ mod tests {
     impl ConversionStore for MockStore {
         async fn claim_batch(
             &self,
-            _limit: i64,
+            limit: i64,
         ) -> Result<MarketplaceConversionClaimBatch, StorageError> {
+            self.claim_limits
+                .lock()
+                .map_err(|_| {
+                    StorageError::InvalidData("mock claim limits lock poisoned".to_owned())
+                })?
+                .push(limit);
+            let mut unclaimed_jobs = self.unclaimed_jobs.lock().map_err(|_| {
+                StorageError::InvalidData("mock unclaimed jobs lock poisoned".to_owned())
+            })?;
+            let mut jobs = Vec::new();
+            for _ in 0..usize::try_from(limit.max(0)).unwrap_or(usize::MAX) {
+                let Some(mut job) = unclaimed_jobs.pop_front() else {
+                    break;
+                };
+                job.attempts += 1;
+                jobs.push(job);
+            }
+            drop(unclaimed_jobs);
+            self.claimed_jobs
+                .lock()
+                .map_err(|_| {
+                    StorageError::InvalidData("mock claimed jobs lock poisoned".to_owned())
+                })?
+                .extend(jobs.iter().map(|job| job.id));
             Ok(MarketplaceConversionClaimBatch {
-                jobs: Vec::new(),
+                jobs,
                 expired_dead: 0,
             })
         }
@@ -470,36 +509,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shutdown_should_finish_current_job_and_leave_remaining_claims_for_lease_recovery() {
+    async fn shutdown_should_not_claim_or_increment_an_unstarted_job()
+    -> Result<(), Box<dyn std::error::Error>> {
         let (shutdown_tx, shutdown) = watch::channel(false);
+        let mut first = job();
+        first.attempts = 0;
+        let first_id = first.id;
+        let mut unstarted = job();
+        unstarted.attempts = 0;
+        let unstarted_id = unstarted.id;
         let mut store = MockStore::new(
-            vec![
-                Ok(MarketplaceConversionProjectionOutcome {
-                    opportunity_id: Some(Uuid::now_v7()),
-                    notifications_written: 0,
-                }),
-                Ok(MarketplaceConversionProjectionOutcome {
-                    opportunity_id: Some(Uuid::now_v7()),
-                    notifications_written: 0,
-                }),
-            ],
+            vec![Ok(MarketplaceConversionProjectionOutcome {
+                opportunity_id: Some(Uuid::now_v7()),
+                notifications_written: 0,
+            })],
             Vec::new(),
         );
         store.shutdown_after_first = Some(shutdown_tx);
-        let metrics = WorkerMetrics::default();
+        let store = store.with_unclaimed_jobs(vec![first, unstarted]);
+        let metrics = Arc::new(WorkerMetrics::default());
 
-        handle_claim_batch(
-            &store,
-            MarketplaceConversionClaimBatch {
-                jobs: vec![job(), job()],
-                expired_dead: 0,
-            },
-            &metrics,
-            &shutdown,
+        timeout(
+            Duration::from_secs(1),
+            run_worker(
+                &store,
+                WorkerSettings {
+                    poll_interval: Duration::from_secs(60),
+                },
+                Arc::clone(&metrics),
+                shutdown,
+            ),
         )
-        .await;
+        .await?;
 
+        assert_eq!(
+            store
+                .claim_limits
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_slice(),
+            [SERIAL_CLAIM_LIMIT]
+        );
+        assert_eq!(
+            store
+                .claimed_jobs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_slice(),
+            [first_id]
+        );
+        let remaining = store
+            .unclaimed_jobs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining.front().map(|job| job.id), Some(unstarted_id));
+        assert_eq!(remaining.front().map(|job| job.attempts), Some(0));
         assert_eq!(store.projected_jobs.load(Ordering::Relaxed), 1);
         assert_eq!(metrics.snapshot().projected, 1);
+        Ok(())
     }
 }

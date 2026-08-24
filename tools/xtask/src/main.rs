@@ -13,7 +13,7 @@ use matchplane_config::{AppConfig, ConfigurationDiagnostics, Environment};
 use matchplane_domain::{DomainId, TenantId};
 use matchplane_storage::{
     CatalogProjectionStatus, MarketplaceConversionRecoveryAction, PgStore, ProvisionRootDomain,
-    ProvisionRootPlatform, ProvisionedRootPlatform,
+    ProvisionRootPlatform, ProvisionedRootPlatform, VerifiedHostOperator,
 };
 use reqwest::Client;
 use rpassword::prompt_password;
@@ -887,6 +887,7 @@ const PASSWORD_MAINTENANCE_ENV_FILES: [&str; 3] = [
     "/etc/matchplane/services/web.env",
     "/etc/matchplane/services/migration.env",
 ];
+const CONVERSION_RECOVERY_ENV_FILE: &str = "/etc/matchplane/recovery/conversion-projections.env";
 
 struct PasswordMaintenanceConfig {
     database_url: String,
@@ -953,6 +954,101 @@ fn read_password_maintenance_env_file(path: &Path) -> Result<Option<PasswordMain
         database_url: dotenv_value(&content, "MATCHPLANE_DATABASE_URL"),
         root_admin_email: dotenv_value(&content, "MATCHPLANE_ROOT_ADMIN_EMAIL"),
     }))
+}
+
+fn load_conversion_recovery_connection<F>(
+    apply: bool,
+    effective_uid: u32,
+    recovery_path: &Path,
+    load_ordinary_config: F,
+) -> Result<(String, Option<VerifiedHostOperator>)>
+where
+    F: FnOnce() -> Result<PasswordMaintenanceConfig>,
+{
+    if apply {
+        let host_operator = VerifiedHostOperator::from_effective_uid(effective_uid)
+            .context("conversion projection apply is restricted to the root host operator")?;
+        let database_url = read_conversion_recovery_database_url(recovery_path)?;
+        return Ok((database_url, Some(host_operator)));
+    }
+
+    Ok((load_ordinary_config()?.database_url, None))
+}
+
+fn read_conversion_recovery_database_url(path: &Path) -> Result<String> {
+    use std::os::unix::fs::MetadataExt;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("{} has no parent directory", path.display()))?;
+    let parent_metadata = fs::symlink_metadata(parent)
+        .with_context(|| format!("could not inspect {}", parent.display()))?;
+    validate_root_owned_recovery_path(
+        parent,
+        RecoveryPathSecurity {
+            uid: parent_metadata.uid(),
+            gid: parent_metadata.gid(),
+            mode: parent_metadata.mode(),
+            expected_kind: parent_metadata.file_type().is_dir(),
+        },
+        0o750,
+        "directory",
+    )?;
+
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("could not inspect {}", path.display()))?;
+    validate_root_owned_recovery_path(
+        path,
+        RecoveryPathSecurity {
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+            mode: metadata.mode(),
+            expected_kind: metadata.file_type().is_file(),
+        },
+        0o640,
+        "regular file",
+    )?;
+    let content =
+        fs::read_to_string(path).with_context(|| format!("could not read {}", path.display()))?;
+    dotenv_value(&content, "MATCHPLANE_RECOVERY_DATABASE_URL").ok_or_else(|| {
+        anyhow!(
+            "{} must define MATCHPLANE_RECOVERY_DATABASE_URL",
+            path.display()
+        )
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RecoveryPathSecurity {
+    uid: u32,
+    gid: u32,
+    mode: u32,
+    expected_kind: bool,
+}
+
+fn validate_root_owned_recovery_path(
+    path: &Path,
+    security: RecoveryPathSecurity,
+    expected_mode: u32,
+    kind_name: &str,
+) -> Result<()> {
+    if !security.expected_kind {
+        bail!("{} must be a {kind_name}", path.display());
+    }
+    let actual_mode = security.mode & 0o7777;
+    if security.uid != 0 || security.gid != 0 || actual_mode != expected_mode {
+        bail!(
+            "{} must be root:root with mode {expected_mode:04o}; found uid={}, gid={}, mode={actual_mode:04o}",
+            path.display(),
+            security.uid,
+            security.gid
+        );
+    }
+    Ok(())
+}
+
+fn current_effective_uid() -> u32 {
+    rustix::process::geteuid().as_raw()
 }
 
 fn non_empty_environment_value(name: &str) -> Option<String> {
@@ -1435,14 +1531,28 @@ async fn recover_conversion_projection_command(
     apply: bool,
 ) -> Result<()> {
     validate_operator_uuid(job_id, "job_id")?;
-    let config = load_password_maintenance_config()
-        .context("conversion projection database configuration is unavailable")?;
-    let store = PgStore::connect(&config.database_url, 2)
+    let (database_url, host_operator) = load_conversion_recovery_connection(
+        apply,
+        current_effective_uid(),
+        Path::new(CONVERSION_RECOVERY_ENV_FILE),
+        || {
+            load_password_maintenance_config()
+                .context("conversion projection database configuration is unavailable")
+        },
+    )?;
+    let store = PgStore::connect(&database_url, 2)
         .await
         .context("conversion projection recovery could not connect to PostgreSQL")?;
     let operator_request_id = request_id.unwrap_or_else(|| format!("host-cli:{}", Uuid::now_v7()));
     let outcome = store
-        .recover_marketplace_conversion(job_id, action, apply, &operator_request_id, reason)
+        .recover_marketplace_conversion(
+            job_id,
+            action,
+            apply,
+            host_operator,
+            &operator_request_id,
+            reason,
+        )
         .await
         .context("conversion projection recovery failed")?;
     println!(
@@ -1961,13 +2071,17 @@ impl JsonRpcResponse {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::Cell, path::Path};
+
     use super::{
-        AdminInviteRole, AuthCommand, Cli, Command, ConversionProjectionCommand, SecretCommand,
-        Service, admin_invite_role_value, better_auth_derived_key, dotenv_value,
+        AdminInviteRole, AuthCommand, Cli, Command, ConversionProjectionCommand,
+        RecoveryPathSecurity, SecretCommand, Service, admin_invite_role_value,
+        better_auth_derived_key, current_effective_uid, dotenv_value,
         hosted_agent_report_from_managed_values, hosted_agent_report_from_values,
-        normalize_admin_base_url, resolve_web_node_with, safe_endpoint_origin,
-        select_root_admin_email, service_command, sha256, tool_list, valid_root_email_secret_slot,
-        validate_operator_email, validate_operator_uuid,
+        load_conversion_recovery_connection, normalize_admin_base_url, resolve_web_node_with,
+        safe_endpoint_origin, select_root_admin_email, service_command, sha256, tool_list,
+        valid_root_email_secret_slot, validate_operator_email, validate_operator_uuid,
+        validate_root_owned_recovery_path,
     };
     use clap::Parser;
     use uuid::Uuid;
@@ -2014,6 +2128,90 @@ mod tests {
                 }
             } if parsed_job_id == job_id
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn conversion_apply_rejects_non_root_before_reading_configuration() {
+        let configuration_read = Cell::new(false);
+        let effective_uid = match current_effective_uid() {
+            0 => 1_000,
+            uid => uid,
+        };
+        let result = load_conversion_recovery_connection(
+            true,
+            effective_uid,
+            Path::new("/missing/recovery.env"),
+            || {
+                configuration_read.set(true);
+                unreachable!("ordinary database configuration must not be read for apply")
+            },
+        );
+
+        assert!(!configuration_read.get());
+        assert!(result.is_err_and(|error| error.to_string().contains("root host operator")));
+    }
+
+    #[test]
+    fn conversion_apply_never_falls_back_to_ordinary_database_configuration() {
+        let configuration_read = Cell::new(false);
+        let result = load_conversion_recovery_connection(
+            true,
+            0,
+            Path::new("/missing/recovery.env"),
+            || {
+                configuration_read.set(true);
+                unreachable!("ordinary database configuration must not authorize apply")
+            },
+        );
+
+        assert!(!configuration_read.get());
+        assert!(result.is_err_and(|error| error.to_string().contains("could not inspect")));
+    }
+
+    #[test]
+    fn recovery_paths_require_root_root_and_exact_modes() -> anyhow::Result<()> {
+        let path = Path::new("/etc/matchplane/recovery/conversion-projections.env");
+        let security = |uid, gid, mode, expected_kind| RecoveryPathSecurity {
+            uid,
+            gid,
+            mode,
+            expected_kind,
+        };
+        validate_root_owned_recovery_path(
+            path,
+            security(0, 0, 0o100640, true),
+            0o640,
+            "regular file",
+        )?;
+        for invalid in [
+            validate_root_owned_recovery_path(
+                path,
+                security(1_000, 0, 0o100640, true),
+                0o640,
+                "regular file",
+            ),
+            validate_root_owned_recovery_path(
+                path,
+                security(0, 1_000, 0o100640, true),
+                0o640,
+                "regular file",
+            ),
+            validate_root_owned_recovery_path(
+                path,
+                security(0, 0, 0o100600, true),
+                0o640,
+                "regular file",
+            ),
+            validate_root_owned_recovery_path(
+                path,
+                security(0, 0, 0o120640, false),
+                0o640,
+                "regular file",
+            ),
+        ] {
+            assert!(invalid.is_err());
+        }
         Ok(())
     }
 

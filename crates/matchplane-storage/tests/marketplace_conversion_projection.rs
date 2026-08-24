@@ -1,6 +1,6 @@
 use matchplane_storage::{
     MarketplaceConversionFailureDisposition, MarketplaceConversionJob,
-    MarketplaceConversionRecoveryAction, PgStore, StorageError,
+    MarketplaceConversionRecoveryAction, PgStore, StorageError, VerifiedHostOperator,
 };
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row};
@@ -19,6 +19,116 @@ struct Fixture {
     organization_id: Uuid,
     seller_user_id: Uuid,
     buyer_user_id: Uuid,
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn projection_migration_should_normalize_every_004_legal_status(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    create_source_schema(&pool).await?;
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/202608240004_marketplace_conversion_outbox.sql"
+    ))
+    .execute(&pool)
+    .await?;
+
+    let tenant_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1)")
+        .bind(tenant_id)
+        .execute(&pool)
+        .await?;
+    let claimed_at = time::OffsetDateTime::now_utc();
+    let mut seeded = Vec::new();
+    for (status, attempts) in [
+        ("pending", 0),
+        ("publishing", 0),
+        ("published", 0),
+        ("failed", 2),
+        ("dead", 0),
+    ] {
+        let id = Uuid::now_v7();
+        let publishing = status == "publishing";
+        sqlx::query(
+            "INSERT INTO marketplace_conversion_outbox ( \
+                 id, tenant_id, source_type, source_id, aggregate_type, aggregate_id, \
+                 event_type, status, attempts, claimed_at, claim_token, published_at \
+             ) VALUES ($1, $2, 'sales_handoff', $3, 'marketplace_sales_handoff', $4, \
+                       'legacy_004_state', $5, $6, $7, $8, NULL)",
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .bind(Uuid::now_v7())
+        .bind(Uuid::now_v7())
+        .bind(status)
+        .bind(attempts)
+        .bind(publishing.then_some(claimed_at))
+        .bind(publishing.then(Uuid::now_v7))
+        .execute(&pool)
+        .await?;
+        seeded.push((id, status, attempts));
+    }
+
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/202608240005_marketplace_conversion_projection.sql"
+    ))
+    .execute(&pool)
+    .await?;
+    // A manually resumed deployment must be able to repeat 005 without changing normalized rows.
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/202608240005_marketplace_conversion_projection.sql"
+    ))
+    .execute(&pool)
+    .await?;
+
+    let validated_checks: i64 = sqlx::query_scalar(
+        "SELECT count(*) \
+           FROM pg_constraint \
+          WHERE conrelid = 'marketplace_conversion_outbox'::regclass \
+            AND conname IN ( \
+                'marketplace_conversion_outbox_status_check', \
+                'marketplace_conversion_outbox_schema_version_check', \
+                'marketplace_conversion_outbox_aggregate_version_check', \
+                'marketplace_conversion_outbox_claim_state_check', \
+                'marketplace_conversion_outbox_publication_state_check', \
+                'marketplace_conversion_outbox_dead_state_check', \
+                'marketplace_conversion_outbox_resolution_state_check', \
+                'marketplace_conversion_outbox_attempt_audit_check' \
+            ) \
+            AND convalidated",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(validated_checks, 8);
+
+    for (id, status, original_attempts) in seeded {
+        let row = sqlx::query(
+            "SELECT status, attempts, claimed_at IS NOT NULL AS claimed, \
+                    claim_token IS NOT NULL AS claim_token, \
+                    claim_expires_at IS NOT NULL AS claim_expires, \
+                    published_at IS NOT NULL AS published, \
+                    dead_at IS NOT NULL AS dead, \
+                    resolved_at IS NOT NULL AS resolved, \
+                    last_attempt_at IS NOT NULL AS attempted \
+               FROM marketplace_conversion_outbox \
+              WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(row.get::<String, _>("status"), status);
+        let publishing = status == "publishing";
+        assert_eq!(row.get::<bool, _>("claimed"), publishing);
+        assert_eq!(row.get::<bool, _>("claim_token"), publishing);
+        assert_eq!(row.get::<bool, _>("claim_expires"), publishing);
+        assert_eq!(row.get::<bool, _>("published"), status == "published");
+        assert_eq!(row.get::<bool, _>("dead"), status == "dead");
+        assert!(!row.get::<bool, _>("resolved"));
+        let expected_attempts = if publishing { 1 } else { original_attempts };
+        assert_eq!(row.get::<i32, _>("attempts"), expected_attempts);
+        assert_eq!(row.get::<bool, _>("attempted"), expected_attempts > 0);
+    }
+    Ok(())
 }
 
 #[sqlx::test]
@@ -484,7 +594,9 @@ async fn retry_available_at_should_use_bounded_deterministic_jitter(
         failure.disposition,
         MarketplaceConversionFailureDisposition::Retry
     );
-    let retry_delay_ms = failure.retry_delay_ms.expect("retry delay must be present");
+    let retry_delay_ms = failure.retry_delay_ms.ok_or_else(|| {
+        StorageError::InvalidData("retry delay must be present for retry disposition".to_owned())
+    })?;
     assert!((1_600..=2_400).contains(&retry_delay_ms));
     let within_transition_bounds: bool = sqlx::query_scalar(
         "SELECT available_at >= $2 + make_interval(secs => $4) \
@@ -515,6 +627,7 @@ async fn replay_recovery_should_audit_and_unlock_successor(
             head.id,
             MarketplaceConversionRecoveryAction::Replay,
             false,
+            None,
             "conversion-replay-dry-run",
             "canonical source repaired",
         )
@@ -538,6 +651,7 @@ async fn replay_recovery_should_audit_and_unlock_successor(
             head.id,
             MarketplaceConversionRecoveryAction::Replay,
             true,
+            Some(verified_host_operator()?),
             "conversion-replay-apply",
             "canonical source repaired",
         )
@@ -580,6 +694,7 @@ async fn resolve_recovery_should_audit_and_unlock_successor(
             head.id,
             MarketplaceConversionRecoveryAction::Resolve,
             true,
+            Some(verified_host_operator()?),
             "conversion-resolve-apply",
             "event intentionally skipped by root operator",
         )
@@ -620,6 +735,7 @@ async fn active_claim_should_reject_dead_recovery(pool: PgPool) -> Result<(), St
             job.id,
             MarketplaceConversionRecoveryAction::Resolve,
             true,
+            Some(verified_host_operator()?),
             "active-claim-recovery",
             "must remain fenced",
         )
@@ -674,6 +790,10 @@ async fn dead_contact_head_with_successor(
     Ok((head, successor_id))
 }
 
+fn verified_host_operator() -> Result<VerifiedHostOperator, StorageError> {
+    VerifiedHostOperator::from_effective_uid(0)
+}
+
 async fn assert_recovery_audit(
     pool: &PgPool,
     event_type: &str,
@@ -682,7 +802,8 @@ async fn assert_recovery_audit(
 ) -> Result<(), StorageError> {
     let row = sqlx::query(
         "SELECT event_type, request_id, metadata->>'reason' AS reason, \
-                metadata->>'host_operator' AS host_operator \
+                metadata->>'host_operator' AS host_operator, \
+                metadata->>'host_operator_uid' AS host_operator_uid \
            FROM platform_audit_events",
     )
     .fetch_one(pool)
@@ -691,6 +812,7 @@ async fn assert_recovery_audit(
     assert_eq!(row.get::<String, _>("request_id"), request_id);
     assert_eq!(row.get::<String, _>("reason"), reason);
     assert_eq!(row.get::<String, _>("host_operator"), "true");
+    assert_eq!(row.get::<String, _>("host_operator_uid"), "0");
     Ok(())
 }
 

@@ -4,7 +4,9 @@ set -euo pipefail
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$repository_root"
 
-bash -n packaging/scripts/stage.sh packaging/scripts/archive.sh
+bash -n packaging/scripts/stage.sh packaging/scripts/archive.sh \
+  packaging/scripts/check-conversion-recovery-permissions.sh
+bash -n deploy/helm/matchplane/tests/conversion-projector-probe.sh
 bash -n packaging/ubuntu/build-deb.sh packaging/ubuntu/postinst packaging/ubuntu/prerm
 bash -n packaging/fedora/build-rpm.sh
 bash -n deploy/scripts/configure-ubuntu-host.sh
@@ -16,7 +18,7 @@ bash -n packaging/aur/matchplane-git/matchplane.install
 bash -n packaging/aur/matchplane-bin/PKGBUILD.in
 bash -n packaging/aur/matchplane-bin/matchplane.install
 
-for service in web gateway payment-service event-relay matcher projector subplatform-builder vector-worker federation-hub; do
+for service in web gateway payment-service event-relay conversion-projector matcher projector subplatform-builder vector-worker federation-hub; do
   unit="packaging/systemd/matchplane-${service}.service"
   if ! rg -q "^EnvironmentFile=/etc/matchplane/services/${service}\.env$" "$unit"; then
     echo "$unit must require its workload-scoped environment file" >&2
@@ -28,7 +30,7 @@ if ! rg -q '^EnvironmentFile=/etc/matchplane/services/migration\.env$' \
   echo 'matchplane-initialize.service must require the migration environment file' >&2
   exit 1
 fi
-for service_user in relay matcher projector builder vector federation migration; do
+for service_user in relay conversion matcher projector builder vector federation migration; do
   if ! rg -q "^User=matchplane-${service_user}$" \
     packaging/systemd/matchplane-*.service; then
     echo "missing dedicated service user matchplane-${service_user}" >&2
@@ -73,6 +75,15 @@ if ! rg -q '^d /var/lib/matchplane/media 0750 matchplane-web matchplane-web -$' 
   packaging/systemd/matchplane-web.service; then
   echo 'hosted store media must be private and writable by the web service' >&2
   exit 1
+fi
+if ! rg -q '^d /etc/matchplane/recovery 0750 root root -$' \
+  packaging/tmpfiles/matchplane.conf; then
+  echo 'conversion recovery credentials require a root-only directory' >&2
+  exit 1
+fi
+packaging/scripts/check-conversion-recovery-permissions.sh
+if command -v helm >/dev/null 2>&1; then
+  deploy/helm/matchplane/tests/conversion-projector-probe.sh
 fi
 
 if rg -n --glob '*.Dockerfile' --glob 'Dockerfile*' \

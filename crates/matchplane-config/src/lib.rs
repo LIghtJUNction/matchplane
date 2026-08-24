@@ -39,7 +39,7 @@ pub struct AppConfig {
     pub http_addr: String,
     /// Whether the standalone conversion projector may claim work.
     pub conversion_projector_enabled: bool,
-    /// Maximum number of conversion jobs claimed per batch.
+    /// Serial conversion claim size. Retained as a deployment compatibility gate and fixed at one.
     pub conversion_projector_batch_size: u16,
     /// Empty-loop polling interval in milliseconds.
     pub conversion_projector_poll_ms: u64,
@@ -94,7 +94,7 @@ pub struct ValidatedConfig {
     pub http_addr: SocketAddr,
     /// Whether the standalone conversion projector may claim work.
     pub conversion_projector_enabled: bool,
-    /// Maximum number of conversion jobs claimed per batch.
+    /// Serial conversion claim size. Retained as a deployment compatibility gate and fixed at one.
     pub conversion_projector_batch_size: u16,
     /// Empty-loop polling interval in milliseconds.
     pub conversion_projector_poll_ms: u64,
@@ -207,7 +207,7 @@ impl AppConfig {
             .set_default("node_id", "00000000-0000-7000-8000-00000000000a")?
             .set_default("http_addr", "0.0.0.0:8080")?
             .set_default("conversion_projector_enabled", false)?
-            .set_default("conversion_projector_batch_size", 100)?
+            .set_default("conversion_projector_batch_size", 1)?
             .set_default("conversion_projector_poll_ms", 1_000)?
             .set_default("conversion_projector_pool_size", 5)?
             .set_default("conversion_projector_degraded_after_seconds", 300)?
@@ -318,7 +318,7 @@ impl AppConfig {
                 "MATCHPLANE_CONVERSION_PROJECTOR_BATCH_SIZE",
                 u64::from(self.conversion_projector_batch_size),
                 1,
-                100,
+                1,
             ),
             (
                 "MATCHPLANE_CONVERSION_PROJECTOR_POLL_MS",
@@ -567,7 +567,7 @@ mod tests {
             node_id: FederationNodeId::new().to_string(),
             http_addr: "127.0.0.1:8080".to_owned(),
             conversion_projector_enabled: false,
-            conversion_projector_batch_size: 100,
+            conversion_projector_batch_size: 1,
             conversion_projector_poll_ms: 1_000,
             conversion_projector_pool_size: 5,
             conversion_projector_degraded_after_seconds: 300,
@@ -690,6 +690,7 @@ mod tests {
     fn validate_should_reject_conversion_projector_values_outside_bounds() {
         for mutate in [
             |config: &mut AppConfig| config.conversion_projector_batch_size = 0,
+            |config: &mut AppConfig| config.conversion_projector_batch_size = 2,
             |config: &mut AppConfig| config.conversion_projector_poll_ms = 60_001,
             |config: &mut AppConfig| config.conversion_projector_pool_size = 21,
             |config: &mut AppConfig| config.conversion_projector_degraded_after_seconds = 0,

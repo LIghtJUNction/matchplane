@@ -1,48 +1,34 @@
 -- Lease-backed, ordered conversion projection into store CRM and in-app notifications.
 
 ALTER TABLE marketplace_conversion_outbox
-    ADD COLUMN schema_version smallint NOT NULL DEFAULT 1,
-    ADD COLUMN aggregate_version bigint,
-    ADD COLUMN claim_expires_at timestamptz,
-    ADD COLUMN last_attempt_at timestamptz,
-    ADD COLUMN dead_at timestamptz,
-    ADD COLUMN resolved_at timestamptz;
+    ADD COLUMN IF NOT EXISTS schema_version smallint NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS aggregate_version bigint,
+    ADD COLUMN IF NOT EXISTS claim_expires_at timestamptz,
+    ADD COLUMN IF NOT EXISTS last_attempt_at timestamptz,
+    ADD COLUMN IF NOT EXISTS dead_at timestamptz,
+    ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
 
-WITH ranked AS (
-    SELECT id,
-           row_number() OVER (
-               PARTITION BY tenant_id, aggregate_type, aggregate_id
-               ORDER BY created_at, id
-           ) AS aggregate_version
-    FROM marketplace_conversion_outbox
-)
-UPDATE marketplace_conversion_outbox AS outbox
-SET aggregate_version = ranked.aggregate_version
-FROM ranked
-WHERE ranked.id = outbox.id;
-
-UPDATE marketplace_conversion_outbox
-SET claim_expires_at = claimed_at + INTERVAL '60 seconds',
-    last_attempt_at = claimed_at
-WHERE status = 'publishing';
-
-UPDATE marketplace_conversion_outbox
-SET last_attempt_at = created_at
-WHERE attempts > 0 AND last_attempt_at IS NULL;
+-- Install the new checks without scanning 004-era rows. A single idempotent normalization update
+-- then moves every 004-legal status to a 005-legal state before validation.
+ALTER TABLE marketplace_conversion_outbox
+    DROP CONSTRAINT IF EXISTS marketplace_conversion_outbox_status_check,
+    DROP CONSTRAINT IF EXISTS marketplace_conversion_outbox_schema_version_check,
+    DROP CONSTRAINT IF EXISTS marketplace_conversion_outbox_aggregate_version_check,
+    DROP CONSTRAINT IF EXISTS marketplace_conversion_outbox_aggregate_version_unique,
+    DROP CONSTRAINT IF EXISTS marketplace_conversion_outbox_claim_state_check,
+    DROP CONSTRAINT IF EXISTS marketplace_conversion_outbox_publication_state_check,
+    DROP CONSTRAINT IF EXISTS marketplace_conversion_outbox_dead_state_check,
+    DROP CONSTRAINT IF EXISTS marketplace_conversion_outbox_resolution_state_check,
+    DROP CONSTRAINT IF EXISTS marketplace_conversion_outbox_attempt_audit_check;
 
 ALTER TABLE marketplace_conversion_outbox
-    ALTER COLUMN aggregate_version SET NOT NULL,
-    ADD CONSTRAINT marketplace_conversion_outbox_schema_version_check
-        CHECK (schema_version > 0),
-    ADD CONSTRAINT marketplace_conversion_outbox_aggregate_version_check
-        CHECK (aggregate_version > 0),
-    ADD CONSTRAINT marketplace_conversion_outbox_aggregate_version_unique
-        UNIQUE (tenant_id, aggregate_type, aggregate_id, aggregate_version);
-
-ALTER TABLE marketplace_conversion_outbox
-    DROP CONSTRAINT marketplace_conversion_outbox_status_check,
     ADD CONSTRAINT marketplace_conversion_outbox_status_check
-        CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'dead', 'resolved')),
+        CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'dead', 'resolved'))
+        NOT VALID,
+    ADD CONSTRAINT marketplace_conversion_outbox_schema_version_check
+        CHECK (schema_version > 0) NOT VALID,
+    ADD CONSTRAINT marketplace_conversion_outbox_aggregate_version_check
+        CHECK (aggregate_version > 0) NOT VALID,
     ADD CONSTRAINT marketplace_conversion_outbox_claim_state_check
         CHECK (
             (status = 'publishing'
@@ -54,35 +40,103 @@ ALTER TABLE marketplace_conversion_outbox
              AND claimed_at IS NULL
              AND claim_token IS NULL
              AND claim_expires_at IS NULL)
-        ),
+        ) NOT VALID,
     ADD CONSTRAINT marketplace_conversion_outbox_publication_state_check
-        CHECK ((status = 'published') = (published_at IS NOT NULL)),
+        CHECK ((status = 'published') = (published_at IS NOT NULL)) NOT VALID,
     ADD CONSTRAINT marketplace_conversion_outbox_dead_state_check
-        CHECK ((status = 'dead') = (dead_at IS NOT NULL)),
+        CHECK ((status = 'dead') = (dead_at IS NOT NULL)) NOT VALID,
     ADD CONSTRAINT marketplace_conversion_outbox_resolution_state_check
-        CHECK ((status = 'resolved') = (resolved_at IS NOT NULL)),
+        CHECK ((status = 'resolved') = (resolved_at IS NOT NULL)) NOT VALID,
     ADD CONSTRAINT marketplace_conversion_outbox_attempt_audit_check
         CHECK (
             (attempts = 0 AND last_attempt_at IS NULL)
             OR (attempts > 0 AND last_attempt_at IS NOT NULL)
-        );
+        ) NOT VALID;
 
-DROP INDEX marketplace_conversion_outbox_claim_idx;
-CREATE INDEX marketplace_conversion_outbox_ready_idx
+WITH ranked AS (
+    SELECT id,
+           row_number() OVER (
+               PARTITION BY tenant_id, aggregate_type, aggregate_id
+               ORDER BY created_at, id
+           ) AS aggregate_version
+    FROM marketplace_conversion_outbox
+)
+UPDATE marketplace_conversion_outbox AS outbox
+SET aggregate_version = ranked.aggregate_version,
+    attempts = CASE
+        WHEN outbox.status = 'publishing' THEN GREATEST(outbox.attempts, 1)
+        ELSE outbox.attempts
+    END,
+    claimed_at = CASE WHEN outbox.status = 'publishing' THEN outbox.claimed_at END,
+    claim_token = CASE WHEN outbox.status = 'publishing' THEN outbox.claim_token END,
+    claim_expires_at = CASE
+        WHEN outbox.status = 'publishing'
+            THEN COALESCE(outbox.claim_expires_at, outbox.claimed_at + INTERVAL '60 seconds')
+    END,
+    published_at = CASE
+        WHEN outbox.status = 'published'
+            THEN COALESCE(outbox.published_at, outbox.claimed_at, outbox.created_at)
+    END,
+    dead_at = CASE
+        WHEN outbox.status = 'dead'
+            THEN COALESCE(
+                outbox.dead_at,
+                outbox.last_attempt_at,
+                outbox.claimed_at,
+                outbox.published_at,
+                outbox.created_at
+            )
+    END,
+    resolved_at = CASE
+        WHEN outbox.status = 'resolved'
+            THEN COALESCE(outbox.resolved_at, outbox.created_at)
+    END,
+    last_attempt_at = CASE
+        WHEN outbox.status = 'publishing'
+            THEN COALESCE(outbox.last_attempt_at, outbox.claimed_at, outbox.created_at)
+        WHEN outbox.attempts > 0
+            THEN COALESCE(
+                outbox.last_attempt_at,
+                outbox.claimed_at,
+                outbox.published_at,
+                outbox.dead_at,
+                outbox.created_at
+            )
+    END
+FROM ranked
+WHERE ranked.id = outbox.id;
+
+ALTER TABLE marketplace_conversion_outbox
+    VALIDATE CONSTRAINT marketplace_conversion_outbox_status_check,
+    VALIDATE CONSTRAINT marketplace_conversion_outbox_schema_version_check,
+    VALIDATE CONSTRAINT marketplace_conversion_outbox_aggregate_version_check,
+    VALIDATE CONSTRAINT marketplace_conversion_outbox_claim_state_check,
+    VALIDATE CONSTRAINT marketplace_conversion_outbox_publication_state_check,
+    VALIDATE CONSTRAINT marketplace_conversion_outbox_dead_state_check,
+    VALIDATE CONSTRAINT marketplace_conversion_outbox_resolution_state_check,
+    VALIDATE CONSTRAINT marketplace_conversion_outbox_attempt_audit_check;
+
+ALTER TABLE marketplace_conversion_outbox
+    ALTER COLUMN aggregate_version SET NOT NULL,
+    ADD CONSTRAINT marketplace_conversion_outbox_aggregate_version_unique
+        UNIQUE (tenant_id, aggregate_type, aggregate_id, aggregate_version);
+
+DROP INDEX IF EXISTS marketplace_conversion_outbox_claim_idx;
+CREATE INDEX IF NOT EXISTS marketplace_conversion_outbox_ready_idx
     ON marketplace_conversion_outbox (available_at, created_at, id)
     WHERE status IN ('pending', 'failed');
-CREATE INDEX marketplace_conversion_outbox_expired_claim_idx
+CREATE INDEX IF NOT EXISTS marketplace_conversion_outbox_expired_claim_idx
     ON marketplace_conversion_outbox (claim_expires_at, created_at, id)
     WHERE status = 'publishing';
-CREATE INDEX marketplace_conversion_outbox_aggregate_order_idx
+CREATE INDEX IF NOT EXISTS marketplace_conversion_outbox_aggregate_order_idx
     ON marketplace_conversion_outbox
        (tenant_id, aggregate_type, aggregate_id, aggregate_version, created_at, id)
     WHERE status NOT IN ('published', 'resolved');
-CREATE INDEX marketplace_conversion_outbox_dead_idx
+CREATE INDEX IF NOT EXISTS marketplace_conversion_outbox_dead_idx
     ON marketplace_conversion_outbox (dead_at, id)
     WHERE status = 'dead';
 
-CREATE TABLE marketplace_store_customers (
+CREATE TABLE IF NOT EXISTS marketplace_store_customers (
     id uuid PRIMARY KEY,
     tenant_id uuid NOT NULL,
     store_id uuid NOT NULL,
@@ -99,10 +153,10 @@ CREATE TABLE marketplace_store_customers (
     CHECK (last_activity_at >= first_seen_at)
 );
 
-CREATE INDEX marketplace_store_customers_activity_idx
+CREATE INDEX IF NOT EXISTS marketplace_store_customers_activity_idx
     ON marketplace_store_customers (tenant_id, store_id, last_activity_at DESC, id);
 
-CREATE TABLE marketplace_sales_opportunities (
+CREATE TABLE IF NOT EXISTS marketplace_sales_opportunities (
     id uuid PRIMARY KEY,
     tenant_id uuid NOT NULL,
     store_id uuid NOT NULL,
@@ -144,12 +198,12 @@ CREATE TABLE marketplace_sales_opportunities (
     )
 );
 
-CREATE INDEX marketplace_sales_opportunities_store_activity_idx
+CREATE INDEX IF NOT EXISTS marketplace_sales_opportunities_store_activity_idx
     ON marketplace_sales_opportunities (tenant_id, store_id, updated_at DESC, id);
-CREATE INDEX marketplace_sales_opportunities_customer_idx
+CREATE INDEX IF NOT EXISTS marketplace_sales_opportunities_customer_idx
     ON marketplace_sales_opportunities (tenant_id, customer_id, updated_at DESC, id);
 
-CREATE TABLE marketplace_sales_opportunity_offers (
+CREATE TABLE IF NOT EXISTS marketplace_sales_opportunity_offers (
     tenant_id uuid NOT NULL,
     opportunity_id uuid NOT NULL,
     offer_id uuid NOT NULL,

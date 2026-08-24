@@ -12,7 +12,7 @@ use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 use tracing::info;
 
 use crate::{
-    health::HealthState,
+    health::{HealthState, ReadinessState},
     worker::{WorkerSettings, run_worker},
     worker_metrics::WorkerMetrics,
 };
@@ -37,11 +37,13 @@ async fn main() -> anyhow::Result<()> {
         .context("conversion projector health listener bind failed")?;
     let metrics = Arc::new(WorkerMetrics::default());
     let health_state = HealthState {
-        store: store.clone(),
+        readiness: ReadinessState {
+            store: store.clone(),
+            metrics: Arc::clone(&metrics),
+            enabled: config.conversion_projector_enabled,
+            degraded_after_seconds: config.conversion_projector_degraded_after_seconds,
+        },
         telemetry: telemetry.clone(),
-        metrics: Arc::clone(&metrics),
-        enabled: config.conversion_projector_enabled,
-        degraded_after_seconds: config.conversion_projector_degraded_after_seconds,
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let server_shutdown = shutdown_rx.clone();
@@ -55,9 +57,8 @@ async fn main() -> anyhow::Result<()> {
     let mut worker_handle = tokio::spawn(async move {
         if enabled {
             run_worker(
-                store,
+                &store,
                 WorkerSettings {
-                    batch_size: i64::from(config.conversion_projector_batch_size),
                     poll_interval: Duration::from_millis(config.conversion_projector_poll_ms),
                 },
                 metrics,

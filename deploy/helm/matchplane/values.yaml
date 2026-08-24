@@ -194,7 +194,7 @@ conversionProjector:
   # after the database migration, service-scoped secret, and operator runbook are ready.
   enabled: false
   replicas: 2
-  batchSize: 100
+  batchSize: 1
   pollMs: 1000
   poolSize: 5
   degradedAfterSeconds: 300

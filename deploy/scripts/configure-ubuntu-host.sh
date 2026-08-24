@@ -31,6 +31,7 @@ install -d -m 0750 -o root -g matchplane-gateway /etc/matchplane/secrets/gateway
 install -d -m 0750 -o root -g matchplane-payment /etc/matchplane/secrets/payment
 install -d -m 0750 -o root -g matchplane-web /etc/matchplane/secrets/web
 install -d -m 0750 -o root -g matchplane /etc/matchplane/services
+install -d -m 0750 -o root -g root /etc/matchplane/recovery
 install -d -m 0750 -o matchplane-web -g matchplane-web /var/lib/matchplane/subplatform-uploads
 
 create_hex_secret() {
@@ -46,6 +47,7 @@ create_hex_secret() {
 }
 
 create_hex_secret /etc/matchplane/secrets/database.password 24 root
+create_hex_secret /etc/matchplane/recovery/database.password 24 root
 create_hex_secret /etc/matchplane/secrets/gateway/contact-data.key 32 matchplane-gateway
 create_hex_secret /etc/matchplane/secrets/payment/invoice-data.key 32 matchplane-payment
 create_hex_secret /etc/matchplane/secrets/payment/payment-admin.token 32 matchplane-payment
@@ -60,8 +62,13 @@ install -m 0640 -o root -g matchplane-web \
   /etc/matchplane/secrets/web/gateway-admin.token
 
 database_password=$(tr -d '\r\n' </etc/matchplane/secrets/database.password)
+recovery_database_password=$(tr -d '\r\n' </etc/matchplane/recovery/database.password)
 if [[ ! $database_password =~ ^[0-9a-f]{48}$ ]]; then
   echo 'database password file is malformed' >&2
+  exit 1
+fi
+if [[ ! $recovery_database_password =~ ^[0-9a-f]{48}$ ]]; then
+  echo 'recovery database password file is malformed' >&2
   exit 1
 fi
 
@@ -98,6 +105,17 @@ if [[ $(sudo -u postgres psql -Atqc \
     sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
 else
   printf "ALTER ROLE matchplane LOGIN PASSWORD '%s';\n" "$database_password" |
+    sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
+fi
+
+if [[ $(sudo -u postgres psql -Atqc \
+  "SELECT count(*) FROM pg_roles WHERE rolname = 'matchplane_recovery'" postgres) == 0 ]]; then
+  printf "CREATE ROLE matchplane_recovery WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '%s';\n" \
+    "$recovery_database_password" |
+    sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
+else
+  printf "ALTER ROLE matchplane_recovery WITH LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '%s';\n" \
+    "$recovery_database_password" |
     sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
 fi
 
@@ -147,9 +165,10 @@ trap 'rm -f "$environment_file"' EXIT
 install -m 0640 -o root -g matchplane "$environment_file" \
   /etc/matchplane/matchplane.env
 
-# The test profile deliberately uses one generated database/cache identity, but
-# still writes one unit-scoped environment file. Production operators must
-# replace these with distinct role/ACL URLs and per-client Kafka TLS paths.
+# The test profile deliberately uses one generated runtime database/cache identity, but
+# still writes one unit-scoped environment file. Recovery uses a separate root-only role/file.
+# Production operators must replace runtime values with distinct role/ACL URLs and per-client
+# Kafka TLS paths.
 write_service_environment() {
   local service=$1
   local group=$2
@@ -164,7 +183,7 @@ write_service_environment() {
       # Ship the workload declared but disabled. The root operator must explicitly flip this
       # after migrations, alerting, and recovery access have been verified.
       printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_ENABLED=false'
-      printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_BATCH_SIZE=100'
+      printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_BATCH_SIZE=1'
       printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_POLL_MS=1000'
       printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_POOL_SIZE=5'
       printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_DEGRADED_AFTER_SECONDS=300'
@@ -193,10 +212,41 @@ write_service_environment vector-worker matchplane-vector
 write_service_environment federation-hub matchplane-federation
 write_service_environment migration matchplane-migration
 
+recovery_environment_file=$(mktemp /etc/matchplane/recovery/.conversion-projections.env.XXXXXX)
+trap 'rm -f "$environment_file" "$recovery_environment_file"' EXIT
+printf 'MATCHPLANE_RECOVERY_DATABASE_URL=postgres://matchplane_recovery:%s@127.0.0.1:5432/matchplane?sslmode=require\n' \
+  "$recovery_database_password" >"$recovery_environment_file"
+install -m 0640 -o root -g root "$recovery_environment_file" \
+  /etc/matchplane/recovery/conversion-projections.env
+rm -f "$recovery_environment_file"
+if sudo -u matchplane-conversion -- \
+  test -r /etc/matchplane/recovery/conversion-projections.env; then
+  echo 'conversion projector must not read the root recovery credential' >&2
+  exit 1
+fi
+if [[ $(stat -c '%u:%g %a' /etc/matchplane/recovery/conversion-projections.env) != '0:0 640' ]]; then
+  echo 'conversion recovery credential must be root:root 0640' >&2
+  exit 1
+fi
+
 systemctl daemon-reload
 systemctl reset-failed matchplane-initialize.service \
   matchplane-gateway.service matchplane-payment-service.service >/dev/null 2>&1 || true
 systemctl start matchplane-initialize.service
+sudo -u postgres psql --set=ON_ERROR_STOP=1 matchplane <<'SQL'
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM matchplane_recovery;
+REVOKE CREATE ON SCHEMA public FROM matchplane_recovery;
+GRANT CONNECT ON DATABASE matchplane TO matchplane_recovery;
+GRANT USAGE ON SCHEMA public TO matchplane_recovery;
+GRANT SELECT, UPDATE ON marketplace_conversion_outbox TO matchplane_recovery;
+GRANT SELECT ON marketplace_introduction_contact_events,
+                marketplace_introductions,
+                marketplace_offers,
+                marketplace_parties,
+                marketplace_sales_handoffs
+    TO matchplane_recovery;
+GRANT INSERT ON platform_audit_events TO matchplane_recovery;
+SQL
 systemctl enable --now matchplane-gateway.service matchplane-payment-service.service
 
 for _ in $(seq 1 30); do

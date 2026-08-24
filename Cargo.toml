@@ -61,6 +61,7 @@ rdkafka = { version = "0.39.0", features = ["cmake-build", "ssl-vendored", "trac
 reqwest = { version = "0.13.4", default-features = false, features = ["form", "json", "rustls", "stream"] }
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2.2.0"
+rustix = { version = "1.1.4", features = ["process"] }
 rig-core = { version = "0.42.0", default-features = false }
 rpassword = "7.5.4"
 rsa = { version = "0.9.10", features = ["sha2"] }

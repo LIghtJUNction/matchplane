@@ -1906,6 +1906,7 @@ name = "matchplane-conversion-projector"
 version = "0.1.10"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "matchplane-config",
  "matchplane-observability",
@@ -5154,6 +5155,7 @@ dependencies = [
  "matchplane-storage",
  "reqwest 0.13.4",
  "rpassword",
+ "rustix",
  "scrypt",
  "secrecy",
  "serde",
