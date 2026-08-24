@@ -68,8 +68,8 @@ fi
 # `pg-074a390aaed10fa4`) in the standalone server chunks. Create those aliases
 # from the locked Bun links instead of assuming that the tracer will emit them.
 external_aliases=$(grep -RhoE '"[A-Za-z0-9@._/-]+-[0-9a-f]{14,}"' \
-  "$repository_root/web/.next/server" 2>/dev/null \
-  | sed -E 's/^"|"$//g' | sort -u || true)
+  "$repository_root/web/.next/server" 2>/dev/null |
+  sed -E 's/^"|"$//g' | sort -u || true)
 for external_alias in $external_aliases; do
   package_name=$(printf '%s\n' "$external_alias" | sed -E 's/-[0-9a-f]{14,}$//')
   source_link="$repository_root/web/node_modules/$package_name"
@@ -79,7 +79,7 @@ for external_alias in $external_aliases; do
   package_fragment=${package_link#../../node_modules/.bun/}
   alias_path="$root/usr/share/matchplane/web/node_modules/$external_alias"
   install -d "$(dirname "$alias_path")"
-  [[ -e $alias_path || -L $alias_path ]] || \
+  [[ -e $alias_path || -L $alias_path ]] ||
     ln -s ".bun/$package_fragment" "$alias_path"
 done
 # Bun's isolated linker can make Next's file tracer retain only the CJS half of
