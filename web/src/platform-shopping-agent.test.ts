@@ -1021,7 +1021,7 @@ describe("platform shopping agent", () => {
       { type: "products", productIds: ["offer-1"], presentation: "grid" },
     ]);
     expect(searchPublicStoreOffers).toHaveBeenCalledTimes(1);
-    expect(generateText.mock.calls[0]?.[0].system).toContain("AI 店长");
+    expect(generateText.mock.calls[0]?.[0].system).toContain("在线咨询");
     expect(generateText.mock.calls[0]?.[0].system).toContain("不能替用户同意");
   });
 });
