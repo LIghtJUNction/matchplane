@@ -105,6 +105,129 @@ describe("PlatformAiConfigPanel staged cutover", () => {
     ).toBeDisabled();
   });
 
+  it("prevents concurrent mutations and unlocks every control after a failed test", async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    let failProbe = () => {};
+    api.getManagedPlatformRouterState.mockResolvedValue({
+      config,
+      draft: {
+        ...config,
+        testedReady: true,
+        testedAt: "2026-08-25T00:00:00.000Z",
+        keyChanged: true,
+      },
+      effective,
+    });
+    api.testPlatformAi.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          failProbe = () => reject(new Error("模拟测试失败"));
+        }),
+    );
+
+    render(
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
+    );
+    const endpoint = await screen.findByDisplayValue(longEndpoint);
+    const testButton = screen.getByRole("button", { name: "测试待测配置" });
+    const saveButton = screen.getByRole("button", { name: "保存待测配置" });
+    const activateButton = screen.getByRole("button", {
+      name: "启用已测试配置",
+    });
+    await waitFor(() => expect(testButton).toBeEnabled());
+    expect(activateButton).toBeEnabled();
+    await user.click(testButton);
+
+    await waitFor(() => expect(testButton).toBeDisabled());
+    expect(endpoint).toBeDisabled();
+    expect(saveButton).toBeDisabled();
+    expect(activateButton).toBeDisabled();
+    await user.click(testButton);
+    await user.click(saveButton);
+    await user.click(activateButton);
+    expect(api.testPlatformAi).toHaveBeenCalledTimes(1);
+    expect(api.saveManagedPlatformRouterConfig).not.toHaveBeenCalled();
+    expect(api.activateManagedPlatformRouterConfig).not.toHaveBeenCalled();
+
+    failProbe();
+    await waitFor(() =>
+      expect(onNotice).toHaveBeenCalledWith("模拟测试失败"),
+    );
+    expect(endpoint).toBeEnabled();
+    expect(saveButton).toBeEnabled();
+    expect(testButton).toBeEnabled();
+    expect(activateButton).toBeEnabled();
+  });
+
+  it.each([
+    ["保存", "保存待测配置"],
+    ["启用", "启用已测试配置"],
+  ] as const)(
+    "%s运行时拒绝并发 mutation，并在失败后解锁",
+    async (action, actionName) => {
+      const user = userEvent.setup();
+      const onNotice = vi.fn();
+      let failAction = () => {};
+      api.getManagedPlatformRouterState.mockResolvedValue({
+        config,
+        draft: {
+          ...config,
+          testedReady: true,
+          testedAt: "2026-08-25T00:00:00.000Z",
+          keyChanged: true,
+        },
+        effective,
+      });
+      const actionMock =
+        action === "保存"
+          ? api.saveManagedPlatformRouterConfig
+          : api.activateManagedPlatformRouterConfig;
+      actionMock.mockImplementation(
+        () =>
+          new Promise((_resolve, reject) => {
+            failAction = () => reject(new Error(`模拟${action}失败`));
+          }),
+      );
+
+      render(
+        <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
+      );
+      const endpoint = await screen.findByDisplayValue(longEndpoint);
+      const saveButton = screen.getByRole("button", { name: "保存待测配置" });
+      const testButton = screen.getByRole("button", { name: "测试待测配置" });
+      const activateButton = screen.getByRole("button", {
+        name: "启用已测试配置",
+      });
+      await waitFor(() => expect(activateButton).toBeEnabled());
+      await user.click(screen.getByRole("button", { name: actionName }));
+
+      await waitFor(() => expect(endpoint).toBeDisabled());
+      expect(saveButton).toBeDisabled();
+      expect(testButton).toBeDisabled();
+      expect(activateButton).toBeDisabled();
+      await user.click(saveButton);
+      await user.click(testButton);
+      await user.click(activateButton);
+      expect(api.saveManagedPlatformRouterConfig).toHaveBeenCalledTimes(
+        action === "保存" ? 1 : 0,
+      );
+      expect(api.testPlatformAi).not.toHaveBeenCalled();
+      expect(api.activateManagedPlatformRouterConfig).toHaveBeenCalledTimes(
+        action === "启用" ? 1 : 0,
+      );
+
+      failAction();
+      await waitFor(() =>
+        expect(onNotice).toHaveBeenCalledWith(`模拟${action}失败`),
+      );
+      expect(endpoint).toBeEnabled();
+      expect(saveButton).toBeEnabled();
+      expect(testButton).toBeEnabled();
+      expect(activateButton).toBeEnabled();
+    },
+  );
+
   it("stages without replacing active config and enables only an attested draft", async () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();

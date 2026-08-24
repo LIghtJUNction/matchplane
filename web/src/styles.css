@@ -1440,8 +1440,8 @@ main { padding: 0.75rem 0.9rem 5rem; }
 .login-card { padding: 1.35rem; border-radius: 1.1rem; }
 .login-card-header .brand { margin-bottom: 1.7rem; }
 .root-email-actions { align-items: stretch; flex-direction: column; }
-.root-email-action-buttons { width: 100%; }
-.root-email-save, .root-email-test { flex: 1; }
+.root-email-action-buttons { width: 100%; flex-wrap: wrap; }
+.root-email-save, .root-email-test { min-width: 0; flex: 1 1 8.5rem; white-space: normal; }
 }
 .header-store-action:hover, .header-store-action:focus-visible { border-color: var(--cactus-ink); background: var(--paper-deep); outline: 0; }
 .header-store-action:active { transform: scale(0.97); }

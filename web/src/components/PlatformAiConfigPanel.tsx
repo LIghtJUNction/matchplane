@@ -61,6 +61,7 @@ export function PlatformAiConfigPanel({
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [activating, setActivating] = useState(false);
+  const interactionLocked = loading || saving || testing || activating;
   const reasoningEfforts = useMemo(() => {
     const listed = models.find(
       (candidate) => candidate.id === model,
@@ -266,7 +267,7 @@ export function PlatformAiConfigPanel({
           <Input
             id="platform-ai-endpoint"
             value={endpoint}
-            disabled={!canEdit || loading}
+            disabled={!canEdit || interactionLocked}
             onChange={(event) => setEndpoint(event.target.value)}
             placeholder="https://api.lmm.best/v1"
             inputMode="url"
@@ -277,7 +278,7 @@ export function PlatformAiConfigPanel({
           <select
             id="platform-ai-protocol"
             value={protocol}
-            disabled={!canEdit || loading}
+            disabled={!canEdit || interactionLocked}
             onChange={(event) => {
               setProtocol(
                 event.target.value as ManagedPlatformRouterConfig["protocol"],
@@ -300,7 +301,7 @@ export function PlatformAiConfigPanel({
             id="platform-ai-key"
             type="password"
             value={apiKey}
-            disabled={!canEdit || loading}
+            disabled={!canEdit || interactionLocked}
             onChange={(event) => setApiKey(event.target.value)}
             autoComplete="new-password"
             placeholder={
@@ -314,7 +315,7 @@ export function PlatformAiConfigPanel({
           <button
             className="root-email-test"
             type="button"
-            disabled={!canEdit || modelsLoading || loading}
+            disabled={!canEdit || modelsLoading || interactionLocked}
             onClick={() => void loadModels()}
           >
             {modelsLoading ? "获取中…" : "获取模型列表"}
@@ -324,7 +325,7 @@ export function PlatformAiConfigPanel({
             <select
               id="platform-ai-model"
               value={model}
-              disabled={!canEdit || loading || !models.length}
+              disabled={!canEdit || interactionLocked || !models.length}
               onChange={(event) => {
                 const next = event.target.value;
                 setModel(next);
@@ -351,7 +352,7 @@ export function PlatformAiConfigPanel({
           <input
             type="checkbox"
             checked={enabled}
-            disabled={!canEdit || loading}
+            disabled={!canEdit || interactionLocked}
             onChange={(event) => setEnabled(event.target.checked)}
           />
           启用商城 AI 导购
@@ -366,7 +367,7 @@ export function PlatformAiConfigPanel({
             <textarea
               id="platform-ai-instructions"
               value={assistantInstructions}
-              disabled={!canEdit || loading}
+              disabled={!canEdit || interactionLocked}
               maxLength={4000}
               rows={4}
               onChange={(event) => setAssistantInstructions(event.target.value)}
@@ -380,7 +381,7 @@ export function PlatformAiConfigPanel({
               min={64}
               max={512}
               value={assistantMaxOutputTokens}
-              disabled={!canEdit || loading}
+              disabled={!canEdit || interactionLocked}
               onChange={(event) =>
                 setAssistantMaxOutputTokens(event.target.value)
               }
@@ -395,7 +396,7 @@ export function PlatformAiConfigPanel({
               max={1}
               step={0.1}
               value={assistantTemperature}
-              disabled={!canEdit || loading}
+              disabled={!canEdit || interactionLocked}
               onChange={(event) => setAssistantTemperature(event.target.value)}
             />
             <small>0 更稳定，1 更开放</small>
@@ -407,7 +408,7 @@ export function PlatformAiConfigPanel({
               min={2}
               max={8}
               value={assistantMaxSteps}
-              disabled={!canEdit || loading}
+              disabled={!canEdit || interactionLocked}
               onChange={(event) => setAssistantMaxSteps(event.target.value)}
             />
             <small>2–8 步，保留最终回答</small>
@@ -420,7 +421,7 @@ export function PlatformAiConfigPanel({
               max={30000}
               step={1000}
               value={assistantTimeoutMs}
-              disabled={!canEdit || loading}
+              disabled={!canEdit || interactionLocked}
               onChange={(event) => setAssistantTimeoutMs(event.target.value)}
             />
             <small>4000–30000 ms</small>
@@ -430,7 +431,7 @@ export function PlatformAiConfigPanel({
               <span>思考等级</span>
               <select
                 value={assistantReasoningEffort}
-                disabled={!canEdit || loading}
+                disabled={!canEdit || interactionLocked}
                 onChange={(event) =>
                   setAssistantReasoningEffort(event.target.value)
                 }
@@ -489,7 +490,7 @@ export function PlatformAiConfigPanel({
               <button
                 className="root-email-save"
                 type="button"
-                disabled={saving || loading}
+                disabled={interactionLocked}
                 onClick={() => void save()}
               >
                 <Save size={16} aria-hidden="true" />
@@ -501,7 +502,7 @@ export function PlatformAiConfigPanel({
               type="button"
               disabled={
                 !canEdit ||
-                testing ||
+                interactionLocked ||
                 !draft?.credentialConfigured ||
                 !draft.enabled
               }
@@ -514,7 +515,7 @@ export function PlatformAiConfigPanel({
               <button
                 className="root-email-save"
                 type="button"
-                disabled={activating || !draft?.testedReady}
+                disabled={interactionLocked || !draft?.testedReady}
                 onClick={() => void activate()}
               >
                 <Power size={16} aria-hidden="true" />
