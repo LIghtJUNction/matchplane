@@ -44,6 +44,16 @@ web:
   # Optional read-only PVC populated by the deployment secret manager. Its layout is
   # <tenant-uuid>/<domain-uuid>/<slot-name> and is never writable by the web pod.
   secretPvc: ''
+  # Durable state for Web-managed router generations, audit delivery, and credential slots.
+  # This storage is mandatory because an ephemeral Web filesystem can silently lose an activated
+  # router during a restart. Replicated Web requires ReadWriteMany-capable storage.
+  platformRouterStorage:
+    enabled: true
+    existingClaim: ''
+    storageClass: ''
+    size: 1Gi
+    accessModes:
+      - ReadWriteMany
   # The router provider is optional. Keep its API key in existingWebSecret under router-ai-key.
   routerAiUrl: ''
   routerAiModel: ''
@@ -206,6 +216,7 @@ podSecurityContext:
   runAsUser: 12001
   runAsGroup: 12001
   fsGroup: 12001
+  fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
     type: RuntimeDefault
 

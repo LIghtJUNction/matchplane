@@ -30,6 +30,9 @@ install -d -m 0750 -o root -g matchplane /etc/matchplane/secrets
 install -d -m 0750 -o root -g matchplane-gateway /etc/matchplane/secrets/gateway
 install -d -m 0750 -o root -g matchplane-payment /etc/matchplane/secrets/payment
 install -d -m 0750 -o root -g matchplane-web /etc/matchplane/secrets/web
+# Repair only the router-state root metadata; Web owns creation of pointers, generations, audit
+# records, and credential slots below it, so bootstrap never truncates or replaces existing state.
+install -d -m 0770 -o root -g matchplane-web /etc/matchplane/secrets/root-email
 install -d -m 0750 -o root -g matchplane /etc/matchplane/services
 install -d -m 0750 -o matchplane-web -g matchplane-web /var/lib/matchplane/subplatform-uploads
 

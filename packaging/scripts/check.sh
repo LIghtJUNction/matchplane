@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$repository_root"
@@ -72,6 +73,36 @@ if ! rg -q '^d /var/lib/matchplane/media 0750 matchplane-web matchplane-web -$' 
   || ! rg -q '^ReadWritePaths=.* /var/lib/matchplane/media( |$)' \
   packaging/systemd/matchplane-web.service; then
   echo 'hosted store media must be private and writable by the web service' >&2
+  exit 1
+fi
+
+router_state_root='/etc/matchplane/secrets/root-email'
+if ! rg -q '^d /etc/matchplane/secrets/root-email 0770 root matchplane-web -$' \
+  packaging/tmpfiles/matchplane.conf \
+  || ! rg -q '^install -d -m 0770 -o root -g matchplane-web /etc/matchplane/secrets/root-email$' \
+  deploy/scripts/configure-ubuntu-host.sh \
+  || ! rg -q '^ReadWritePaths=.* /etc/matchplane/secrets/root-email( |$)' \
+  packaging/systemd/matchplane-web.service; then
+  echo 'platform-router state root must be root:matchplane-web 0770 and writable only by Web' >&2
+  exit 1
+fi
+if ! rg -q 'mkdirSync\(directory, \{ mode: 0o750 \}\);' \
+  web/src/lib/platform-router-config/transaction.ts \
+  || ! rg -q 'writeExclusiveFile\(generationTemporary, generationBytes, 0o640, environment\);' \
+  web/src/lib/platform-router-config/transaction.ts \
+  || ! rg -q 'fchmodSync\(descriptor, 0o640\);' \
+  web/src/lib/platform-router-config/protected-storage.ts; then
+  echo 'Web must remain the runtime owner of 0750 generation directories and 0640 state files' >&2
+  exit 1
+fi
+if rg -q "^[^d#].*${router_state_root}" packaging/tmpfiles/matchplane.conf \
+  || rg -q 'root-email|platform-router' packaging/systemd --glob '*.timer'; then
+  echo 'platform-router credential temporaries must not be removed by tmpfiles or a cleanup timer' >&2
+  exit 1
+fi
+if ! rg -q 'Credential-shaped temporary files are not age-cleaned by tmpfiles or a systemd timer' \
+  docs/platform-router-state-storage.md; then
+  echo 'platform-router storage documentation must preserve the no-age-cleanup contract' >&2
   exit 1
 fi
 

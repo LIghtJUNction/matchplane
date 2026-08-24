@@ -47,6 +47,28 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+  Managed platform-router state must survive Web pod replacement. The chart either owns the PVC
+  or mounts an operator-provided claim. Replicas share one current pointer, so more than one Web
+  pod requires a ReadWriteMany-capable claim rather than independent or node-local storage.
+*/}}
+{{- define "matchplane.platformRouterClaimName" -}}
+{{- $storage := required "web.platformRouterStorage is required" .Values.web.platformRouterStorage -}}
+{{- if not $storage.enabled -}}
+{{- fail "web.platformRouterStorage.enabled must be true while the Web deployment is enabled" -}}
+{{- end -}}
+{{- $accessModes := required "web.platformRouterStorage.accessModes must not be empty" $storage.accessModes -}}
+{{- if and (gt (int .Values.web.replicas) 1) (not (has "ReadWriteMany" $accessModes)) -}}
+{{- fail "web.platformRouterStorage.accessModes must include ReadWriteMany when web.replicas is greater than one" -}}
+{{- end -}}
+{{- if $storage.existingClaim -}}
+{{- $storage.existingClaim -}}
+{{- else -}}
+{{- $_ := required "web.platformRouterStorage.size is required when existingClaim is empty" $storage.size -}}
+{{- printf "%s-platform-router-state" (include "matchplane.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
   Runtime credentials are intentionally selected per workload. The legacy
   runtime.existingSecret value remains a development/test fallback only; a
   production render fails unless every workload has its own secret. Each

@@ -149,6 +149,31 @@ spec:
       securityContext:
         {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: 30
+      # A short-lived, capability-bounded root init fixes only the PVC root. Runtime Web remains
+      # non-root and creates generation directories/files itself with 0750/0640 modes.
+      initContainers:
+        - name: prepare-platform-router-state
+          image: {{ include "matchplane.webImage" $root }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - >-
+              chown 0:{{ $root.Values.podSecurityContext.fsGroup }} /etc/matchplane/secrets/root-email &&
+              chmod 0770 /etc/matchplane/secrets/root-email
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "FOWNER"]
+          volumeMounts:
+            - name: platform-router-state
+              mountPath: /etc/matchplane/secrets/root-email
+              readOnly: false
       containers:
         - name: web
           image: {{ include "matchplane.webImage" $root }}
@@ -306,6 +331,9 @@ spec:
             - name: admin-bearer-secrets
               mountPath: /run/matchplane/admin-secrets
               readOnly: true
+            - name: platform-router-state
+              mountPath: /etc/matchplane/secrets/root-email
+              readOnly: false
           {{- if $root.Values.web.artifactPvc }}
             - name: subplatform-artifacts
               mountPath: {{ $root.Values.web.artifactRoot | quote }}
@@ -329,6 +357,9 @@ spec:
           resources:
             {{- toYaml (default $root.Values.resources $root.Values.web.resources) | nindent 12 }}
       volumes:
+        - name: platform-router-state
+          persistentVolumeClaim:
+            claimName: {{ include "matchplane.platformRouterClaimName" $root }}
         - name: admin-bearer-secrets
           projected:
             defaultMode: 0440
