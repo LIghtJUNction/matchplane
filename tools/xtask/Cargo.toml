@@ -21,7 +21,6 @@ matchplane-domain.workspace = true
 matchplane-storage.workspace = true
 reqwest.workspace = true
 rpassword.workspace = true
-rustix.workspace = true
 scrypt.workspace = true
 secrecy.workspace = true
 serde.workspace = true

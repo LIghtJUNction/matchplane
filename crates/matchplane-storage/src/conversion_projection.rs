@@ -41,13 +41,13 @@ pub struct MarketplaceConversionJob {
     pub claim_token: Uuid,
 }
 
-/// One atomically claimed conversion batch plus expired claims dead-lettered by the watchdog.
+/// One atomically claimed conversion batch plus exhausted jobs dead-lettered by the watchdog.
 #[derive(Debug, Clone)]
 pub struct MarketplaceConversionClaimBatch {
     /// Aggregate-head jobs fenced to this worker claim.
     pub jobs: Vec<MarketplaceConversionJob>,
-    /// Expired jobs moved to `dead` before this batch was claimed.
-    pub expired_dead: u64,
+    /// Attempt-exhausted jobs moved to `dead` before this batch was claimed.
+    pub exhausted_dead: u64,
 }
 
 /// Durable result of returning one failed projection claim.
@@ -145,17 +145,22 @@ impl PgStore {
     ) -> Result<MarketplaceConversionClaimBatch, StorageError> {
         let claim_token = Uuid::now_v7();
         let mut transaction = self.pool().begin().await?;
-        let expired_dead = sqlx::query(
+        let exhausted_dead = sqlx::query(
             "UPDATE marketplace_conversion_outbox \
                 SET status = 'dead', \
                     claimed_at = NULL, \
                     claim_token = NULL, \
                     claim_expires_at = NULL, \
                     dead_at = clock_timestamp(), \
-                    last_error = 'worker claim expired after maximum delivery attempts' \
-              WHERE status = 'publishing' \
-                AND claim_expires_at <= clock_timestamp() \
-                AND attempts >= $1",
+                    last_error = CASE \
+                        WHEN status = 'publishing' \
+                            THEN 'worker claim expired after maximum delivery attempts' \
+                        ELSE 'worker dead-lettered row at or above maximum delivery attempts' \
+                    END \
+              WHERE attempts >= $1 \
+                AND (status IN ('pending', 'failed') \
+                     OR (status = 'publishing' \
+                         AND claim_expires_at <= clock_timestamp()))",
         )
         .bind(MAX_DELIVERY_ATTEMPTS)
         .execute(&mut *transaction)
@@ -166,9 +171,9 @@ impl PgStore {
                  SELECT candidate.id \
                    FROM marketplace_conversion_outbox AS candidate \
                   WHERE candidate.available_at <= clock_timestamp() \
+                    AND candidate.attempts < $4 \
                     AND (candidate.status IN ('pending', 'failed') \
                          OR (candidate.status = 'publishing' \
-                             AND candidate.attempts < $4 \
                              AND candidate.claim_expires_at <= clock_timestamp())) \
                     AND NOT EXISTS ( \
                         SELECT 1 \
@@ -227,7 +232,7 @@ impl PgStore {
         transaction.commit().await?;
         Ok(MarketplaceConversionClaimBatch {
             jobs,
-            expired_dead: expired_dead.rows_affected(),
+            exhausted_dead: exhausted_dead.rows_affected(),
         })
     }
 

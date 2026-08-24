@@ -178,7 +178,9 @@ write_service_environment() {
     printf 'MATCHPLANE_SERVICE_ROLE=%s\n' "$service"
     printf 'MATCHPLANE_DATABASE_URL=postgres://matchplane:%s@127.0.0.1:5432/matchplane\n' \
       "$database_password"
-    printf '%s\n' 'MATCHPLANE_VALKEY_URL=redis://127.0.0.1:6379/'
+    if [[ $service != conversion-projector ]]; then
+      printf '%s\n' 'MATCHPLANE_VALKEY_URL=redis://127.0.0.1:6379/'
+    fi
     if [[ $service == conversion-projector ]]; then
       # Ship the workload declared but disabled. The root operator must explicitly flip this
       # after migrations, alerting, and recovery access have been verified.

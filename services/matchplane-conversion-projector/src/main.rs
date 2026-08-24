@@ -60,6 +60,8 @@ async fn main() -> anyhow::Result<()> {
                 &store,
                 WorkerSettings {
                     poll_interval: Duration::from_millis(config.conversion_projector_poll_ms),
+                    #[cfg(test)]
+                    poll_observed: None,
                 },
                 metrics,
                 worker_shutdown,

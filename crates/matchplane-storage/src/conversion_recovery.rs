@@ -16,12 +16,16 @@ pub struct VerifiedHostOperator {
 }
 
 impl VerifiedHostOperator {
-    /// Constructs host-operator proof only for the operating-system root identity.
+    /// Verifies that the current host process is running as the operating-system root identity.
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError::Forbidden`] when `effective_uid` is not zero.
-    pub fn from_effective_uid(effective_uid: u32) -> Result<Self, StorageError> {
+    /// Returns [`StorageError::Forbidden`] when the real effective UID is not zero.
+    pub fn verify_current_process() -> Result<Self, StorageError> {
+        Self::from_effective_uid(rustix::process::geteuid().as_raw())
+    }
+
+    fn from_effective_uid(effective_uid: u32) -> Result<Self, StorageError> {
         if effective_uid != 0 {
             return Err(StorageError::Forbidden(
                 "conversion projection apply requires effective UID 0".to_owned(),
@@ -337,7 +341,16 @@ async fn canonical_recovery_scope(
 
 #[cfg(test)]
 mod tests {
-    use crate::bounded_operator_text;
+    use crate::{StorageError, VerifiedHostOperator, bounded_operator_text};
+
+    #[test]
+    fn host_operator_proof_should_only_accept_root_in_the_private_test_seam() {
+        assert!(VerifiedHostOperator::from_effective_uid(0).is_ok());
+        assert!(matches!(
+            VerifiedHostOperator::from_effective_uid(1_000),
+            Err(StorageError::Forbidden(_))
+        ));
+    }
 
     #[test]
     fn recovery_reason_must_be_bounded_and_printable() {

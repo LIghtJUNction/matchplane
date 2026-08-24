@@ -958,16 +958,35 @@ fn read_password_maintenance_env_file(path: &Path) -> Result<Option<PasswordMain
 
 fn load_conversion_recovery_connection<F>(
     apply: bool,
-    effective_uid: u32,
     recovery_path: &Path,
     load_ordinary_config: F,
 ) -> Result<(String, Option<VerifiedHostOperator>)>
 where
     F: FnOnce() -> Result<PasswordMaintenanceConfig>,
 {
+    load_conversion_recovery_connection_with_verifier(
+        apply,
+        recovery_path,
+        load_ordinary_config,
+        || {
+            VerifiedHostOperator::verify_current_process()
+                .context("conversion projection apply is restricted to the root host operator")
+        },
+    )
+}
+
+fn load_conversion_recovery_connection_with_verifier<F, V>(
+    apply: bool,
+    recovery_path: &Path,
+    load_ordinary_config: F,
+    verify_host_operator: V,
+) -> Result<(String, Option<VerifiedHostOperator>)>
+where
+    F: FnOnce() -> Result<PasswordMaintenanceConfig>,
+    V: FnOnce() -> Result<VerifiedHostOperator>,
+{
     if apply {
-        let host_operator = VerifiedHostOperator::from_effective_uid(effective_uid)
-            .context("conversion projection apply is restricted to the root host operator")?;
+        let host_operator = verify_host_operator()?;
         let database_url = read_conversion_recovery_database_url(recovery_path)?;
         return Ok((database_url, Some(host_operator)));
     }
@@ -1045,10 +1064,6 @@ fn validate_root_owned_recovery_path(
         );
     }
     Ok(())
-}
-
-fn current_effective_uid() -> u32 {
-    rustix::process::geteuid().as_raw()
 }
 
 fn non_empty_environment_value(name: &str) -> Option<String> {
@@ -1533,7 +1548,6 @@ async fn recover_conversion_projection_command(
     validate_operator_uuid(job_id, "job_id")?;
     let (database_url, host_operator) = load_conversion_recovery_connection(
         apply,
-        current_effective_uid(),
         Path::new(CONVERSION_RECOVERY_ENV_FILE),
         || {
             load_password_maintenance_config()
@@ -2075,13 +2089,13 @@ mod tests {
 
     use super::{
         AdminInviteRole, AuthCommand, Cli, Command, ConversionProjectionCommand,
-        RecoveryPathSecurity, SecretCommand, Service, admin_invite_role_value,
-        better_auth_derived_key, current_effective_uid, dotenv_value,
+        PasswordMaintenanceConfig, RecoveryPathSecurity, SecretCommand, Service,
+        admin_invite_role_value, better_auth_derived_key, dotenv_value,
         hosted_agent_report_from_managed_values, hosted_agent_report_from_values,
-        load_conversion_recovery_connection, normalize_admin_base_url, resolve_web_node_with,
-        safe_endpoint_origin, select_root_admin_email, service_command, sha256, tool_list,
-        valid_root_email_secret_slot, validate_operator_email, validate_operator_uuid,
-        validate_root_owned_recovery_path,
+        load_conversion_recovery_connection, load_conversion_recovery_connection_with_verifier,
+        normalize_admin_base_url, resolve_web_node_with, safe_endpoint_origin,
+        select_root_admin_email, service_command, sha256, tool_list, valid_root_email_secret_slot,
+        validate_operator_email, validate_operator_uuid, validate_root_owned_recovery_path,
     };
     use clap::Parser;
     use uuid::Uuid;
@@ -2132,20 +2146,16 @@ mod tests {
     }
 
     #[test]
-    fn conversion_apply_rejects_non_root_before_reading_configuration() {
+    fn conversion_apply_rejects_non_root_before_reading_files_or_configuration() {
         let configuration_read = Cell::new(false);
-        let effective_uid = match current_effective_uid() {
-            0 => 1_000,
-            uid => uid,
-        };
-        let result = load_conversion_recovery_connection(
+        let result = load_conversion_recovery_connection_with_verifier(
             true,
-            effective_uid,
             Path::new("/missing/recovery.env"),
             || {
                 configuration_read.set(true);
                 unreachable!("ordinary database configuration must not be read for apply")
             },
+            || Err(anyhow::anyhow!("root host operator verification failed")),
         );
 
         assert!(!configuration_read.get());
@@ -2153,20 +2163,21 @@ mod tests {
     }
 
     #[test]
-    fn conversion_apply_never_falls_back_to_ordinary_database_configuration() {
+    fn conversion_dry_run_uses_ordinary_database_configuration() -> anyhow::Result<()> {
         let configuration_read = Cell::new(false);
-        let result = load_conversion_recovery_connection(
-            true,
-            0,
-            Path::new("/missing/recovery.env"),
-            || {
+        let (database_url, host_operator) =
+            load_conversion_recovery_connection(false, Path::new("/missing/recovery.env"), || {
                 configuration_read.set(true);
-                unreachable!("ordinary database configuration must not authorize apply")
-            },
-        );
+                Ok(PasswordMaintenanceConfig {
+                    database_url: "postgres://dry-run".to_owned(),
+                    root_admin_email: None,
+                })
+            })?;
 
-        assert!(!configuration_read.get());
-        assert!(result.is_err_and(|error| error.to_string().contains("could not inspect")));
+        assert!(configuration_read.get());
+        assert_eq!(database_url, "postgres://dry-run");
+        assert!(host_operator.is_none());
+        Ok(())
     }
 
     #[test]

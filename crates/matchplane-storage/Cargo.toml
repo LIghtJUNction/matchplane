@@ -15,6 +15,7 @@ matchplane-events.workspace = true
 matchplane-payments.workspace = true
 matchplane-protocol.workspace = true
 prost.workspace = true
+rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

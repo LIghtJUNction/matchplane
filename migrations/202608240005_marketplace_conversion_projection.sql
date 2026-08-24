@@ -55,6 +55,7 @@ ALTER TABLE marketplace_conversion_outbox
 
 WITH ranked AS (
     SELECT id,
+           status IN ('pending', 'failed') AND attempts >= 12 AS delivery_exhausted,
            row_number() OVER (
                PARTITION BY tenant_id, aggregate_type, aggregate_id
                ORDER BY created_at, id
@@ -63,6 +64,10 @@ WITH ranked AS (
 )
 UPDATE marketplace_conversion_outbox AS outbox
 SET aggregate_version = ranked.aggregate_version,
+    status = CASE
+        WHEN ranked.delivery_exhausted THEN 'dead'
+        ELSE outbox.status
+    END,
     attempts = CASE
         WHEN outbox.status = 'publishing' THEN GREATEST(outbox.attempts, 1)
         ELSE outbox.attempts
@@ -78,7 +83,7 @@ SET aggregate_version = ranked.aggregate_version,
             THEN COALESCE(outbox.published_at, outbox.claimed_at, outbox.created_at)
     END,
     dead_at = CASE
-        WHEN outbox.status = 'dead'
+        WHEN outbox.status = 'dead' OR ranked.delivery_exhausted
             THEN COALESCE(
                 outbox.dead_at,
                 outbox.last_attempt_at,
@@ -102,6 +107,11 @@ SET aggregate_version = ranked.aggregate_version,
                 outbox.dead_at,
                 outbox.created_at
             )
+    END,
+    last_error = CASE
+        WHEN ranked.delivery_exhausted
+            THEN 'migration dead-lettered 004 row at or above maximum delivery attempts'
+        ELSE outbox.last_error
     END
 FROM ranked
 WHERE ranked.id = outbox.id;

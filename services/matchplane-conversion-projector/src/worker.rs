@@ -12,9 +12,11 @@ use crate::worker_metrics::WorkerMetrics;
 
 const SERIAL_CLAIM_LIMIT: i64 = 1;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct WorkerSettings {
     pub(crate) poll_interval: Duration,
+    #[cfg(test)]
+    pub(crate) poll_observed: Option<Arc<tokio::sync::Notify>>,
 }
 
 pub(crate) trait ConversionStore: Send + Sync {
@@ -79,13 +81,19 @@ pub(crate) async fn run_worker<S: ConversionStore>(
         match claimed {
             Ok(batch) => {
                 let is_empty = batch.jobs.is_empty();
-                handle_claim_batch(store, batch, &metrics, &shutdown).await;
+                handle_claim_batch(store, batch, &metrics).await;
                 refresh_backlog(store, &metrics).await;
                 if *shutdown.borrow() {
                     return;
                 }
-                if is_empty && wait_for_poll(settings.poll_interval, &mut shutdown).await {
-                    return;
+                if is_empty {
+                    #[cfg(test)]
+                    if let Some(poll_observed) = &settings.poll_observed {
+                        poll_observed.notify_one();
+                    }
+                    if wait_for_poll(settings.poll_interval, &mut shutdown).await {
+                        return;
+                    }
                 }
             }
             Err(error_value) => {
@@ -107,20 +115,17 @@ async fn handle_claim_batch<S: ConversionStore>(
     store: &S,
     batch: MarketplaceConversionClaimBatch,
     metrics: &WorkerMetrics,
-    shutdown: &watch::Receiver<bool>,
 ) {
-    metrics.record_batch(batch.jobs.len(), batch.expired_dead);
-    if batch.expired_dead != 0 {
+    metrics.record_batch(batch.jobs.len(), batch.exhausted_dead);
+    if batch.exhausted_dead != 0 {
         warn!(
-            dead_count = batch.expired_dead,
-            outcome = "lease_expired_dead",
-            "conversion projection lease watchdog dead-lettered jobs"
+            dead_count = batch.exhausted_dead,
+            outcome = "attempts_exhausted_dead",
+            "conversion projection claim watchdog dead-lettered exhausted jobs"
         );
     }
     for job in batch.jobs {
-        if *shutdown.borrow() {
-            return;
-        }
+        // Once claim_batch commits a lease, shutdown must not strand it in publishing.
         process_job(store, &job, metrics).await;
     }
 }
@@ -290,7 +295,10 @@ mod tests {
         },
     };
 
-    use tokio::{sync::watch, time::timeout};
+    use tokio::{
+        sync::{Notify, watch},
+        time::timeout,
+    };
     use uuid::Uuid;
 
     use super::*;
@@ -303,7 +311,7 @@ mod tests {
         claimed_jobs: Mutex<Vec<Uuid>>,
         claim_limits: Mutex<Vec<i64>>,
         projected_jobs: AtomicUsize,
-        shutdown_after_first: Option<watch::Sender<bool>>,
+        shutdown_before_claim_return: Option<watch::Sender<bool>>,
     }
 
     impl MockStore {
@@ -318,7 +326,7 @@ mod tests {
                 claimed_jobs: Mutex::new(Vec::new()),
                 claim_limits: Mutex::new(Vec::new()),
                 projected_jobs: AtomicUsize::new(0),
-                shutdown_after_first: None,
+                shutdown_before_claim_return: None,
             }
         }
 
@@ -370,9 +378,14 @@ mod tests {
                     StorageError::InvalidData("mock claimed jobs lock poisoned".to_owned())
                 })?
                 .extend(jobs.iter().map(|job| job.id));
+            if !jobs.is_empty()
+                && let Some(sender) = &self.shutdown_before_claim_return
+            {
+                let _ = sender.send(true);
+            }
             Ok(MarketplaceConversionClaimBatch {
                 jobs,
-                expired_dead: 0,
+                exhausted_dead: 0,
             })
         }
 
@@ -380,21 +393,14 @@ mod tests {
             &self,
             _job: &MarketplaceConversionJob,
         ) -> Result<MarketplaceConversionProjectionOutcome, StorageError> {
-            let index = self.projected_jobs.fetch_add(1, Ordering::Relaxed);
-            let result = self
-                .project_results
+            self.projected_jobs.fetch_add(1, Ordering::Relaxed);
+            self.project_results
                 .lock()
                 .map_err(|_| StorageError::InvalidData("mock project lock poisoned".to_owned()))?
                 .pop_front()
                 .ok_or_else(|| {
                     StorageError::InvalidData("missing mock project result".to_owned())
-                })?;
-            if index == 0
-                && let Some(sender) = &self.shutdown_after_first
-            {
-                let _ = sender.send(true);
-            }
-            result
+                })?
         }
 
         async fn fail(
@@ -443,15 +449,13 @@ mod tests {
         metrics: &WorkerMetrics,
         jobs: Vec<MarketplaceConversionJob>,
     ) {
-        let (_shutdown_tx, shutdown) = watch::channel(false);
         handle_claim_batch(
             store,
             MarketplaceConversionClaimBatch {
                 jobs,
-                expired_dead: 0,
+                exhausted_dead: 0,
             },
             metrics,
-            &shutdown,
         )
         .await;
     }
@@ -509,7 +513,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shutdown_should_not_claim_or_increment_an_unstarted_job()
+    async fn shutdown_after_claim_commit_should_finish_the_claimed_job()
     -> Result<(), Box<dyn std::error::Error>> {
         let (shutdown_tx, shutdown) = watch::channel(false);
         let mut first = job();
@@ -525,7 +529,7 @@ mod tests {
             })],
             Vec::new(),
         );
-        store.shutdown_after_first = Some(shutdown_tx);
+        store.shutdown_before_claim_return = Some(shutdown_tx);
         let store = store.with_unclaimed_jobs(vec![first, unstarted]);
         let metrics = Arc::new(WorkerMetrics::default());
 
@@ -535,6 +539,7 @@ mod tests {
                 &store,
                 WorkerSettings {
                     poll_interval: Duration::from_secs(60),
+                    poll_observed: None,
                 },
                 Arc::clone(&metrics),
                 shutdown,
@@ -567,6 +572,43 @@ mod tests {
         assert_eq!(remaining.front().map(|job| job.attempts), Some(0));
         assert_eq!(store.projected_jobs.load(Ordering::Relaxed), 1);
         assert_eq!(metrics.snapshot().projected, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn shutdown_should_interrupt_an_empty_sixty_second_poll()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (shutdown_tx, shutdown) = watch::channel(false);
+        let poll_observed = Arc::new(Notify::new());
+        let store = Arc::new(MockStore::new(Vec::new(), Vec::new()));
+        let worker_store = Arc::clone(&store);
+        let worker_poll_observed = Arc::clone(&poll_observed);
+        let worker = tokio::spawn(async move {
+            run_worker(
+                worker_store.as_ref(),
+                WorkerSettings {
+                    poll_interval: Duration::from_secs(60),
+                    poll_observed: Some(worker_poll_observed),
+                },
+                Arc::new(WorkerMetrics::default()),
+                shutdown,
+            )
+            .await;
+        });
+
+        poll_observed.notified().await;
+        shutdown_tx.send(true)?;
+        timeout(Duration::from_secs(1), worker).await??;
+
+        assert_eq!(
+            store
+                .claim_limits
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_slice(),
+            [SERIAL_CLAIM_LIMIT]
+        );
+        assert_eq!(store.projected_jobs.load(Ordering::Relaxed), 0);
         Ok(())
     }
 }

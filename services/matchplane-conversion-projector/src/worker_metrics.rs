@@ -22,13 +22,13 @@ pub(crate) struct WorkerMetrics {
 }
 
 impl WorkerMetrics {
-    pub(crate) fn record_batch(&self, claimed: usize, expired_dead: u64) {
+    pub(crate) fn record_batch(&self, claimed: usize, exhausted_dead: u64) {
         let claimed = u64::try_from(claimed).unwrap_or(u64::MAX);
         self.claimed.fetch_add(claimed, Ordering::Relaxed);
         self.last_batch_size.store(claimed, Ordering::Relaxed);
-        self.dead.fetch_add(expired_dead, Ordering::Relaxed);
+        self.dead.fetch_add(exhausted_dead, Ordering::Relaxed);
         counter!("matchplane_conversion_projector_claimed_total").increment(claimed);
-        counter!("matchplane_conversion_projector_dead_total").increment(expired_dead);
+        counter!("matchplane_conversion_projector_dead_total").increment(exhausted_dead);
         histogram!("matchplane_conversion_projector_batch_size").record(claimed as f64);
     }
 

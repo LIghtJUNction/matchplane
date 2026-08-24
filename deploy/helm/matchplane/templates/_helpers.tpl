@@ -50,8 +50,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   Runtime credentials are intentionally selected per workload. The legacy
   runtime.existingSecret value remains a development/test fallback only; a
   production render fails unless every workload has its own secret. Each
-  workload secret must expose database-url and valkey-url. This keeps a
-  compromised public service from inheriting the payment/migration identity.
+  workload secret must expose database-url; cache-using workloads also expose
+  valkey-url. This keeps a compromised public service from inheriting the
+  payment/migration identity.
 */}}
 {{- define "matchplane.runtimeSecret" -}}
 {{- $root := .root -}}
@@ -108,11 +109,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ $root.Values.runtime.kafkaSslCertificateLocation | quote }}
 - name: MATCHPLANE_KAFKA_SSL_KEY_LOCATION
   value: {{ $root.Values.runtime.kafkaSslKeyLocation | quote }}
+{{- if ne $service "conversion-projector" }}
 - name: MATCHPLANE_VALKEY_URL
   valueFrom:
     secretKeyRef:
       name: {{ include "matchplane.runtimeSecret" (dict "root" $root "service" $service) }}
       key: valkey-url
+{{- end }}
 - name: MATCHPLANE_LOG_FILTER
   value: {{ $root.Values.runtime.logFilter | quote }}
 - name: MATCHPLANE_OTLP_ENDPOINT

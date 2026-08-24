@@ -305,12 +305,14 @@ impl AppConfig {
         for (field, value) in [
             ("MATCHPLANE_DATABASE_URL", self.database_url.as_str()),
             ("MATCHPLANE_KAFKA_BROKERS", self.kafka_brokers.as_str()),
-            ("MATCHPLANE_VALKEY_URL", self.valkey_url.as_str()),
             ("MATCHPLANE_OTLP_ENDPOINT", self.otlp_endpoint.as_str()),
         ] {
             if value.trim().is_empty() {
                 errors.push(ConfigError::Empty(field));
             }
+        }
+        if self.service_role != "conversion-projector" && self.valkey_url.trim().is_empty() {
+            errors.push(ConfigError::Empty("MATCHPLANE_VALKEY_URL"));
         }
 
         for (field, actual, minimum, maximum) in [
@@ -377,24 +379,26 @@ impl AppConfig {
                     "MATCHPLANE_NODE_ID must be unique and cannot use the development default",
                 ));
             }
-            let valkey_url = match Url::parse(&self.valkey_url) {
-                Ok(url) => Some(url),
-                Err(_) if !self.valkey_url.trim().is_empty() => {
-                    errors.push(ConfigError::InsecureProduction(
-                        "MATCHPLANE_VALKEY_URL must be a valid URL",
-                    ));
-                    None
-                }
-                Err(_) => None,
-            };
-            if let Some(valkey_url) = valkey_url {
-                if valkey_url.scheme() != "rediss" || valkey_url.fragment().is_some() {
-                    errors.push(ConfigError::InsecureProduction(
-                        "Valkey must use rediss:// with certificate verification enabled",
-                    ));
-                }
-                if let Err(error) = reject_placeholder_credentials(&valkey_url, "Valkey") {
-                    errors.push(error);
+            if self.service_role != "conversion-projector" {
+                let valkey_url = match Url::parse(&self.valkey_url) {
+                    Ok(url) => Some(url),
+                    Err(_) if !self.valkey_url.trim().is_empty() => {
+                        errors.push(ConfigError::InsecureProduction(
+                            "MATCHPLANE_VALKEY_URL must be a valid URL",
+                        ));
+                        None
+                    }
+                    Err(_) => None,
+                };
+                if let Some(valkey_url) = valkey_url {
+                    if valkey_url.scheme() != "rediss" || valkey_url.fragment().is_some() {
+                        errors.push(ConfigError::InsecureProduction(
+                            "Valkey must use rediss:// with certificate verification enabled",
+                        ));
+                    }
+                    if let Err(error) = reject_placeholder_credentials(&valkey_url, "Valkey") {
+                        errors.push(error);
+                    }
                 }
             }
 
@@ -682,8 +686,21 @@ mod tests {
         config.kafka_ssl_ca_location.clear();
         config.kafka_ssl_certificate_location.clear();
         config.kafka_ssl_key_location.clear();
+        config.valkey_url.clear();
+        config.valkey_ca_file.clear();
 
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_should_require_valkey_for_cache_using_roles() {
+        let mut config = production_config();
+        config.valkey_url.clear();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::Empty("MATCHPLANE_VALKEY_URL"))
+        ));
     }
 
     #[test]

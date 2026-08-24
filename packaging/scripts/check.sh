@@ -25,6 +25,19 @@ for service in web gateway payment-service event-relay conversion-projector matc
     exit 1
   fi
 done
+python3 - <<'PY'
+from pathlib import Path
+
+source = Path("deploy/scripts/configure-ubuntu-host.sh").read_text(encoding="utf-8")
+function = source.split("write_service_environment() {", 1)[1].split("\n}", 1)[0]
+guard = "if [[ $service != conversion-projector ]]; then"
+guard_start = function.index(guard)
+guard_end = function.index("\n    fi", guard_start)
+valkey = function.index("MATCHPLANE_VALKEY_URL")
+assert guard_start < valkey < guard_end, (
+    "conversion projector host environment must not receive MATCHPLANE_VALKEY_URL"
+)
+PY
 if ! rg -q '^EnvironmentFile=/etc/matchplane/services/migration\.env$' \
   packaging/systemd/matchplane-initialize.service; then
   echo 'matchplane-initialize.service must require the migration environment file' >&2
@@ -58,9 +71,9 @@ if ! rg -q '^Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchpla
   exit 1
 fi
 if ! rg -q '^ConditionPathExists=/etc/matchplane/services/subplatform-builder\.env$' \
-  packaging/systemd/matchplane-subplatform-builder.service \
-  || ! rg -q '^ConditionPathExists=/etc/matchplane/secrets/builder/builder\.token$' \
-  packaging/systemd/matchplane-subplatform-builder.service; then
+  packaging/systemd/matchplane-subplatform-builder.service ||
+  ! rg -q '^ConditionPathExists=/etc/matchplane/secrets/builder/builder\.token$' \
+    packaging/systemd/matchplane-subplatform-builder.service; then
   echo 'optional builder service must fail closed when its environment or token is absent' >&2
   exit 1
 fi
@@ -70,9 +83,9 @@ if ! rg -q '^d /var/lib/matchplane/subplatform-artifacts 0750 matchplane-builder
   exit 1
 fi
 if ! rg -q '^d /var/lib/matchplane/media 0750 matchplane-web matchplane-web -$' \
-  packaging/tmpfiles/matchplane.conf \
-  || ! rg -q '^ReadWritePaths=.* /var/lib/matchplane/media( |$)' \
-  packaging/systemd/matchplane-web.service; then
+  packaging/tmpfiles/matchplane.conf ||
+  ! rg -q '^ReadWritePaths=.* /var/lib/matchplane/media( |$)' \
+    packaging/systemd/matchplane-web.service; then
   echo 'hosted store media must be private and writable by the web service' >&2
   exit 1
 fi
@@ -100,9 +113,9 @@ fi
 
 if command -v systemd-analyze >/dev/null 2>&1; then
   verify_output=$(systemd-analyze verify packaging/systemd/*.service 2>&1 || true)
-  unexpected=$(printf '%s\n' "$verify_output" \
-    | grep -Ev 'Command (/usr/bin/node|/usr/bin/(matchplane|matchplane-[a-z-]+)) is not executable: No such file or directory' \
-    || true)
+  unexpected=$(printf '%s\n' "$verify_output" |
+    grep -Ev 'Command (/usr/bin/node|/usr/bin/(matchplane|matchplane-[a-z-]+)) is not executable: No such file or directory' ||
+    true)
   if [[ -n $unexpected ]]; then
     printf '%s\n' "$unexpected" >&2
     exit 1

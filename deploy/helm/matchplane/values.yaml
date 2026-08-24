@@ -119,8 +119,9 @@ runtime:
   # Legacy shared secret retained only for development/test renders. Production
   # requires a distinct secret for every workload below.
   existingSecret: matchplane-runtime
-  # Each secret must provide database-url and valkey-url. Use distinct
-  # PostgreSQL roles and Valkey ACL users; do not reuse the migration identity.
+  # Each secret must provide database-url. Cache-using workloads must also provide valkey-url;
+  # the database-only conversion projector must not receive it. Use distinct PostgreSQL roles
+  # and Valkey ACL users; do not reuse the migration identity.
   serviceSecrets:
     web: ""
     gateway: ""

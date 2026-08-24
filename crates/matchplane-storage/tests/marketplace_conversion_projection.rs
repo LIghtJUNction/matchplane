@@ -26,6 +26,9 @@ struct Fixture {
 async fn projection_migration_should_normalize_every_004_legal_status(
     pool: PgPool,
 ) -> Result<(), StorageError> {
+    const EXHAUSTED_ERROR: &str =
+        "migration dead-lettered 004 row at or above maximum delivery attempts";
+
     create_source_schema(&pool).await?;
     sqlx::raw_sql(include_str!(
         "../../../migrations/202608240004_marketplace_conversion_outbox.sql"
@@ -40,12 +43,16 @@ async fn projection_migration_should_normalize_every_004_legal_status(
         .await?;
     let claimed_at = time::OffsetDateTime::now_utc();
     let mut seeded = Vec::new();
-    for (status, attempts) in [
-        ("pending", 0),
-        ("publishing", 0),
-        ("published", 0),
-        ("failed", 2),
-        ("dead", 0),
+    for (status, attempts, expected_status) in [
+        ("pending", 0, "pending"),
+        ("publishing", 0, "publishing"),
+        ("published", 0, "published"),
+        ("failed", 2, "failed"),
+        ("dead", 0, "dead"),
+        ("pending", 12, "dead"),
+        ("failed", 13, "dead"),
+        ("pending", i32::MAX, "dead"),
+        ("pending", 11, "pending"),
     ] {
         let id = Uuid::now_v7();
         let publishing = status == "publishing";
@@ -66,7 +73,7 @@ async fn projection_migration_should_normalize_every_004_legal_status(
         .bind(publishing.then(Uuid::now_v7))
         .execute(&pool)
         .await?;
-        seeded.push((id, status, attempts));
+        seeded.push((id, status, attempts, expected_status));
     }
 
     sqlx::raw_sql(include_str!(
@@ -101,7 +108,7 @@ async fn projection_migration_should_normalize_every_004_legal_status(
     .await?;
     assert_eq!(validated_checks, 8);
 
-    for (id, status, original_attempts) in seeded {
+    for (id, status, original_attempts, expected_status) in &seeded {
         let row = sqlx::query(
             "SELECT status, attempts, claimed_at IS NOT NULL AS claimed, \
                     claim_token IS NOT NULL AS claim_token, \
@@ -109,24 +116,104 @@ async fn projection_migration_should_normalize_every_004_legal_status(
                     published_at IS NOT NULL AS published, \
                     dead_at IS NOT NULL AS dead, \
                     resolved_at IS NOT NULL AS resolved, \
-                    last_attempt_at IS NOT NULL AS attempted \
+                    last_attempt_at IS NOT NULL AS attempted, last_error \
                FROM marketplace_conversion_outbox \
               WHERE id = $1",
         )
         .bind(id)
         .fetch_one(&pool)
         .await?;
-        assert_eq!(row.get::<String, _>("status"), status);
-        let publishing = status == "publishing";
+        assert_eq!(row.get::<String, _>("status"), *expected_status);
+        let publishing = *status == "publishing";
         assert_eq!(row.get::<bool, _>("claimed"), publishing);
         assert_eq!(row.get::<bool, _>("claim_token"), publishing);
         assert_eq!(row.get::<bool, _>("claim_expires"), publishing);
-        assert_eq!(row.get::<bool, _>("published"), status == "published");
-        assert_eq!(row.get::<bool, _>("dead"), status == "dead");
+        assert_eq!(row.get::<bool, _>("published"), *status == "published");
+        assert_eq!(row.get::<bool, _>("dead"), *expected_status == "dead");
         assert!(!row.get::<bool, _>("resolved"));
-        let expected_attempts = if publishing { 1 } else { original_attempts };
+        let expected_attempts = if publishing { 1 } else { *original_attempts };
         assert_eq!(row.get::<i32, _>("attempts"), expected_attempts);
         assert_eq!(row.get::<bool, _>("attempted"), expected_attempts > 0);
+        if matches!(*status, "pending" | "failed") && *original_attempts >= 12 {
+            assert_eq!(row.get::<String, _>("last_error"), EXHAUSTED_ERROR);
+        }
+    }
+
+    let store = PgStore::from_pool(pool);
+    let claimed = store.claim_marketplace_conversions(100).await?;
+    assert!(claimed.iter().all(|job| job.attempts <= 12));
+    for (id, status, attempts, _) in &seeded {
+        if matches!(*status, "pending" | "failed") && *attempts >= 12 {
+            assert!(claimed.iter().all(|job| job.id != *id));
+        }
+    }
+    let at_limit_id = seeded
+        .iter()
+        .find_map(|(id, status, attempts, _)| {
+            (*status == "pending" && *attempts == 11).then_some(*id)
+        })
+        .ok_or_else(|| {
+            StorageError::InvalidData("attempt-11 migration fixture must exist".to_owned())
+        })?;
+    assert_eq!(
+        claimed
+            .iter()
+            .find(|job| job.id == at_limit_id)
+            .map(|job| job.attempts),
+        Some(12)
+    );
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn claim_should_defensively_dead_letter_exhausted_pending_and_failed_rows(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    let mut poisoned_ids = Vec::new();
+    for (status, attempts) in [("pending", 12), ("failed", 13), ("pending", i32::MAX)] {
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO marketplace_conversion_outbox ( \
+                 id, tenant_id, schema_version, source_type, source_id, aggregate_type, \
+                 aggregate_id, aggregate_version, event_type, status, attempts, last_attempt_at \
+             ) VALUES ($1, $2, 1, 'sales_handoff', $3, 'marketplace_sales_handoff', \
+                       $4, 1, 'defensive_claim_fixture', $5, $6, clock_timestamp())",
+        )
+        .bind(id)
+        .bind(fixture.tenant_id)
+        .bind(Uuid::now_v7())
+        .bind(Uuid::now_v7())
+        .bind(status)
+        .bind(attempts)
+        .execute(&pool)
+        .await?;
+        poisoned_ids.push(id);
+    }
+
+    let store = PgStore::from_pool(pool.clone());
+    let batch = store.claim_marketplace_conversion_batch(100).await?;
+    assert!(batch.jobs.is_empty());
+    assert_eq!(batch.exhausted_dead, 3);
+
+    let rows = sqlx::query(
+        "SELECT id, status, attempts, dead_at IS NOT NULL AS has_dead_at, last_error \
+           FROM marketplace_conversion_outbox \
+          WHERE id = ANY($1)",
+    )
+    .bind(&poisoned_ids)
+    .fetch_all(&pool)
+    .await?;
+    assert_eq!(rows.len(), 3);
+    for row in rows {
+        assert_eq!(row.get::<String, _>("status"), "dead");
+        assert!(row.get::<i32, _>("attempts") >= 12);
+        assert!(row.get::<bool, _>("has_dead_at"));
+        assert_eq!(
+            row.get::<String, _>("last_error"),
+            "worker dead-lettered row at or above maximum delivery attempts"
+        );
     }
     Ok(())
 }
@@ -646,12 +733,26 @@ async fn replay_recovery_should_audit_and_unlock_successor(
         .await?;
     assert_eq!(dry_run_audits, 0);
 
+    let Some(host_operator) = current_verified_host_operator()? else {
+        let denied = store
+            .recover_marketplace_conversion(
+                head.id,
+                MarketplaceConversionRecoveryAction::Replay,
+                true,
+                None,
+                "conversion-replay-apply",
+                "canonical source repaired",
+            )
+            .await;
+        assert!(matches!(denied, Err(StorageError::Forbidden(_))));
+        return Ok(());
+    };
     let applied = store
         .recover_marketplace_conversion(
             head.id,
             MarketplaceConversionRecoveryAction::Replay,
             true,
-            Some(verified_host_operator()?),
+            Some(host_operator),
             "conversion-replay-apply",
             "canonical source repaired",
         )
@@ -689,12 +790,26 @@ async fn resolve_recovery_should_audit_and_unlock_successor(
         .execute(&pool)
         .await?;
 
+    let Some(host_operator) = current_verified_host_operator()? else {
+        let denied = store
+            .recover_marketplace_conversion(
+                head.id,
+                MarketplaceConversionRecoveryAction::Resolve,
+                true,
+                None,
+                "conversion-resolve-apply",
+                "event intentionally skipped by root operator",
+            )
+            .await;
+        assert!(matches!(denied, Err(StorageError::Forbidden(_))));
+        return Ok(());
+    };
     let applied = store
         .recover_marketplace_conversion(
             head.id,
             MarketplaceConversionRecoveryAction::Resolve,
             true,
-            Some(verified_host_operator()?),
+            Some(host_operator),
             "conversion-resolve-apply",
             "event intentionally skipped by root operator",
         )
@@ -730,12 +845,26 @@ async fn active_claim_should_reject_dead_recovery(pool: PgPool) -> Result<(), St
     let store = PgStore::from_pool(pool.clone());
     let job = store.claim_marketplace_conversions(1).await?.remove(0);
 
+    let Some(host_operator) = current_verified_host_operator()? else {
+        let denied = store
+            .recover_marketplace_conversion(
+                job.id,
+                MarketplaceConversionRecoveryAction::Resolve,
+                true,
+                None,
+                "active-claim-recovery",
+                "must remain fenced",
+            )
+            .await;
+        assert!(matches!(denied, Err(StorageError::Forbidden(_))));
+        return Ok(());
+    };
     let recovery = store
         .recover_marketplace_conversion(
             job.id,
             MarketplaceConversionRecoveryAction::Resolve,
             true,
-            Some(verified_host_operator()?),
+            Some(host_operator),
             "active-claim-recovery",
             "must remain fenced",
         )
@@ -790,8 +919,12 @@ async fn dead_contact_head_with_successor(
     Ok((head, successor_id))
 }
 
-fn verified_host_operator() -> Result<VerifiedHostOperator, StorageError> {
-    VerifiedHostOperator::from_effective_uid(0)
+fn current_verified_host_operator() -> Result<Option<VerifiedHostOperator>, StorageError> {
+    match VerifiedHostOperator::verify_current_process() {
+        Ok(host_operator) => Ok(Some(host_operator)),
+        Err(StorageError::Forbidden(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 async fn assert_recovery_audit(

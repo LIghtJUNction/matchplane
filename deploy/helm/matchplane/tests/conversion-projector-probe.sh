@@ -50,6 +50,12 @@ assert re.search(
     r"livenessProbe:\s+httpGet:\s+path: /health/live\s+port: http",
     projector,
 ), "conversion projector liveness probe must call /health/live over HTTP"
+assert "MATCHPLANE_VALKEY_URL" not in projector, (
+    "database-only conversion projector must not receive MATCHPLANE_VALKEY_URL"
+)
+assert "valkey-url" not in projector, (
+    "database-only conversion projector must not reference the valkey-url secret key"
+)
 PY
 
 if helm template "${base_args[@]}" --set conversionProjector.batchSize=2 \
