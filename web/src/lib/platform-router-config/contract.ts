@@ -49,18 +49,18 @@ export interface PlatformRouterEffectiveStatus {
   source: "managed" | "environment" | "unconfigured";
   managedOverridesEnvironment: boolean;
   conflicts: {
-    endpoint: boolean;
-    model: boolean;
-    protocol: boolean;
+    endpoint: boolean | null;
+    model: boolean | null;
+    protocol: boolean | null;
   };
   endpointOrigin: string | null;
   model: string | null;
   protocol: ManagedRouterProtocol | null;
   enabled: boolean;
   credentialConfigured: boolean;
-  endpointMatchesRequired: boolean;
-  modelMatchesRequired: boolean;
-  protocolMatchesRequired: boolean;
+  endpointMatchesRequired: boolean | null;
+  modelMatchesRequired: boolean | null;
+  protocolMatchesRequired: boolean | null;
   requiredEndpoint: string;
   requiredModel: string;
   issues: string[];

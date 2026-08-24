@@ -204,12 +204,17 @@ export interface PlatformAiStatus {
     protocol:
       | "openai-compatible"
       | "anthropic-messages"
-      | "gemini-generate-content";
+      | "gemini-generate-content"
+      | null;
     model: string | null;
     endpointOrigin: string | null;
     source: "managed" | "environment" | "unconfigured";
     managedOverridesEnvironment: boolean;
-    conflicts: { endpoint: boolean; model: boolean; protocol: boolean };
+    conflicts: {
+      endpoint: boolean | null;
+      model: boolean | null;
+      protocol: boolean | null;
+    };
     credentialConfigured: boolean;
     policyCode: "ready" | "upstream_configuration";
     policyIssues: string[];
@@ -1497,15 +1502,19 @@ export interface PlatformRouterEffectiveStatus {
   preferredHttpStatus: 451 | null;
   source: "managed" | "environment" | "unconfigured";
   managedOverridesEnvironment: boolean;
-  conflicts: { endpoint: boolean; model: boolean; protocol: boolean };
+  conflicts: {
+    endpoint: boolean | null;
+    model: boolean | null;
+    protocol: boolean | null;
+  };
   endpointOrigin: string | null;
   model: string | null;
   protocol: ManagedPlatformRouterConfig["protocol"] | null;
   enabled: boolean;
   credentialConfigured: boolean;
-  endpointMatchesRequired: boolean;
-  modelMatchesRequired: boolean;
-  protocolMatchesRequired: boolean;
+  endpointMatchesRequired: boolean | null;
+  modelMatchesRequired: boolean | null;
+  protocolMatchesRequired: boolean | null;
   requiredEndpoint: string;
   requiredModel: string;
   issues: string[];

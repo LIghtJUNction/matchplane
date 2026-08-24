@@ -8,10 +8,7 @@ import {
 import { isRootEmailAuthConfigured } from "../../../../../src/lib/mail";
 import { isPhoneOtpConfigured } from "../../../../../src/lib/sms";
 import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
-import {
-    configuredPlatformRouterProtocol,
-    isPlatformRouterConfigured,
-} from "../../../../../src/platform-router";
+import { isPlatformRouterConfigured } from "../../../../../src/platform-router";
 import { getManagedPlatformRouterState } from "../../../../../src/lib/platform-router-config";
 
 export const runtime = "nodejs";
@@ -47,18 +44,15 @@ export async function GET(request: Request): Promise<Response> {
 
     const emailAuth = await isRootEmailAuthConfigured();
     const state = getManagedPlatformRouterState();
-    const managed = state.config;
     const endpoint = state.effective.endpointOrigin;
-    const model =
-        managed?.model ??
-        (process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null);
+    const model = state.effective.model;
     const toolMode = parseToolMode(process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE);
     return NextResponse.json(
         {
             router: {
                 configured: isPlatformRouterConfigured(),
                 aiReady: state.effective.ready,
-                protocol: configuredPlatformRouterProtocol(),
+                protocol: state.effective.protocol,
                 model,
                 endpointOrigin: endpoint,
                 source: state.effective.source,

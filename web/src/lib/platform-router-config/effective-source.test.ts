@@ -16,6 +16,7 @@ import {
 } from "./effective-source";
 import { createTransactionalManagedPlatformRouterLifecycle } from "./transactional-lifecycle";
 import {
+  PLATFORM_ROUTER_GENERATION_DIRECTORY,
   PLATFORM_ROUTER_POINTER_FILE,
   readCurrentSnapshot,
 } from "./transaction";
@@ -117,6 +118,29 @@ describe("platform router effective source", () => {
     );
   });
 
+  it("maps a real corrupt managed generation to explicit bounded unavailability", async () => {
+    const root = path.join(TEST_ROOT, "corrupt-generation");
+    const lifecycle = lifecycleFixture("corrupt-generation");
+    await activateFixture(lifecycle);
+    const snapshot = readCurrentSnapshot({ root });
+    writeFileSync(
+      path.join(
+        root,
+        PLATFORM_ROUTER_GENERATION_DIRECTORY,
+        `${snapshot.generationId}.json`,
+      ),
+      "{}\n",
+      { mode: 0o640 },
+    );
+
+    expectUnreadableManagedStatus(
+      platformRouterEffectiveStatusFromReader(
+        lifecycle.getActive,
+        readyEnvironment(),
+      ),
+    );
+  });
+
   it("blocks ready environment fallback when a referenced credential is missing", async () => {
     const lifecycle = lifecycleFixture("missing-credential");
     await activateFixture(lifecycle);
@@ -192,15 +216,15 @@ function expectUnreadableManagedStatus(
     preferredHttpStatus: 451,
     source: "managed",
     managedOverridesEnvironment: true,
-    conflicts: { endpoint: false, model: false, protocol: false },
+    conflicts: { endpoint: null, model: null, protocol: null },
     endpointOrigin: null,
     model: null,
     protocol: null,
     enabled: false,
     credentialConfigured: false,
-    endpointMatchesRequired: false,
-    modelMatchesRequired: false,
-    protocolMatchesRequired: false,
+    endpointMatchesRequired: null,
+    modelMatchesRequired: null,
+    protocolMatchesRequired: null,
     issues: ["managed_configuration_unreadable"],
   });
 }
