@@ -65,6 +65,10 @@ matchplane serve gateway
 - 导购 Agent 系统提示明确：模糊购买意向先用 `ask_user` 问 **预算档位**，下一轮问 **主要用途**，
   条件足够立即通过 `search_public_products` 检索并默认 `show_products` 展示商品卡
 - 首页对话快捷示例改为卖车场景（「预算 15 万以内，帮我找一台家用 SUV」），与首页需求入口一致
+- **登录页跟随部署能力**：配置短信网关后自动出现「验证码」标签页并支持手机号登录；
+  配置邮件后出现「免密链接」；未配置时输入框不再提示手机号，密码框输错手机号会指引正确方式
+- **商城设置新增「登录方式」面板**：实时检测微信 / 手机 / 邮箱等登录方式的启用状态，
+  未配置的方式直接列出所需环境变量清单（见第 7 节），支持「重新检测」
 
 ## 6. 赞助商演示脚本（卖车店铺）
 
@@ -89,3 +93,46 @@ matchplane serve gateway
 
 审计佐证：每轮回复的 `toolCalls` 已写入 `platform_ai_usage` / `platform_match_requests`
 （`routing_decision.toolCalls`），可在数据库中当场证明「工具检索而非 RAG」。
+
+## 7. 微信 / 手机登录配置清单（商城运营）
+
+登录方式的凭据只存在服务器环境变量中，不入库、不进浏览器。配置状态可在
+**商城后台 → 商城设置 → 登录方式** 面板实时查看；未配置的方式会在面板中列出下面的清单。
+
+### 7.1 微信登录（可选）
+
+| 环境变量 | 说明 |
+| --- | --- |
+| `MATCHPLANE_WECHAT_OAUTH_CLIENT_ID` | 微信开放平台 AppID |
+| `MATCHPLANE_WECHAT_OAUTH_CLIENT_SECRET` | 微信开放平台 AppSecret |
+| `MATCHPLANE_WECHAT_OAUTH_AUTHORIZATION_URL` | 授权地址（与下两项同时填写） |
+| `MATCHPLANE_WECHAT_OAUTH_TOKEN_URL` | 令牌地址 |
+| `MATCHPLANE_WECHAT_OAUTH_USERINFO_URL` | 用户信息地址 |
+| `MATCHPLANE_WECHAT_OAUTH_DISCOVERY_URL` | 支持 OIDC 的网关可只填这一项，替代上面三个地址 |
+| `MATCHPLANE_WECHAT_OAUTH_SCOPES` | 可选，逗号分隔，默认 `openid,profile,email` |
+
+要求：Client ID、Client Secret 与完整的端点契约（discovery 或三个地址）缺一不可，
+配置不完整时服务器只记录告警、登录页不显示微信按钮。生产环境地址必须是 HTTPS。
+微信账号通常没有已验证邮箱，因此只会通过账号页的 **显式绑定** 关联到已有账号，
+不会按邮箱隐式合并（防止账号被劫持）。
+
+### 7.2 手机号验证码登录（可选）
+
+| 环境变量 | 说明 |
+| --- | --- |
+| `MATCHPLANE_SMS_PROVIDER_URL` | HTTPS 短信网关地址；服务器向它 `POST { phoneNumber, code, purpose }` |
+| `MATCHPLANE_SMS_PROVIDER_TOKEN` | 可选，作为 `Bearer` token 随请求发送 |
+
+验证码由认证服务生成并散列存储（6 位、5 分钟有效、最多 3 次尝试），短信网关只负责发送。
+注册仍以邮箱为主；手机验证码是已有账号的登录方式。
+
+### 7.3 邮箱验证码 / 免密链接
+
+不需要环境变量：在 **商城设置 → 账号邮件** 中配置 SMTP 并启用后自动开启。
+
+### 7.4 生效与验证
+
+1. 修改环境变量后重启 Web 服务（登录页能力接口最多缓存 60 秒）。
+2. 商城后台 → 商城设置 → 登录方式，点「重新检测」，确认目标方式显示 **已启用**。
+3. 退出登录后打开登录页：配置微信后「其他方式」出现微信按钮；配置短信后出现
+   「验证码」标签页，输入框提示「邮箱或手机号」。
