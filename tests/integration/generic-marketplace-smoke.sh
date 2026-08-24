@@ -69,11 +69,14 @@ jq -nc --arg tenant "$tenant_id" --arg domain "$domain_id" --arg supply "$supply
     --header 'content-type: application/json' \
     --header "authorization: Bearer $supply_token" --header "$platform_path_header" --data-binary @-
 test "$(jq -r '.status' "$offer_response")" = draft
+offer_version=$(jq -er 'if (.version | type) == "number" and (.version | floor) == .version and .version >= 0 then .version else error("offer version must be a non-negative integer") end' "$offer_response")
 
+activate_request=$(jq -nc --arg tenant "$tenant_id" --argjson expected_version "$offer_version" \
+  '{tenant_id:$tenant,expected_version:$expected_version}')
 activate_response="$HTTP_JSON_WORK_DIRECTORY/activate.json"
-http_json "$activate_response" "$base_url/v1/admin/marketplace/offers/$offer_id/activate" \
-  --header "$admin_authorization" --header 'content-type: application/json' \
-  --data "{\"tenant_id\":\"$tenant_id\"}"
+printf '%s' "$activate_request" \
+  | http_json "$activate_response" "$base_url/v1/admin/marketplace/offers/$offer_id/activate" \
+    --header "$admin_authorization" --header 'content-type: application/json' --data-binary @-
 jq -e '.status == "active" and .offer_id == "00000000-0000-7000-8000-000000000902"' "$activate_response" >/dev/null
 
 intent_response="$HTTP_JSON_WORK_DIRECTORY/intent.json"
