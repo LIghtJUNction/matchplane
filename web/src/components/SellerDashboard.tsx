@@ -543,7 +543,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "platformSessionError",
-              "当前店铺身份配置不完整",
+              "店铺信息不完整，请联系商城工作人员",
               "This store's identity configuration is incomplete",
             ),
       );
@@ -581,7 +581,7 @@ export function SellerDashboard({
           "offerWithdrawnNotice",
           offer.status === "draft"
             ? "商品草稿已删除"
-            : "商品已下架并从公开目录移除",
+            : "商品已下架，买家不会再看到它",
           offer.status === "draft"
             ? "Draft deleted"
             : "Offer removed from the public catalog",
@@ -593,7 +593,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "offerWithdrawError",
-              "商品下架失败，请重新读取后重试",
+              "商品下架失败，请刷新页面后再试",
               "Could not withdraw the offer; reload and try again",
             ),
       );
@@ -612,7 +612,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "platformIdentityIncompleteNotice",
-          "当前店铺尚未完成身份配置",
+          "店铺信息还没配置好，请联系商城工作人员",
           "This store's identity configuration is incomplete",
         ),
       );
@@ -623,8 +623,8 @@ export function SellerDashboard({
       onNotice(
         copy(
           "mediaLimitNotice",
-          "最多添加 8 个附件",
-          "You can add up to 8 attachments",
+          "最多上传 8 张图片",
+          "You can add up to 8 images",
         ),
       );
       return;
@@ -647,8 +647,8 @@ export function SellerDashboard({
         onNotice(
           copy(
             "mediaLimitNotice",
-            "最多添加 8 个附件",
-            "You can add up to 8 attachments",
+            "最多上传 8 张图片",
+            "You can add up to 8 images",
           ),
         );
     } catch (error) {
@@ -657,8 +657,8 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "mediaUploadError",
-              "附件上传失败，请稍后重试",
-              "Could not upload the attachment; try again",
+              "图片上传失败，请再试一次",
+              "Could not upload the image; try again",
             ),
       );
     } finally {
@@ -686,7 +686,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "supplyApiUnavailableNotice",
-          "当前环境未启用真实供给 API，资料没有写入系统",
+          "当前环境暂时无法发布商品，内容没有保存",
           "The live supply API is disabled; nothing was saved",
         ),
       );
@@ -717,7 +717,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "invalidProductStock",
-          "库存必须是 0 到 1000000 之间的整数",
+          "库存请填 0 到 1000000 之间的整数",
           "Stock must be an integer between 0 and 1000000",
         ),
       );
@@ -737,7 +737,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "platformIdentityIncompleteNotice",
-          "当前店铺尚未完成身份配置",
+          "店铺信息还没配置好，请联系商城工作人员",
           "This store has not finished its identity setup",
         ),
       );
@@ -755,7 +755,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "platformSchemaIncomplete",
-          "当前店铺尚未配置完整的商品字段、币种和价格精度",
+          "店铺设置还没完成，请联系商城工作人员",
           "This store has incomplete product fields, currency, or price precision settings",
         ),
       );
@@ -788,7 +788,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "platformSessionError",
-              "当前店铺身份配置不完整",
+              "店铺信息不完整，请联系商城工作人员",
               "This store's identity configuration is incomplete",
             ),
       );
@@ -865,8 +865,8 @@ export function SellerDashboard({
         copy(
           wasEditing ? "offerUpdatedNotice" : "offerSubmittedNotice",
           wasEditing
-            ? "商品修改已保存，等待平台重新审核"
-            : "供给已提交，等待平台审核后展示",
+            ? "商品修改已保存，等待商城重新审核"
+            : "商品已提交，商城审核通过后就会上架",
           wasEditing
             ? "Changes saved; the offer is awaiting review again"
             : "Offer submitted; it will appear after platform review",
@@ -878,7 +878,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "offerSubmitError",
-              "供给提交失败，请稍后重试",
+              "商品提交失败，请稍后再试",
               "Could not submit the offer; try again",
             ),
       );
