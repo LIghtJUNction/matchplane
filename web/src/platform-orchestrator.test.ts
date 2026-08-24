@@ -105,22 +105,29 @@ describe("bounded recursive platform orchestrator", () => {
 
   it("marks a route truncated when the shared wall-clock budget expires", async () => {
     const loadChildren = vi.fn(async () => [candidate("child", "/child")]);
-    const decide = vi.fn(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      return decision(["one"]);
-    });
+    const decide = vi.fn(async () => decision(["one"]));
+    const now = vi
+      .spyOn(Date, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValue(2);
 
-    const result = await expandPlatformRouteTree({
-      platformPath: "/",
-      narrative: "快速路由",
-      candidates: [candidate("one", "/one")],
-      loadChildren,
-      decide,
-      maxSteps: 4,
-      maxDurationMs: 1,
-    });
+    try {
+      const result = await expandPlatformRouteTree({
+        platformPath: "/",
+        narrative: "快速路由",
+        candidates: [candidate("one", "/one")],
+        loadChildren,
+        decide,
+        maxSteps: 4,
+        maxDurationMs: 1,
+      });
 
-    expect(result.trace).toHaveLength(1);
-    expect(result.truncated).toBe(true);
+      expect(result.trace).toHaveLength(1);
+      expect(result.truncated).toBe(true);
+    } finally {
+      now.mockRestore();
+    }
   });
 });

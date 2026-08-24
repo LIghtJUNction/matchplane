@@ -68,9 +68,15 @@ export interface PlatformRouterMutationResult<T> {
   generationId: string;
 }
 
+export interface TransactionalManagedPlatformRouterPublicState {
+  config: ManagedPlatformRouterConfig | null;
+  draft: ManagedPlatformRouterDraftConfig | null;
+}
+
 export interface TransactionalManagedPlatformRouterLifecycle {
   readActive(): ManagedPlatformRouterSecretConfig | null;
   readDraft(): ManagedPlatformRouterSecretConfig | null;
+  getState(): TransactionalManagedPlatformRouterPublicState;
   getActive(): ManagedPlatformRouterConfig | null;
   getDraft(): ManagedPlatformRouterDraftConfig | null;
   prepareDraftProbe(): PlatformRouterDraftProbe;
@@ -152,18 +158,24 @@ export function createTransactionalManagedPlatformRouterLifecycle(
     };
   }
 
-  function getActive(): ManagedPlatformRouterConfig | null {
+  function getState(): TransactionalManagedPlatformRouterPublicState {
     const snapshot = readValidatedSnapshot();
-    if (!snapshot.active) return null;
-    const secret = readSecret(snapshot.active);
-    return presentManagedConfig(snapshot.active, Boolean(secret));
+    const activeSecret = readSecret(snapshot.active);
+    const draftSecret = readSecret(snapshot.draft?.config ?? null);
+    return {
+      config: snapshot.active
+        ? presentManagedConfig(snapshot.active, Boolean(activeSecret))
+        : null,
+      draft: publicDraft(snapshot.draft, draftSecret?.apiKey ?? null),
+    };
+  }
+
+  function getActive(): ManagedPlatformRouterConfig | null {
+    return getState().config;
   }
 
   function getDraft(): ManagedPlatformRouterDraftConfig | null {
-    const snapshot = readValidatedSnapshot();
-    if (!snapshot.draft) return null;
-    const secret = readSecret(snapshot.draft.config);
-    return publicDraft(snapshot.draft, secret?.apiKey ?? null);
+    return getState().draft;
   }
 
   function prepareDraftProbe(): PlatformRouterDraftProbe {
@@ -423,6 +435,7 @@ export function createTransactionalManagedPlatformRouterLifecycle(
       const snapshot = readValidatedSnapshot();
       return readSecret(snapshot.draft?.config ?? null);
     },
+    getState,
     getActive,
     getDraft,
     prepareDraftProbe,
@@ -665,6 +678,17 @@ export function readTransactionalManagedPlatformRouterConfig(): ManagedPlatformR
 
 export function readTransactionalManagedPlatformRouterDraftConfig(): ManagedPlatformRouterSecretConfig | null {
   return productionTransactionalLifecycle.readDraft();
+}
+
+export function getTransactionalManagedPlatformRouterState(
+  transactionOptions?: PlatformRouterTransactionOptions,
+): TransactionalManagedPlatformRouterPublicState {
+  if (transactionOptions) {
+    return createTransactionalManagedPlatformRouterLifecycle({
+      transactionOptions,
+    }).getState();
+  }
+  return productionTransactionalLifecycle.getState();
 }
 
 export function getTransactionalManagedPlatformRouterConfig(): ManagedPlatformRouterConfig | null {

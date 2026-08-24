@@ -49,7 +49,7 @@ export function platformRouterEffectiveStatusFromReader(
   }
 }
 
-function unreadableManagedPlatformRouterEffectiveStatus(
+export function unreadableManagedPlatformRouterEffectiveStatus(
   environment: EnvironmentProviderStatus,
 ): PlatformRouterEffectiveStatus {
   return {
