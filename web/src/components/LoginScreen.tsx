@@ -304,8 +304,14 @@ export function LoginScreen({
       return;
     }
     if (method === "password" && resolvedIdentifier.kind === "phone") {
+      // Send the user to the working path instead of a generic credential error:
+      // phone numbers sign in through SMS codes, never through passwords.
       setError(
-        isRegistration ? copy.registrationEmailOnly : copy.invalidCredentials,
+        isRegistration
+          ? copy.registrationEmailOnly
+          : capabilities.phoneOtp
+            ? copy.phonePasswordUnavailable
+            : copy.phoneOtpUnavailable,
       );
       return;
     }

@@ -194,7 +194,7 @@ export function SellerDashboard({
       setSubmissionsError(
         copy(
           "supplyApiUnavailable",
-          "当前部署未启用真实供给 API",
+          "当前环境暂时无法发布商品，请联系商城工作人员",
           "The live supply API is not enabled for this deployment",
         ),
       );
@@ -204,7 +204,7 @@ export function SellerDashboard({
       setSubmissionsError(
         copy(
           "platformIdentityIncomplete",
-          "当前店铺还没有完成身份配置",
+          "店铺信息还没配置好，请联系商城工作人员",
           "This store has not finished its identity setup",
         ),
       );
@@ -223,7 +223,7 @@ export function SellerDashboard({
         setSubmissionsError(
           copy(
             "signInToViewSubmissions",
-            "请先登录后查看你的提交记录",
+            "请先登录，再查看你的商品",
             "Sign in to view your submissions",
           ),
         );
@@ -261,7 +261,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "submissionLoadError",
-              "提交记录读取失败",
+              "商品列表加载失败，请稍后再试",
               "Could not load submissions",
             );
       setSubmissionsError(message);
@@ -301,7 +301,7 @@ export function SellerDashboard({
         onNotice(
           copy(
             "signInToFindDemand",
-            "请先登录后寻找已公开需求",
+            "请先登录，再寻找买家",
             "Sign in to find published demand",
           ),
         );
@@ -323,7 +323,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "demandMatchLoadError",
-              "需求匹配暂时无法读取",
+              "暂时找不到买家信息，请稍后再试",
               "Demand matching is temporarily unavailable",
             );
       setDemandMatchesError((current) => ({
@@ -353,7 +353,7 @@ export function SellerDashboard({
         onNotice(
           copy(
             "signInToProcessContact",
-            "请先登录后处理联系申请",
+            "请先登录，再处理买家的联系申请",
             "Sign in to process contact requests",
           ),
         );
@@ -372,7 +372,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "contactConsentSaved",
-          "已同意交换联系方式，买方可以查看你提供的联系渠道",
+          "已同意交换联系方式，买家现在可以看到你的联系方式",
           "Contact exchange approved; the buyer can view your channels",
         ),
       );
@@ -382,7 +382,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "contactConsentError",
-              "联系申请处理失败",
+              "联系申请处理失败，请稍后再试",
               "Could not process the contact request",
             ),
       );
@@ -404,7 +404,7 @@ export function SellerDashboard({
       });
       if (!session) {
         onNotice(
-          copy("contactLoginNotice", "请先登录后查看已同意交换的联系方式"),
+          copy("contactLoginNotice", "请先登录，再查看对方的联系方式"),
         );
         return;
       }
@@ -420,14 +420,14 @@ export function SellerDashboard({
       onNotice(
         copy(
           "contactReleasedNotice",
-          "联系方式已解锁，请通过对方提供的渠道联系",
+          "已拿到对方的联系方式，可以直接联系对方了",
         ),
       );
     } catch (error) {
       onNotice(
         error instanceof Error
           ? error.message
-          : copy("contactReleaseError", "联系方式暂时无法读取"),
+          : copy("contactReleaseError", "联系方式暂时看不了，请稍后再试"),
       );
     } finally {
       setReleasingContactId(null);
