@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { auth } from "../../../../../src/lib/auth";
@@ -25,9 +27,17 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "只有根平台管理员可以测试托管 AI" }, { status: 403 });
   }
 
-  const probe = await probePlatformRouter();
+  const probe = await probePlatformRouter({
+    requestId: randomUUID(),
+    signal: request.signal,
+  });
   return NextResponse.json(probe, {
-    status: probe.status === "ready" ? 200 : probe.status === "unconfigured" ? 409 : 502,
+    status:
+      probe.status === "ready" || probe.status === "slow"
+        ? 200
+        : probe.status === "unconfigured"
+          ? 409
+          : 502,
     headers: { "cache-control": "no-store" },
   });
 }

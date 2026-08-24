@@ -70,7 +70,7 @@ export async function POST(request: Request): Promise<Response> {
     let memory = identity.authUserId
       ? await readShoppingMemory(tenantId, identity.authUserId).catch(() => {
           process.stderr.write(
-            "[mall-assistant] shopping memory lookup failed\n",
+            `[mall-assistant] ${JSON.stringify({ requestId, status: "memory_lookup_failed" })}\n`,
           );
           return null;
         })
@@ -127,6 +127,8 @@ export async function POST(request: Request): Promise<Response> {
         });
         if (!admitted) throw new PlatformRouterQuotaExceededError();
       },
+      requestId,
+      signal: request.signal,
     });
     await recordAssistantUsage({
       requestId,
@@ -143,19 +145,32 @@ export async function POST(request: Request): Promise<Response> {
         answer: reply.text,
         recommendations: reply.recommendations,
         uiActions: reply.uiActions,
+        ...(reply.outcome ? { outcome: reply.outcome } : {}),
       },
-      { headers: { "cache-control": "no-store" } },
+      { headers: { "cache-control": "no-store", "x-request-id": requestId } },
     );
     if (identity.newCookie)
       response.cookies.set(GUEST_COOKIE, identity.newCookie, guestCookie());
     return response;
   } catch (cause) {
     if (cause instanceof PlatformRouterQuotaExceededError)
-      return error(cause.message, 429, { "retry-after": "3600" });
+      return error(
+        cause.message,
+        429,
+        { "retry-after": "3600", "x-request-id": requestId },
+        { code: "platform_quota", retryable: true, requestId },
+      );
     if (cause instanceof PlatformAssistantUnavailableError)
-      return error(cause.message, 502);
-    process.stderr.write("[mall-assistant] request failed\n");
-    return error("商城 AI 导购暂时不可用，请稍后再试。", 503);
+      return providerErrorResponse(cause, requestId);
+    process.stderr.write(
+      `[mall-assistant] ${JSON.stringify({ requestId, status: "internal_error" })}\n`,
+    );
+    return error(
+      "商城 AI 导购暂时不可用，请稍后再试。",
+      503,
+      { "x-request-id": requestId },
+      { code: "assistant_unavailable", retryable: true, requestId },
+    );
   }
 }
 
@@ -204,7 +219,7 @@ async function recordAssistantUsage(input: {
       input.usage?.completionTokens ?? null,
       input.usage?.totalTokens ?? null,
       JSON.stringify(input.toolCalls.slice(0, 16)),
-      Math.max(1, Math.min(16, Math.trunc(input.modelCalls))),
+      Math.max(0, Math.min(16, Math.trunc(input.modelCalls))),
     ],
   );
 }
@@ -310,13 +325,48 @@ function readCookie(header: string | null, name: string): string | null {
   return null;
 }
 
+function providerErrorResponse(
+  cause: PlatformAssistantUnavailableError,
+  requestId: string,
+): Response {
+  const headers: Record<string, string> = { "x-request-id": requestId };
+  let status = 503;
+  let code = `provider_${cause.kind}`;
+  if (
+    cause.kind === "connect_timeout" ||
+    cause.kind === "first_byte_timeout" ||
+    cause.kind === "total_timeout"
+  ) {
+    status = 504;
+    headers["retry-after"] = "5";
+  } else if (
+    cause.kind === "no_final_text" ||
+    cause.kind === "malformed_response" ||
+    cause.kind === "upstream_http"
+  ) {
+    status = 502;
+    if (cause.retryable) headers["retry-after"] = "5";
+  } else if (cause.kind === "quota") {
+    headers["retry-after"] = "60";
+  } else if (cause.kind === "aborted") {
+    status = 499;
+    code = "request_aborted";
+  }
+  return error(cause.message, status, headers, {
+    code,
+    retryable: cause.retryable,
+    requestId,
+  });
+}
+
 function error(
   message: string,
   status: number,
   headers: Record<string, string> = {},
+  metadata?: { code: string; retryable: boolean; requestId: string },
 ): Response {
   return NextResponse.json(
-    { error: message },
+    { error: message, ...(metadata ?? {}) },
     { status, headers: { "cache-control": "no-store", ...headers } },
   );
 }
