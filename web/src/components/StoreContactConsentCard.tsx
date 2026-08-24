@@ -11,25 +11,47 @@ import { useEffect, useState } from "react";
 import {
   getVerifiedContactChannels,
   type MallAssistantContactConsentAction,
+  type MarketplaceContactResponse,
   type VerifiedContactChannel,
 } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
+
+function contactChannelLabel(key: string, english: boolean): string {
+  if (key === "email") return english ? "Email" : "邮箱";
+  if (key === "phone") return english ? "Phone" : "手机";
+  return key;
+}
 
 export function StoreContactConsentCard({
   action,
   locale,
   onAgree,
+  onRetrieve,
 }: {
   action: MallAssistantContactConsentAction;
   locale: InterfaceLocale;
-  onAgree?: (action: MallAssistantContactConsentAction) => Promise<void>;
+  onAgree?: (action: MallAssistantContactConsentAction) => Promise<unknown>;
+  onRetrieve?: (
+    action: MallAssistantContactConsentAction,
+  ) => Promise<MarketplaceContactResponse | null>;
 }) {
   const english = locale === "en";
   const [channels, setChannels] = useState<VerifiedContactChannel[]>([]);
   const [status, setStatus] = useState<
-    "loading" | "ready" | "agreeing" | "accepted" | "declined" | "failed"
+    | "loading"
+    | "ready"
+    | "agreeing"
+    | "accepted"
+    | "checking"
+    | "released"
+    | "declined"
+    | "failed"
   >("loading");
   const [error, setError] = useState<string | null>(null);
+  const [contact, setContact] = useState<MarketplaceContactResponse | null>(
+    null,
+  );
+  const [checkMessage, setCheckMessage] = useState<string | null>(null);
 
   const load = async () => {
     setStatus("loading");
@@ -47,33 +69,99 @@ export function StoreContactConsentCard({
     void load();
   }, [action.id]);
 
-  if (status === "accepted" || status === "declined") {
+  if (
+    status === "accepted" ||
+    status === "checking" ||
+    status === "released" ||
+    status === "declined"
+  ) {
+    const accepted = status !== "declined";
     return (
       <div className={`store-contact-consent-result is-${status}`} role="status">
-        {status === "accepted" ? (
+        {accepted ? (
           <CheckCircle2 size={18} aria-hidden="true" />
         ) : (
           <X size={18} aria-hidden="true" />
         )}
         <div>
           <strong>
-            {status === "accepted"
-              ? english
-                ? "Contact request sent"
-                : "联系申请已发送"
+            {accepted
+              ? status === "released"
+                ? english
+                  ? "Verified store contact unlocked"
+                  : "已解锁店员的已验证联系方式"
+                : english
+                  ? "Contact request sent"
+                  : "联系申请已发送"
               : english
                 ? "Contact exchange declined"
                 : "已拒绝交换联系方式"}
           </strong>
           <span>
-            {status === "accepted"
+            {accepted
               ? english
-                ? "Details are released only after store staff also approve. You can keep chatting with the AI manager."
-                : "只有店员也同意后才会交换；你仍可继续与 AI 店长对话。"
+                ? "Details are released only after store staff also approve. Nothing is shared automatically."
+                : "只有店员也同意后才会交换；平台不会自动展示或发送联系方式。"
               : english
                 ? "No contact details were shared. The AI manager remains available."
                 : "没有交换任何联系方式，AI 店长仍会继续对话。"}
           </span>
+          {contact ? (
+            <dl className="store-contact-released-values">
+              {Object.entries(contact.counterpart.contact).map(
+                ([key, value]) => (
+                  <div key={key}>
+                    <dt>{contactChannelLabel(key, english)}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ),
+              )}
+            </dl>
+          ) : accepted && onRetrieve ? (
+            <button
+              className="button button-muted store-contact-check"
+              type="button"
+              disabled={status === "checking"}
+              onClick={async () => {
+                setStatus("checking");
+                setCheckMessage(null);
+                try {
+                  const result = await onRetrieve(action);
+                  if (result) {
+                    setContact(result);
+                    setStatus("released");
+                    return;
+                  }
+                  setCheckMessage(
+                    english
+                      ? "Store staff have not approved yet. Check notifications and try again later."
+                      : "店员尚未同意。请留意通知，稍后再检查。",
+                  );
+                  setStatus("accepted");
+                } catch (cause) {
+                  setCheckMessage(
+                    cause instanceof Error
+                      ? cause.message
+                      : english
+                        ? "Unable to check contact status."
+                        : "暂时无法检查联系状态。",
+                  );
+                  setStatus("accepted");
+                }
+              }}
+            >
+              {status === "checking"
+                ? english
+                  ? "Checking…"
+                  : "检查中…"
+                : english
+                  ? "Check store approval"
+                  : "检查店员是否同意"}
+            </button>
+          ) : null}
+          {checkMessage ? (
+            <span className="store-contact-check-message">{checkMessage}</span>
+          ) : null}
         </div>
       </div>
     );

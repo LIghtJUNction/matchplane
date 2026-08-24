@@ -201,8 +201,9 @@ POST /api/platform/retrieval/query
 - 结果桥是"单向数据 + 双向选中"：
   - host 发送 `{ protocol: "matchplane.plugin/v1", type: "match.results", version: 1, contextToken, payload: { listings: [...] } }`，最多包含 100 条由 host 拥有且公开的结果关联。
   - 援方会话的`platform.context`可附带`agentDraft`（`narrative`、任选`intentId`、不透明`attributes`与`attributes`）插件。它只是聊天材料的可编辑草稿，不是已发布援方，也没有提出代币、曼哈顿或支付权限；必须让援方检查并通过`listing.submit`显然，可行仍会做架构、机场和权限。稿草在路由到子平台后会通过新的上下文消息补发，避免聊天与表单脱节。
-  - 插件发送`{ type: "listing.open", contextToken, payload: { listingId } }`；主机会忽略当前快照之外的id。
-  这种约束在保留垂直化渲染能力的同时，将作用域、联系人同意与支付行为留在根服务侧。
+  - 插件发送 `{ type: "listing.open", contextToken, payload: { listingId } }`；host 会忽略当前快照之外的 id。
+  - 买方 `platform.context` 只附带 `auth.status = pending|authenticated|anonymous`，不附带用户资料、cookie 或 token。插件可发送带 `requestId` 的 `auth.open`、`demand.open` 与 `listing.like`；host 分别负责 Better Auth 跳转、打开当前子平台内的根托管会话，以及调用已认证点赞 API，并返回对应的 `*.result`。匿名点赞意图只在根的 `sessionStorage` 中保存供给 id、平台路径和期望计数，登录返回同一路径后由根恢复；凭据始终不会进入 iframe。
+  这种约束在保留垂直化渲染能力的同时，将认证、作用域、联系人同意与支付行为留在根服务侧。
 - 路径仅在清单校验、API兼容、CSP/资源检查、包扫描和运营审计通过后才激活。取消或吊销会删除路径，但根账号与历史会保留。
   生产环境下，web页面和清单接口会独立校验完整的递归路径是否解析到激活不可变注册；`public/`下静态文件不构成激活授权。
 - 清单与插件资产读取与代理路由共享 `membership_policy`可见性检查。公开注册可在未认领成员关系时获取；邀请制发布在调用方更好的身份验证用户或带作用域的代理密钥进行授权该组织子树时，返回相同的未找到（未找到）响应。

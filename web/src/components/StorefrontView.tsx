@@ -34,6 +34,7 @@ import {
 import {
   listingIdFromBackend,
   type MallAssistantContactConsentAction,
+  type MarketplaceContactResponse,
 } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 import { subplatformCopy, type SubplatformConfig } from "../subplatform";
@@ -53,6 +54,7 @@ export function StorefrontView({
   onNotice = () => undefined,
   onHumanHandoff,
   onContactConsent,
+  onContactRetrieve,
   subplatform,
   canManageStore = false,
   onOpenStoreConsole,
@@ -73,7 +75,10 @@ export function StorefrontView({
   }) => Promise<void>;
   onContactConsent?: (
     action: MallAssistantContactConsentAction,
-  ) => Promise<void>;
+  ) => Promise<unknown>;
+  onContactRetrieve?: (
+    action: MallAssistantContactConsentAction,
+  ) => Promise<MarketplaceContactResponse | null>;
   subplatform: SubplatformConfig;
   canManageStore?: boolean;
   onOpenStoreConsole?: () => void;
@@ -202,6 +207,7 @@ export function StorefrontView({
                   onLikeListing={onLikeListing}
                   onHumanHandoff={onHumanHandoff}
                   onContactConsent={onContactConsent}
+                  onContactRetrieve={onContactRetrieve}
                 />
               </DialogBody>
             </DialogContent>

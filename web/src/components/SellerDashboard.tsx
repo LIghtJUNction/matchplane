@@ -369,6 +369,7 @@ export function SellerDashboard({
           item.introduction_id === updated.introduction_id ? updated : item,
         ),
       );
+      window.dispatchEvent(new Event("matchplane:notifications-updated"));
       onNotice(
         copy(
           "contactConsentSaved",
@@ -417,6 +418,7 @@ export function SellerDashboard({
         ...current,
         [introduction.introduction_id]: contact,
       }));
+      window.dispatchEvent(new Event("matchplane:notifications-updated"));
       onNotice(
         copy(
           "contactReleasedNotice",

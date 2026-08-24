@@ -15,6 +15,56 @@ import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 
 const CATALOG_TIMEOUT_MS = 10_000;
+export const PENDING_MARKETPLACE_LIKE_KEY = "matchplane.marketplace.pending-like";
+
+interface PendingMarketplaceLike {
+  version: 1;
+  platformPath: string;
+  listingId: string;
+  offerId: string;
+  expectedCount: number;
+}
+
+export function readPendingMarketplaceLike(): PendingMarketplaceLike | null {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_MARKETPLACE_LIKE_KEY);
+    if (!raw) return null;
+    const value: unknown = JSON.parse(raw);
+    if (
+      !value ||
+      typeof value !== "object" ||
+      (value as PendingMarketplaceLike).version !== 1 ||
+      typeof (value as PendingMarketplaceLike).platformPath !== "string" ||
+      typeof (value as PendingMarketplaceLike).listingId !== "string" ||
+      typeof (value as PendingMarketplaceLike).offerId !== "string" ||
+      typeof (value as PendingMarketplaceLike).expectedCount !== "number"
+    ) {
+      return null;
+    }
+    return value as PendingMarketplaceLike;
+  } catch {
+    return null;
+  }
+}
+
+function rememberPendingMarketplaceLike(value: PendingMarketplaceLike): void {
+  try {
+    window.sessionStorage.setItem(
+      PENDING_MARKETPLACE_LIKE_KEY,
+      JSON.stringify(value),
+    );
+  } catch {
+    // Session storage can be unavailable in hardened browser modes; login still proceeds.
+  }
+}
+
+function clearPendingMarketplaceLike(): void {
+  try {
+    window.sessionStorage.removeItem(PENDING_MARKETPLACE_LIKE_KEY);
+  } catch {
+    // Nothing else is required when session storage is unavailable.
+  }
+}
 
 interface UseMarketplaceCatalogOptions {
   hydrated: boolean;
@@ -143,27 +193,17 @@ export function useMarketplaceCatalog({
     };
   }, [authUserId, listingOfferIds]);
 
-  const likeListing = useCallback(
-    async (target: AssetListing) => {
-      if (!authUserId) {
-        onAuthRequired();
-        return;
-      }
-      const offerId = target.offerId ?? listingIdFromBackend(target);
-      if (!offerId) {
-        onNotice("这个商品暂不支持点赞");
-        return;
-      }
-      const expectedCount = target.viewerLikeCount ?? 0;
-      if (expectedCount >= 5) return;
+  const submitLike = useCallback(
+    async (pending: PendingMarketplaceLike) => {
+      if (pending.expectedCount >= 5) return;
       try {
         const state = await setMarketplaceOfferLikeCount({
-          offerId,
-          count: expectedCount + 1,
-          expectedCount,
+          offerId: pending.offerId,
+          count: pending.expectedCount + 1,
+          expectedCount: pending.expectedCount,
         });
         const applyState = (item: AssetListing) =>
-          (item.offerId ?? listingIdFromBackend(item)) === offerId
+          (item.offerId ?? listingIdFromBackend(item)) === pending.offerId
             ? {
                 ...item,
                 likeTotal: state.likeTotal,
@@ -174,33 +214,65 @@ export function useMarketplaceCatalog({
         setListing((current) => (current ? applyState(current) : current));
       } catch (error) {
         if (error instanceof MarketplaceApiError && error.status === 401) {
+          rememberPendingMarketplaceLike(pending);
           onAuthRequired();
           return;
         }
         if (error instanceof MarketplaceApiError && error.status === 409) {
-          const [state] = await getMarketplaceOfferLikes([offerId]).catch(
-            () => [],
-          );
+          const [state] = await getMarketplaceOfferLikes([
+            pending.offerId,
+          ]).catch(() => []);
           if (state) {
-            setListings((current) =>
-              current.map((item) =>
-                (item.offerId ?? listingIdFromBackend(item)) === offerId
-                  ? {
-                      ...item,
-                      likeTotal: state.likeTotal,
-                      viewerLikeCount: state.viewerLikeCount,
-                    }
-                  : item,
-              ),
-            );
+            const applyState = (item: AssetListing) =>
+              (item.offerId ?? listingIdFromBackend(item)) === pending.offerId
+                ? {
+                    ...item,
+                    likeTotal: state.likeTotal,
+                    viewerLikeCount: state.viewerLikeCount,
+                  }
+                : item;
+            setListings((current) => current.map(applyState));
+            setListing((current) => (current ? applyState(current) : current));
             return;
           }
         }
         onNotice(error instanceof Error ? error.message : "点赞失败");
       }
     },
-    [authUserId, onAuthRequired, onNotice],
+    [onAuthRequired, onNotice],
   );
+
+  const likeListing = useCallback(
+    async (target: AssetListing) => {
+      const offerId = target.offerId ?? listingIdFromBackend(target);
+      if (!offerId) {
+        onNotice("这个商品暂不支持点赞");
+        return;
+      }
+      const pending: PendingMarketplaceLike = {
+        version: 1,
+        platformPath: window.location.pathname,
+        listingId: target.id,
+        offerId,
+        expectedCount: target.viewerLikeCount ?? 0,
+      };
+      if (!authUserId) {
+        rememberPendingMarketplaceLike(pending);
+        onAuthRequired();
+        return;
+      }
+      await submitLike(pending);
+    },
+    [authUserId, onAuthRequired, onNotice, submitLike],
+  );
+
+  useEffect(() => {
+    if (!authUserId) return;
+    const pending = readPendingMarketplaceLike();
+    if (!pending || pending.platformPath !== window.location.pathname) return;
+    clearPendingMarketplaceLike();
+    void submitLike(pending);
+  }, [authUserId, submitLike]);
 
   const replaceFromRecommendations = useCallback(
     (recommendations: Parameters<typeof mapRecommendations>[0]) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   loadSubplatform,
   resolveSubplatform,
@@ -151,6 +151,35 @@ export function useSubplatformRoute({
   const [publishProductRequested, setPublishProductRequested] = useState(false);
 
   const requestedRoleRef = useRef<WorkspaceRole>(roleFromLocation());
+  const navigationRequestRef = useRef(0);
+
+  const navigateToSubplatform = useCallback(
+    async (target: string): Promise<SubplatformConfig> => {
+      const destination = new URL(target, window.location.origin);
+      if (
+        destination.origin !== window.location.origin ||
+        !destination.pathname.startsWith("/")
+      ) {
+        throw new Error("平台入口必须使用本站路径");
+      }
+
+      const request = navigationRequestRef.current + 1;
+      navigationRequestRef.current = request;
+      const path = destination.pathname;
+      const fallback = resolveSubplatform(path);
+      window.history.pushState(null, "", path);
+      setSubplatform(fallback);
+
+      try {
+        const loaded = await loadSubplatform(path);
+        if (navigationRequestRef.current === request) setSubplatform(loaded);
+        return loaded;
+      } catch {
+        return fallback;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const requestedPath = window.location.pathname;
@@ -196,6 +225,18 @@ export function useSubplatformRoute({
       requiresAuthenticatedWorkspace(requestedRole) ? "buyer" : requestedRole,
     );
     setHydrated(true);
+
+    const onPopState = () => {
+      const path = window.location.pathname;
+      const request = navigationRequestRef.current + 1;
+      navigationRequestRef.current = request;
+      setSubplatform(resolveSubplatform(path));
+      void loadSubplatform(path).then((loaded) => {
+        if (navigationRequestRef.current === request) setSubplatform(loaded);
+      });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
   useEffect(() => {
@@ -222,6 +263,7 @@ export function useSubplatformRoute({
     setStoreConsoleRequested,
     publishProductRequested,
     setPublishProductRequested,
+    navigateToSubplatform,
     requestedRoleRef,
   };
 }
