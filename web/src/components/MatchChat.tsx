@@ -730,12 +730,12 @@ export function MatchChat({
   const quickPrompts =
     locale === "en"
       ? [
-          "A lightweight laptop for commuting, within my budget",
+          "A family SUV within a 150,000 budget",
           "Compare a few suitable options and explain the trade-offs",
           "Find a reliable store for this product",
         ]
       : [
-          "预算内找一台适合通勤的轻薄电脑",
+          "预算 15 万以内，帮我找一台家用 SUV",
           "比较几款合适的商品，并说明取舍",
           "帮我找一家可靠的店铺",
         ];

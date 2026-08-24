@@ -885,6 +885,10 @@ describe("platform shopping agent", () => {
     expect(generateText).toHaveBeenCalledTimes(1);
 
     const options = generateText.mock.calls[0]?.[0];
+    // The sponsor demo depends on the agent proactively asking budget/use-case
+    // through the clickable ask_user tool and presenting cards after retrieval.
+    expect(options.system).toContain("先用 ask_user 给出预算档位选项");
+    expect(options.system).toContain("检索到匹配商品后默认调用 show_products");
     expect(options.tools).toEqual(
       expect.objectContaining({
         ask_user: expect.anything(),
