@@ -6,6 +6,7 @@ export * from "./shell/PlatformOverlaysHost";
 // Core Primitives & UI Elements
 export * from "./Primitives";
 export * from "./Overlays";
+export * from "./ListingSheet";
 export * from "./PreferenceControls";
 export * from "./PalettePicker";
 export * from "./NotificationBell";
@@ -15,6 +16,7 @@ export * from "./PluginHost";
 export * from "./WorkspaceSettingsDialog";
 
 // Account & Auth
+export * from "./LoginMethodsPanel";
 export * from "./LoginScreen";
 export * from "./PersonalProfilePanel";
 export * from "./PasskeyPanel";

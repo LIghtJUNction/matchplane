@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@appica/ui-react/button";
-import { ArrowRight, Heart } from "lucide-react";
+import { Heart } from "lucide-react";
 import { useState } from "react";
 
 import { listingIdFromBackend } from "../api";
@@ -24,6 +24,16 @@ function likeLabel(
     : `给${title}点赞：已点 ${viewerLikeCount}/5，共 ${likeTotal} 个赞`;
 }
 
+/** Key facts under the title, used-car-listing style: "2019年 · 3.2万公里 · 杭州". */
+function keySpecs(listing: AssetListing) {
+  const values = listing.facts
+    .filter((fact) => fact.key !== "category")
+    .map((fact) => fact.value.trim())
+    .filter(Boolean);
+  if (listing.location) values.push(listing.location);
+  return values.slice(0, 3).join(" · ");
+}
+
 export function MarketplaceListingCard({
   listing,
   locale,
@@ -44,99 +54,85 @@ export function MarketplaceListingCard({
   const likeOfferId = listing.offerId ?? listingIdFromBackend(listing);
   const likeEnabled = Boolean(onLike && likeOfferId);
   const sellerLabel = listing.storeName || listing.seller || listing.subtitle;
-  const showSubtitle = Boolean(
-    listing.subtitle && listing.subtitle !== sellerLabel,
-  );
-  const archiveCode = (listing.offerId ?? listing.id)
-    .replace(/[^a-z0-9]/gi, "")
-    .slice(-6)
-    .toUpperCase()
-    .padStart(6, "0");
+  const specs =
+    keySpecs(listing) ||
+    (listing.subtitle !== sellerLabel ? listing.subtitle : "");
 
   return (
     <article
       className={`marketplace-product-card${compact ? " is-chat-recommendation" : ""}`}
       data-accent={listing.accent || "cactus"}
     >
-      <div className="marketplace-product-box">
-        <div className="marketplace-product-lid" aria-hidden="true" />
-        <div className="marketplace-product-media">
-          {listing.imageUrl && !imageFailed ? (
-            <img
-              src={listing.imageUrl}
-              alt={listing.title}
-              loading="lazy"
-              onError={() => setImageFailed(true)}
+      <div className="marketplace-product-media">
+        {listing.imageUrl && !imageFailed ? (
+          <img
+            src={listing.imageUrl}
+            alt={listing.title}
+            loading="lazy"
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <div
+            className="marketplace-product-fallback"
+            role="img"
+            aria-label={listing.title}
+          >
+            <span>{listing.title.slice(0, 2)}</span>
+          </div>
+        )}
+        {likeEnabled ? (
+          <Button
+            className="marketplace-like-button"
+            type="button"
+            variant="ghost"
+            aria-label={likeLabel(
+              locale,
+              listing.title,
+              viewerLikeCount,
+              likeTotal,
+            )}
+            aria-pressed={viewerLikeCount > 0}
+            disabled={liking || viewerLikeCount >= 5}
+            title={
+              viewerLikeCount >= 5
+                ? locale === "en"
+                  ? "Like limit reached (5)"
+                  : "已达点赞上限（5）"
+                : undefined
+            }
+            onClick={() => {
+              if (!onLike || viewerLikeCount >= 5) return;
+              setLiking(true);
+              void onLike().finally(() => setLiking(false));
+            }}
+          >
+            <Heart
+              fill={viewerLikeCount > 0 ? "currentColor" : "none"}
+              aria-hidden="true"
             />
-          ) : (
-            <div
-              className="marketplace-product-fallback"
-              role="img"
-              aria-label={listing.title}
-            >
-              <span>{listing.title.slice(0, 2)}</span>
-            </div>
-          )}
-          <span className="marketplace-product-code" aria-hidden="true">
-            MP-{archiveCode}
-          </span>
-          {likeEnabled ? (
-            <Button
-              className="marketplace-like-button"
-              type="button"
-              variant="ghost"
-              aria-label={likeLabel(
-                locale,
-                listing.title,
-                viewerLikeCount,
-                likeTotal,
-              )}
-              aria-pressed={viewerLikeCount > 0}
-              disabled={liking || viewerLikeCount >= 5}
-              title={
-                viewerLikeCount >= 5
-                  ? locale === "en"
-                    ? "Like limit reached (5)"
-                    : "已达点赞上限（5）"
-                  : undefined
-              }
-              onClick={() => {
-                if (!onLike || viewerLikeCount >= 5) return;
-                setLiking(true);
-                void onLike().finally(() => setLiking(false));
-              }}
-            >
-              <Heart
-                fill={viewerLikeCount > 0 ? "currentColor" : "none"}
-                aria-hidden="true"
-              />
-              <span aria-live="polite">{likeTotal}</span>
-            </Button>
-          ) : null}
+            <span aria-live="polite">{likeTotal}</span>
+          </Button>
+        ) : null}
+      </div>
+      <div className="marketplace-product-info">
+        <button
+          className="marketplace-product-title"
+          type="button"
+          onClick={onOpen}
+        >
+          {listing.title}
+        </button>
+        {specs ? <p className="marketplace-product-specs">{specs}</p> : null}
+        <div className="marketplace-product-price-row">
+          <strong>{listing.price}</strong>
+          {listing.priceLabel ? <span>{listing.priceLabel}</span> : null}
         </div>
-        <div className="marketplace-product-end-label">
+        {sellerLabel ? (
           <div className="marketplace-product-origin">
             <i aria-hidden="true" />
             <span>{sellerLabel}</span>
           </div>
-          <button
-            className="marketplace-product-title"
-            type="button"
-            onClick={onOpen}
-          >
-            {listing.title}
-          </button>
-          {showSubtitle ? (
-            <p className="marketplace-product-subtitle">{listing.subtitle}</p>
-          ) : null}
-          <div className="marketplace-product-price-row">
-            <strong>{listing.price}</strong>
-            <button type="button" onClick={onOpen}>
-              {locale === "en" ? "Pull box" : "抽出查看"}
-              <ArrowRight aria-hidden="true" />
-            </button>
-          </div>
-        </div>
+        ) : null}
       </div>
     </article>
   );
