@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -56,6 +56,26 @@ describe("ListingSheet", () => {
     expect(screen.getByAltText("Dogfood 测试商品 2/2")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "管理商品" }));
     expect(onManage).toHaveBeenCalledWith(ownedListing);
+  });
+
+  it("delegates Escape dismissal to the accessible drawer primitive", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <ListingSheet
+        listing={listing}
+        subplatform={subplatform}
+        locale="zh"
+        onClose={onClose}
+        onContact={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: "Dogfood 测试商品" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it("keeps the detail open and confirms a completed contact request", async () => {

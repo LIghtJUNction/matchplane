@@ -114,6 +114,65 @@ describe("MarketplaceHome actions", () => {
     expect(onPublishProduct).toHaveBeenCalledTimes(1);
   });
 
+  it("uses a keyboard-navigable toggle group for category filtering", async () => {
+    const user = userEvent.setup();
+    const homeListing: AssetListing = {
+      ...listing,
+      id: "home-listing",
+      title: "云朵羊毛毯",
+      facts: [{ key: "category", label: "分类", value: "家居" }],
+    };
+    const digitalListing: AssetListing = {
+      ...listing,
+      id: "digital-listing",
+      title: "日光便携音箱",
+      facts: [{ key: "category", label: "分类", value: "数码" }],
+    };
+    render(
+      <MarketplaceHome
+        catalogResolved
+        listings={[homeListing, digitalListing]}
+        locale="zh"
+        theme="light"
+        onLocaleChange={vi.fn()}
+        onThemeChange={vi.fn()}
+        onLikeListing={vi.fn(async () => undefined)}
+        onNotice={vi.fn()}
+        onOpenListing={vi.fn()}
+        onPublishProduct={vi.fn()}
+        onRetryCatalog={vi.fn()}
+        onRecommendations={vi.fn()}
+        subplatform={
+          {
+            slug: "root",
+            path: "/",
+            label: "MatchPlane",
+            ui: {},
+          } as SubplatformConfig
+        }
+      />,
+    );
+
+    const categories = screen.getByRole("group", { name: "商品分类" });
+    const all = screen.getByRole("button", { name: "全部" });
+    const home = screen.getByRole("button", { name: "家居" });
+    expect(categories).toContainElement(all);
+    expect(all).toHaveAttribute("aria-pressed", "true");
+
+    all.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(home).toHaveFocus();
+    await user.keyboard(" ");
+
+    expect(home).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: "云朵羊毛毯" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "日光便携音箱" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps one clerk input and exposes it as a mobile bottom sheet", async () => {
     const user = userEvent.setup();
     const { container } = render(
@@ -255,6 +314,7 @@ describe("MarketplaceHome actions", () => {
       />,
     );
 
+    expect(screen.getByRole("alert")).toHaveAttribute("data-slot", "alert");
     await user.click(screen.getByRole("button", { name: "重新读取商品" }));
     expect(onRetryCatalog).toHaveBeenCalledTimes(1);
   });

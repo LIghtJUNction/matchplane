@@ -478,8 +478,7 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .finance-actions small { margin-top: 0.13rem; color: var(--muted); font-size: 0.62rem; }
 .overlay-layer { position: fixed; z-index: 100; inset: 0; display: flex; justify-content: flex-end; }
 .overlay-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(20, 20, 19, 0.48); backdrop-filter: blur(0.32rem); cursor: default; }
-.sheet-handle { display: none; }
-.sheet-header { min-height: 4rem; padding: 0.65rem 0.8rem 0.65rem 1.25rem; display: flex; align-items: center; justify-content: space-between; background: rgba(250, 249, 245, 0.82); backdrop-filter: blur(1.2rem); }
+.sheet-header { min-height: 4rem; padding: 0.65rem 0.8rem 0.65rem 1.25rem; display: flex; align-items: center; justify-content: space-between; flex-direction: row; background: rgba(250, 249, 245, 0.82); backdrop-filter: blur(1.2rem); }
 .sheet-label { color: var(--muted); font-size: 0.74rem; font-weight: 650; }
 .sheet-header button { width: 2.55rem; height: 2.55rem; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 0.9rem; background: var(--paper); cursor: pointer; }
 .sheet-scroll { padding: 0 1.2rem 1.5rem; overflow-y: auto; overscroll-behavior: contain; }
@@ -513,7 +512,7 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .offline-contact-card p { margin-top: 0.32rem; color: rgba(250, 249, 245, 0.64); font-size: 0.68rem; line-height: 1.5; }
 .contact-options { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; }
 .contact-options span { min-height: 2rem; padding: 0 0.55rem; display: flex; align-items: center; gap: 0.35rem; border-radius: 0.65rem; background: rgba(250, 249, 245, 0.08); color: rgba(250, 249, 245, 0.75); font-size: 0.63rem; }
-.sheet-footer { min-height: 5.5rem; padding: 0.75rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--line); background: rgba(250, 249, 245, 0.9); backdrop-filter: blur(1.2rem); }
+.sheet-footer { min-height: 5.5rem; padding: 0.75rem 1rem; display: flex; align-items: center; justify-content: space-between; flex-direction: row; gap: 1rem; border-top: 1px solid var(--line); background: rgba(250, 249, 245, 0.9); backdrop-filter: blur(1.2rem); }
 .sheet-footer > div { display: grid; }
 .sheet-footer small { color: var(--muted); font-size: 0.62rem; }
 .sheet-footer .sheet-contact-success { color: var(--cactus-ink); font-weight: 650; }
@@ -523,8 +522,9 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .mode-dialog { position: relative; width: min(100%, 29rem); padding: 1.6rem; border: 1px solid rgba(255, 255, 255, 0.62); border-radius: 2rem; background: var(--ivory); box-shadow: var(--shadow-large); }
 .dialog-icon { width: 3.2rem; height: 3.2rem; margin-bottom: 1rem; display: grid; place-items: center; border-radius: 1.05rem; background: var(--clay); }
 .dialog-icon svg { width: 1.45rem; }
-.mode-dialog h2 { margin-top: 0.4rem; font-size: 1.7rem; letter-spacing: -0.045em; }
-.mode-dialog > p:not(.eyebrow) { margin-top: 0.7rem; color: var(--muted); font-size: 0.78rem; line-height: 1.65; }
+.mode-dialog .mode-dialog-header, .mode-dialog .mode-dialog-body, .mode-dialog .dialog-actions { padding: 0; }
+.mode-dialog h2 { margin-top: 0.4rem; font-size: 1.7rem; letter-spacing: -0.04em; }
+.mode-dialog [data-slot="alert-dialog-description"] { margin-top: 0.7rem; color: var(--muted); font-size: 0.78rem; line-height: 1.65; }
 .dialog-checks { margin-top: 1rem; padding: 0.8rem; display: grid; gap: 0.55rem; border-radius: 1rem; background: var(--paper); }
 .dialog-checks span { display: flex; align-items: center; gap: 0.45rem; font-size: 0.7rem; }
 .dialog-checks svg { color: var(--olive); }
@@ -553,8 +553,7 @@ main { padding-inline: 0.75rem; }
 .subplatform-build-error { grid-column: 2 / -1; }
 .subplatform-activate { grid-column: 2 / -1; justify-self: start; }
 .platform-layout { grid-template-columns: 1fr; }
-.finance-activity, .gateway-panel, .listing-sheet { align-self: end; width: 100%; height: min(92dvh, 50rem); margin: 0; grid-template-rows: auto auto minmax(0, 1fr) auto; border-radius: 2rem 2rem 0 0; }
-.sheet-handle { width: 2.4rem; height: 0.3rem; margin: 0.55rem auto 0; display: block; border-radius: 999px; background: var(--line-strong); }
+.finance-activity, .gateway-panel, .listing-sheet { align-self: end; width: 100%; height: min(92dvh, 50rem); margin: 0; border-radius: 2rem 2rem 0 0; }
 .sheet-header { min-height: 3.3rem; padding-top: 0.2rem; }
 }
 @media (max-width: 40rem) {
@@ -1621,7 +1620,7 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .root-marketplace-inline-categories { margin: 0.75rem auto 0; padding: 0 0.35rem; display: flex; gap: 1rem; overflow-x: auto; border: 0; }
 .root-marketplace-products, .root-marketplace-stores { padding-right: 1rem; padding-left: 1rem; }
 }
-.listing-sheet { position: relative; width: min(35rem, 100%); height: calc(100% - 1rem); margin: 0.5rem; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.64); border-radius: 2.15rem; background: var(--ivory); box-shadow: var(--shadow-large); --ink: #1d211c; --ink-soft: #343a32; --muted: #686c63; --ivory: #fbf8f1; --paper: #f1ede3; --paper-deep: #e8e2d6; --line: rgba(29, 33, 28, 0.12); --line-strong: rgba(29, 33, 28, 0.22); --surface: #fbf8f1; color: var(--ink); }
+.listing-sheet { position: relative; width: min(35rem, 100%); height: calc(100% - 1rem); margin: 0.5rem; display: flex; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.64); border-radius: 2.15rem; background: var(--ivory); box-shadow: var(--shadow-large); --ink: #1d211c; --ink-soft: #343a32; --muted: #686c63; --ivory: #fbf8f1; --paper: #f1ede3; --paper-deep: #e8e2d6; --line: rgba(29, 33, 28, 0.12); --line-strong: rgba(29, 33, 28, 0.22); --surface: #fbf8f1; color: var(--ink); }
 .listing-sheet .sheet-header { background: color-mix(in srgb, var(--ivory) 94%, transparent); border-color: var(--line); }
 .listing-sheet .sheet-scroll { padding: 0 1.2rem 7.5rem; }
 .listing-gallery { position: relative; overflow: hidden; border-radius: 1.1rem; background: var(--paper-deep); outline: 0; }
@@ -1664,6 +1663,8 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .listing-sheet .sheet-scroll { padding-right: 1rem; padding-left: 1rem; }
 }
 [data-slot="dialog-backdrop"], [data-slot="dialog-viewport"] { z-index: 120 !important; }
+[data-slot="drawer-backdrop"], [data-slot="drawer-viewport"] { z-index: 300 !important; }
+[data-slot="alert-dialog-backdrop"], [data-slot="alert-dialog-viewport"] { z-index: 320 !important; }
 .workspace-settings-dialog { position: relative; width: min(calc(100vw - 2rem), 64rem); max-height: calc(100dvh - 2rem); display: block; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 1.35rem; background: var(--ivory); box-shadow: 0 1.5rem 5rem rgba(0, 0, 0, 0.32); height: min(48rem, calc(100dvh - 2rem)); padding: 0 !important; }
 .workspace-settings-dialog-wide { width: min(calc(100vw - 2rem), 72rem); }
 .workspace-settings-layout { height: 100%; min-height: 0; display: grid; grid-template-columns: 19rem minmax(0, 1fr); }

@@ -624,7 +624,7 @@ describe("MatchPlane workspaces", () => {
     await user.click(screen.getByRole("tab", { name: "支付（可选）" }));
     await user.click(screen.getByRole("button", { name: "切换支付模式" }));
 
-    const dialog = screen.getByRole("dialog", {
+    const dialog = screen.getByRole("alertdialog", {
       name: "切换到生产模式？",
     });
     expect(dialog).toHaveTextContent("未决订单检查");

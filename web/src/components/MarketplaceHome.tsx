@@ -1,5 +1,16 @@
 "use client";
 
+import {
+    Alert,
+    AlertAction,
+    AlertDescription,
+    AlertIcon,
+    AlertTitle,
+} from "@appica/ui-react/alert";
+import { Button } from "@appica/ui-react/button";
+import { Skeleton } from "@appica/ui-react/skeleton";
+import { Toggle } from "@appica/ui-react/toggle";
+import { ToggleGroup } from "@appica/ui-react/toggle-group";
 import { ArrowRight, PackageOpen, RefreshCw, ShoppingBag } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
@@ -62,9 +73,9 @@ function MarketplaceLoading({ locale }: { locale: InterfaceLocale }) {
             <div className="root-marketplace-loading" aria-hidden="true">
                 {[0, 1, 2, 3].map((item) => (
                     <div className="root-marketplace-loading-box" key={item}>
-                        <span />
-                        <span />
-                        <span />
+                        <Skeleton className="root-marketplace-loading-visual" />
+                        <Skeleton className="root-marketplace-loading-line" />
+                        <Skeleton className="root-marketplace-loading-line is-short" />
                     </div>
                 ))}
             </div>
@@ -155,25 +166,31 @@ function MarketplaceProducts({
         );
     else if (catalogError)
         content = (
-            <div className="root-marketplace-error" role="alert">
-                <PackageOpen aria-hidden="true" />
-                <div>
-                    <strong>
-                        {locale === "en"
-                            ? "The product shelf did not load"
-                            : "商品货架读取失败"}
-                    </strong>
-                    <p>
-                        {locale === "en"
-                            ? "The shopping assistant is still available."
-                            : "选货员仍然可用，可以直接描述你的需要。"}
-                    </p>
-                </div>
-                <button type="button" onClick={onRetryCatalog}>
-                    <RefreshCw aria-hidden="true" />
-                    {locale === "en" ? "Retry catalog" : "重新读取商品"}
-                </button>
-            </div>
+            <Alert
+                className="root-marketplace-error"
+                variant="error"
+                layout="inline"
+            >
+                <AlertIcon>
+                    <PackageOpen aria-hidden="true" />
+                </AlertIcon>
+                <AlertTitle as="div">
+                    {locale === "en"
+                        ? "The product shelf did not load"
+                        : "商品货架读取失败"}
+                </AlertTitle>
+                <AlertDescription>
+                    {locale === "en"
+                        ? "The shopping assistant is still available."
+                        : "选货员仍然可用，可以直接描述你的需要。"}
+                </AlertDescription>
+                <AlertAction>
+                    <Button size="sm" type="button" onClick={onRetryCatalog}>
+                        <RefreshCw aria-hidden="true" />
+                        {locale === "en" ? "Retry catalog" : "重新读取商品"}
+                    </Button>
+                </AlertAction>
+            </Alert>
         );
     else
         content = (
@@ -191,10 +208,15 @@ function MarketplaceProducts({
                             : "可以询问选货员，也可以浏览下方已营业店铺。"}
                     </p>
                 </div>
-                <button type="button" onClick={onPublishProduct}>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={onPublishProduct}
+                >
                     {locale === "en" ? "List a product" : "发布商品"}
                     <ArrowRight aria-hidden="true" />
-                </button>
+                </Button>
             </div>
         );
 
@@ -291,36 +313,51 @@ export function MarketplaceHome({
                             </span>
                         </div>
                         <div className="root-marketplace-catalog-actions">
-                            <a href="#stores">
+                            <Button
+                                variant="outline"
+                                render={<a href="#stores" />}
+                            >
                                 {locale === "en" ? "Browse stores" : "浏览店铺"}
-                            </a>
-                            <button type="button" onClick={onPublishProduct}>
+                            </Button>
+                            <Button type="button" onClick={onPublishProduct}>
                                 <ShoppingBag aria-hidden="true" />
                                 {locale === "en"
                                     ? "List a product"
                                     : "发布商品"}
-                            </button>
+                            </Button>
                         </div>
                     </header>
                     {categories.length > 1 ? (
-                        <fieldset className="root-marketplace-inline-categories">
-                            <legend className="sr-only">
-                                {locale === "en"
+                        <ToggleGroup
+                            className="root-marketplace-inline-categories"
+                            aria-label={
+                                locale === "en"
                                     ? "Product categories"
-                                    : "商品分类"}
-                            </legend>
+                                    : "商品分类"
+                            }
+                            value={[effectiveCategory]}
+                            onValueChange={(next) => {
+                                if (next[0]) setCategory(next[0]);
+                            }}
+                        >
                             {categories.map((item) => (
-                                <button
-                                    className="root-marketplace-category"
+                                <Toggle
                                     key={item}
-                                    type="button"
-                                    aria-pressed={effectiveCategory === item}
-                                    onClick={() => setCategory(item)}
-                                >
-                                    {item}
-                                </button>
+                                    value={item}
+                                    aria-label={item}
+                                    render={
+                                        <Button
+                                            className="root-marketplace-category"
+                                            variant="ghost"
+                                            size="sm"
+                                            type="button"
+                                        >
+                                            {item}
+                                        </Button>
+                                    }
+                                />
                             ))}
-                        </fieldset>
+                        </ToggleGroup>
                     ) : null}
                     <div
                         className={`root-marketplace-content${sparseCatalog ? " is-sparse" : ""}`}
