@@ -1902,6 +1902,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "matchplane-conversion-projector"
+version = "0.1.10"
+dependencies = [
+ "anyhow",
+ "axum",
+ "matchplane-config",
+ "matchplane-observability",
+ "matchplane-storage",
+ "metrics",
+ "serde",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "matchplane-domain"
 version = "0.1.10"
 dependencies = [

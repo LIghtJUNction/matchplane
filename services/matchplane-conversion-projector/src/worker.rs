@@ -1,0 +1,515 @@
+use std::{sync::Arc, time::Duration};
+
+use matchplane_storage::{
+    MarketplaceConversionBacklog, MarketplaceConversionClaimBatch,
+    MarketplaceConversionFailureDisposition, MarketplaceConversionFailureOutcome,
+    MarketplaceConversionJob, MarketplaceConversionProjectionOutcome, PgStore, StorageError,
+};
+use tokio::{sync::watch, time::Instant};
+use tracing::{error, info, warn};
+
+use crate::worker_metrics::WorkerMetrics;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct WorkerSettings {
+    pub(crate) batch_size: i64,
+    pub(crate) poll_interval: Duration,
+}
+
+trait ConversionStore: Send + Sync {
+    async fn claim_batch(
+        &self,
+        limit: i64,
+    ) -> Result<MarketplaceConversionClaimBatch, StorageError>;
+
+    async fn project(
+        &self,
+        job: &MarketplaceConversionJob,
+    ) -> Result<MarketplaceConversionProjectionOutcome, StorageError>;
+
+    async fn fail(
+        &self,
+        job: &MarketplaceConversionJob,
+        error: &str,
+    ) -> Result<MarketplaceConversionFailureOutcome, StorageError>;
+
+    async fn backlog(&self) -> Result<MarketplaceConversionBacklog, StorageError>;
+}
+
+impl ConversionStore for PgStore {
+    async fn claim_batch(
+        &self,
+        limit: i64,
+    ) -> Result<MarketplaceConversionClaimBatch, StorageError> {
+        self.claim_marketplace_conversion_batch(limit).await
+    }
+
+    async fn project(
+        &self,
+        job: &MarketplaceConversionJob,
+    ) -> Result<MarketplaceConversionProjectionOutcome, StorageError> {
+        self.project_marketplace_conversion(job).await
+    }
+
+    async fn fail(
+        &self,
+        job: &MarketplaceConversionJob,
+        error: &str,
+    ) -> Result<MarketplaceConversionFailureOutcome, StorageError> {
+        self.fail_marketplace_conversion(job, error).await
+    }
+
+    async fn backlog(&self) -> Result<MarketplaceConversionBacklog, StorageError> {
+        self.marketplace_conversion_backlog().await
+    }
+}
+
+pub(crate) async fn run_worker(
+    store: PgStore,
+    settings: WorkerSettings,
+    metrics: Arc<WorkerMetrics>,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    loop {
+        if *shutdown.borrow() {
+            return;
+        }
+        let claimed = store.claim_batch(settings.batch_size).await;
+        match claimed {
+            Ok(batch) => {
+                let is_empty = batch.jobs.is_empty();
+                handle_claim_batch(&store, batch, &metrics, &shutdown).await;
+                refresh_backlog(&store, &metrics).await;
+                if *shutdown.borrow() {
+                    return;
+                }
+                if is_empty && wait_for_poll(settings.poll_interval, &mut shutdown).await {
+                    return;
+                }
+            }
+            Err(error_value) => {
+                metrics.loop_error();
+                error!(
+                    error_category = error_category(&error_value),
+                    outcome = "claim_error",
+                    "conversion projection claim loop failed"
+                );
+                if wait_for_poll(settings.poll_interval, &mut shutdown).await {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+async fn handle_claim_batch<S: ConversionStore>(
+    store: &S,
+    batch: MarketplaceConversionClaimBatch,
+    metrics: &WorkerMetrics,
+    shutdown: &watch::Receiver<bool>,
+) {
+    metrics.record_batch(batch.jobs.len(), batch.expired_dead);
+    if batch.expired_dead != 0 {
+        warn!(
+            dead_count = batch.expired_dead,
+            outcome = "lease_expired_dead",
+            "conversion projection lease watchdog dead-lettered jobs"
+        );
+    }
+    for job in batch.jobs {
+        if *shutdown.borrow() {
+            return;
+        }
+        process_job(store, &job, metrics).await;
+    }
+}
+
+async fn process_job<S: ConversionStore>(
+    store: &S,
+    job: &MarketplaceConversionJob,
+    metrics: &WorkerMetrics,
+) {
+    let started = Instant::now();
+    metrics.begin_job();
+    let projection = store.project(job).await;
+    match projection {
+        Ok(_) => {
+            metrics.projected();
+            info!(
+                job_id = %job.id,
+                tenant_id = %job.tenant_id,
+                aggregate_id = %job.aggregate_id,
+                source_category = source_category(&job.source_type),
+                attempt = job.attempts,
+                duration_ms = started.elapsed().as_millis() as u64,
+                outcome = "projected",
+                "conversion projection job completed"
+            );
+        }
+        Err(StorageError::Conflict(_)) => {
+            metrics.claim_conflict();
+            warn!(
+                job_id = %job.id,
+                tenant_id = %job.tenant_id,
+                aggregate_id = %job.aggregate_id,
+                source_category = source_category(&job.source_type),
+                attempt = job.attempts,
+                duration_ms = started.elapsed().as_millis() as u64,
+                outcome = "claim_lost",
+                "conversion projection claim was lost"
+            );
+        }
+        Err(error_value) => {
+            let category = error_category(&error_value);
+            let durable_error = error_value.to_string();
+            match store.fail(job, &durable_error).await {
+                Ok(failure) => match failure.disposition {
+                    MarketplaceConversionFailureDisposition::Retry => {
+                        metrics.retry();
+                        warn!(
+                            job_id = %job.id,
+                            tenant_id = %job.tenant_id,
+                            aggregate_id = %job.aggregate_id,
+                            source_category = source_category(&job.source_type),
+                            error_category = category,
+                            attempt = job.attempts,
+                            duration_ms = started.elapsed().as_millis() as u64,
+                            outcome = "retry",
+                            "conversion projection job scheduled for retry"
+                        );
+                    }
+                    MarketplaceConversionFailureDisposition::Dead => {
+                        metrics.dead();
+                        error!(
+                            job_id = %job.id,
+                            tenant_id = %job.tenant_id,
+                            aggregate_id = %job.aggregate_id,
+                            source_category = source_category(&job.source_type),
+                            error_category = category,
+                            attempt = job.attempts,
+                            duration_ms = started.elapsed().as_millis() as u64,
+                            outcome = "dead",
+                            "conversion projection job dead-lettered"
+                        );
+                    }
+                },
+                Err(StorageError::Conflict(_)) => {
+                    metrics.claim_conflict();
+                    warn!(
+                        job_id = %job.id,
+                        tenant_id = %job.tenant_id,
+                        aggregate_id = %job.aggregate_id,
+                        source_category = source_category(&job.source_type),
+                        error_category = category,
+                        attempt = job.attempts,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        outcome = "claim_lost",
+                        "conversion projection failure transition lost its claim"
+                    );
+                }
+                Err(transition_error) => {
+                    metrics.loop_error();
+                    error!(
+                        job_id = %job.id,
+                        tenant_id = %job.tenant_id,
+                        aggregate_id = %job.aggregate_id,
+                        source_category = source_category(&job.source_type),
+                        error_category = category,
+                        transition_error_category = error_category(&transition_error),
+                        attempt = job.attempts,
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        outcome = "transition_error",
+                        "conversion projection failure transition failed"
+                    );
+                }
+            }
+        }
+    }
+    metrics.finish_job(started.elapsed().as_secs_f64());
+}
+
+async fn refresh_backlog<S: ConversionStore>(store: &S, metrics: &WorkerMetrics) {
+    match store.backlog().await {
+        Ok(backlog) => metrics.observe_backlog(backlog),
+        Err(error_value) => {
+            metrics.loop_error();
+            error!(
+                error_category = error_category(&error_value),
+                outcome = "backlog_error",
+                "conversion projection backlog refresh failed"
+            );
+        }
+    }
+}
+
+async fn wait_for_poll(interval: Duration, shutdown: &mut watch::Receiver<bool>) -> bool {
+    tokio::select! {
+        () = tokio::time::sleep(interval) => *shutdown.borrow(),
+        changed = shutdown.changed() => changed.is_err() || *shutdown.borrow(),
+    }
+}
+
+fn source_category(source_type: &str) -> &'static str {
+    match source_type {
+        "introduction_contact_event" => "contact",
+        "sales_handoff" => "handoff",
+        _ => "unknown",
+    }
+}
+
+fn error_category(error: &StorageError) -> &'static str {
+    match error {
+        StorageError::Sqlx(_) => "postgres",
+        StorageError::Migration(_) => "migration",
+        StorageError::IdempotencyConflict => "idempotency_conflict",
+        StorageError::Forbidden(_) => "forbidden",
+        StorageError::Conflict(_) => "conflict",
+        StorageError::NotFound(_) => "not_found",
+        StorageError::InvalidData(_) => "invalid_data",
+        StorageError::InsufficientBalance => "insufficient_balance",
+        StorageError::LeaseUnavailable => "lease_unavailable",
+        StorageError::ReservationUnavailable => "reservation_unavailable",
+        StorageError::StaleFencingToken => "stale_fencing_token",
+        StorageError::ReplayDetected => "replay_detected",
+        StorageError::ReservationVersionConflict => "reservation_version_conflict",
+        StorageError::InvalidReservationTransition { .. } => "invalid_transition",
+        StorageError::Wire(_) => "wire",
+        StorageError::Engine(_) => "engine",
+        StorageError::Json(_) => "json",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::VecDeque,
+        sync::{
+            Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    use tokio::sync::watch;
+    use uuid::Uuid;
+
+    use super::*;
+
+    struct MockStore {
+        project_results:
+            Mutex<VecDeque<Result<MarketplaceConversionProjectionOutcome, StorageError>>>,
+        fail_results: Mutex<VecDeque<Result<MarketplaceConversionFailureOutcome, StorageError>>>,
+        projected_jobs: AtomicUsize,
+        shutdown_after_first: Option<watch::Sender<bool>>,
+    }
+
+    impl MockStore {
+        fn success() -> Self {
+            Self {
+                project_results: Mutex::new(VecDeque::from([Ok(
+                    MarketplaceConversionProjectionOutcome {
+                        opportunity_id: Some(Uuid::now_v7()),
+                        notifications_written: 1,
+                    },
+                )])),
+                fail_results: Mutex::new(VecDeque::new()),
+                projected_jobs: AtomicUsize::new(0),
+                shutdown_after_first: None,
+            }
+        }
+    }
+
+    impl ConversionStore for MockStore {
+        async fn claim_batch(
+            &self,
+            _limit: i64,
+        ) -> Result<MarketplaceConversionClaimBatch, StorageError> {
+            Ok(MarketplaceConversionClaimBatch {
+                jobs: Vec::new(),
+                expired_dead: 0,
+            })
+        }
+
+        async fn project(
+            &self,
+            _job: &MarketplaceConversionJob,
+        ) -> Result<MarketplaceConversionProjectionOutcome, StorageError> {
+            let index = self.projected_jobs.fetch_add(1, Ordering::Relaxed);
+            let result = self
+                .project_results
+                .lock()
+                .expect("project result lock poisoned")
+                .pop_front()
+                .expect("missing project result");
+            if index == 0
+                && let Some(sender) = &self.shutdown_after_first
+            {
+                let _ = sender.send(true);
+            }
+            result
+        }
+
+        async fn fail(
+            &self,
+            _job: &MarketplaceConversionJob,
+            _error: &str,
+        ) -> Result<MarketplaceConversionFailureOutcome, StorageError> {
+            self.fail_results
+                .lock()
+                .expect("failure result lock poisoned")
+                .pop_front()
+                .expect("missing failure result")
+        }
+
+        async fn backlog(&self) -> Result<MarketplaceConversionBacklog, StorageError> {
+            Ok(MarketplaceConversionBacklog {
+                pending: 0,
+                publishing: 0,
+                failed: 0,
+                dead: 0,
+                oldest_unresolved_seconds: None,
+            })
+        }
+    }
+
+    fn job() -> MarketplaceConversionJob {
+        MarketplaceConversionJob {
+            id: Uuid::now_v7(),
+            tenant_id: Uuid::now_v7(),
+            schema_version: 1,
+            source_type: "sales_handoff".to_owned(),
+            source_id: Uuid::now_v7(),
+            aggregate_type: "marketplace_sales_handoff".to_owned(),
+            aggregate_id: Uuid::now_v7(),
+            aggregate_version: 1,
+            event_type: "marketplace_sales_handoff_created".to_owned(),
+            attempts: 1,
+            claim_token: Uuid::now_v7(),
+        }
+    }
+
+    #[tokio::test]
+    async fn successful_batch_should_record_claim_and_projection_metrics() {
+        let store = MockStore::success();
+        let metrics = WorkerMetrics::default();
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+
+        handle_claim_batch(
+            &store,
+            MarketplaceConversionClaimBatch {
+                jobs: vec![job()],
+                expired_dead: 0,
+            },
+            &metrics,
+            &shutdown,
+        )
+        .await;
+
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.claimed, 1);
+        assert_eq!(snapshot.projected, 1);
+        assert_eq!(snapshot.retries, 0);
+        assert_eq!(snapshot.inflight, 0);
+        assert_eq!(snapshot.last_batch_size, 1);
+        assert_eq!(snapshot.duration_observations, 1);
+    }
+
+    #[tokio::test]
+    async fn failed_batch_should_record_retry_metrics() {
+        let store = MockStore {
+            project_results: Mutex::new(VecDeque::from([Err(StorageError::InvalidData(
+                "deterministic failure".to_owned(),
+            ))])),
+            fail_results: Mutex::new(VecDeque::from([Ok(MarketplaceConversionFailureOutcome {
+                disposition: MarketplaceConversionFailureDisposition::Retry,
+                retry_delay_ms: Some(2_000),
+            })])),
+            projected_jobs: AtomicUsize::new(0),
+            shutdown_after_first: None,
+        };
+        let metrics = WorkerMetrics::default();
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+
+        handle_claim_batch(
+            &store,
+            MarketplaceConversionClaimBatch {
+                jobs: vec![job()],
+                expired_dead: 0,
+            },
+            &metrics,
+            &shutdown,
+        )
+        .await;
+
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.claimed, 1);
+        assert_eq!(snapshot.projected, 0);
+        assert_eq!(snapshot.retries, 1);
+        assert_eq!(snapshot.loop_errors, 0);
+        assert_eq!(snapshot.inflight, 0);
+    }
+
+    #[tokio::test]
+    async fn claim_conflict_should_not_schedule_failure_transition() {
+        let store = MockStore {
+            project_results: Mutex::new(VecDeque::from([Err(StorageError::Conflict(
+                "claim lost".to_owned(),
+            ))])),
+            fail_results: Mutex::new(VecDeque::new()),
+            projected_jobs: AtomicUsize::new(0),
+            shutdown_after_first: None,
+        };
+        let metrics = WorkerMetrics::default();
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+
+        handle_claim_batch(
+            &store,
+            MarketplaceConversionClaimBatch {
+                jobs: vec![job()],
+                expired_dead: 0,
+            },
+            &metrics,
+            &shutdown,
+        )
+        .await;
+
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.claim_conflicts, 1);
+        assert_eq!(snapshot.retries, 0);
+        assert_eq!(snapshot.dead, 0);
+    }
+
+    #[tokio::test]
+    async fn shutdown_should_finish_current_job_and_leave_remaining_claims_for_lease_recovery() {
+        let (shutdown_tx, shutdown) = watch::channel(false);
+        let store = MockStore {
+            project_results: Mutex::new(VecDeque::from([
+                Ok(MarketplaceConversionProjectionOutcome {
+                    opportunity_id: Some(Uuid::now_v7()),
+                    notifications_written: 0,
+                }),
+                Ok(MarketplaceConversionProjectionOutcome {
+                    opportunity_id: Some(Uuid::now_v7()),
+                    notifications_written: 0,
+                }),
+            ])),
+            fail_results: Mutex::new(VecDeque::new()),
+            projected_jobs: AtomicUsize::new(0),
+            shutdown_after_first: Some(shutdown_tx),
+        };
+        let metrics = WorkerMetrics::default();
+
+        handle_claim_batch(
+            &store,
+            MarketplaceConversionClaimBatch {
+                jobs: vec![job(), job()],
+                expired_dead: 0,
+            },
+            &metrics,
+            &shutdown,
+        )
+        .await;
+
+        assert_eq!(store.projected_jobs.load(Ordering::Relaxed), 1);
+        assert_eq!(metrics.snapshot().projected, 1);
+    }
+}

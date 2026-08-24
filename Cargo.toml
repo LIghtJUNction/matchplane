@@ -13,6 +13,7 @@ members = [
   "crates/matchplane-payments",
   "crates/matchplane-protocol",
   "crates/matchplane-storage",
+  "services/matchplane-conversion-projector",
   "services/matchplane-event-relay",
   "services/matchplane-federation-hub",
   "services/matchplane-gateway",
