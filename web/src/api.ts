@@ -885,7 +885,9 @@ export async function getMallSettings(): Promise<MallSettings> {
     cache: "no-store",
     fallbackError: "商城设置读取失败",
     ok: (value) =>
-      Boolean(value && typeof value === "object" && "mall" in value && value.mall),
+      Boolean(
+        value && typeof value === "object" && "mall" in value && value.mall,
+      ),
   });
   return body.mall;
 }
@@ -901,7 +903,9 @@ export async function saveMallSettings(input: {
     body: input,
     fallbackError: "商城名称保存失败",
     ok: (value) =>
-      Boolean(value && typeof value === "object" && "mall" in value && value.mall),
+      Boolean(
+        value && typeof value === "object" && "mall" in value && value.mall,
+      ),
   });
   return body.mall;
 }
@@ -1651,7 +1655,10 @@ export async function getShoppingMemory(): Promise<ShoppingMemorySnapshot> {
       fallbackError: "购物记忆读取失败",
       ok: (value) =>
         Boolean(
-          value && typeof value === "object" && "memory" in value && value.memory,
+          value &&
+            typeof value === "object" &&
+            "memory" in value &&
+            value.memory,
         ),
     },
   );
@@ -1669,7 +1676,10 @@ export async function saveShoppingMemory(
       fallbackError: "购物记忆保存失败",
       ok: (value) =>
         Boolean(
-          value && typeof value === "object" && "memory" in value && value.memory,
+          value &&
+            typeof value === "object" &&
+            "memory" in value &&
+            value.memory,
         ),
     },
   );
@@ -1790,16 +1800,22 @@ export interface StoreCustomerRecord {
 export async function getStoreCustomers(
   storeId: string,
 ): Promise<StoreCustomerRecord[]> {
-  const response = await fetch(`/api/stores/${encodeURIComponent(storeId)}/customers`, {
-    cache: "no-store",
-    credentials: "include",
-  });
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(storeId)}/customers`,
+    {
+      cache: "no-store",
+      credentials: "include",
+    },
+  );
   const body = (await response.json().catch(() => null)) as {
     customers?: StoreCustomerRecord[];
     error?: string;
   } | null;
   if (!response.ok)
-    throw new MarketplaceApiError(response.status, body?.error || "客户列表暂时无法读取");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "客户列表暂时无法读取",
+    );
   return Array.isArray(body?.customers) ? body.customers : [];
 }
 
@@ -1807,16 +1823,13 @@ export async function notifyStoreCustomerHandoff(
   storePath: string,
   handoffId: string,
 ): Promise<number> {
-  const response = await fetch(
-    "/api/mall/handoffs/notify",
-    {
-      method: "POST",
-      cache: "no-store",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ handoffId, storePath }),
-    },
-  );
+  const response = await fetch("/api/mall/handoffs/notify", {
+    method: "POST",
+    cache: "no-store",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ handoffId, storePath }),
+  });
   const body = (await response.json().catch(() => null)) as {
     notified?: number;
     error?: string;
@@ -1860,7 +1873,10 @@ export async function updateStoreCustomer(input: {
     error?: string;
   } | null;
   if (!response.ok || !body?.customer)
-    throw new MarketplaceApiError(response.status, body?.error || "客户记录更新失败");
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "客户记录更新失败",
+    );
   return body.customer;
 }
 
@@ -2122,8 +2138,7 @@ async function apiJson<T>(path: string, options: ApiJsonOptions): Promise<T> {
         : {}),
       ...options.headers,
     },
-    body:
-      options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
   const body = await readJson<T & { error?: string }>(response);
   const valid = options.ok ? options.ok(body) : Boolean(body);

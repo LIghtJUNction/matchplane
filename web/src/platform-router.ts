@@ -464,7 +464,11 @@ function boundedCatalogAttributes(
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(attributes).slice(0, 32)) {
     if (key === "attachments" || key === "description") continue;
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    )
       result[key] = String(value).slice(0, 300);
     else if (Array.isArray(value)) {
       const scalars = value.filter(
@@ -593,7 +597,12 @@ function catalogSummary(products: AssistantCatalogProduct[]) {
   const stores = new Map<string, number>();
   const priceRanges = new Map<
     string,
-    { currency: string; currencyScale: number; minimum: bigint; maximum: bigint }
+    {
+      currency: string;
+      currencyScale: number;
+      minimum: bigint;
+      maximum: bigint;
+    }
   >();
   const fields = new Set<string>();
   for (const product of products) {
@@ -1268,7 +1277,12 @@ export async function answerPlatformShoppingQuestion(input: {
                 limit: page.limit,
                 hasMore: page.hasMore,
               },
-              applied: { budget: budget ?? null, requirements, storePaths, sort },
+              applied: {
+                budget: budget ?? null,
+                requirements,
+                storePaths,
+                sort,
+              },
             };
           },
         }),

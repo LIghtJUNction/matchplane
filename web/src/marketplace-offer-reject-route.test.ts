@@ -84,15 +84,16 @@ describe("marketplace offer rejection route", () => {
     mocks.notifyPartyUsers.mockResolvedValue(undefined);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            offer_id: offerId,
-            status: "withdrawn",
-            version: 4,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              offer_id: offerId,
+              status: "withdrawn",
+              version: 4,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
       ),
     );
   });

@@ -61,6 +61,20 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18.4-bookworm@sha256:882236b897e39051d2368c5ccc6cda944904723506b2dfc97f2a8f5bc9afa382
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username postgres --dbname postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,6 +115,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Run tests
         run: cargo test --workspace --locked
+      - name: Test ordered outbox claims against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test outbox_claims -- --ignored
       - name: Validate Compose model
         run: docker compose --env-file .env.example -f deploy/compose/compose.yaml config --quiet
 

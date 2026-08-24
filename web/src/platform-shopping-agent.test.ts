@@ -620,7 +620,10 @@ describe("platform shopping agent", () => {
       products: [
         expect.objectContaining({
           id: "offer-a",
-          attributes: expect.objectContaining({ memory_gb: "16", color: "灰色" }),
+          attributes: expect.objectContaining({
+            memory_gb: "16",
+            color: "灰色",
+          }),
           matchScore: 0.93,
           matchReasons: ["符合预算"],
         }),

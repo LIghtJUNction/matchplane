@@ -5,6 +5,7 @@ use matchplane_domain::{
 };
 use serde::Serialize;
 use time::OffsetDateTime;
+use uuid::Uuid;
 
 /// Validated order data submitted to the authoritative transaction boundary.
 #[derive(Debug, Clone)]
@@ -132,10 +133,14 @@ pub struct OutboxMessage {
     pub topic: String,
     /// Kafka partitioning key.
     pub message_key: String,
+    /// Monotonic sequence within the message stream.
+    pub shard_sequence: u64,
     /// Complete Protobuf envelope bytes.
     pub payload: Vec<u8>,
-    /// Number of preceding publication attempts.
+    /// Number of publication attempts including this claim.
     pub attempts: i32,
+    /// Fences acknowledgements from workers whose stale claim was reclaimed.
+    pub claim_token: Uuid,
 }
 
 /// Result of committing a consumed command and its deterministic events.

@@ -105,6 +105,27 @@ root 接收规范资产 ID、有界分数、提供者/模型版本和原因；�
 域事实。每个信封都包含强制性身份、沿袭、分片、版本、时间戳、
 和 ADR 0003 中描述的有效负载哈希字段。
 
+## 前端与交互层
+
+MatchPlane 前端工程（`web/`）采用基于 Next.js 16 + React 19 的领域解耦架构，将状态机与视图层彻底分离：
+
+```text
+Next.js App Router (app/) -> 声明式主编排器 (App.tsx)
+                                 |
+        +------------------------+------------------------+
+        |                                                 |
+领域业务 Hooks (hooks/)                       外壳与弹窗宿主 (components/shell/)
+  - useAuthSession                              - PlatformHeader
+  - useSubplatformRoute                         - SubplatformFullscreenHeader
+  - useOwnedStores                              - PlatformOverlaysHost
+  - useStoreHandoff                             - PlatformFooter
+  - useMarketplaceCatalog                                 |
+                                             领域组件库 (components/)
+                                               - account/ marketplace/ store/ admin/ ui/
+```
+
+详细规范请参阅 `docs/frontend-architecture.zh-CN.md` 与 `docs/adr/0018-frontend-modularization-and-domain-driven-decoupling.zh-CN.md`。
+
 ## 部署
 
 A、B 和 C 应在独立的 Kubernetes 故障域中运行。无状态 API 和工作人员使用

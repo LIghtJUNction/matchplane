@@ -162,7 +162,9 @@ export async function POST(
     platformPath: candidate.storePath,
     actionPath: `${candidate.storePath}?console=products&offer=${encodeURIComponent(offerId)}`,
     payload: { offerId, reason },
-  }).catch((error) => console.error("offer rejection notification failed", error));
+  }).catch((error) =>
+    console.error("offer rejection notification failed", error),
+  );
 
   return NextResponse.json(rejected, {
     status: upstream.status,

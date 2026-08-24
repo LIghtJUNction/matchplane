@@ -69,13 +69,25 @@ async fn relay_once(store: &PgStore, publisher: &KafkaPublisher) -> anyhow::Resu
             .await
         {
             Ok(()) => store
-                .mark_outbox_published(message.event_id)
+                .mark_outbox_published(message.event_id, message.claim_token)
                 .await
                 .context("outbox acknowledgement failed")?,
             Err(error) => {
-                warn!(event_id = %message.event_id, %error, "Kafka publication will be retried");
+                warn!(
+                    event_id = %message.event_id,
+                    topic = %message.topic,
+                    message_key = %message.message_key,
+                    shard_sequence = message.shard_sequence,
+                    %error,
+                    "Kafka publication will be retried"
+                );
                 store
-                    .mark_outbox_failed(message.event_id, message.attempts, &error.to_string())
+                    .mark_outbox_failed(
+                        message.event_id,
+                        message.claim_token,
+                        message.attempts,
+                        &error.to_string(),
+                    )
                     .await
                     .context("outbox retry transition failed")?;
             }

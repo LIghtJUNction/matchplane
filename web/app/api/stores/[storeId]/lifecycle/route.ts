@@ -56,8 +56,7 @@ export async function PATCH(
     return error("店铺状态已被其他操作更新，请刷新后重试", 409);
 
   const targetStatus = action === "close" ? "closed" : "active";
-  if (access.store.status === targetStatus)
-    return storeResponse(access.store);
+  if (access.store.status === targetStatus) return storeResponse(access.store);
   const sourceStatus = action === "close" ? "active" : "closed";
   if (access.store.status !== sourceStatus) {
     if (access.store.status === "suspended")

@@ -349,7 +349,6 @@ async function readOwnedStores(request: Request): Promise<Response> {
   );
 }
 
-
 function normalizeName(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
@@ -384,4 +383,3 @@ class StoreCreationConflict extends Error {
     super(message);
   }
 }
-

@@ -148,14 +148,10 @@ export function HostedStoreOnboarding({
     setCopied(false);
   };
 
-  const sectionLabel =
-    locale === "en" ? "Your stores" : "你的店铺";
+  const sectionLabel = locale === "en" ? "Your stores" : "你的店铺";
 
   return (
-    <section
-      className="hosted-store-onboarding"
-      aria-label={sectionLabel}
-    >
+    <section className="hosted-store-onboarding" aria-label={sectionLabel}>
       {loading ? (
         <p className="hosted-store-status" role="status">
           {locale === "en" ? "Loading stores…" : "正在读取店铺…"}
@@ -271,10 +267,7 @@ export function HostedStoreOnboarding({
                         (locale === "en" ? "Hosted store" : "托管店铺")}
                     </p>
                   </div>
-                  <a
-                    className="owned-store-enter"
-                    href={store.path}
-                  >
+                  <a className="owned-store-enter" href={store.path}>
                     {locale === "en" ? "Open store" : "进入店铺"}
                     <ArrowRight size={16} aria-hidden="true" />
                   </a>

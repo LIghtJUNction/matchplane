@@ -146,7 +146,11 @@ function boundedText(value: unknown, maxLength: number): string {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
-function stringList(value: unknown, limit: number, maxLength: number): string[] {
+function stringList(
+  value: unknown,
+  limit: number,
+  maxLength: number,
+): string[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter(

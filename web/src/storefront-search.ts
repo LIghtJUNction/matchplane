@@ -142,54 +142,54 @@ export async function searchPublicStoreOfferPage(
       compareRankedOffers(left.row, right.row, sort),
     );
   const publicOffers = ranked.flatMap(
-      ({
-        row,
-        score,
-        overlapLabels,
-        intentReasons,
-      }): RecommendedBackendListing[] => {
-        const attributes = publicAttributes(
-          row.attributes,
-          row.integrationKind,
-          row.supplyFields,
-        );
-        const terms = publicTerms(row.terms);
-        const imageUrl = firstPublicImageUrl(attributes.attachments);
-        if (
-          !text(attributes.description) ||
-          !imageUrl ||
-          !hasFixedPublicPrice(terms) ||
-          attributes.stock_quantity === 0
-        )
-          return [];
-        return [
-          {
-            offer_id: row.id,
-            tenant_id: row.tenantId,
-            domain_id: row.domainId,
-            display_name: row.displayName,
-            attributes,
-            terms,
-            platform_path: row.storePath,
-            subplatform: row.storeSlug,
-            store_name: row.storeName,
-            like_total: row.likeTotal ?? "0",
-            ...(imageUrl ? { image_url: imageUrl } : {}),
-            match_score: score,
-            match_reasons: [
-              ...intentReasons,
-              ...(overlapLabels.length
-                ? [
-                    `在${row.storeName}找到，名称或介绍与“${overlapLabels.slice(0, 4).join("、")}”相关`,
-                  ]
-                : [`来自${row.storeName}的在售商品`]),
-            ].slice(0, 8),
-            match_risks: [],
-            status: "active",
-          },
-        ];
-      },
-    );
+    ({
+      row,
+      score,
+      overlapLabels,
+      intentReasons,
+    }): RecommendedBackendListing[] => {
+      const attributes = publicAttributes(
+        row.attributes,
+        row.integrationKind,
+        row.supplyFields,
+      );
+      const terms = publicTerms(row.terms);
+      const imageUrl = firstPublicImageUrl(attributes.attachments);
+      if (
+        !text(attributes.description) ||
+        !imageUrl ||
+        !hasFixedPublicPrice(terms) ||
+        attributes.stock_quantity === 0
+      )
+        return [];
+      return [
+        {
+          offer_id: row.id,
+          tenant_id: row.tenantId,
+          domain_id: row.domainId,
+          display_name: row.displayName,
+          attributes,
+          terms,
+          platform_path: row.storePath,
+          subplatform: row.storeSlug,
+          store_name: row.storeName,
+          like_total: row.likeTotal ?? "0",
+          ...(imageUrl ? { image_url: imageUrl } : {}),
+          match_score: score,
+          match_reasons: [
+            ...intentReasons,
+            ...(overlapLabels.length
+              ? [
+                  `在${row.storeName}找到，名称或介绍与“${overlapLabels.slice(0, 4).join("、")}”相关`,
+                ]
+              : [`来自${row.storeName}的在售商品`]),
+          ].slice(0, 8),
+          match_risks: [],
+          status: "active",
+        },
+      ];
+    },
+  );
   return {
     items: publicOffers.slice(offset, offset + limit),
     total: publicOffers.length,
@@ -209,15 +209,17 @@ function compareRankedOffers(
       String(left.publishedAt ?? ""),
     );
   if (sort === "popularity")
-    return compareBigInt(integerText(right.likeTotal), integerText(left.likeTotal));
+    return compareBigInt(
+      integerText(right.likeTotal),
+      integerText(left.likeTotal),
+    );
   const direction = sort === "price_asc" ? 1 : -1;
   const leftPrice = publicPrice(left.terms);
   const rightPrice = publicPrice(right.terms);
   const currencyOrder = leftPrice.currency.localeCompare(rightPrice.currency);
   if (currencyOrder) return currencyOrder;
   const scale = Math.max(leftPrice.scale, rightPrice.scale);
-  const leftAmount =
-    leftPrice.amount * 10n ** BigInt(scale - leftPrice.scale);
+  const leftAmount = leftPrice.amount * 10n ** BigInt(scale - leftPrice.scale);
   const rightAmount =
     rightPrice.amount * 10n ** BigInt(scale - rightPrice.scale);
   return direction * compareBigInt(leftAmount, rightAmount);

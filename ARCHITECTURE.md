@@ -105,6 +105,27 @@ Control-plane RPC uses gRPC with protocol negotiation and mTLS hooks. Kafka carr
 domain facts. Every envelope contains the mandatory identity, lineage, shard, version, timestamp,
 and payload hash fields described in ADR 0003.
 
+## Frontend and Presentation Layer
+
+The web interface (`web/`) is organized as a declarative Next.js 16 + React 19 application decoupled into domain custom hooks, shell layouts, and domain component clusters:
+
+```text
+Next.js App Router (app/) -> Declarative Orchestrator (App.tsx)
+                                 |
+        +------------------------+------------------------+
+        |                                                 |
+Domain Custom Hooks (hooks/)                  Shell & Overlays Host (components/shell/)
+  - useAuthSession                              - PlatformHeader
+  - useSubplatformRoute                         - SubplatformFullscreenHeader
+  - useOwnedStores                              - PlatformOverlaysHost
+  - useStoreHandoff                             - PlatformFooter
+  - useMarketplaceCatalog                                 |
+                                             Domain Components (components/)
+                                               - account/ marketplace/ store/ admin/ ui/
+```
+
+See `docs/frontend-architecture.md` and `docs/adr/0018-frontend-modularization-and-domain-driven-decoupling.md` for full implementation details.
+
 ## Deployment
 
 A, B, and C should run in independent Kubernetes failure domains. Stateless APIs and workers use

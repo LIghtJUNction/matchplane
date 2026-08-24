@@ -139,7 +139,9 @@ describe("store lifecycle route", () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual(
-      expect.objectContaining({ error: expect.stringContaining("接入尚未就绪") }),
+      expect.objectContaining({
+        error: expect.stringContaining("接入尚未就绪"),
+      }),
     );
   });
 
