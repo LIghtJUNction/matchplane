@@ -1,0 +1,806 @@
+use matchplane_storage::{PgStore, StorageError};
+use serde_json::{Value, json};
+use sqlx::{PgPool, Row};
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy)]
+struct Fixture {
+    tenant_id: Uuid,
+    domain_id: Uuid,
+    store_id: Uuid,
+    buyer_party_id: Uuid,
+    seller_party_id: Uuid,
+    intent_id: Uuid,
+    offer_id: Uuid,
+    introduction_id: Uuid,
+    organization_id: Uuid,
+    seller_user_id: Uuid,
+    buyer_user_id: Uuid,
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn expired_claim_should_recover_and_projection_should_be_idempotent(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    let long_store_name = "店".repeat(200);
+    sqlx::query("UPDATE stores SET display_name = $1 WHERE tenant_id = $2 AND id = $3")
+        .bind(&long_store_name)
+        .bind(fixture.tenant_id)
+        .bind(fixture.store_id)
+        .execute(&pool)
+        .await?;
+    let handoff_id = insert_handoff(&pool, fixture).await?;
+    let store = PgStore::from_pool(pool.clone());
+
+    let stale = store.claim_marketplace_conversions(10).await?.remove(0);
+    sqlx::query(
+        "UPDATE marketplace_conversion_outbox \
+            SET claim_expires_at = clock_timestamp() - INTERVAL '1 second' \
+          WHERE id = $1",
+    )
+    .bind(stale.id)
+    .execute(&pool)
+    .await?;
+    let current = store.claim_marketplace_conversions(10).await?.remove(0);
+    assert_eq!(stale.id, current.id);
+    assert_ne!(stale.claim_token, current.claim_token);
+
+    let stale_result = store.project_marketplace_conversion(&stale).await;
+    assert!(matches!(stale_result, Err(StorageError::Conflict(_))));
+    let projected = store.project_marketplace_conversion(&current).await?;
+    assert!(projected.opportunity_id.is_some());
+    assert_eq!(projected.notifications_written, 1);
+    assert_projection_counts(&pool, 1, 1, 1).await?;
+
+    let projected_offer: Uuid =
+        sqlx::query_scalar("SELECT offer_id FROM marketplace_sales_opportunity_offers LIMIT 1")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(projected_offer, fixture.offer_id);
+    let notification = sqlx::query(
+        "SELECT source_id, tenant_id, char_length(title)::bigint AS title_chars \
+           FROM user_notifications WHERE source_type = 'store_ai_handoff'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        notification.get::<String, _>("source_id"),
+        handoff_id.to_string()
+    );
+    assert_eq!(notification.get::<Uuid, _>("tenant_id"), fixture.tenant_id);
+    assert_eq!(notification.get::<i64, _>("title_chars"), 200);
+    let before_replay = projection_snapshot(&pool).await?;
+
+    sqlx::query(
+        "UPDATE marketplace_conversion_outbox \
+            SET status = 'pending', published_at = NULL, available_at = clock_timestamp() \
+          WHERE id = $1",
+    )
+    .bind(current.id)
+    .execute(&pool)
+    .await?;
+    let replay = store.claim_marketplace_conversions(10).await?.remove(0);
+    store.project_marketplace_conversion(&replay).await?;
+    assert_projection_counts(&pool, 1, 1, 1).await?;
+    assert_eq!(projection_snapshot(&pool).await?, before_replay);
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn contact_projection_should_preserve_order_and_not_regress_on_replay(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    let requested_event_id = Uuid::now_v7();
+    sqlx::query(
+        "UPDATE marketplace_introductions \
+            SET status = 'contact_requested' \
+          WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.introduction_id)
+    .execute(&pool)
+    .await?;
+    insert_contact_event(
+        &pool,
+        fixture,
+        requested_event_id,
+        "contact_requested",
+        fixture.buyer_party_id,
+        fixture.seller_party_id,
+    )
+    .await?;
+
+    let consent_event_id = Uuid::now_v7();
+    sqlx::query(
+        "UPDATE marketplace_introductions \
+            SET status = 'contact_released', supply_contact_consent_at = clock_timestamp() \
+          WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.introduction_id)
+    .execute(&pool)
+    .await?;
+    insert_contact_event(
+        &pool,
+        fixture,
+        consent_event_id,
+        "contact_consent",
+        fixture.seller_party_id,
+        fixture.buyer_party_id,
+    )
+    .await?;
+
+    let store = PgStore::from_pool(pool.clone());
+    let first_batch = store.claim_marketplace_conversions(10).await?;
+    assert_eq!(first_batch.len(), 1);
+    assert_eq!(first_batch[0].source_id, requested_event_id);
+    assert_eq!(first_batch[0].aggregate_version, 1);
+    store
+        .project_marketplace_conversion(&first_batch[0])
+        .await?;
+
+    let second_batch = store.claim_marketplace_conversions(10).await?;
+    assert_eq!(second_batch.len(), 1);
+    assert_eq!(second_batch[0].source_id, consent_event_id);
+    assert_eq!(second_batch[0].aggregate_version, 2);
+    store
+        .project_marketplace_conversion(&second_batch[0])
+        .await?;
+
+    let release_event_id = Uuid::now_v7();
+    sqlx::query(
+        "UPDATE marketplace_introductions \
+            SET contact_released_at = clock_timestamp() \
+          WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.introduction_id)
+    .execute(&pool)
+    .await?;
+    insert_contact_event(
+        &pool,
+        fixture,
+        release_event_id,
+        "contact_release",
+        fixture.buyer_party_id,
+        fixture.seller_party_id,
+    )
+    .await?;
+    let release = store.claim_marketplace_conversions(10).await?.remove(0);
+    assert_eq!(release.aggregate_version, 3);
+    store.project_marketplace_conversion(&release).await?;
+
+    assert_contact_projection(&pool, "contact_exchanged", "accepted", 3).await?;
+    assert_projection_counts(&pool, 1, 1, 2).await?;
+    let scoped_notifications: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM user_notifications WHERE tenant_id = $1")
+            .bind(fixture.tenant_id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(scoped_notifications, 2);
+    let unscoped_notifications: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM user_notifications WHERE tenant_id IS NULL")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(unscoped_notifications, 0);
+    let before_replay = projection_snapshot(&pool).await?;
+
+    sqlx::query(
+        "UPDATE marketplace_conversion_outbox \
+            SET status = 'pending', published_at = NULL, available_at = clock_timestamp() \
+          WHERE source_id = $1",
+    )
+    .bind(requested_event_id)
+    .execute(&pool)
+    .await?;
+    let replay = store.claim_marketplace_conversions(10).await?.remove(0);
+    assert_eq!(replay.aggregate_version, 1);
+    store.project_marketplace_conversion(&replay).await?;
+
+    assert_contact_projection(&pool, "contact_exchanged", "accepted", 3).await?;
+    assert_projection_counts(&pool, 1, 1, 2).await?;
+    assert_eq!(projection_snapshot(&pool).await?, before_replay);
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn dead_aggregate_head_should_block_later_versions(pool: PgPool) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    insert_contact_event(
+        &pool,
+        fixture,
+        Uuid::now_v7(),
+        "contact_requested",
+        fixture.buyer_party_id,
+        fixture.seller_party_id,
+    )
+    .await?;
+    insert_contact_event(
+        &pool,
+        fixture,
+        Uuid::now_v7(),
+        "contact_consent",
+        fixture.seller_party_id,
+        fixture.buyer_party_id,
+    )
+    .await?;
+    let store = PgStore::from_pool(pool.clone());
+    let head = store.claim_marketplace_conversions(10).await?.remove(0);
+    sqlx::query("UPDATE marketplace_conversion_outbox SET attempts = 12 WHERE id = $1")
+        .bind(head.id)
+        .execute(&pool)
+        .await?;
+    store
+        .fail_marketplace_conversion(&head, "deterministic projection failure")
+        .await?;
+
+    assert!(store.claim_marketplace_conversions(10).await?.is_empty());
+    let backlog = store.marketplace_conversion_backlog().await?;
+    assert_eq!(backlog.dead, 1);
+    assert_eq!(backlog.pending, 1);
+    assert!(backlog.oldest_unresolved_seconds.is_some());
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn customer_activity_bounds_should_survive_cross_aggregate_order(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    let store = PgStore::from_pool(pool.clone());
+
+    let later_handoff = insert_handoff(&pool, fixture).await?;
+    sqlx::query(
+        "UPDATE marketplace_sales_handoffs \
+            SET created_at = TIMESTAMPTZ '2030-01-02 00:00:00+00', \
+                updated_at = TIMESTAMPTZ '2030-01-02 00:00:00+00' \
+          WHERE id = $1",
+    )
+    .bind(later_handoff)
+    .execute(&pool)
+    .await?;
+    let later_job = store.claim_marketplace_conversions(1).await?.remove(0);
+    store.project_marketplace_conversion(&later_job).await?;
+
+    let wider_handoff = insert_handoff(&pool, fixture).await?;
+    sqlx::query(
+        "UPDATE marketplace_sales_handoffs \
+            SET created_at = TIMESTAMPTZ '2030-01-01 00:00:00+00', \
+                updated_at = TIMESTAMPTZ '2030-01-03 00:00:00+00' \
+          WHERE id = $1",
+    )
+    .bind(wider_handoff)
+    .execute(&pool)
+    .await?;
+    let wider_job = store.claim_marketplace_conversions(1).await?.remove(0);
+    store.project_marketplace_conversion(&wider_job).await?;
+
+    let customer = sqlx::query(
+        "SELECT first_seen_at = TIMESTAMPTZ '2030-01-01 00:00:00+00' AS first_matches, \
+                last_activity_at = TIMESTAMPTZ '2030-01-03 00:00:00+00' AS last_matches, \
+                version \
+           FROM marketplace_store_customers \
+          WHERE tenant_id = $1 AND store_id = $2 AND demand_party_id = $3",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.store_id)
+    .bind(fixture.buyer_party_id)
+    .fetch_one(&pool)
+    .await?;
+    assert!(customer.get::<bool, _>("first_matches"));
+    assert!(customer.get::<bool, _>("last_matches"));
+    assert_eq!(customer.get::<i64, _>("version"), 2);
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn twelfth_expired_lease_should_be_atomically_dead_lettered(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    insert_handoff(&pool, fixture).await?;
+    let store = PgStore::from_pool(pool.clone());
+    let mut job = store.claim_marketplace_conversions(1).await?.remove(0);
+
+    for expected_attempts in 1..=12 {
+        assert_eq!(job.attempts, expected_attempts);
+        sqlx::query(
+            "UPDATE marketplace_conversion_outbox \
+                SET claim_expires_at = clock_timestamp() - INTERVAL '1 second' \
+              WHERE id = $1",
+        )
+        .bind(job.id)
+        .execute(&pool)
+        .await?;
+        if expected_attempts < 12 {
+            job = store.claim_marketplace_conversions(1).await?.remove(0);
+        }
+    }
+
+    assert!(store.claim_marketplace_conversions(1).await?.is_empty());
+    let row = sqlx::query(
+        "SELECT status, attempts, dead_at IS NOT NULL AS has_dead_at, last_error \
+           FROM marketplace_conversion_outbox WHERE id = $1",
+    )
+    .bind(job.id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(row.get::<String, _>("status"), "dead");
+    assert_eq!(row.get::<i32, _>("attempts"), 12);
+    assert!(row.get::<bool, _>("has_dead_at"));
+    assert_eq!(
+        row.get::<String, _>("last_error"),
+        "worker claim expired after maximum delivery attempts"
+    );
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn unknown_schema_version_should_fail_closed_and_dead_letter(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    let handoff_id = insert_handoff(&pool, fixture).await?;
+    sqlx::query("UPDATE marketplace_conversion_outbox SET schema_version = 2 WHERE source_id = $1")
+        .bind(handoff_id)
+        .execute(&pool)
+        .await?;
+    let store = PgStore::from_pool(pool.clone());
+    let job = store.claim_marketplace_conversions(1).await?.remove(0);
+    assert_eq!(job.schema_version, 2);
+
+    let error = store
+        .project_marketplace_conversion(&job)
+        .await
+        .expect_err("unknown schema version must not project");
+    assert!(matches!(error, StorageError::InvalidData(_)));
+    let error_message = error.to_string();
+    assert!(error_message.contains("unsupported marketplace conversion schema version 2"));
+    store
+        .fail_marketplace_conversion(&job, &error_message)
+        .await?;
+
+    let row = sqlx::query(
+        "SELECT status, attempts, last_error FROM marketplace_conversion_outbox WHERE id = $1",
+    )
+    .bind(job.id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(row.get::<String, _>("status"), "dead");
+    assert_eq!(row.get::<i32, _>("attempts"), 1);
+    assert!(
+        row.get::<String, _>("last_error")
+            .contains("unsupported marketplace conversion schema version 2")
+    );
+    assert_projection_counts(&pool, 0, 0, 0).await?;
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn notifications_should_remain_scoped_across_tenants(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let first = setup(&pool).await?;
+    let second = seed_fixture(
+        &pool,
+        Some(first.seller_user_id),
+        Some(first.buyer_user_id),
+        "used-car",
+    )
+    .await?;
+    let first_handoff = insert_handoff(&pool, first).await?;
+    let second_handoff = insert_handoff(&pool, second).await?;
+    let store = PgStore::from_pool(pool.clone());
+
+    let jobs = store.claim_marketplace_conversions(10).await?;
+    assert_eq!(jobs.len(), 2);
+    for job in jobs {
+        store.project_marketplace_conversion(&job).await?;
+    }
+
+    let rows = sqlx::query(
+        "SELECT tenant_id, platform_path, source_id, char_length(title)::bigint AS title_chars \
+           FROM user_notifications \
+          WHERE recipient_auth_user_id = $1 AND source_type = 'store_ai_handoff'",
+    )
+    .bind(first.seller_user_id)
+    .fetch_all(&pool)
+    .await?;
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        let source_id = row.get::<String, _>("source_id");
+        let tenant_id = row.get::<Uuid, _>("tenant_id");
+        if source_id == first_handoff.to_string() {
+            assert_eq!(tenant_id, first.tenant_id);
+        } else if source_id == second_handoff.to_string() {
+            assert_eq!(tenant_id, second.tenant_id);
+        } else {
+            panic!("unexpected notification source {source_id}");
+        }
+        assert_eq!(row.get::<String, _>("platform_path"), "/used-car");
+        assert!(row.get::<i64, _>("title_chars") <= 200);
+    }
+    Ok(())
+}
+
+async fn setup(pool: &PgPool) -> Result<Fixture, StorageError> {
+    create_source_schema(pool).await?;
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/202608240004_marketplace_conversion_outbox.sql"
+    ))
+    .execute(pool)
+    .await?;
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/202608240005_marketplace_conversion_projection.sql"
+    ))
+    .execute(pool)
+    .await?;
+    seed_fixture(pool, None, None, "used-car").await
+}
+
+async fn seed_fixture(
+    pool: &PgPool,
+    seller_user_id: Option<Uuid>,
+    buyer_user_id: Option<Uuid>,
+    slug: &str,
+) -> Result<Fixture, StorageError> {
+    let organization_id = Uuid::now_v7();
+    let seller_user_id = seller_user_id.unwrap_or_else(Uuid::now_v7);
+    let buyer_user_id = buyer_user_id.unwrap_or_else(Uuid::now_v7);
+    let fixture = Fixture {
+        tenant_id: Uuid::now_v7(),
+        domain_id: Uuid::now_v7(),
+        store_id: Uuid::now_v7(),
+        buyer_party_id: Uuid::now_v7(),
+        seller_party_id: Uuid::now_v7(),
+        intent_id: Uuid::now_v7(),
+        offer_id: Uuid::now_v7(),
+        introduction_id: Uuid::now_v7(),
+        organization_id,
+        seller_user_id,
+        buyer_user_id,
+    };
+    let platform_path = format!("/{slug}");
+
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1)")
+        .bind(fixture.tenant_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("INSERT INTO domains (id, tenant_id) VALUES ($1, $2)")
+        .bind(fixture.domain_id)
+        .bind(fixture.tenant_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("INSERT INTO \"organization\" (id) VALUES ($1)")
+        .bind(fixture.organization_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("INSERT INTO \"user\" (id) VALUES ($1), ($2) ON CONFLICT (id) DO NOTHING")
+        .bind(fixture.seller_user_id)
+        .bind(fixture.buyer_user_id)
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "INSERT INTO \"member\" (id, \"organizationId\", \"userId\", role) \
+         VALUES ($1, $2, $3, 'owner')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(fixture.organization_id)
+    .bind(fixture.seller_user_id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO stores \
+             (id, tenant_id, domain_id, organization_id, slug, display_name) \
+         VALUES ($1, $2, $3, $4, $5, '测试车行')",
+    )
+    .bind(fixture.store_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.domain_id)
+    .bind(fixture.organization_id)
+    .bind(slug)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO marketplace_parties (id, tenant_id, store_id, platform_path) \
+         VALUES ($1, $3, $4, $5), ($2, $3, $4, $5)",
+    )
+    .bind(fixture.buyer_party_id)
+    .bind(fixture.seller_party_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.store_id)
+    .bind(&platform_path)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO marketplace_party_auth_links (tenant_id, party_id, auth_user_id) \
+         VALUES ($1, $2, $3)",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.buyer_party_id)
+    .bind(fixture.buyer_user_id)
+    .execute(pool)
+    .await?;
+    sqlx::query("INSERT INTO marketplace_intents (id, tenant_id, domain_id) VALUES ($1, $2, $3)")
+        .bind(fixture.intent_id)
+        .bind(fixture.tenant_id)
+        .bind(fixture.domain_id)
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "INSERT INTO marketplace_offers \
+             (id, tenant_id, domain_id, supply_party_id) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(fixture.offer_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.domain_id)
+    .bind(fixture.seller_party_id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO marketplace_introductions \
+             (id, tenant_id, demand_intent_id, supply_offer_id, demand_party_id, \
+              supply_party_id, status) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'proposed')",
+    )
+    .bind(fixture.introduction_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.intent_id)
+    .bind(fixture.offer_id)
+    .bind(fixture.buyer_party_id)
+    .bind(fixture.seller_party_id)
+    .execute(pool)
+    .await?;
+    Ok(fixture)
+}
+
+async fn create_source_schema(pool: &PgPool) -> Result<(), StorageError> {
+    sqlx::raw_sql(
+        "CREATE TABLE tenants (id uuid PRIMARY KEY);
+         CREATE TABLE domains (
+             id uuid PRIMARY KEY,
+             tenant_id uuid NOT NULL REFERENCES tenants(id),
+             UNIQUE (tenant_id, id)
+         );
+         CREATE TABLE \"user\" (id uuid PRIMARY KEY);
+         CREATE TABLE \"organization\" (id uuid PRIMARY KEY);
+         CREATE TABLE \"member\" (
+             id uuid PRIMARY KEY,
+             \"organizationId\" uuid NOT NULL REFERENCES \"organization\"(id),
+             \"userId\" uuid NOT NULL REFERENCES \"user\"(id),
+             role text NOT NULL
+         );
+         CREATE TABLE stores (
+             id uuid PRIMARY KEY,
+             tenant_id uuid NOT NULL REFERENCES tenants(id),
+             domain_id uuid NOT NULL,
+             organization_id uuid NOT NULL REFERENCES \"organization\"(id),
+             slug text NOT NULL,
+             display_name text NOT NULL CHECK (length(display_name) BETWEEN 1 AND 200),
+             UNIQUE (tenant_id, id)
+         );
+         CREATE TABLE marketplace_parties (
+             id uuid PRIMARY KEY,
+             tenant_id uuid NOT NULL REFERENCES tenants(id),
+             store_id uuid,
+             platform_path text NOT NULL,
+             UNIQUE (tenant_id, id),
+             FOREIGN KEY (tenant_id, store_id) REFERENCES stores(tenant_id, id)
+         );
+         CREATE TABLE marketplace_party_auth_links (
+             tenant_id uuid NOT NULL,
+             party_id uuid NOT NULL,
+             auth_user_id uuid NOT NULL REFERENCES \"user\"(id),
+             PRIMARY KEY (tenant_id, party_id, auth_user_id),
+             FOREIGN KEY (tenant_id, party_id) REFERENCES marketplace_parties(tenant_id, id)
+         );
+         CREATE TABLE marketplace_intents (
+             id uuid PRIMARY KEY,
+             tenant_id uuid NOT NULL,
+             domain_id uuid NOT NULL,
+             UNIQUE (tenant_id, id),
+             FOREIGN KEY (tenant_id, domain_id) REFERENCES domains(tenant_id, id)
+         );
+         CREATE TABLE marketplace_offers (
+             id uuid PRIMARY KEY,
+             tenant_id uuid NOT NULL,
+             domain_id uuid NOT NULL,
+             supply_party_id uuid NOT NULL,
+             UNIQUE (tenant_id, id),
+             FOREIGN KEY (tenant_id, domain_id) REFERENCES domains(tenant_id, id),
+             FOREIGN KEY (tenant_id, supply_party_id) REFERENCES marketplace_parties(tenant_id, id)
+         );
+         CREATE TABLE marketplace_introductions (
+             id uuid PRIMARY KEY,
+             tenant_id uuid NOT NULL,
+             demand_intent_id uuid NOT NULL,
+             supply_offer_id uuid NOT NULL,
+             demand_party_id uuid NOT NULL,
+             supply_party_id uuid NOT NULL,
+             status text NOT NULL,
+             supply_contact_consent_at timestamptz,
+             contact_released_at timestamptz,
+             UNIQUE (tenant_id, id),
+             FOREIGN KEY (tenant_id, demand_intent_id) REFERENCES marketplace_intents(tenant_id, id),
+             FOREIGN KEY (tenant_id, supply_offer_id) REFERENCES marketplace_offers(tenant_id, id),
+             FOREIGN KEY (tenant_id, demand_party_id) REFERENCES marketplace_parties(tenant_id, id),
+             FOREIGN KEY (tenant_id, supply_party_id) REFERENCES marketplace_parties(tenant_id, id)
+         );
+         CREATE TABLE marketplace_introduction_contact_events (
+             id uuid PRIMARY KEY,
+             tenant_id uuid NOT NULL,
+             introduction_id uuid NOT NULL,
+             actor_party_id uuid NOT NULL,
+             target_party_id uuid NOT NULL,
+             event_type text NOT NULL,
+             decision text NOT NULL,
+             occurred_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+             FOREIGN KEY (tenant_id, introduction_id)
+                 REFERENCES marketplace_introductions(tenant_id, id)
+         );
+         CREATE TABLE marketplace_sales_handoffs (
+             id uuid PRIMARY KEY,
+             tenant_id uuid NOT NULL,
+             domain_id uuid NOT NULL,
+             participant_id uuid NOT NULL,
+             summary jsonb NOT NULL,
+             status text NOT NULL DEFAULT 'requested',
+             lead_stage text NOT NULL DEFAULT 'new',
+             favorite boolean NOT NULL DEFAULT false,
+             staff_notes text,
+             contact_consent_status text NOT NULL DEFAULT 'not_requested',
+             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+             UNIQUE (tenant_id, id),
+             FOREIGN KEY (tenant_id, domain_id) REFERENCES domains(tenant_id, id),
+             FOREIGN KEY (tenant_id, participant_id) REFERENCES marketplace_parties(tenant_id, id)
+         );
+         CREATE TABLE user_notifications (
+             id uuid PRIMARY KEY,
+             recipient_auth_user_id uuid NOT NULL REFERENCES \"user\"(id),
+             tenant_id uuid REFERENCES tenants(id),
+             platform_path text NOT NULL CHECK (length(platform_path) BETWEEN 1 AND 512),
+             kind text NOT NULL CHECK (length(kind) BETWEEN 1 AND 64),
+             source_type text NOT NULL CHECK (length(source_type) BETWEEN 1 AND 64),
+             source_id text NOT NULL CHECK (length(source_id) BETWEEN 1 AND 200),
+             title text NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
+             body text CHECK (body IS NULL OR length(body) <= 500),
+             payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+             action_path text NOT NULL CHECK (length(action_path) BETWEEN 1 AND 1024),
+             read_at timestamptz,
+             created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+             updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+             UNIQUE (recipient_auth_user_id, source_type, source_id, kind)
+         );",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn insert_handoff(pool: &PgPool, fixture: Fixture) -> Result<Uuid, StorageError> {
+    let handoff_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO marketplace_sales_handoffs \
+             (id, tenant_id, domain_id, participant_id, summary) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(handoff_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.domain_id)
+    .bind(fixture.buyer_party_id)
+    .bind(json!({
+        "analysis": "去敏后的客户意向",
+        "product_ids": [fixture.offer_id, Uuid::now_v7()],
+    }))
+    .execute(pool)
+    .await?;
+    Ok(handoff_id)
+}
+
+async fn insert_contact_event(
+    pool: &PgPool,
+    fixture: Fixture,
+    event_id: Uuid,
+    event_type: &str,
+    actor_party_id: Uuid,
+    target_party_id: Uuid,
+) -> Result<(), StorageError> {
+    sqlx::query(
+        "INSERT INTO marketplace_introduction_contact_events \
+             (id, tenant_id, introduction_id, actor_party_id, target_party_id, \
+              event_type, decision) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'allowed')",
+    )
+    .bind(event_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.introduction_id)
+    .bind(actor_party_id)
+    .bind(target_party_id)
+    .bind(event_type)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn projection_snapshot(pool: &PgPool) -> Result<Value, StorageError> {
+    let snapshot = sqlx::query_scalar(
+        "SELECT jsonb_build_object( \
+             'customers', COALESCE(( \
+                 SELECT jsonb_agg(to_jsonb(customer) ORDER BY customer.id) \
+                   FROM marketplace_store_customers AS customer \
+             ), '[]'::jsonb), \
+             'opportunities', COALESCE(( \
+                 SELECT jsonb_agg(to_jsonb(opportunity) ORDER BY opportunity.id) \
+                   FROM marketplace_sales_opportunities AS opportunity \
+             ), '[]'::jsonb), \
+             'offers', COALESCE(( \
+                 SELECT jsonb_agg(to_jsonb(opportunity_offer) \
+                                  ORDER BY opportunity_offer.opportunity_id, \
+                                           opportunity_offer.ordinal, opportunity_offer.offer_id) \
+                   FROM marketplace_sales_opportunity_offers AS opportunity_offer \
+             ), '[]'::jsonb), \
+             'notifications', COALESCE(( \
+                 SELECT jsonb_agg(to_jsonb(notification) ORDER BY notification.id) \
+                   FROM user_notifications AS notification \
+             ), '[]'::jsonb) \
+         )",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(snapshot)
+}
+
+async fn assert_projection_counts(
+    pool: &PgPool,
+    customers: i64,
+    opportunities: i64,
+    notifications: i64,
+) -> Result<(), StorageError> {
+    let actual_customers: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM marketplace_store_customers")
+            .fetch_one(pool)
+            .await?;
+    let actual_opportunities: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM marketplace_sales_opportunities")
+            .fetch_one(pool)
+            .await?;
+    let actual_notifications: i64 = sqlx::query_scalar("SELECT count(*) FROM user_notifications")
+        .fetch_one(pool)
+        .await?;
+    assert_eq!(actual_customers, customers);
+    assert_eq!(actual_opportunities, opportunities);
+    assert_eq!(actual_notifications, notifications);
+    Ok(())
+}
+
+async fn assert_contact_projection(
+    pool: &PgPool,
+    lead_stage: &str,
+    consent_status: &str,
+    last_version: i64,
+) -> Result<(), StorageError> {
+    let row = sqlx::query(
+        "SELECT lead_stage, contact_consent_status, last_applied_version \
+           FROM marketplace_sales_opportunities \
+          WHERE source_type = 'marketplace_introduction'",
+    )
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(row.get::<String, _>("lead_stage"), lead_stage);
+    assert_eq!(
+        row.get::<String, _>("contact_consent_status"),
+        consent_status
+    );
+    assert_eq!(row.get::<i64, _>("last_applied_version"), last_version);
+    Ok(())
+}

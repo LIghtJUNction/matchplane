@@ -140,6 +140,10 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: cargo test --locked -p matchplane-storage --test marketplace_conversion_outbox -- --ignored
+      - name: Test marketplace conversion projection against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test marketplace_conversion_projection -- --ignored
       - name: Test atomic Valkey book repair
         env:
           MATCHPLANE_TEST_VALKEY_URL: redis://127.0.0.1:6379/
