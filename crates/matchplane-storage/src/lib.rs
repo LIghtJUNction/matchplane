@@ -1,6 +1,8 @@
 //! PostgreSQL repositories, migrations, transactional outbox, and consumer inbox primitives.
 
+mod book_projection;
 mod catalog_projection;
+mod consumer_failure;
 mod federation;
 mod generic_marketplace;
 mod marketplace;
@@ -18,6 +20,9 @@ use thiserror::Error;
 pub use catalog_projection::{
     CatalogProjectionCounts, CatalogProjectionProblem, CatalogProjectionReplayOutcome,
     CatalogProjectionStatus,
+};
+pub use consumer_failure::{
+    KafkaFailureClass, KafkaFailureDisposition, QuarantineKafkaRecord, QuarantinedKafkaRecord,
 };
 pub use generic_marketplace::{
     AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,
@@ -49,9 +54,9 @@ pub use platform::{
 };
 pub use subplatform::{SubplatformEmailConfig, UpsertSubplatformEmailConfig};
 pub use types::{
-    BookSnapshot, CandidateMatch, FederationReservation, FederationTransition, MatchCommitOutcome,
-    OutboxMessage, ReserveFederated, StoredAccount, StoredOrder, StoredTrade, SubmitOrder,
-    SubmitOrderOutcome, VectorRecord,
+    BookProjection, BookProjectionLevel, BookSnapshot, CandidateMatch, FederationReservation,
+    FederationTransition, MatchCommitOutcome, OutboxMessage, ReserveFederated, StoredAccount,
+    StoredOrder, StoredTrade, SubmitOrder, SubmitOrderOutcome, VectorRecord,
 };
 
 /// PostgreSQL storage facade shared by service adapters.

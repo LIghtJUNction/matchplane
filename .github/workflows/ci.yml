@@ -75,6 +75,15 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      valkey:
+        image: valkey/valkey:9.1.1-alpine@sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -119,6 +128,18 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: cargo test --locked -p matchplane-storage --test outbox_claims -- --ignored
+      - name: Test durable book recovery source against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test book_projection_recovery -- --ignored
+      - name: Test Kafka poison-record quarantine against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test kafka_consumer_quarantine -- --ignored
+      - name: Test atomic Valkey book repair
+        env:
+          MATCHPLANE_TEST_VALKEY_URL: redis://127.0.0.1:6379/
+        run: cargo test --locked -p matchplane-cache durable_repair_should_seed_gap_and_fence_stale_writers -- --ignored
       - name: Validate Compose model
         run: docker compose --env-file .env.example -f deploy/compose/compose.yaml config --quiet
 
