@@ -80,21 +80,21 @@ fi
 
 current_preload=$(sudo -u postgres psql -Atqc 'SHOW shared_preload_libraries' postgres)
 case ",$current_preload," in
-*,timescaledb,*) ;;
-*)
-  if [[ -n $current_preload ]]; then
-    next_preload="$current_preload,timescaledb"
-  else
-    next_preload=timescaledb
-  fi
-  if [[ ! $next_preload =~ ^[a-zA-Z0-9_,[:space:]-]+$ ]]; then
-    echo 'existing shared_preload_libraries value is unsafe to preserve' >&2
-    exit 1
-  fi
-  printf "ALTER SYSTEM SET shared_preload_libraries = '%s';\n" "$next_preload" |
-    sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
-  systemctl restart postgresql
-  ;;
+  *,timescaledb,*) ;;
+  *)
+    if [[ -n $current_preload ]]; then
+      next_preload="$current_preload,timescaledb"
+    else
+      next_preload=timescaledb
+    fi
+    if [[ ! $next_preload =~ ^[a-zA-Z0-9_,[:space:]-]+$ ]]; then
+      echo 'existing shared_preload_libraries value is unsafe to preserve' >&2
+      exit 1
+    fi
+    printf "ALTER SYSTEM SET shared_preload_libraries = '%s';\n" "$next_preload" |
+      sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
+    systemctl restart postgresql
+    ;;
 esac
 
 for _ in $(seq 1 30); do

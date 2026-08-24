@@ -127,8 +127,8 @@ for directive in \
     exit 1
   fi
 done
-if ! rg -q '^Persistent=true$' "$backup_timer" \
-  || ! rg -q '^RandomizedDelaySec=45m$' "$backup_timer"; then
+if ! rg -q '^Persistent=true$' "$backup_timer" ||
+  ! rg -q '^RandomizedDelaySec=45m$' "$backup_timer"; then
   echo 'PostgreSQL backup timer must be persistent and randomized' >&2
   exit 1
 fi
@@ -174,9 +174,9 @@ fi
 
 if command -v systemd-analyze >/dev/null 2>&1; then
   verify_output=$(systemd-analyze verify packaging/systemd/*.service packaging/systemd/*.timer 2>&1 || true)
-  unexpected=$(printf '%s\n' "$verify_output" \
-    | grep -Ev 'Command (/usr/bin/node|/usr/bin/(matchplane|matchplane-[a-z-]+)|/usr/libexec/matchplane-postgres-backup) is not executable:' \
-    || true)
+  unexpected=$(printf '%s\n' "$verify_output" |
+    grep -Ev 'Command (/usr/bin/node|/usr/bin/(matchplane|matchplane-[a-z-]+)|/usr/libexec/matchplane-postgres-backup) is not executable:' ||
+    true)
   if [[ -n $unexpected ]]; then
     printf '%s\n' "$unexpected" >&2
     exit 1
