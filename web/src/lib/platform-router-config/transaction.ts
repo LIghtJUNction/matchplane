@@ -51,6 +51,7 @@ const POINTER_SCHEMA_VERSION = 1;
 const DEFAULT_LOCK_TIMEOUT_MS = 2_000;
 const DEFAULT_OWNER_CREATION_GRACE_MS = 250;
 const DEFAULT_GC_GRACE_MS = 5 * 60_000;
+const MAX_GENERATION_LINEAGE_DEPTH = 10_000;
 export const MAX_STATE_BYTES = 1024 * 1024;
 export const MAX_PENDING_AUDIT_RECORDS = 1_024;
 const AUDIT_SCAN_CHUNK_BYTES = 64 * 1024;
@@ -71,7 +72,22 @@ const LOCK_RELEASED_PATTERN =
   /^\.platform-router\.tx\.lock\.released-([0-9a-f-]{36})$/i;
 const LOCK_RECOVERY_CLAIM_PATTERN =
   /^\.recovery-claim-([0-9a-f-]{36}|[0-9a-f]{64})$/i;
-const lockCapabilities = new WeakSet<object>();
+interface LockCapability {
+  descriptor: number;
+  device: number;
+  inode: number;
+  nonce: string;
+  ownerBytes: Buffer;
+  released: boolean;
+  publicationUncertain: boolean;
+}
+
+interface DirectoryIdentity {
+  device: number;
+  inode: number;
+}
+
+const lockCapabilities = new WeakMap<object, LockCapability>();
 
 export interface PlatformRouterPointer {
   schemaVersion: 1;
@@ -120,6 +136,7 @@ export interface PlatformRouterLockOwner {
 export interface PlatformRouterLockHandle {
   readonly owner: PlatformRouterLockOwner;
   readonly root: string;
+  readonly publicationUncertain: boolean;
   release(): void;
 }
 
@@ -243,9 +260,18 @@ export async function acquirePlatformRouterLock(
       environment.root,
       `.platform-router.tx.lock.candidate-${owner.nonce}`,
     );
+    let candidateIdentity: DirectoryIdentity | null = null;
     let published = false;
     try {
       mkdirSync(candidatePath, { mode: 0o700 });
+      const candidateStat = environment.io.lstat(candidatePath);
+      if (!candidateStat.isDirectory() || candidateStat.isSymbolicLink()) {
+        throw new PlatformRouterCorruptionError("AI 配置事务锁候选路径无效");
+      }
+      candidateIdentity = {
+        device: candidateStat.dev,
+        inode: candidateStat.ino,
+      };
       chmodSync(candidatePath, 0o700);
       writeExclusiveFile(
         path.join(candidatePath, PLATFORM_ROUTER_LOCK_OWNER_FILE),
@@ -257,10 +283,37 @@ export async function acquirePlatformRouterLock(
       assertAbsent(lockPath, "AI 配置事务锁已被其他进程持有");
       environment.io.rename(candidatePath, lockPath);
       published = true;
-      fsyncDirectory(environment.root, environment);
-      return createLockHandle(owner, environment);
+      const handle = createLockHandle(owner, environment, candidateIdentity);
+      try {
+        fsyncDirectory(environment.root, environment);
+      } catch (cause) {
+        try {
+          releasePlatformRouterLock(handle, environment, false);
+        } catch (cleanupCause) {
+          try {
+            assertPlatformRouterLockOwned(handle, environment);
+            const capability = lockCapabilities.get(handle);
+            if (capability) capability.publicationUncertain = true;
+            return handle;
+          } catch (ownershipCause) {
+            throw new PlatformRouterTransactionError(
+              "AI 配置事务锁发布同步失败且无法安全回滚",
+              { cause: new AggregateError([cause, cleanupCause, ownershipCause]) },
+            );
+          }
+        }
+        throw cause;
+      }
+      return handle;
     } catch (cause) {
-      if (!published) removeLockArtifact(candidatePath, "candidate", environment);
+      if (!published && candidateIdentity !== null) {
+        removeLockArtifact(
+          candidatePath,
+          "candidate",
+          candidateIdentity,
+          environment,
+        );
+      }
       if (
         !(cause instanceof PlatformRouterConflictError) &&
         !isNodeErrorCode(cause, "EEXIST") &&
@@ -389,6 +442,7 @@ export function commitGeneration(
     sha256: createHash("sha256").update(generationBytes).digest("hex"),
   };
   const pointerBytes = Buffer.from(`${JSON.stringify(pointer)}\n`);
+  assertPlatformRouterLockOwned(handle, environment);
   const generationDirectory = ensureGenerationDirectory(environment);
   const generationPath = generationPathFor(generationId, environment);
   const generationTemporary = path.join(
@@ -404,11 +458,14 @@ export function commitGeneration(
 
   try {
     assertAbsent(generationPath, "AI 配置代际已存在");
+    assertPlatformRouterLockOwned(handle, environment);
     writeExclusiveFile(generationTemporary, generationBytes, 0o640, environment);
+    assertPlatformRouterLockOwned(handle, environment);
     environment.io.rename(generationTemporary, generationPath);
     fsyncDirectory(generationDirectory, environment);
 
     assertRegularPathIfPresent(pointerPath, "AI 配置当前指针路径无效");
+    assertPlatformRouterLockOwned(handle, environment);
     writeExclusiveFile(pointerTemporary, pointerBytes, 0o640, environment);
     assertPlatformRouterLockOwned(handle, environment);
     assertPointerUnchanged(expectedPointer, environment);
@@ -424,8 +481,16 @@ export function commitGeneration(
     }
     return snapshotFromGeneration(generation, pointer);
   } catch (cause) {
-    removeRecognizedTemporary(generationTemporary, environment);
-    removeRecognizedTemporary(pointerTemporary, environment);
+    try {
+      assertPlatformRouterLockOwned(handle, environment);
+      removeRecognizedTemporary(generationTemporary, environment);
+      assertPlatformRouterLockOwned(handle, environment);
+      removeRecognizedTemporary(pointerTemporary, environment);
+    } catch (cleanupCause) {
+      if (!(cleanupCause instanceof PlatformRouterLockOwnershipError)) {
+        throw cleanupCause;
+      }
+    }
     if (pointerRenamed || cause instanceof PlatformRouterCommitUncertainError) {
       throw cause;
     }
@@ -451,6 +516,7 @@ export function flushAuditOutbox(
     wantedEventIds,
     environment,
   );
+  assertPlatformRouterLockOwned(handle, environment);
   const appendedEventIds: string[] = [];
   const missing = pending.filter((record) => {
     const existing = scan.records.get(record.eventId);
@@ -468,6 +534,7 @@ export function flushAuditOutbox(
     let descriptor: number | null = null;
     try {
       assertRegularPathIfPresent(auditPath, "AI 配置审计路径无效");
+      assertPlatformRouterLockOwned(handle, environment);
       descriptor = environment.io.open(
         auditPath,
         fsConstants.O_APPEND |
@@ -479,8 +546,11 @@ export function flushAuditOutbox(
       if (!fstatSync(descriptor).isFile()) {
         throw new PlatformRouterCorruptionError("AI 配置审计路径无效");
       }
+      assertPlatformRouterLockOwned(handle, environment);
       fchmodSync(descriptor, 0o640);
+      assertPlatformRouterLockOwned(handle, environment);
       for (const record of missing) {
+        assertPlatformRouterLockOwned(handle, environment);
         writeAll(
           descriptor,
           Buffer.from(`${JSON.stringify(record)}\n`),
@@ -488,6 +558,7 @@ export function flushAuditOutbox(
         );
         appendedEventIds.push(record.eventId);
       }
+      assertPlatformRouterLockOwned(handle, environment);
       environment.io.fsync(descriptor);
       if (!existed) fsyncDirectory(environment.root, environment);
     } catch (cause) {
@@ -513,7 +584,8 @@ export function checkpointDeliveredAudit(
   handle: PlatformRouterLockHandle,
   options: PlatformRouterTransactionOptions = {},
 ): PlatformRouterSnapshot {
-  assertPlatformRouterLockOwned(handle, resolveHandleEnvironment(handle, options));
+  const environment = resolveHandleEnvironment(handle, options);
+  assertPlatformRouterLockOwned(handle, environment);
   if (snapshot.source !== "generation" || snapshot.generationId === null) {
     throw new PlatformRouterConflictError(
       "AI 配置审计检查点要求已提交代际",
@@ -532,6 +604,7 @@ export function checkpointDeliveredAudit(
   const remaining = current.pendingAudit.filter(
     (record) => !delivered.has(record.eventId),
   );
+  assertPlatformRouterLockOwned(handle, environment);
   if (remaining.length === current.pendingAudit.length) return current;
   return commitGeneration(
     {
@@ -589,7 +662,11 @@ export function garbageCollectPlatformRouterArtifacts(
   if (current.source !== "generation" || current.generationId === null) {
     throw new PlatformRouterConflictError("AI 配置垃圾回收要求已提交代际");
   }
-  const generationDirectory = ensureGenerationDirectory(environment);
+  const generationDirectory = path.join(
+    environment.root,
+    PLATFORM_ROUTER_GENERATION_DIRECTORY,
+  );
+  assertTrustedDirectory(generationDirectory, "AI 配置代际目录无效");
   const graceCutoff = environment.nowMs() - boundedDuration(
     options.gcGraceMs,
     DEFAULT_GC_GRACE_MS,
@@ -597,22 +674,28 @@ export function garbageCollectPlatformRouterArtifacts(
     7 * 24 * 60 * 60_000,
   );
   const retained = new Set<string>();
-  const retainedGenerations = new Map<string, PlatformRouterGeneration>();
+  const credentialGenerations = new Map<string, PlatformRouterGeneration>();
   const visited = new Set<string>();
   let nextGenerationId: string | null = current.generationId;
+  let depth = 0;
 
-  for (let depth = 0; depth < 3 && nextGenerationId; depth += 1) {
+  // Validate the complete lineage before any deletion. Only the current
+  // generation and two predecessors retain credentials by lineage policy.
+  while (nextGenerationId !== null) {
+    if (depth >= MAX_GENERATION_LINEAGE_DEPTH) {
+      throw new PlatformRouterCorruptionError("AI 配置代际父链超过安全深度限制");
+    }
     if (visited.has(nextGenerationId)) {
       throw new PlatformRouterCorruptionError("AI 配置代际父链包含循环");
     }
     visited.add(nextGenerationId);
     const generation = readGenerationWithoutPointer(nextGenerationId, environment);
-    retained.add(generation.generationId);
-    retainedGenerations.set(generation.generationId, generation);
+    if (depth < 3) {
+      retained.add(generation.generationId);
+      credentialGenerations.set(generation.generationId, generation);
+    }
     nextGenerationId = generation.parentGenerationId;
-  }
-  if (nextGenerationId !== null && visited.has(nextGenerationId)) {
-    throw new PlatformRouterCorruptionError("AI 配置代际父链包含循环");
+    depth += 1;
   }
 
   const generationEntries = readdirSync(generationDirectory);
@@ -628,33 +711,24 @@ export function garbageCollectPlatformRouterArtifacts(
     if (stat.mtimeMs >= graceCutoff) {
       const generation = readGenerationWithoutPointer(generationId, environment);
       retained.add(generationId);
-      retainedGenerations.set(generationId, generation);
+      credentialGenerations.set(generationId, generation);
     }
   }
 
   const referencedCredentials = new Set<string>();
-  for (const generation of retainedGenerations.values()) {
+  for (const generation of credentialGenerations.values()) {
     markGenerationCredentials(generation, referencedCredentials);
   }
   const legacy = readLegacySnapshot(environment);
   markSnapshotCredentials(legacy, referencedCredentials);
   referencedCredentials.add(LEGACY_ROUTER_KEY_FILE);
 
-  const removedGenerations: string[] = [];
-  for (const entry of generationEntries) {
-    const match = GENERATION_FILE_PATTERN.exec(entry);
-    if (!match) continue;
-    const generationId = normalizeUuid(match[1]);
-    if (retained.has(generationId)) continue;
-    const candidate = path.join(generationDirectory, entry);
-    assertRegularPathIfPresent(candidate, "AI 配置代际路径无效");
-    environment.io.unlink(candidate);
-    removedGenerations.push(generationId);
-  }
-  if (removedGenerations.length > 0) fsyncDirectory(generationDirectory, environment);
-
+  // Generation JSON is immutable history and is never auto-deleted. Only
+  // unreferenced, old managed credentials are eligible for collection.
   const removedCredentials: string[] = [];
-  for (const entry of readdirSync(environment.root)) {
+  const rootEntries = readdirSync(environment.root);
+  assertPlatformRouterLockOwned(handle, environment);
+  for (const entry of rootEntries) {
     if (!MANAGED_ROUTER_KEY_FILE.test(entry) || referencedCredentials.has(entry)) {
       continue;
     }
@@ -664,6 +738,7 @@ export function garbageCollectPlatformRouterArtifacts(
       throw new PlatformRouterCorruptionError("AI 配置凭据路径无效");
     }
     if (stat.mtimeMs >= graceCutoff) continue;
+    assertPlatformRouterLockOwned(handle, environment);
     environment.io.unlink(candidate);
     removedCredentials.push(entry);
   }
@@ -671,7 +746,7 @@ export function garbageCollectPlatformRouterArtifacts(
 
   return {
     retainedGenerations: [...retained].sort(),
-    removedGenerations: removedGenerations.sort(),
+    removedGenerations: [],
     removedCredentials: removedCredentials.sort(),
   };
 }
@@ -683,18 +758,25 @@ export function cleanupRecognizedOrphanTemps(
   const environment = resolveHandleEnvironment(handle, options);
   assertPlatformRouterLockOwned(handle, environment);
   const removed: string[] = [];
-  for (const entry of readdirSync(environment.root)) {
+  const rootEntries = readdirSync(environment.root);
+  assertPlatformRouterLockOwned(handle, environment);
+  for (const entry of rootEntries) {
     if (!POINTER_TEMP_PATTERN.test(entry)) continue;
     const target = path.join(environment.root, entry);
     assertRegularPathIfPresent(target, "AI 配置临时指针路径无效");
+    assertPlatformRouterLockOwned(handle, environment);
     environment.io.unlink(target);
     removed.push(entry);
   }
+  assertPlatformRouterLockOwned(handle, environment);
   const generationDirectory = ensureGenerationDirectory(environment);
-  for (const entry of readdirSync(generationDirectory)) {
+  const generationEntries = readdirSync(generationDirectory);
+  assertPlatformRouterLockOwned(handle, environment);
+  for (const entry of generationEntries) {
     if (!GENERATION_TEMP_PATTERN.test(entry)) continue;
     const target = path.join(generationDirectory, entry);
     assertRegularPathIfPresent(target, "AI 配置临时代际路径无效");
+    assertPlatformRouterLockOwned(handle, environment);
     environment.io.unlink(target);
     removed.push(`${PLATFORM_ROUTER_GENERATION_DIRECTORY}/${entry}`);
   }
@@ -751,28 +833,60 @@ function assertPlatformRouterLockOwned(
   handle: PlatformRouterLockHandle,
   environment: ResolvedEnvironment,
 ): void {
-  if (!lockCapabilities.has(handle) || handle.root !== environment.root) {
+  const capability = lockCapabilities.get(handle);
+  if (
+    capability === undefined ||
+    capability.released ||
+    handle.root !== environment.root
+  ) {
     throw new PlatformRouterLockOwnershipError(
-      "AI 配置事务锁能力无效或根目录不匹配",
+      "AI 配置事务锁能力无效、已释放或根目录不匹配",
     );
   }
-  const ownerPath = path.join(
+  const lockPath = path.join(
     environment.root,
     PLATFORM_ROUTER_LOCK_DIRECTORY,
-    PLATFORM_ROUTER_LOCK_OWNER_FILE,
   );
-  let actual: PlatformRouterLockOwner;
   try {
-    actual = readLockOwner(ownerPath, environment);
+    const heldStat = fstatSync(capability.descriptor);
+    if (
+      !heldStat.isDirectory() ||
+      heldStat.dev !== capability.device ||
+      heldStat.ino !== capability.inode ||
+      !sameLockDirectory(
+        lockPath,
+        capability.device,
+        capability.inode,
+        environment,
+      )
+    ) {
+      throw new PlatformRouterLockOwnershipError(
+        "AI 配置事务锁规范目录身份已改变",
+      );
+    }
+    const actual = readLockOwnerState(
+      path.join(
+        `/proc/self/fd/${capability.descriptor}`,
+        PLATFORM_ROUTER_LOCK_OWNER_FILE,
+      ),
+      environment,
+    );
+    if (
+      actual?.owner === null ||
+      actual === null ||
+      !actual.bytes.equals(capability.ownerBytes) ||
+      actual.owner.nonce !== capability.nonce ||
+      handle.owner.nonce !== capability.nonce
+    ) {
+      throw new PlatformRouterLockOwnershipError(
+        "AI 配置事务锁所有者字节或 nonce 已改变",
+      );
+    }
   } catch (cause) {
+    if (cause instanceof PlatformRouterLockOwnershipError) throw cause;
     throw new PlatformRouterLockOwnershipError(
       "AI 配置事务锁所有权无法确认",
       { cause },
-    );
-  }
-  if (actual.nonce !== handle.owner.nonce) {
-    throw new PlatformRouterLockOwnershipError(
-      "AI 配置事务锁已由其他进程持有",
     );
   }
 }
@@ -780,33 +894,139 @@ function assertPlatformRouterLockOwned(
 function createLockHandle(
   owner: PlatformRouterLockOwner,
   environment: ResolvedEnvironment,
+  expectedIdentity?: DirectoryIdentity,
 ): PlatformRouterLockHandle {
-  let released = false;
-  const handle: PlatformRouterLockHandle = {
-    owner,
-    root: environment.root,
-    release() {
-      if (released) return;
-      assertPlatformRouterLockOwned(handle, environment);
-      const lockPath = path.join(
-        environment.root,
-        PLATFORM_ROUTER_LOCK_DIRECTORY,
+  const lockPath = path.join(
+    environment.root,
+    PLATFORM_ROUTER_LOCK_DIRECTORY,
+  );
+  let descriptor: number | null = null;
+  try {
+    descriptor = environment.io.open(
+      lockPath,
+      fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
+    );
+    const stat = fstatSync(descriptor);
+    const ownerBytes = Buffer.from(`${JSON.stringify(owner)}\n`);
+    const actual = readLockOwnerState(
+      path.join(`/proc/self/fd/${descriptor}`, PLATFORM_ROUTER_LOCK_OWNER_FILE),
+      environment,
+    );
+    if (
+      !stat.isDirectory() ||
+      (expectedIdentity !== undefined &&
+        (stat.dev !== expectedIdentity.device || stat.ino !== expectedIdentity.inode)) ||
+      !sameLockDirectory(lockPath, stat.dev, stat.ino, environment) ||
+      actual?.owner === null ||
+      actual === null ||
+      !actual.bytes.equals(ownerBytes) ||
+      actual.owner.nonce !== owner.nonce
+    ) {
+      throw new PlatformRouterLockOwnershipError(
+        "AI 配置事务锁发布后的目录或所有者身份不匹配",
       );
-      const releasedPath = path.join(
-        environment.root,
-        `.platform-router.tx.lock.released-${owner.nonce}`,
-      );
-      assertAbsent(releasedPath, "AI 配置事务锁释放路径已存在");
-      environment.io.rename(lockPath, releasedPath);
-      released = true;
-      lockCapabilities.delete(handle);
-      fsyncDirectory(environment.root, environment);
-      removeLockArtifact(releasedPath, "released", environment);
-      fsyncDirectory(environment.root, environment);
-    },
-  };
-  lockCapabilities.add(handle);
-  return handle;
+    }
+    const capability: LockCapability = {
+      descriptor,
+      device: stat.dev,
+      inode: stat.ino,
+      nonce: owner.nonce,
+      ownerBytes: Buffer.from(actual.bytes),
+      released: false,
+      publicationUncertain: false,
+    };
+    const frozenOwner = Object.freeze({ ...owner });
+    const handle: PlatformRouterLockHandle = {
+      owner: frozenOwner,
+      root: environment.root,
+      get publicationUncertain() {
+        return capability.publicationUncertain;
+      },
+      release() {
+        if (capability.released) return;
+        releasePlatformRouterLock(handle, environment, true);
+      },
+    };
+    lockCapabilities.set(handle, capability);
+    descriptor = null;
+    return handle;
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+  }
+}
+
+function releasePlatformRouterLock(
+  handle: PlatformRouterLockHandle,
+  environment: ResolvedEnvironment,
+  syncRoot: boolean,
+): void {
+  const capability = lockCapabilities.get(handle);
+  assertPlatformRouterLockOwned(handle, environment);
+  if (capability === undefined) {
+    throw new PlatformRouterLockOwnershipError("AI 配置事务锁能力无效");
+  }
+  const lockPath = path.join(
+    environment.root,
+    PLATFORM_ROUTER_LOCK_DIRECTORY,
+  );
+  const releasedPath = path.join(
+    environment.root,
+    `.platform-router.tx.lock.released-${capability.nonce}`,
+  );
+  assertAbsent(releasedPath, "AI 配置事务锁释放路径已存在");
+
+  // This assertion is intentionally adjacent to the ownership-changing rename.
+  assertPlatformRouterLockOwned(handle, environment);
+  environment.io.rename(lockPath, releasedPath);
+  const releasedIsOwned = sameLockDirectory(
+    releasedPath,
+    capability.device,
+    capability.inode,
+    environment,
+  );
+  if (!releasedIsOwned) {
+    if (!pathExists(lockPath) && pathExists(releasedPath)) {
+      try {
+        renameSync(releasedPath, lockPath);
+      } catch {
+        // Keep every mismatched directory intact and fail closed.
+      }
+    }
+    finishLockCapability(handle, capability);
+    throw new PlatformRouterLockOwnershipError(
+      "AI 配置事务锁释放路径身份已改变",
+    );
+  }
+
+  let syncFailure: unknown;
+  try {
+    if (syncRoot) fsyncDirectory(environment.root, environment);
+  } catch (cause) {
+    syncFailure = cause;
+  }
+  try {
+    removeLockArtifact(
+      releasedPath,
+      "released",
+      capability,
+      environment,
+    );
+    if (syncRoot) fsyncDirectory(environment.root, environment);
+  } catch (cause) {
+    if (syncFailure === undefined) syncFailure = cause;
+  } finally {
+    finishLockCapability(handle, capability);
+  }
+  if (syncFailure !== undefined) throw syncFailure;
+}
+
+function finishLockCapability(
+  handle: PlatformRouterLockHandle,
+  capability: LockCapability,
+): void {
+  capability.released = true;
+  lockCapabilities.delete(handle);
+  closeSync(capability.descriptor);
 }
 
 function createLockOwner(environment: ResolvedEnvironment): PlatformRouterLockOwner {
@@ -933,8 +1153,31 @@ function takeOverStaleLock(
       claimPath,
       path.join(directoryPath, PLATFORM_ROUTER_LOCK_OWNER_FILE),
     );
-    environment.io.fsync(inspection.descriptor);
-    return createLockHandle(owner, environment);
+    const handle = createLockHandle(owner, environment, {
+      device: inspection.device,
+      inode: inspection.inode,
+    });
+    try {
+      environment.io.fsync(inspection.descriptor);
+    } catch (cause) {
+      try {
+        releasePlatformRouterLock(handle, environment, false);
+      } catch (cleanupCause) {
+        try {
+          assertPlatformRouterLockOwned(handle, environment);
+          const capability = lockCapabilities.get(handle);
+          if (capability) capability.publicationUncertain = true;
+          return handle;
+        } catch (ownershipCause) {
+          throw new PlatformRouterTransactionError(
+            "AI 配置事务锁接管同步失败且无法安全回滚",
+            { cause: new AggregateError([cause, cleanupCause, ownershipCause]) },
+          );
+        }
+      }
+      throw cause;
+    }
+    return handle;
   } finally {
     removeLockFile(claimPath, environment);
   }
@@ -988,20 +1231,6 @@ function readLockOwnerState(
   }
 }
 
-function readLockOwner(
-  ownerPath: string,
-  environment: ResolvedEnvironment,
-): PlatformRouterLockOwner {
-  const bytes = readRegularFile(ownerPath, false, environment)!;
-  try {
-    return decodeLockOwner(parseStrictJson(bytes));
-  } catch (cause) {
-    throw new PlatformRouterCorruptionError("AI 配置事务锁 owner 损坏", {
-      cause,
-    });
-  }
-}
-
 function decodeLockOwner(value: unknown): PlatformRouterLockOwner {
   if (
     !isRecord(value) ||
@@ -1025,18 +1254,27 @@ function decodeLockOwner(value: unknown): PlatformRouterLockOwner {
 function removeLockArtifact(
   target: string,
   kind: "candidate" | "released",
+  identity: DirectoryIdentity,
   environment: ResolvedEnvironment,
-): void {
+): boolean {
   const basename = path.basename(target);
   const accepted = kind === "candidate"
     ? LOCK_CANDIDATE_PATTERN.test(basename)
     : LOCK_RELEASED_PATTERN.test(basename);
-  if (!accepted || !pathExists(target)) return;
-  const stat = environment.io.lstat(target);
+  if (!accepted) return false;
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = environment.io.lstat(target);
+  } catch (cause) {
+    if (isNodeErrorCode(cause, "ENOENT")) return false;
+    throw cause;
+  }
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new PlatformRouterCorruptionError("AI 配置事务锁清理路径无效");
   }
+  if (stat.dev !== identity.device || stat.ino !== identity.inode) return false;
   rmSync(target, { recursive: true, force: false });
+  return true;
 }
 
 function removeLockFile(
@@ -1366,6 +1604,19 @@ function scanAndRepairAuditJournal(
     }
 
     if (carry.length > 0) {
+      try {
+        // Streaming fatal decode accepts only a valid UTF-8 prefix. It keeps a
+        // genuinely truncated final multibyte sequence buffered, while
+        // rejecting impossible bytes such as 0xff immediately.
+        new TextDecoder("utf-8", { fatal: true }).decode(carry, {
+          stream: true,
+        });
+      } catch (cause) {
+        throw new PlatformRouterCorruptionError(
+          "AI 配置审计尾部包含无效 UTF-8",
+          { cause },
+        );
+      }
       throw new PlatformRouterAuditPendingError(
         "AI 配置审计存在未完成的尾部记录，稍后重试",
       );

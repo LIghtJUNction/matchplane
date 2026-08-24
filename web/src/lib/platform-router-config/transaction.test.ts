@@ -68,6 +68,14 @@ const SENTINEL = "SENTINEL_PRIVATE_VALUE_DO_NOT_LEAK";
 const OLD_TIME = new Date("2020-01-01T00:00:00.000Z");
 const trackedChildren = new Map<ChildProcess, { stdout: string; stderr: string }>();
 
+interface SwappedCanonicalLock {
+  canonical: string;
+  original: string;
+  replacement: string;
+  replacementInode: number;
+  replacementOwnerBytes: Buffer;
+}
+
 beforeAll(() => {
   rmSync(TEST_ROOT, { recursive: true, force: true });
   mkdirSync(TEST_ROOT, { recursive: true, mode: 0o750 });
@@ -115,6 +123,27 @@ describe("identity-safe cross-process lock", () => {
     expect(JSON.parse(readFileSync(path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY, PLATFORM_ROUTER_LOCK_OWNER_FILE), "utf8")).nonce).toBe(handle.owner.nonce);
     expect(existsSync(orphan)).toBe(true);
     handle.release();
+  });
+
+  it("preserves a pre-existing candidate on an exact nonce collision", async () => {
+    const root = caseRoot("candidate-exact-collision");
+    const collision = path.join(
+      root,
+      `.platform-router.tx.lock.candidate-${uuid(1)}`,
+    );
+    mkdirSync(collision, { mode: 0o700 });
+    const sentinel = Buffer.from("pre-existing-candidate");
+    writeFileSync(path.join(collision, "sentinel"), sentinel, { mode: 0o600 });
+
+    const handle = await acquirePlatformRouterLock({
+      root,
+      nextId: idSequence(1, 2),
+    });
+    try {
+      expect(readFileSync(path.join(collision, "sentinel"))).toEqual(sentinel);
+    } finally {
+      handle.release();
+    }
   });
 
   it("does not let a paused stale inspector touch a released and recreated lock", async () => {
@@ -248,6 +277,87 @@ describe("identity-safe cross-process lock", () => {
     expect(existsSync(lockPath)).toBe(true);
     rmSync(lockPath, { recursive: true, force: true });
   });
+
+  it("removes the published canonical lock when initial publication fsync fails", async () => {
+    const root = caseRoot("publish-fsync-failure");
+    const canonical = path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY);
+    let failed = false;
+    await expect(acquirePlatformRouterLock({
+      root,
+      io: pathAwareIo({
+        fsync(target, descriptor) {
+          if (!failed && target === root && existsSync(canonical)) {
+            failed = true;
+            throw nodeFailure("ENOSPC", "root fsync failed after publish");
+          }
+          fsyncSync(descriptor);
+        },
+      }),
+    })).rejects.toThrow("事务锁无法创建");
+    expect(failed).toBe(true);
+    expect(existsSync(canonical)).toBe(false);
+  });
+
+  it("removes a newly installed takeover owner when its directory fsync fails", async () => {
+    const root = caseRoot("takeover-fsync-failure");
+    const canonical = path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY);
+    writeStaleLock(root, 31);
+    let lockFsyncs = 0;
+    await expect(acquirePlatformRouterLock({
+      root,
+      timeoutMs: 500,
+      io: pathAwareIo({
+        fsync(target, descriptor) {
+          if (target === canonical) {
+            lockFsyncs += 1;
+            if (lockFsyncs === 2) {
+              throw nodeFailure("ENOSPC", "takeover owner fsync failed");
+            }
+          }
+          fsyncSync(descriptor);
+        },
+      }),
+    })).rejects.toThrow("takeover owner fsync failed");
+    expect(lockFsyncs).toBe(2);
+    expect(existsSync(canonical)).toBe(false);
+  });
+
+  it("never deletes a replacement directory swapped in during release", async () => {
+    const root = caseRoot("release-canonical-swap");
+    const canonical = path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY);
+    const original = path.join(root, "parked-original-lock");
+    let replacementInode = 0;
+    const replacementBytes = Buffer.from(`${JSON.stringify(staleOwner(33))}\n`);
+    const handle = await acquirePlatformRouterLock({
+      root,
+      io: {
+        rename: ((source: string, destination: string) => {
+          if (
+            source === canonical &&
+            destination.includes(".platform-router.tx.lock.released-")
+          ) {
+            renameSync(canonical, original);
+            mkdirSync(canonical, { mode: 0o700 });
+            writeFileSync(
+              path.join(canonical, PLATFORM_ROUTER_LOCK_OWNER_FILE),
+              replacementBytes,
+              { mode: 0o600 },
+            );
+            replacementInode = statSync(canonical).ino;
+          }
+          renameSync(source, destination);
+        }) as typeof renameSync,
+      },
+    });
+
+    expect(() => handle.release()).toThrow(PlatformRouterLockOwnershipError);
+    expect(statSync(canonical).ino).toBe(replacementInode);
+    expect(readFileSync(path.join(canonical, PLATFORM_ROUTER_LOCK_OWNER_FILE))).toEqual(
+      replacementBytes,
+    );
+    rmSync(canonical, { recursive: true, force: true });
+    rmSync(original, { recursive: true, force: true });
+  });
 });
 
 describe("lock-scoped generation commits", () => {
@@ -265,6 +375,30 @@ describe("lock-scoped generation commits", () => {
     );
     expect(() => commitGeneration(input, handle, { root })).toThrow(PlatformRouterLockOwnershipError);
     rmSync(path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY), { recursive: true, force: true });
+  });
+
+  it("rejects owner-byte changes even when the decoded nonce is unchanged", async () => {
+    const root = caseRoot("capability-owner-bytes");
+    const handle = await acquirePlatformRouterLock({ root });
+    const ownerPath = path.join(
+      root,
+      PLATFORM_ROUTER_LOCK_DIRECTORY,
+      PLATFORM_ROUTER_LOCK_OWNER_FILE,
+    );
+    writeFileSync(ownerPath, `${JSON.stringify(handle.owner, null, 2)}\n`, {
+      mode: 0o600,
+    });
+    expect(() =>
+      commitGeneration(
+        generationInput(105, null, config("same-nonce", keyName(1))),
+        handle,
+        transactionOptions(root, 105),
+      )
+    ).toThrow(PlatformRouterLockOwnershipError);
+    rmSync(path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY), {
+      recursive: true,
+      force: true,
+    });
   });
 
   it("enforces exact parent CAS, rejects self/null/stale parents, and validates parent identity", async () => {
@@ -369,6 +503,33 @@ describe("non-destructive audit projection", () => {
     }
   });
 
+  it("classifies impossible unterminated UTF-8 as corruption and a truncated multibyte suffix as pending", async () => {
+    const root = caseRoot("audit-utf8-tail");
+    const snapshot = await commitState(root, 204, null, null, [auditRecord(204)]);
+    const handle = await acquirePlatformRouterLock({ root });
+    const auditPath = path.join(root, PLATFORM_ROUTER_AUDIT_FILE);
+    try {
+      const invalid = Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xff]);
+      writeFileSync(auditPath, invalid, { mode: 0o640 });
+      expect(() => flushAuditOutbox(snapshot, handle, { root })).toThrow(
+        PlatformRouterCorruptionError,
+      );
+      expect(readFileSync(auditPath)).toEqual(invalid);
+
+      const truncated = Buffer.concat([
+        Buffer.from('{"actor":"'),
+        Buffer.from([0xe7, 0x95]),
+      ]);
+      writeFileSync(auditPath, truncated, { mode: 0o640 });
+      expect(() => flushAuditOutbox(snapshot, handle, { root })).toThrow(
+        PlatformRouterAuditPendingError,
+      );
+      expect(readFileSync(auditPath)).toEqual(truncated);
+    } finally {
+      handle.release();
+    }
+  });
+
   it("decodes valid UTF-8 even when a multibyte character crosses the scan chunk boundary", async () => {
     const root = caseRoot("audit-utf8-split");
     const event = auditRecord(205);
@@ -429,6 +590,83 @@ describe("non-destructive audit projection", () => {
       handle.release();
     }
   }, 20_000);
+
+  it("preserves a positive mid-record append after the next write fails", async () => {
+    const root = caseRoot("audit-mid-record-failure");
+    const event = auditRecord(207);
+    const snapshot = await commitState(root, 207, null, null, [event]);
+    const handle = await acquirePlatformRouterLock({ root });
+    const auditPath = path.join(root, PLATFORM_ROUTER_AUDIT_FILE);
+    const fullLine = Buffer.from(`${JSON.stringify(event)}\n`);
+    let writes = 0;
+    const partialThenFail = ((
+      descriptor: number,
+      buffer: Uint8Array,
+      offset: number,
+      length: number,
+      position: number | null,
+    ) => {
+      writes += 1;
+      if (writes === 1) {
+        return writeSync(descriptor, buffer, offset, Math.min(11, length), position);
+      }
+      throw nodeFailure("ENOSPC", "audit append ran out of space");
+    }) as typeof writeSync;
+    try {
+      expect(() =>
+        flushAuditOutbox(snapshot, handle, {
+          root,
+          io: { write: partialThenFail },
+        })
+      ).toThrow("审计投影失败");
+      const partial = readFileSync(auditPath);
+      expect(partial.length).toBeGreaterThan(0);
+      expect(partial.length).toBeLessThan(fullLine.length);
+      expect(partial).toEqual(fullLine.subarray(0, partial.length));
+      expect(readCurrentSnapshot({ root }).pendingAudit).toEqual([event]);
+      expect(() => flushAuditOutbox(snapshot, handle, { root })).toThrow(
+        PlatformRouterAuditPendingError,
+      );
+      expect(readFileSync(auditPath)).toEqual(partial);
+    } finally {
+      handle.release();
+    }
+  });
+
+  it("fails before append when the canonical lock is swapped after audit scanning", async () => {
+    const root = caseRoot("audit-lock-swap");
+    const event = auditRecord(208);
+    const snapshot = await commitState(root, 208, null, null, [event]);
+    const auditPath = path.join(root, PLATFORM_ROUTER_AUDIT_FILE);
+    const originalAudit = Buffer.from(`${JSON.stringify(auditRecord(209))}\n`);
+    writeFileSync(auditPath, originalAudit, { mode: 0o640 });
+    const handle = await acquirePlatformRouterLock({ root });
+    const canonical = path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY);
+    let lockChecks = 0;
+    let swapped: SwappedCanonicalLock | null = null;
+    try {
+      expect(() => flushAuditOutbox(snapshot, handle, {
+        root,
+        io: {
+          lstat: ((target: string) => {
+            if (target === canonical) {
+              lockChecks += 1;
+              if (lockChecks === 2) {
+                swapped = swapCanonicalLock(root, "audit", 209);
+              }
+            }
+            return lstatSync(target);
+          }) as typeof lstatSync,
+        },
+      })).toThrow(PlatformRouterLockOwnershipError);
+      expect(swapped).not.toBeNull();
+      expect(readFileSync(auditPath)).toEqual(originalAudit);
+      expectCanonicalReplacementUntouched(swapped!);
+    } finally {
+      if (swapped) restoreCanonicalLock(swapped, handle);
+      else handle.release();
+    }
+  });
 
   it("loops positive short appends, deduplicates, and checkpoints under one owner", async () => {
     const root = caseRoot("audit-short-write");
@@ -498,6 +736,95 @@ describe("reader and garbage-collection integrity", () => {
       } finally {
         handle.release();
       }
+    }
+  });
+
+  it("validates missing parents and cycles beyond the retention window before deleting anything", async () => {
+    for (const [name, base, badParent] of [
+      ["deep-missing", 410, uuid(499)],
+      ["deep-cycle", 420, uuid(423)],
+    ] as const) {
+      const root = caseRoot(`gc-${name}`);
+      let parent: string | null = null;
+      for (let index = 0; index < 5; index += 1) {
+        const snapshot = await commitState(
+          root,
+          base + index,
+          parent,
+          config(`${name}-${index}`, keyName(base + index)),
+        );
+        parent = snapshot.generationId;
+      }
+      rewriteGenerationAndPointer(root, base, false, (generation) => {
+        generation.parentGenerationId = badParent;
+      });
+      const orphan = keyName(base + 50);
+      writeCredential(root, orphan, "must-survive-failed-gc");
+      utimesSync(path.join(root, orphan), OLD_TIME, OLD_TIME);
+      const generationFiles = readdirSync(
+        path.join(root, PLATFORM_ROUTER_GENERATION_DIRECTORY),
+      );
+      const generationBytes = generationFiles.map((entry) =>
+        readFileSync(path.join(root, PLATFORM_ROUTER_GENERATION_DIRECTORY, entry))
+      );
+
+      const handle = await acquirePlatformRouterLock({ root });
+      try {
+        expect(() =>
+          garbageCollectPlatformRouterArtifacts(handle, {
+            root,
+            gcGraceMs: 0,
+          })
+        ).toThrow(PlatformRouterCorruptionError);
+        expect(existsSync(path.join(root, orphan))).toBe(true);
+        expect(readdirSync(path.join(root, PLATFORM_ROUTER_GENERATION_DIRECTORY))).toEqual(
+          generationFiles,
+        );
+        for (const [index, entry] of generationFiles.entries()) {
+          expect(
+            readFileSync(path.join(root, PLATFORM_ROUTER_GENERATION_DIRECTORY, entry)),
+          ).toEqual(generationBytes[index]);
+        }
+      } finally {
+        handle.release();
+      }
+    }
+  });
+
+  it("fails before credential deletion when the canonical lock is swapped after GC scanning", async () => {
+    const root = caseRoot("gc-lock-swap");
+    const currentKey = keyName(460);
+    const orphan = keyName(461);
+    writeCredential(root, currentKey, "current-private-value");
+    writeCredential(root, orphan, "orphan-private-value");
+    await commitState(root, 460, null, config("gc-lock-swap", currentKey));
+    utimesSync(path.join(root, orphan), OLD_TIME, OLD_TIME);
+    const handle = await acquirePlatformRouterLock({ root });
+    const canonical = path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY);
+    let lockChecks = 0;
+    let swapped: SwappedCanonicalLock | null = null;
+    try {
+      expect(() => garbageCollectPlatformRouterArtifacts(handle, {
+        root,
+        gcGraceMs: 0,
+        io: {
+          lstat: ((target: string) => {
+            if (target === canonical) {
+              lockChecks += 1;
+              if (lockChecks === 2) {
+                swapped = swapCanonicalLock(root, "gc", 461);
+              }
+            }
+            return lstatSync(target);
+          }) as typeof lstatSync,
+        },
+      })).toThrow(PlatformRouterLockOwnershipError);
+      expect(swapped).not.toBeNull();
+      expect(existsSync(path.join(root, orphan))).toBe(true);
+      expectCanonicalReplacementUntouched(swapped!);
+    } finally {
+      if (swapped) restoreCanonicalLock(swapped, handle);
+      else handle.release();
     }
   });
 
@@ -937,8 +1264,11 @@ describe("ported recovery and collection invariants", () => {
       expect(result.retainedGenerations).toEqual(
         [uuid(834), uuid(835), uuid(836), uuid(837)].sort(),
       );
-      expect(result.removedGenerations).toEqual([uuid(831), uuid(832), uuid(833)]);
+      expect(result.removedGenerations).toEqual([]);
       expect(result.removedCredentials).toEqual([keyName(822), keyName(823), orphanKey].sort());
+      for (let generationNumber = 831; generationNumber <= 837; generationNumber += 1) {
+        expect(existsSync(generationPath(root, generationNumber))).toBe(true);
+      }
     } finally {
       gcHandle.release();
     }
@@ -1198,6 +1528,50 @@ function caseRoot(name: string): string {
   rmSync(root, { recursive: true, force: true });
   mkdirSync(root, { recursive: true, mode: 0o750 });
   return root;
+}
+
+function swapCanonicalLock(
+  root: string,
+  name: string,
+  ownerNumber: number,
+): SwappedCanonicalLock {
+  const canonical = path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY);
+  const original = path.join(root, `parked-${name}-original-lock`);
+  const replacement = path.join(root, `parked-${name}-replacement-lock`);
+  renameSync(canonical, original);
+  mkdirSync(canonical, { mode: 0o700 });
+  const replacementOwnerBytes = Buffer.from(
+    `${JSON.stringify(staleOwner(ownerNumber))}\n`,
+  );
+  writeFileSync(
+    path.join(canonical, PLATFORM_ROUTER_LOCK_OWNER_FILE),
+    replacementOwnerBytes,
+    { mode: 0o600 },
+  );
+  return {
+    canonical,
+    original,
+    replacement,
+    replacementInode: statSync(canonical).ino,
+    replacementOwnerBytes,
+  };
+}
+
+function expectCanonicalReplacementUntouched(swap: SwappedCanonicalLock): void {
+  expect(statSync(swap.canonical).ino).toBe(swap.replacementInode);
+  expect(
+    readFileSync(path.join(swap.canonical, PLATFORM_ROUTER_LOCK_OWNER_FILE)),
+  ).toEqual(swap.replacementOwnerBytes);
+}
+
+function restoreCanonicalLock(
+  swap: SwappedCanonicalLock,
+  handle: PlatformRouterLockHandle,
+): void {
+  renameSync(swap.canonical, swap.replacement);
+  renameSync(swap.original, swap.canonical);
+  handle.release();
+  rmSync(swap.replacement, { recursive: true, force: true });
 }
 
 function barrier(root: string, name: string): string {
