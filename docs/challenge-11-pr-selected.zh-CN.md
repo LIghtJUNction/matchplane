@@ -1,26 +1,16 @@
-# 选用 PR 文案（9 版中 #2 最无人味）
+# 选用 PR 文案（9 版中 #2 口语版最无人味）
 
-选定理由：像真人给发布者留言，有具体路径，无「赋能/全面/优化」套话，语气平实。
+选定理由：子代理 [PR 文案 #2 口语](bc-9bd438e8-8dbf-5607-a7d7-ac2135828d75) 胜出——像真人跟 light 说话（「我自己看着都难受」），具体可验，无 PR 机器人腔。否决 [PR 文案 #6  conventional](bc-495f6c53-e78d-5c63-913d-adc9b331169d)（「概述/交付/围绕四个评审要点」AI 味最重）。
 
 ---
 
 **TITLE:**
 
 ```
-挑战11交付：matchplane 卖车场景能点了
+挑战11：首页改成「帮我找」、卡片抄了瓜子的作业、后台能配微信和短信登录了
 ```
 
-**BODY:**
-
-```markdown
-light 你好，这版按挑战页要求做的。
-
-首页先看车，右上角「帮我找」填预算能筛商品；聊天里会先问预算和用途，再出卡片，不是瞎编。联系方式只能走账号里验证过的邮箱/手机，双方同意才给。
-
-商城设置里加了微信登录和短信网关的配置界面（没配真实密钥也能用 mock 演示 OTP）。`tools/demo/bootstrap-car-shop-demo.sh` 一键起「星辰二手车行」六台样车。
-
-我本地点过一遍，测试也跑了。你那边要是方便，按 `docs/challenge-11-demo-script.zh-CN.md` 验一下就行。
-```
+**BODY:** 见 `docs/challenge-11-pr-selected-body.md`
 
 ---
 
@@ -38,6 +28,6 @@ gh pr create \
   --repo LIghtJUNction/matchplane \
   --base main \
   --head <你的用户名>:cursor/challenge-11-participation-897f \
-  --title "挑战11交付：matchplane 卖车场景能点了" \
+  --title "挑战11：首页改成「帮我找」、卡片抄了瓜子的作业、后台能配微信和短信登录了" \
   --body-file docs/challenge-11-pr-selected-body.md
 ```
