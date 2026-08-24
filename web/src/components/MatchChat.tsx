@@ -189,11 +189,7 @@ function handoffStatusLabel(
     case "sent":
       return localeText(locale, "Handoff request saved", "人工介入请求已记录");
     case "cancelled":
-      return localeText(
-        locale,
-        "Store staff were not notified",
-        "未通知店员",
-      );
+      return localeText(locale, "Store staff were not notified", "未通知店员");
     case "failed":
       return localeText(locale, "Handoff request failed", "人工介入请求失败");
   }
@@ -741,7 +737,11 @@ export function MatchChat({
     ? copy.sellerDescription
     : copy.buyerDescription;
   if (showCompactMarketplaceHeading) {
-    visibleHeadline = localeText(locale, "What are you looking for?", "想找什么？");
+    visibleHeadline = localeText(
+      locale,
+      "What are you looking for?",
+      "想找什么？",
+    );
     visibleDescription = localeText(
       locale,
       "Say what you need and your budget. Matching products will appear here.",
@@ -874,9 +874,7 @@ export function MatchChat({
       },
     ],
   };
-  const starterPromptCards = isRoot
-    ? starterPromptCardsByLocale[locale]
-    : [];
+  const starterPromptCards = isRoot ? starterPromptCardsByLocale[locale] : [];
 
   const applyQuickPrompt = (value: string) => {
     setMessage(value);
@@ -1614,9 +1612,7 @@ export function MatchChat({
             text: `${assistantText}${isSeller ? "" : degradedSuffix}`,
           },
         ]);
-        let successNotice = isSeller
-          ? copy.sellerSuccess
-          : copy.buyerSuccess;
+        let successNotice = isSeller ? copy.sellerSuccess : copy.buyerSuccess;
         if (retrievalDegraded) {
           successNotice = runtime.retrievalDegradedNotice;
         }

@@ -8,13 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@appica/ui-react/dropdown-menu";
-import {
-  LayoutDashboard,
-  LogIn,
-  LogOut,
-  Store,
-  UserRound,
-} from "lucide-react";
+import { LayoutDashboard, LogIn, LogOut, Store, UserRound } from "lucide-react";
 import { motion } from "motion/react";
 
 import { Brand, spring } from "../Primitives";

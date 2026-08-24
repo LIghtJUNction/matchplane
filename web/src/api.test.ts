@@ -136,23 +136,24 @@ describe("shopping assistant retry metadata", () => {
   it("preserves a rate-limit detail and Retry-After timing", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            error: {
-              message: "请求过于频繁，请稍后再试。",
-              code: "rate_limited",
-              retryable: true,
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                message: "请求过于频繁，请稍后再试。",
+                code: "rate_limited",
+                retryable: true,
+              },
+            }),
+            {
+              status: 429,
+              headers: {
+                "content-type": "application/json",
+                "retry-after": "90",
+              },
             },
-          }),
-          {
-            status: 429,
-            headers: {
-              "content-type": "application/json",
-              "retry-after": "90",
-            },
-          },
-        ),
+          ),
       ),
     );
 
@@ -173,25 +174,26 @@ describe("shopping assistant retry metadata", () => {
   it("preserves gateway timeout Retry-After metadata", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            error: {
-              message: "下游平台响应超时，请稍后重试。",
-              code: "gateway_timeout",
-              retryable: true,
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                message: "下游平台响应超时，请稍后重试。",
+                code: "gateway_timeout",
+                retryable: true,
+              },
+              requestId: "44444444-4444-4444-8444-444444444444",
+            }),
+            {
+              status: 504,
+              headers: {
+                "content-type": "application/json",
+                "retry-after": "5",
+                "x-request-id": "44444444-4444-4444-8444-444444444444",
+              },
             },
-            requestId: "44444444-4444-4444-8444-444444444444",
-          }),
-          {
-            status: 504,
-            headers: {
-              "content-type": "application/json",
-              "retry-after": "5",
-              "x-request-id": "44444444-4444-4444-8444-444444444444",
-            },
-          },
-        ),
+          ),
       ),
     );
 
@@ -211,27 +213,26 @@ describe("shopping assistant retry metadata", () => {
   it("returns request identity with a typed empty-catalog outcome", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            requestId: "55555555-5555-4555-8555-555555555555",
-            answer: "当前公开目录里暂时还没有可推荐的商品。",
-            recommendations: [],
-            uiActions: [],
-            outcome: "empty_catalog",
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              requestId: "55555555-5555-4555-8555-555555555555",
+              answer: "当前公开目录里暂时还没有可推荐的商品。",
+              recommendations: [],
+              uiActions: [],
+              outcome: "empty_catalog",
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
       ),
     );
 
     await expect(
-      askMallShoppingAssistant([
-        { role: "user", content: "现在有什么商品？" },
-      ]),
+      askMallShoppingAssistant([{ role: "user", content: "现在有什么商品？" }]),
     ).resolves.toMatchObject({
       requestId: "55555555-5555-4555-8555-555555555555",
       answer: "当前公开目录里暂时还没有可推荐的商品。",

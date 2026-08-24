@@ -123,9 +123,10 @@ describe("MatchPlane workspaces", () => {
   it("keeps the root entry focused on one public buyer chat and a visible sign-in entry", async () => {
     render(<App />);
 
-    expect(
-      screen.getByRole("button", { name: "问选货员" }),
-    ).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "问选货员" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
     expect(
       screen.getByRole("heading", { name: "想找什么？" }),
     ).toBeInTheDocument();

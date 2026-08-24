@@ -90,21 +90,26 @@ describe("PlatformHeader account actions", () => {
     await user.click(trigger);
 
     const menu = await screen.findByRole("menu", { name: "账户菜单" });
-    expect(within(menu).getByRole("menuitem", { name: /我的店铺/ })).toBeVisible();
-    expect(within(menu).getByRole("menuitem", { name: "商城控制台" })).toHaveAttribute(
-      "href",
-      "/?role=platform",
-    );
+    expect(
+      within(menu).getByRole("menuitem", { name: /我的店铺/ }),
+    ).toBeVisible();
+    expect(
+      within(menu).getByRole("menuitem", { name: "商城控制台" }),
+    ).toHaveAttribute("href", "/?role=platform");
     expect(screen.getAllByText("商城控制台")).toHaveLength(1);
 
     await user.click(within(menu).getByRole("menuitem", { name: /我的店铺/ }));
     expect(onOpenAccountSection).toHaveBeenCalledWith("stores");
-    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
+    );
 
     await user.click(trigger);
     await screen.findByRole("menu", { name: "账户菜单" });
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
+    );
     expect(trigger).toHaveFocus();
   });
 
@@ -128,7 +133,9 @@ describe("PlatformHeader account actions", () => {
     const user = userEvent.setup();
     const { onOpenStoreCenter } = renderHeader(null);
 
-    expect(screen.queryByRole("button", { name: "账户菜单" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "账户菜单" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("商城控制台")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录" })).toBeVisible();
 

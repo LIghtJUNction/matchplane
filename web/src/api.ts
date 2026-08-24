@@ -1989,16 +1989,14 @@ export async function askMallShoppingAssistant(
           [429, 503, 504].includes(response.status),
         retryAfterMs: readRetryAfterMs(response, {
           retryAfterMs: typedError?.retryAfterMs ?? body?.retryAfterMs,
-          retryAfterSnakeMs:
-            typedError?.retry_after_ms ?? body?.retry_after_ms,
+          retryAfterSnakeMs: typedError?.retry_after_ms ?? body?.retry_after_ms,
           retryAfterSeconds: body?.retryAfterSeconds,
         }),
       },
     );
   }
   const outcome =
-    body.outcome === "empty_catalog" ||
-    body.outcome === "no_matching_products"
+    body.outcome === "empty_catalog" || body.outcome === "no_matching_products"
       ? body.outcome
       : undefined;
   return {
@@ -2179,8 +2177,7 @@ export class MarketplaceApiError extends Error {
     this.name = "MarketplaceApiError";
     this.status = status;
     this.code = options.code;
-    this.retryable =
-      options.retryable ?? [429, 503, 504].includes(status);
+    this.retryable = options.retryable ?? [429, 503, 504].includes(status);
     this.retryAfterMs = options.retryAfterMs;
   }
 }

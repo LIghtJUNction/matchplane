@@ -58,15 +58,14 @@ describe("PlatformAiConfigPanel connection probe", () => {
     });
 
     const { container } = render(
-      <PlatformAiConfigPanel
-        rootRole="rootSuperAdmin"
-        onNotice={onNotice}
-      />,
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
     );
 
     const endpoint = await screen.findByDisplayValue(longEndpoint);
     expect(endpoint.closest(".platform-ai-endpoint-field")).not.toBeNull();
-    expect(container.querySelector(".platform-ai-config")).toContainElement(endpoint);
+    expect(container.querySelector(".platform-ai-config")).toContainElement(
+      endpoint,
+    );
 
     const testButton = screen.getByRole("button", { name: "测试连接" });
     await waitFor(() => expect(testButton).toBeEnabled());

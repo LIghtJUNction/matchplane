@@ -279,97 +279,95 @@ describe("MatchChat sending state", () => {
       await screen.findByText("当前公开目录里暂时还没有可推荐的商品。"),
     ).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(
-      document.querySelector(".match-chat-recommendations"),
-    ).toBeNull();
+    expect(document.querySelector(".match-chat-recommendations")).toBeNull();
   });
 
-  it.each([503, 504] as const)(
-    "keeps a seller %i retryable with its prompt and attachment intact",
-    async (status) => {
-      const user = userEvent.setup();
-      const onSellerDraft = vi.fn();
-      const sellerSubplatform = {
-        slug: "tools",
-        path: "/tools",
-        label: "工具平台",
-        tenantId: "11111111-1111-4111-8111-111111111111",
-        domainId: "55555555-5555-4555-8555-555555555555",
-        pricing: { mode: "none" },
-        marketplaceContract: "generic-v1",
-        agentMcpTools: ["media.upload"],
-        ui: {},
-      } as SubplatformConfig;
-      const detail =
-        status === 504
-          ? "下游平台响应超时，请稍后重试。"
-          : "下游平台内部工具暂时不可用，请稍后重试。";
-      createMarketplaceIntent.mockRejectedValueOnce(
-        new MarketplaceApiError(status, detail, {
-          code: status === 504 ? "gateway_timeout" : "provider_tool_failure",
-          retryable: true,
-          retryAfterMs: 5_000,
-        }),
-      );
-      render(
-        <MatchChat
-          onNotice={vi.fn()}
-          onSellerDraft={onSellerDraft}
-          role="seller"
-          subplatform={sellerSubplatform}
-        />,
-      );
-      const input = screen.getByRole("textbox");
-      const attachmentInput = screen.getByLabelText("添加附件");
+  it.each([
+    503, 504,
+  ] as const)("keeps a seller %i retryable with its prompt and attachment intact", async (status) => {
+    const user = userEvent.setup();
+    const onSellerDraft = vi.fn();
+    const sellerSubplatform = {
+      slug: "tools",
+      path: "/tools",
+      label: "工具平台",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      domainId: "55555555-5555-4555-8555-555555555555",
+      pricing: { mode: "none" },
+      marketplaceContract: "generic-v1",
+      agentMcpTools: ["media.upload"],
+      ui: {},
+    } as SubplatformConfig;
+    const detail =
+      status === 504
+        ? "下游平台响应超时，请稍后重试。"
+        : "下游平台内部工具暂时不可用，请稍后重试。";
+    createMarketplaceIntent.mockRejectedValueOnce(
+      new MarketplaceApiError(status, detail, {
+        code: status === 504 ? "gateway_timeout" : "provider_tool_failure",
+        retryable: true,
+        retryAfterMs: 5_000,
+      }),
+    );
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        onSellerDraft={onSellerDraft}
+        role="seller"
+        subplatform={sellerSubplatform}
+      />,
+    );
+    const input = screen.getByRole("textbox");
+    const attachmentInput = screen.getByLabelText("添加附件");
 
-      await user.upload(
-        attachmentInput,
-        new File(["details"], "offer.pdf", { type: "application/pdf" }),
-      );
-      await screen.findByText("offer.pdf");
-      await user.type(input, "我可以提供耐用的专业工具");
-      await user.click(screen.getByRole("button", { name: "发送供给" }));
+    await user.upload(
+      attachmentInput,
+      new File(["details"], "offer.pdf", { type: "application/pdf" }),
+    );
+    await screen.findByText("offer.pdf");
+    await user.type(input, "我可以提供耐用的专业工具");
+    await user.click(screen.getByRole("button", { name: "发送供给" }));
 
-      const alert = await screen.findByRole("alert");
-      expect(alert).toHaveTextContent(detail);
-      expect(alert).toHaveTextContent("建议约 5 秒后重试。");
-      expect(input).toHaveValue("我可以提供耐用的专业工具");
-      expect(
-        document.querySelector(".match-chat-compose-attachments"),
-      ).toHaveTextContent("offer.pdf");
-      expect(
-        document.querySelectorAll(".match-chat-message.is-user"),
-      ).toHaveLength(1);
-      expect(
-        document.querySelector(".match-chat-message.is-assistant"),
-      ).toBeNull();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(detail);
+    expect(alert).toHaveTextContent("建议约 5 秒后重试。");
+    expect(input).toHaveValue("我可以提供耐用的专业工具");
+    expect(
+      document.querySelector(".match-chat-compose-attachments"),
+    ).toHaveTextContent("offer.pdf");
+    expect(
+      document.querySelectorAll(".match-chat-message.is-user"),
+    ).toHaveLength(1);
+    expect(
+      document.querySelector(".match-chat-message.is-assistant"),
+    ).toBeNull();
 
-      await user.click(screen.getByRole("button", { name: "重试回答" }));
+    await user.click(screen.getByRole("button", { name: "重试回答" }));
 
-      expect(
-        await screen.findByText(
-          "供给描述已整理；请在下方提交资料，提交后才会写入系统",
-        ),
-      ).toBeInTheDocument();
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-      expect(input).toHaveValue("");
-      expect(
-        document.querySelector(".match-chat-compose-attachments"),
-      ).toBeNull();
-      expect(
-        document.querySelectorAll(".match-chat-message.is-user"),
-      ).toHaveLength(1);
-      expect(createMarketplaceIntent).toHaveBeenCalledTimes(2);
-      expect(onSellerDraft).toHaveBeenCalledWith(
-        expect.objectContaining({
-          attachments: [
-            expect.objectContaining({
-              attachment_ref: "media://tools/offer.pdf",
-              file_name: "offer.pdf",
-            }),
-          ],
-        }),
-      );
+    expect(
+      await screen.findByText(
+        "供给描述已整理；请在下方提交资料，提交后才会写入系统",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(input).toHaveValue("");
+    expect(
+      document.querySelector(".match-chat-compose-attachments"),
+    ).toBeNull();
+    expect(
+      document.querySelectorAll(".match-chat-message.is-user"),
+    ).toHaveLength(1);
+    expect(createMarketplaceIntent).toHaveBeenCalledTimes(2);
+    expect(onSellerDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            attachment_ref: "media://tools/offer.pdf",
+            file_name: "offer.pdf",
+          }),
+        ],
+      }),
+    );
   });
 
   it("restores visible conversation history for the same signed-in owner", async () => {
