@@ -106,7 +106,9 @@ describe("store lifecycle route", () => {
     const response = await PATCH(request("reopen", 4), context);
 
     expect(response.status).toBe(200);
-    const [, parameters] = query.mock.calls[0] as [string, unknown[]];
+    const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain("FROM platform_federation_bindings binding");
+    expect(sql).not.toContain("FROM federation_platform_bindings binding");
     expect(parameters.slice(2, 5)).toEqual([4, "active", "closed"]);
     expect(parameters[7]).toBe("store.reopened");
   });

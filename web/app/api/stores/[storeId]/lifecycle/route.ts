@@ -98,7 +98,7 @@ export async function PATCH(
               OR store.integration_kind <> 'external'
               OR EXISTS (
                 SELECT 1
-                  FROM federation_platform_bindings binding
+                  FROM platform_federation_bindings binding
                  WHERE binding.tenant_id = store.tenant_id
                    AND binding.id = store.federation_binding_id
                    AND binding.status = 'active'
