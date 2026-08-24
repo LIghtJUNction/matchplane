@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 750" role="img" aria-label="特斯拉 Model 3">
+  <rect width="1200" height="750" fill="#ecfeff"/>
+  <circle cx="1030" cy="150" r="210" fill="#5eead4" opacity="0.35"/>
+  <rect x="0" y="560" width="1200" height="190" fill="#5eead4" opacity="0.25"/>
+  <g>
+    <path d="M210 520 q10 -90 90 -110 l90 -22 q60 -78 170 -78 h160 q110 0 190 74 l120 26 q80 18 88 110 z" fill="#0f766e"/>
+    <path d="M418 396 q52 -62 142 -62 h150 q86 0 150 58 l-190 6 z" fill="#dbeafe" opacity="0.9"/>
+    <rect x="196" y="512" width="808" height="26" rx="13" fill="#1f2937" opacity="0.25"/>
+    <circle cx="392" cy="540" r="58" fill="#111827"/>
+    <circle cx="392" cy="540" r="26" fill="#e5e7eb"/>
+    <circle cx="812" cy="540" r="58" fill="#111827"/>
+    <circle cx="812" cy="540" r="26" fill="#e5e7eb"/>
+  </g>
+  <text x="80" y="120" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="64" font-weight="700" fill="#111827">特斯拉 Model 3</text>
+  <text x="80" y="182" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="38" fill="#374151">2022款 后轮驱动版 · 纯电轿车</text>
+  <text x="80" y="690" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="30" fill="#4b5563">演示图片 · 星辰二手车行</text>
+</svg>

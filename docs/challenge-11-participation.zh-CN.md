@@ -62,6 +62,11 @@ matchplane serve gateway
 
 - 商城首页增加 **自然语言需求入口**（「帮我找」），商品仍居首屏，选货员为辅助
 - 输入内容预填到选货员对话框，降低发现成本，符合「直接用自然语言描述需求」
+- 新增 **卖车店铺演示引导**：`tools/demo/bootstrap-car-shop-demo.sh` 一条命令种入
+  托管店铺「星辰二手车行」（slug `demo-car-shop`）与 6 辆可公开浏览的在售车
+  （幂等、仅限开发档，遵循 `tests/integration/fixture.sql` 的显式数据边界）
+- 新增 **评审演示脚本** [docs/challenge-11-demo-script.zh-CN.md](challenge-11-demo-script.zh-CN.md)，
+  按验收点逐步给出可点击路径
 - 导购 Agent 系统提示明确：模糊购买意向先用 `ask_user` 问 **预算档位**，下一轮问 **主要用途**，
   条件足够立即通过 `search_public_products` 检索并默认 `show_products` 展示商品卡
 - 首页对话快捷示例改为卖车场景（「预算 15 万以内，帮我找一台家用 SUV」），与首页需求入口一致
