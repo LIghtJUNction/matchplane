@@ -89,13 +89,16 @@ export function createProtectedPlatformRouterStorage(
       try {
         assertRegularPathIfPresent(source);
         descriptor = opener(
-          source,
+          /* turbopackIgnore: true */ source,
           fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
         );
         if (!fstatSync(descriptor).isFile()) {
           throw new Error("AI 受保护存储条目不是普通文件");
         }
-        const value = readFileSync(descriptor, "utf8").trim();
+        const value = readFileSync(
+          /* turbopackIgnore: true */ descriptor,
+          "utf8",
+        ).trim();
         return value || null;
       } catch (cause) {
         if (isNodeErrorCode(cause, "ENOENT")) return null;

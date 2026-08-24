@@ -799,7 +799,10 @@ export function validateReferencedCredentials(
   markSnapshotCredentials(snapshot, referenced);
   for (const credentialFile of referenced) {
     const normalized = normalizeCredentialName(credentialFile);
-    const credentialPath = path.join(environment.root, normalized);
+    const credentialPath = path.join(
+      /* turbopackIgnore: true */ environment.root,
+      normalized,
+    );
     let descriptor: number | null = null;
     try {
       assertRegularPathIfPresent(credentialPath, "AI 配置凭据路径无效");
@@ -1799,7 +1802,7 @@ function readRegularFile(
     if (!stat.isFile() || stat.size > MAX_STATE_BYTES) {
       throw new PlatformRouterCorruptionError("AI 配置事务文件无效");
     }
-    return readFileSync(descriptor);
+    return readFileSync(/* turbopackIgnore: true */ descriptor);
   } catch (cause) {
     if (optional && isNodeErrorCode(cause, "ENOENT")) return null;
     if (cause instanceof PlatformRouterTransactionError) throw cause;
