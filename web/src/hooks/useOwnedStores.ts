@@ -5,7 +5,7 @@ import { getOwnedStores, type StoreSummary } from "../api";
 import { loadSubplatform, type SubplatformConfig } from "../subplatform";
 import type { AuthenticatedUser } from "./useAuthSession";
 import { isTransientAuthError, waitForAuthRetry } from "./useAuthSession";
-import { relativeBrowserLocation, type AccountSettingsSection } from "./useSubplatformRoute";
+import type { AccountSettingsSection } from "./useSubplatformRoute";
 
 export interface StoreConsoleContext {
   subplatform: SubplatformConfig;
@@ -40,13 +40,10 @@ async function getOwnedStoresWithRetry(): Promise<StoreSummary[]> {
 
 interface UseOwnedStoresOptions {
   authUser: AuthenticatedUser | null;
-  authResolved: boolean;
   subplatform: SubplatformConfig;
   locale: "zh" | "en";
   storeConsoleRequested: boolean;
   setStoreConsoleRequested: (val: boolean) => void;
-  publishProductRequested: boolean;
-  setPublishProductRequested: (val: boolean) => void;
   setAccountSettingsSection: (section: AccountSettingsSection | null) => void;
   onNotice: (message: string) => void;
   openSignIn: () => void;
@@ -54,13 +51,10 @@ interface UseOwnedStoresOptions {
 
 export function useOwnedStores({
   authUser,
-  authResolved,
   subplatform,
   locale,
   storeConsoleRequested,
   setStoreConsoleRequested,
-  publishProductRequested,
-  setPublishProductRequested,
   setAccountSettingsSection,
   onNotice,
   openSignIn,
@@ -151,75 +145,6 @@ export function useOwnedStores({
     subplatform,
   ]);
 
-  useEffect(() => {
-    if (!publishProductRequested || !authResolved) return;
-    if (!authUser) {
-      if (typeof window !== "undefined") {
-        window.location.assign(
-          `/login?next=${encodeURIComponent("/?publish=1")}`,
-        );
-      }
-      return;
-    }
-    if (!ownedStoresResolved) return;
-
-    setPublishProductRequested(false);
-    if (typeof window !== "undefined") {
-      const searchParams = new URLSearchParams(window.location.search);
-      searchParams.delete("publish");
-      window.history.replaceState(
-        null,
-        "",
-        relativeBrowserLocation(searchParams),
-      );
-    }
-    if (ownedStores.length === 1) {
-      void openStoreConsoleFor(ownedStores[0]);
-      return;
-    }
-    setAccountSettingsSection("stores");
-  }, [
-    authResolved,
-    authUser,
-    openStoreConsoleFor,
-    ownedStores,
-    ownedStoresResolved,
-    publishProductRequested,
-    setAccountSettingsSection,
-    setPublishProductRequested,
-  ]);
-
-  const publishProduct = useCallback(() => {
-    if (!authResolved || (authUser && !ownedStoresResolved)) {
-      setPublishProductRequested(true);
-      onNotice(locale === "en" ? "Loading your stores…" : "正在读取你的店铺…");
-      return;
-    }
-    if (!authUser) {
-      if (typeof window !== "undefined") {
-        window.location.assign(
-          `/login?next=${encodeURIComponent("/?publish=1")}`,
-        );
-      }
-      return;
-    }
-    if (ownedStores.length === 1) {
-      void openStoreConsoleFor(ownedStores[0]);
-      return;
-    }
-    setAccountSettingsSection("stores");
-  }, [
-    authResolved,
-    authUser,
-    locale,
-    onNotice,
-    openStoreConsoleFor,
-    ownedStores,
-    ownedStoresResolved,
-    setAccountSettingsSection,
-    setPublishProductRequested,
-  ]);
-
   const canManageStoreConsole = canManageStore(
     authUser,
     storeConsoleContext?.store ?? null,
@@ -236,6 +161,5 @@ export function useOwnedStores({
     currentManagedStore,
     canManageStoreConsole,
     openStoreConsoleFor,
-    publishProduct,
   };
 }

@@ -148,6 +148,12 @@ describe("MatchPlane workspaces", () => {
       screen.getByRole("button", { name: "显示与语言" }),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("供给名称")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "发布商品" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "List a product" }),
+    ).not.toBeInTheDocument();
   });
 
   it("mounts the selected child adapter before exposing its conversation", async () => {
@@ -199,6 +205,22 @@ describe("MatchPlane workspaces", () => {
     expect(
       await screen.findByRole("button", { name: "登录" }),
     ).toBeInTheDocument();
+  });
+
+  it("sanitizes legacy root publish URLs without opening seller controls", async () => {
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    window.history.replaceState(null, "", "/?publish=1");
+
+    render(<App />);
+
+    await screen.findByRole("button", { name: "账号菜单" });
+    expect(window.location.search).not.toContain("publish");
+    expect(
+      screen.queryByRole("button", { name: "发布商品" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: /^我的店铺|Matx Auto/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps store opening behind the account's explicit My stores entry", async () => {

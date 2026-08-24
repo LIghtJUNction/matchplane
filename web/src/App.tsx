@@ -65,8 +65,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     setAccountSettingsSection,
     storeConsoleRequested,
     setStoreConsoleRequested,
-    publishProductRequested,
-    setPublishProductRequested,
     navigateToSubplatform,
     requestedRoleRef,
   } = useSubplatformRoute({ initialPath, authResolved: false });
@@ -112,13 +110,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     openStoreConsoleFor,
   } = useOwnedStores({
     authUser,
-    authResolved,
     subplatform,
     locale,
     storeConsoleRequested,
     setStoreConsoleRequested,
-    publishProductRequested,
-    setPublishProductRequested,
     setAccountSettingsSection,
     onNotice: setNotice,
     openSignIn,

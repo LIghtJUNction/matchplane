@@ -148,7 +148,6 @@ export function useSubplatformRoute({
   const [accountSettingsSection, setAccountSettingsSection] =
     useState<AccountSettingsSection | null>(null);
   const [storeConsoleRequested, setStoreConsoleRequested] = useState(false);
-  const [publishProductRequested, setPublishProductRequested] = useState(false);
 
   const requestedRoleRef = useRef<WorkspaceRole>(roleFromLocation());
   const navigationRequestRef = useRef(0);
@@ -207,8 +206,9 @@ export function useSubplatformRoute({
       searchParams.delete("console");
       cleanWorkspaceTarget = true;
     }
-    if (searchParams.get("publish") === "1") {
-      setPublishProductRequested(true);
+    if (searchParams.has("publish")) {
+      searchParams.delete("publish");
+      cleanWorkspaceTarget = true;
     }
     if (cleanWorkspaceTarget) {
       window.history.replaceState(
@@ -261,8 +261,6 @@ export function useSubplatformRoute({
     setAccountSettingsSection,
     storeConsoleRequested,
     setStoreConsoleRequested,
-    publishProductRequested,
-    setPublishProductRequested,
     navigateToSubplatform,
     requestedRoleRef,
   };
