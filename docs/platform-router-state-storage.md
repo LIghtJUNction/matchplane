@@ -8,10 +8,10 @@ builder workloads.
 
 ## Filesystem contract
 
-The mount root is `root:matchplane-web` with mode `0770` on packaged hosts. In Compose and
-Kubernetes, the numeric Web group is the equivalent owner. Web creates `generations/` at `0750`
-and creates generation, pointer, audit, and credential files at `0640`. Bootstrap processes repair
-only the mount-root owner and mode; they do not pre-create, truncate, copy, or sweep state files.
+The mount root is `root:matchplane-web` with mode `0770` on packaged hosts. In Compose, the numeric
+Web identity owns the bind root. Web creates `generations/` at `0750` and creates generation,
+pointer, audit, and credential files at `0640`. Bootstrap processes repair only the mount-root
+owner and mode; they do not pre-create, truncate, copy, or sweep state files.
 Credential-shaped temporary files are not age-cleaned by tmpfiles or a systemd timer. Transaction
 recovery and bounded garbage collection remain application-owned.
 
@@ -21,6 +21,7 @@ The `web` service has one read-write bind mount at the exact target
 `/etc/matchplane/secrets/root-email`. Its default source is the stable repository data directory
 `var/platform-router-state`; override it with an absolute
 `MATCHPLANE_PLATFORM_ROUTER_STATE_HOST_ROOT` when state lives on an operator-managed disk.
+Compose Web must not be scaled beyond one process.
 
 Before the first start, and after changing the source path, prepare the directory for the `node`
 identity in the pinned Web image:
@@ -33,62 +34,81 @@ sudo MATCHPLANE_COMPOSE_WEB_UID=1000 MATCHPLANE_COMPOSE_WEB_GID=1000 \
   deploy/scripts/prepare-compose-router-state.sh
 ```
 
-The script preserves every existing child. Back up the directory as one filesystem-consistent
-unit. To restore, stop Web, restore the complete directory (including the current pointer and all
-referenced generations/credentials), run the preparation script, validate the mount, and only then
-start Web. Never restore only the pointer or only a credential file.
+The helper refuses filesystem roots and every symlink in an existing path. The repository default
+may create its `var/platform-router-state` path below the physical repository root. An external
+override must be absolute and have existing, non-symlink parents; the helper creates only its final
+directory. It changes final-directory metadata through a no-follow descriptor and preserves every
+existing child byte-for-byte.
+
+Back up the directory as one filesystem-consistent unit. To restore, stop Web, restore the complete
+directory (including the current pointer and all referenced generations/credentials), run the
+preparation script, run the manual `matchplane validate-mounts --json` gate, and only then start
+Web. Never restore only the pointer or only a credential file. Empty state is valid only for a
+verified first install, never as an automatic rollout replacement.
 
 ## Helm/Kubernetes
 
-`web.platformRouterStorage` is mandatory. With no `existingClaim`, the chart creates a PVC from
-`storageClass`, `size`, and `accessModes`; with `existingClaim`, it mounts that pre-provisioned PVC
-and creates no claim. The claim is mounted read-write only by Web. The Web pod keeps its read-only
-root filesystem. A short-lived init container repairs the PVC root to `root:<pod fsGroup>` mode
-`0770`; the long-lived Web container remains non-root with all capabilities dropped.
+`web.platformRouterStorage` is mandatory. With no `existingClaim`, the chart creates a retained PVC
+from an explicit production `storageClass`, a required `size`, and `accessModes`; blank
+storage-class selection is allowed only for non-production renders. With `existingClaim`, it
+mounts the pre-provisioned PVC and creates no claim. Values on an existing claim cannot prove its
+live access mode, filesystem behavior, or reclaim policy; verify the actual PVC, PV, and CSI driver.
 
-For the default two Web replicas, storage must support `ReadWriteMany` and POSIX `chown`, `chmod`,
-atomic rename, directory `fsync`, stable inode identity, and coherent cross-node reads. The chart
-rejects replicas greater than one unless `accessModes` includes `ReadWriteMany`. A single replica
-may use `ReadWriteOnce`. Confirm the selected CSI driver actually supplies those semantics; an
-access-mode label alone is
-not proof. This PVC is distinct from `runtime.existingWebSecret`: Kubernetes Secrets bootstrap
-service credentials, while this PVC stores mutable generation history and credential slots.
+The chart-owned PVC has `helm.sh/resource-policy: keep`. Helm uninstall therefore leaves it behind,
+and an operator must explicitly delete it after retention and recovery requirements are satisfied.
+For production, select a storage class/PV whose reclaim policy is `Retain`; the chart annotation
+does not override the storage backend's reclaim policy.
 
-Example with an existing claim:
+The PVC root is mounted only into a startup init container at a private staging path. The init runs
+as the same non-root UID/GID as Web, with a read-only root filesystem, no privilege escalation, and
+all capabilities dropped. It creates a `root-email/` child at exact mode `0770` when absent; an
+existing symlink, non-directory, or wrong mode fails closed. It then verifies read/write/search
+access and performs an exclusive file create, file `fsync`, atomic rename, directory `fsync`, and
+unlink. This is runtime evidence for the selected CSI/filesystem, not an inference from declared
+`accessModes`. No state or credential bytes are read.
 
-```yaml
-web:
-  replicas: 2
-  platformRouterStorage:
-    enabled: true
-    existingClaim: matchplane-router-state-rwx
-    storageClass: ""
-    size: 1Gi
-    accessModes: [ReadWriteMany]
+Web mounts only that `root-email/` child by `subPath` at
+`/etc/matchplane/secrets/root-email`, read-write, while retaining its read-only root filesystem. An
+existing claim or restored volume must therefore provide this layout:
+
+```text
+PVC root/
+└── root-email/    # directory, mode 0770, writable/searchable by Web UID/GID through fsGroup
 ```
 
-## Rollout, backup, restore, and rollback
+Operators must pre-provision ownership/group access compatible with the chart's non-root
+`podSecurityContext` and CSI `fsGroup` behavior. There is no privileged ownership-repair escape
+hatch. If the driver cannot apply group access or support create/fsync/rename/directory-fsync, the
+init fails and Web does not start.
 
-1. Before rolling out the B2b image, quiesce Web writes, provision the durable source, and take a
-   filesystem-consistent backup of the current host directory/PVC.
-2. Restore the complete state into the durable source and apply the owner and mode contract. Do not
-   start a new pod/container against an empty replacement.
-3. Render the deployment and verify exactly one Web-only, read-write mount at the canonical target.
-   Validate the mount on every Web workload instance. In Kubernetes, also verify PVC binding,
-   access mode, storage-class semantics, and init success.
-4. Start one Web replica first. Confirm that the previously active generation remains current and
-   that staging/testing a draft persists across a pod/container replacement.
-5. Scale to the intended replica count only after shared-volume coherence is verified.
+## Single-writer rollout, backup, restore, and rollback
+
+The router lock uses boot identity, PID, and process start ticks; those values do not establish
+mutual exclusion across Pods or PID namespaces. M0 therefore enforces exactly one Web replica even
+on RWX storage, and the Web Deployment uses `Recreate`. Rolling and canary Web updates are not
+supported.
+
+1. Before rollout, quiesce AI/router administration writes and stop the old Web workload. Wait
+   until every old Web Pod, container, and process is dead; do not start the new image alongside a
+   legacy writer.
+2. Take a filesystem-consistent backup. Provision or restore the complete `root-email/` layout,
+   including the current pointer, referenced generations and credentials, audit state, legacy
+   state, and temporary files. Do not start against an empty replacement except on a verified first
+   install.
+3. Run `matchplane validate-mounts --json` manually before traffic. Render the deployment and
+   verify the single Web-only read-write `subPath: root-email` mount, PVC binding, retention policy,
+   storage-class semantics, and successful non-root startup init.
+4. Start the one Web replica. Before admitting traffic, confirm that the previously active
+   generation remains current and that staging/testing a draft persists across a stopped-then-
+   started pod replacement.
 
 Drain every legacy writer before considering any future cleanup of transaction temporary files.
-There is no automatic orphan-temp deletion in this rollout. Backups and rollbacks must retain the
-current pointer, every generation it may reference, legacy state, credential slots, and temporary
-files until a separate validated recovery procedure classifies them.
+There is no automatic orphan-temp deletion in this rollout. Backups and rollbacks must retain all
+state until a separate validated recovery procedure classifies it.
 
-For rollback, stop all Web writers before switching storage. An old image cannot safely write
-while a generation committed by the new image remains authoritative. Restore or reattach the last
-complete pre-rollout backup, then roll back the workload version while keeping the durable mount
-attached.
-Only project state into an older format through an explicit, validated manual procedure performed
-with all writers stopped; never infer compatibility or repoint the old image at a newly empty claim.
-Keep the failed volume isolated for forensics and do not delete or sweep it during rollback.
+For rollback, quiesce writes and wait for every new Web process to die before switching storage or
+starting the old image. An old image cannot safely write while a generation committed by the new
+image remains authoritative. Restore or reattach the last complete pre-rollout backup, keep the
+retained failed volume isolated for forensics, run manual mount validation, and only then start the
+single old Web process. Never infer format compatibility, repoint an old image at a newly empty
+claim, or delete/sweep state as part of rollback.

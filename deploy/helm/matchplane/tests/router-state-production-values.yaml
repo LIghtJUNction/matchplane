@@ -5,6 +5,8 @@ web:
     digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   betterAuthUrl: https://matchplane.example
   trustedOrigins: https://matchplane.example
+  platformRouterStorage:
+    storageClass: production-retain
 subplatformBuilder:
   enabled: false
 runtime:

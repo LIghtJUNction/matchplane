@@ -9,6 +9,7 @@ bash -n packaging/scripts/stage.sh packaging/scripts/archive.sh
 bash -n packaging/ubuntu/build-deb.sh packaging/ubuntu/postinst packaging/ubuntu/prerm
 bash -n packaging/fedora/build-rpm.sh
 bash -n deploy/scripts/configure-ubuntu-host.sh
+bash -n deploy/scripts/prepare-compose-router-state.sh
 bash -n deploy/scripts/install-kafka.sh
 bash -n deploy/scripts/install-nginx-certbot-hook.sh
 bash -n deploy/scripts/install-bun.sh
