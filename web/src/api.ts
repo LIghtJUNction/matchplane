@@ -1889,11 +1889,11 @@ export async function updateStoreCustomer(input: {
       body: JSON.stringify({
         id: input.customerId,
         expectedVersion: input.expectedVersion,
-        ...(input.favorite !== undefined ? { favorite: input.favorite } : {}),
-        ...(input.stage !== undefined ? { stage: input.stage } : {}),
-        ...(input.staffNotes !== undefined
-          ? { staffNotes: input.staffNotes }
-          : {}),
+        ...(input.favorite === undefined ? {} : { favorite: input.favorite }),
+        ...(input.stage === undefined ? {} : { stage: input.stage }),
+        ...(input.staffNotes === undefined
+          ? {}
+          : { staffNotes: input.staffNotes }),
       }),
     },
   );
@@ -2162,12 +2162,12 @@ async function apiJson<T>(path: string, options: ApiJsonOptions): Promise<T> {
     cache: options.cache,
     headers: {
       accept: "application/json",
-      ...(options.body !== undefined
-        ? { "content-type": "application/json" }
-        : {}),
+      ...(options.body === undefined
+        ? {}
+        : { "content-type": "application/json" }),
       ...options.headers,
     },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   const body = await readJson<T & { error?: string }>(response);
   const valid = options.ok ? options.ok(body) : Boolean(body);

@@ -446,13 +446,13 @@ describe("MatchChat sending state", () => {
     const onHumanHandoff = vi.fn(async () => undefined);
     askMallShoppingAssistant.mockResolvedValueOnce({
       requestId: "handoff-request-1",
-      answer: "我已经通知店员，你仍可以继续问我。",
+      answer: "如需店员介入，请先确认通知。",
       recommendations: [],
       uiActions: [
         {
           type: "human_handoff",
           id: "human-handoff-1",
-          summary: "客户询问交付时间。",
+          summary: "客户手机号 138-1234-5678，请直接联系。",
           intent: "high",
           productIds: ["offer-1"],
         },
@@ -479,18 +479,27 @@ describe("MatchChat sending state", () => {
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
     expect(
-      await screen.findByText("我已经通知店员，你仍可以继续问我。"),
+      await screen.findByText("如需店员介入，请先确认通知。"),
     ).toBeVisible();
+    expect(onHumanHandoff).not.toHaveBeenCalled();
+    expect(
+      screen.queryByText(/138-1234-5678|请直接联系/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/只会共享结构化购买意向和已选商品编号/),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "确认并通知" }));
+
     await waitFor(() =>
       expect(onHumanHandoff).toHaveBeenCalledWith({
         requestId: "handoff-request-1",
-        summary: "客户询问交付时间。",
+        conversionAttemptId: expect.any(String),
         intent: "high",
         productIds: ["offer-1"],
       }),
     );
-    expect(screen.getByText("已通知店员")).toBeVisible();
-    expect(screen.getByText(/本次没有交换任何联系方式/)).toBeVisible();
+    expect(screen.getByText("人工介入请求已记录")).toBeVisible();
     expect(askMallShoppingAssistant).toHaveBeenCalledWith(expect.any(Array), {
       storePath: "/test-store",
     });

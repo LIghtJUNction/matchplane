@@ -10,10 +10,13 @@ import {
 } from "react";
 import {
   ArrowUp,
+  ArrowUpRight,
   Brain,
+  Compass,
   FileUp,
   History,
   LoaderCircle,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { Button } from "@appica/ui-react/button";
@@ -52,6 +55,10 @@ import {
 } from "../lib/conversation-history";
 import type { InterfaceLocale } from "../lib/preferences";
 import { mapRecommendations } from "../marketplace-listings";
+import {
+  clearPendingConversion,
+  readPendingConversion,
+} from "../pending-conversion";
 import type { AssetListing } from "../types";
 import { ConversationHistoryPanel } from "./ConversationHistoryPanel";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
@@ -96,8 +103,18 @@ interface ChatMessage {
   attachments?: MarketplaceAttachment[];
   choices?: Array<MallAssistantChoiceAction & { selectedValue?: string }>;
   recommendations?: AssetListing[];
-  handoff?: MallAssistantHumanHandoffAction & {
-    status: "pending" | "sent" | "failed";
+  handoff?: Pick<
+    MallAssistantHumanHandoffAction,
+    "type" | "intent" | "productIds"
+  > & {
+    requestId: string;
+    conversionAttemptId: string;
+    status:
+      | "confirmation_required"
+      | "sending"
+      | "sent"
+      | "failed"
+      | "cancelled";
   };
   contactConsent?: MallAssistantContactConsentAction;
 }
@@ -542,7 +559,7 @@ interface MatchChatProps {
   onRecommendations?: (recommendations: RecommendedBackendListing[]) => void;
   onHumanHandoff?: (input: {
     requestId: string;
-    summary: string;
+    conversionAttemptId: string;
     intent: MallAssistantHumanHandoffAction["intent"];
     productIds: string[];
   }) => Promise<void>;
@@ -713,18 +730,56 @@ export function MatchChat({
     locale === "en"
       ? ["Browse publicly", "Compare across stores", "Consent before contact"]
       : ["公开浏览", "跨店比较", "联系前征得同意"];
-  const quickPrompts =
-    locale === "en"
+  const starterPromptCards = !isRoot
+    ? []
+    : locale === "en"
       ? [
-          "A lightweight laptop for commuting, within my budget",
-          "Compare a few suitable options and explain the trade-offs",
-          "Find a reliable store for this product",
+          {
+            id: "describe",
+            badge: "Start",
+            title: "Describe what you need",
+            desc: "Share your budget, use case, and non-negotiable requirements",
+            prompt: "Help me clarify my budget, use case, and must-have requirements.",
+          },
+          {
+            id: "compare",
+            badge: "Compare",
+            title: "Compare shown offers",
+            desc: "Explain trade-offs using only offers and facts already shown",
+            prompt: "Compare the offers already shown and explain the factual trade-offs.",
+          },
+          {
+            id: "stores",
+            badge: "Browse",
+            title: "Browse public stores",
+            desc: "Show currently public stores without making verification claims",
+            prompt: "Show currently public stores and their listed categories.",
+          },
         ]
       : [
-          "预算内找一台适合通勤的轻薄电脑",
-          "比较几款合适的商品，并说明取舍",
-          "帮我找一家可靠的店铺",
+          {
+            id: "describe",
+            badge: "开始",
+            title: "描述真实需求",
+            desc: "说明预算、用途和不能妥协的条件",
+            prompt: "帮我梳理预算、用途和必须满足的条件。",
+          },
+          {
+            id: "compare",
+            badge: "比较",
+            title: "比较已展示商品",
+            desc: "只依据已展示商品和事实说明取舍",
+            prompt: "比较已经展示的商品，并依据已知事实说明取舍。",
+          },
+          {
+            id: "stores",
+            badge: "浏览",
+            title: "查看公开店铺",
+            desc: "只列出当前公开店铺，不附加未经证实的认证声明",
+            prompt: "列出当前公开店铺及其已上架分类。",
+          },
         ];
+
   const applyQuickPrompt = (value: string) => {
     setMessage(value);
     window.requestAnimationFrame(() => {
@@ -1561,36 +1616,22 @@ export function MatchChat({
               action.type === "choice" ? [action] : [],
             ),
             ...(recommendations.length ? { recommendations } : {}),
-            ...(handoff ? { handoff: { ...handoff, status: "pending" } } : {}),
+            ...(handoff
+              ? {
+                  handoff: {
+                    type: "human_handoff" as const,
+                    requestId: reply.requestId,
+                    conversionAttemptId: crypto.randomUUID(),
+                    intent: handoff.intent,
+                    productIds: handoff.productIds,
+                    status: "confirmation_required" as const,
+                  },
+                }
+              : {}),
             ...(contactConsent ? { contactConsent } : {}),
           },
         ]);
         onNotice(reply.answer);
-        if (handoff && onHumanHandoff) {
-          try {
-            await onHumanHandoff({
-              requestId: reply.requestId,
-              summary: handoff.summary,
-              intent: handoff.intent,
-              productIds: handoff.productIds,
-            });
-            setMessages((current) =>
-              current.map((item) =>
-                item.id === assistantId && item.handoff
-                  ? { ...item, handoff: { ...item.handoff, status: "sent" } }
-                  : item,
-              ),
-            );
-          } catch {
-            setMessages((current) =>
-              current.map((item) =>
-                item.id === assistantId && item.handoff
-                  ? { ...item, handoff: { ...item.handoff, status: "failed" } }
-                  : item,
-              ),
-            );
-          }
-        }
       } catch (error) {
         const detail =
           error instanceof Error ? error.message : runtime.sendFailed;
@@ -1606,12 +1647,113 @@ export function MatchChat({
       messages,
       onNotice,
       onRecommendations,
-      onHumanHandoff,
       runtime.sendFailed,
       sending,
       subplatform,
     ],
   );
+
+  const confirmHumanHandoff = useCallback(
+    async (messageId: string) => {
+      const message = messages.find((item) => item.id === messageId);
+      if (
+        !message?.handoff ||
+        !["confirmation_required", "failed"].includes(
+          message.handoff.status,
+        ) ||
+        !onHumanHandoff
+      )
+        return;
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === messageId && item.handoff
+            ? { ...item, handoff: { ...item.handoff, status: "sending" } }
+            : item,
+        ),
+      );
+      try {
+        await onHumanHandoff({
+          requestId: message.handoff.requestId,
+          conversionAttemptId: message.handoff.conversionAttemptId,
+          intent: message.handoff.intent,
+          productIds: message.handoff.productIds,
+        });
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === messageId && item.handoff
+              ? { ...item, handoff: { ...item.handoff, status: "sent" } }
+              : item,
+          ),
+        );
+      } catch {
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === messageId && item.handoff
+              ? { ...item, handoff: { ...item.handoff, status: "failed" } }
+              : item,
+          ),
+        );
+      }
+    },
+    [messages, onHumanHandoff],
+  );
+
+  const cancelHumanHandoff = useCallback(
+    (messageId: string) => {
+      const message = messages.find((item) => item.id === messageId);
+      const pending = readPendingConversion();
+      if (
+        message?.handoff &&
+        pending?.conversionAttemptId === message.handoff.conversionAttemptId
+      )
+        clearPendingConversion(pending.offerId);
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === messageId && item.handoff
+            ? { ...item, handoff: { ...item.handoff, status: "cancelled" } }
+            : item,
+        ),
+      );
+    },
+    [messages],
+  );
+
+  useEffect(() => {
+    const pending = readPendingConversion();
+    if (
+      pending?.action !== "store_ai_handoff" ||
+      pending.storePath !== subplatform.path ||
+      !pending.intentLevel ||
+      !pending.productIds
+    )
+      return;
+    const intent = pending.intentLevel;
+    const productIds = pending.productIds;
+    const messageId = `pending-handoff-${pending.conversionAttemptId}`;
+    setMessages((current) =>
+      current.some((message) => message.id === messageId)
+        ? current
+        : [
+            ...current,
+            {
+              id: messageId,
+              role: "assistant",
+              text:
+                locale === "en"
+                  ? "Your earlier handoff request is ready for confirmation."
+                  : "已恢复登录前的人工介入请求，请再次确认是否通知店员。",
+              handoff: {
+                type: "human_handoff",
+                requestId: `restored-${pending.conversionAttemptId}`,
+                conversionAttemptId: pending.conversionAttemptId,
+                intent,
+                productIds,
+                status: "confirmation_required",
+              },
+            },
+          ],
+    );
+  }, [locale, subplatform.path]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1971,6 +2113,20 @@ export function MatchChat({
               key={item.id}
               className={`match-chat-message-group is-${item.role}`}
             >
+              {item.role === "assistant" ? (
+                <div className="match-chat-assistant-tag" aria-hidden="true">
+                  <Sparkles size={12} />
+                  <span>
+                    {subplatform.slug === "root"
+                      ? locale === "en"
+                        ? "Shopping Assistant"
+                        : "选货员"
+                      : locale === "en"
+                        ? "AI Store Manager"
+                        : "AI 店长"}
+                  </span>
+                </div>
+              ) : null}
               <p className={`match-chat-message is-${item.role}`}>
                 {item.text}
               </p>
@@ -2016,27 +2172,58 @@ export function MatchChat({
                   role={item.handoff.status === "failed" ? "alert" : "status"}
                 >
                   <strong>
-                    {item.handoff.status === "pending"
+                    {item.handoff.status === "confirmation_required"
                       ? locale === "en"
-                        ? "Notifying store staff…"
-                        : "正在通知店员…"
-                      : item.handoff.status === "sent"
+                        ? "Notify store staff?"
+                        : "要通知店员吗？"
+                      : item.handoff.status === "sending"
                         ? locale === "en"
-                          ? "Store staff have been notified"
-                          : "已通知店员"
-                        : locale === "en"
-                          ? "Staff notification failed"
-                          : "通知店员失败"}
+                          ? "Saving your handoff request…"
+                          : "正在记录人工介入请求…"
+                        : item.handoff.status === "sent"
+                          ? locale === "en"
+                            ? "Handoff request saved"
+                            : "人工介入请求已记录"
+                          : item.handoff.status === "cancelled"
+                            ? locale === "en"
+                              ? "Store staff were not notified"
+                              : "未通知店员"
+                            : locale === "en"
+                              ? "Handoff request failed"
+                              : "人工介入请求失败"}
                   </strong>
                   <span>
-                    {item.handoff.status === "failed"
-                      ? locale === "en"
-                        ? "You can keep chatting and try the handoff again later."
-                        : "你可以继续对话，稍后再请求人工介入。"
-                      : locale === "en"
-                        ? "The AI manager remains available in this conversation. No contact details were shared."
-                        : "AI 店长会继续对话，本次没有交换任何联系方式。"}
+                    {locale === "en"
+                      ? "Only your structured shopping intent and selected offer IDs will be shared. Chat text and contact details are excluded."
+                      : "只会共享结构化购买意向和已选商品编号；不会共享聊天原文或联系方式。"}
                   </span>
+                  {item.handoff.status === "confirmation_required" ||
+                  item.handoff.status === "failed" ? (
+                    <div className="match-chat-handoff-actions">
+                      <Button
+                        type="button"
+                        className="match-chat-handoff-confirm"
+                        onClick={() => void confirmHumanHandoff(item.id)}
+                      >
+                        {item.handoff.status === "failed"
+                          ? locale === "en"
+                            ? "Try again"
+                            : "重试"
+                          : locale === "en"
+                            ? "Confirm and notify"
+                            : "确认并通知"}
+                      </Button>
+                      {item.handoff.status === "confirmation_required" ? (
+                        <Button
+                          type="button"
+                          className="match-chat-handoff-cancel"
+                          onClick={() => cancelHumanHandoff(item.id)}
+                        >
+                          {locale === "en" ? "Not now" : "暂不通知"}
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               {item.recommendations?.length ? (
@@ -2080,6 +2267,18 @@ export function MatchChat({
           ))}
           {sending ? (
             <div className="match-chat-message-group is-assistant">
+              <div className="match-chat-assistant-tag" aria-hidden="true">
+                <Sparkles size={12} />
+                <span>
+                  {subplatform.slug === "root"
+                    ? locale === "en"
+                      ? "Shopping Assistant"
+                      : "选货员"
+                    : locale === "en"
+                      ? "AI Store Manager"
+                      : "AI 店长"}
+                </span>
+              </div>
               <div
                 className="chat-typing-indicator"
                 role="status"
@@ -2142,22 +2341,46 @@ export function MatchChat({
           ))}
         </ul>
       ) : null}
-      {isRoot && !isSeller && !compact && !messages.length ? (
+      {isRoot && !isSeller && !messages.length ? (
         <div
           className="match-chat-suggestions"
           aria-label={
             locale === "en" ? "Example shopping requests" : "购物需求示例"
           }
         >
-          <span>{locale === "en" ? "Try asking" : "试着这样问"}</span>
-          <div>
-            {quickPrompts.map((prompt) => (
+          <div className="match-chat-starter-title-row">
+            <Compass size={14} aria-hidden="true" />
+            <span>{locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}</span>
+          </div>
+
+          <div className="match-chat-starter-grid">
+            {starterPromptCards.map((card) => (
               <button
-                key={prompt}
+                key={card.id}
                 type="button"
-                onClick={() => applyQuickPrompt(prompt)}
+                className="match-chat-starter-card"
+                onClick={() => {
+                  if (isRoot && !isSeller) {
+                    void submitGuestMessage(card.prompt);
+                  } else {
+                    applyQuickPrompt(card.prompt);
+                  }
+                }}
               >
-                {prompt}
+                <div className="match-chat-starter-card-top">
+                  <span className="match-chat-starter-badge">{card.badge}</span>
+                  <ArrowUpRight
+                    size={13}
+                    className="match-chat-starter-arrow"
+                    aria-hidden="true"
+                  />
+                </div>
+                <strong className="match-chat-starter-title">
+                  {card.title}
+                </strong>
+                <span className="match-chat-starter-desc">
+                  {card.desc}
+                </span>
               </button>
             ))}
           </div>

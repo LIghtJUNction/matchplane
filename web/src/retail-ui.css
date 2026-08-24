@@ -1673,6 +1673,18 @@ select {
   color: var(--retail-ink);
 }
 
+:where(.floating-clerk-content, .mobile-clerk-drawer-body) .match-chat-starter-grid {
+  grid-template-columns: 1fr;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  gap: 0.45rem;
+}
+
+:where(.floating-clerk-content, .mobile-clerk-drawer-body) .match-chat-starter-card {
+  padding: 0.6rem 0.75rem;
+}
+
 .root-marketplace-clerk-toggle {
   z-index: 250;
   right: max(1.25rem, env(safe-area-inset-right));

@@ -1003,7 +1003,7 @@ describe("platform shopping agent", () => {
         type: "human_handoff",
         id: "human-handoff-1",
         summary:
-          "我想买这件商品，请让店员确认交付时间，并询问我是否同意交换联系方式。",
+          "用户提出人工介入；意向等级：high；关联商品：1 个。未包含聊天原文或联系方式。",
         intent: "high",
         productIds: ["offer-1"],
       },
@@ -1019,5 +1019,8 @@ describe("platform shopping agent", () => {
     expect(searchPublicStoreOffers).toHaveBeenCalledTimes(1);
     expect(generateText.mock.calls[0]?.[0].system).toContain("AI 店长");
     expect(generateText.mock.calls[0]?.[0].system).toContain("不能替用户同意");
+    expect(generateText.mock.calls[0]?.[0].system).toContain(
+      "收到确定性确认成功结果前，绝不能声称",
+    );
   });
 });

@@ -44,7 +44,7 @@ export function StorefrontView({
   onNotice?: (message: string) => void;
   onHumanHandoff?: (input: {
     requestId: string;
-    summary: string;
+    conversionAttemptId: string;
     intent: "warm" | "high" | "urgent";
     productIds: string[];
   }) => Promise<void>;
