@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   listManagedPlatformRouterModels,
   modelReasoningEffortsFromRecord,
+  platformRouterPolicyIssues,
 } from "./platform-router-config";
 
 describe("model reasoning capability metadata", () => {
@@ -47,7 +48,8 @@ describe("managed router model discovery", () => {
   });
 
   it("disables redirects after resolving a public endpoint", async () => {
-    const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
+    const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+      expect(url).toBe("https://provider.example/v1/models");
       expect(init?.redirect).toBe("error");
       expect(init?.cache).toBe("no-store");
       return new Response(
@@ -68,5 +70,48 @@ describe("managed router model discovery", () => {
         resolveAddresses: async () => ["93.184.216.34"],
       }),
     ).resolves.toEqual([{ id: "provider/model", reasoningEfforts: [] }]);
+  });
+
+  it("does not duplicate the version path for a production-compatible base URL", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (url) => {
+      expect(url).toBe("https://api.lmm.best/v1/models");
+      return Response.json({ data: [{ id: "gpt-5.6-sol" }] });
+    });
+
+    await expect(
+      listManagedPlatformRouterModels({
+        endpoint: "https://api.lmm.best/v1",
+        protocol: "openai-compatible",
+        apiKey: "test-only",
+        fetcher,
+        resolveAddresses: async () => ["93.184.216.34"],
+      }),
+    ).resolves.toEqual([{ id: "gpt-5.6-sol", reasoningEfforts: [] }]);
+  });
+});
+
+describe("M0 effective provider policy", () => {
+  it("blocks an otherwise credentialed managed provider with the old model", () => {
+    expect(
+      platformRouterPolicyIssues({
+        endpoint: "https://api.lmm.best/v1",
+        model: "deepseek-v4-flash-0731",
+        protocol: "openai-compatible",
+        enabled: true,
+        credentialConfigured: true,
+      }),
+    ).toEqual(["model_mismatch"]);
+  });
+
+  it("accepts only the exact endpoint, model, protocol and credential state", () => {
+    expect(
+      platformRouterPolicyIssues({
+        endpoint: "https://api.lmm.best/v1",
+        model: "gpt-5.6-sol",
+        protocol: "openai-compatible",
+        enabled: true,
+        credentialConfigured: true,
+      }),
+    ).toEqual([]);
   });
 });

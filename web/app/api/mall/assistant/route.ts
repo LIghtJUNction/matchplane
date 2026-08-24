@@ -17,6 +17,7 @@ import {
   RequestBodyTooLargeError,
 } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { getPlatformRouterEffectiveStatus } from "../../../../src/lib/platform-router-config";
 import { configuredTenantId } from "../../../../src/lib/store-access";
 import {
   parseShoppingMemoryMutation,
@@ -36,6 +37,25 @@ const GLOBAL_LIMIT = 120;
 export async function POST(request: Request): Promise<Response> {
   if (!hasTrustedBrowserOrigin(request))
     return error("请求来源未被商城信任", 403);
+  const requestId = randomUUID();
+  const providerStatus = getPlatformRouterEffectiveStatus();
+  if (!providerStatus.ready)
+    return error(
+      "商城 AI 导购正在配置中，请稍后再试。",
+      503,
+      { "x-request-id": requestId },
+      {
+        code: "upstream_configuration",
+        status: "degraded",
+        retryable: false,
+        requestId,
+        provider: {
+          source: providerStatus.source,
+          issues: providerStatus.issues,
+          credentialConfigured: providerStatus.credentialConfigured,
+        },
+      },
+    );
   let body: { messages?: unknown; question?: unknown; storePath?: unknown };
   try {
     body = (await readJsonBody(request, 16 * 1024)) as typeof body;
@@ -59,7 +79,6 @@ export async function POST(request: Request): Promise<Response> {
     return error("商城 AI 导购尚未配置完整，请稍后再试。", 503);
   const tenantId = configuredTenantId();
   if (!tenantId) return error("商城尚未完成初始化", 503);
-  const requestId = randomUUID();
   const identity = await shoppingIdentity(request);
   try {
     let stores = await readPublicStores(tenantId);
@@ -339,6 +358,9 @@ function providerErrorResponse(
   ) {
     status = 504;
     headers["retry-after"] = "5";
+  } else if (cause.kind === "network_policy") {
+    status = 503;
+    code = "upstream_configuration";
   } else if (
     cause.kind === "no_final_text" ||
     cause.kind === "malformed_response" ||
@@ -365,7 +387,17 @@ function error(
   message: string,
   status: number,
   headers: Record<string, string> = {},
-  metadata?: { code: string; retryable: boolean; requestId: string },
+  metadata?: {
+    code: string;
+    retryable: boolean;
+    requestId: string;
+    status?: "degraded";
+    provider?: {
+      source: "managed" | "environment" | "unconfigured";
+      issues: string[];
+      credentialConfigured: boolean;
+    };
+  },
 ): Response {
   return NextResponse.json(
     { error: message, ...(metadata ?? {}) },

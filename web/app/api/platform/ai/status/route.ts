@@ -12,7 +12,7 @@ import {
   configuredPlatformRouterProtocol,
   isPlatformRouterConfigured,
 } from "../../../../../src/platform-router";
-import { getManagedPlatformRouterConfig } from "../../../../../src/lib/platform-router-config";
+import { getManagedPlatformRouterState } from "../../../../../src/lib/platform-router-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,18 +36,29 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const emailAuth = await isRootEmailAuthConfigured();
-  const managed = getManagedPlatformRouterConfig();
-  const endpoint = readEndpointSummary(managed?.endpoint ?? process.env.MATCHPLANE_ROUTER_AI_URL);
+  const state = getManagedPlatformRouterState();
+  const managed = state.config;
+  const endpoint = state.effective.endpointOrigin;
   const model = managed?.model ?? (process.env.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null);
   const toolMode = parseToolMode(process.env.MATCHPLANE_ROUTER_AI_TOOL_MODE);
   return NextResponse.json(
     {
       router: {
-        configured: isPlatformRouterConfigured(),
-        protocol: configuredPlatformRouterProtocol(),
-        model,
-        endpointOrigin: endpoint,
-        toolMode,
+      configured: isPlatformRouterConfigured(),
+      aiReady: state.effective.ready,
+      protocol: configuredPlatformRouterProtocol(),
+      model,
+      endpointOrigin: endpoint,
+      source: state.effective.source,
+      managedOverridesEnvironment:
+        state.effective.managedOverridesEnvironment,
+      conflicts: state.effective.conflicts,
+      credentialConfigured: state.effective.credentialConfigured,
+      policyCode: state.effective.code,
+      policyIssues: state.effective.issues,
+      requiredEndpoint: state.effective.requiredEndpoint,
+      requiredModel: state.effective.requiredModel,
+      toolMode,
         maxInputCharacters: 24_000,
         maxOutputTokens: boundedInteger(process.env.MATCHPLANE_ROUTER_AI_MAX_TOKENS, 512, 64, 2_048),
         totalTimeoutMs: boundedInteger(process.env.MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS, 20_000, 4_000, 60_000),
@@ -70,15 +81,6 @@ export async function GET(request: Request): Promise<Response> {
   );
 }
 
-function readEndpointSummary(value: string | undefined): string | null {
-  if (!value?.trim()) return null;
-  try {
-    const url = new URL(value.trim());
-    return url.origin;
-  } catch {
-    return null;
-  }
-}
 
 function parseToolMode(value: string | undefined): "auto" | "required" | "disabled" {
   const normalized = value?.trim().toLowerCase();

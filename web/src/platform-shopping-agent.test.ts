@@ -959,6 +959,31 @@ describe("platform shopping agent", () => {
     }
   });
 
+  it("types HTTP 451 as a non-retryable network policy failure", async () => {
+    generateText.mockRejectedValueOnce(
+      Object.assign(new Error("unsafe provider body"), { statusCode: 451 }),
+    );
+
+    let failure: unknown;
+    try {
+      await answerPlatformShoppingQuestion({
+        question: "你好",
+        messages: [{ role: "user", content: "你好" }],
+        stores: [],
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toMatchObject({
+      kind: "network_policy",
+      phase: "response",
+      responseStatus: 451,
+      retryable: false,
+    });
+    expect((failure as Error).message).not.toContain("unsafe");
+  });
+
   it.each([400, 401, 403, 404, 422])(
     "keeps upstream HTTP %i bounded and non-retryable",
     async (statusCode) => {
@@ -1141,6 +1166,8 @@ describe("platform shopping agent", () => {
     expect(generateText).toHaveBeenCalledTimes(1);
 
     const options = generateText.mock.calls[0]?.[0];
+    expect(options.tools).not.toHaveProperty("request_contact_consent");
+    expect(options.tools).not.toHaveProperty("propose_human_handoff");
     expect(options.tools).toEqual(
       expect.objectContaining({
         ask_user: expect.anything(),
@@ -1276,6 +1303,12 @@ describe("platform shopping agent", () => {
       { type: "products", productIds: ["offer-1"], presentation: "grid" },
     ]);
     expect(searchPublicStoreOffers).toHaveBeenCalledTimes(1);
+    expect(generateText.mock.calls[0]?.[0].tools).toEqual(
+      expect.objectContaining({
+        request_contact_consent: expect.anything(),
+        propose_human_handoff: expect.anything(),
+      }),
+    );
     expect(generateText.mock.calls[0]?.[0].system).toContain("AI 店长");
     expect(generateText.mock.calls[0]?.[0].system).toContain("不能替用户同意");
     expect(generateText.mock.calls[0]?.[0].system).toContain(

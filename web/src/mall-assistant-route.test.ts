@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     answerPlatformShoppingQuestion: vi.fn(),
     authDatabaseQuery: vi.fn(),
     configuredTenantId: vi.fn(),
+    getPlatformRouterEffectiveStatus: vi.fn(),
     getSession: vi.fn(),
     hasTrustedBrowserOrigin: vi.fn(),
     isPlatformRouterConfigured: vi.fn(),
@@ -53,6 +54,10 @@ vi.mock("./lib/auth", () => ({
 vi.mock("./lib/request-origin", () => ({
   hasTrustedBrowserOrigin: mocks.hasTrustedBrowserOrigin,
 }));
+vi.mock("./lib/platform-router-config", () => ({
+  getPlatformRouterEffectiveStatus:
+    mocks.getPlatformRouterEffectiveStatus,
+}));
 vi.mock("./lib/store-access", () => ({
   configuredTenantId: mocks.configuredTenantId,
 }));
@@ -69,6 +74,12 @@ const userId = "22222222-2222-4222-8222-222222222222";
 
 beforeEach(() => {
   mocks.hasTrustedBrowserOrigin.mockReturnValue(true);
+  mocks.getPlatformRouterEffectiveStatus.mockReturnValue({
+    ready: true,
+    source: "managed",
+    issues: [],
+    credentialConfigured: true,
+  });
   mocks.isPlatformRouterConfigured.mockReturnValue(true);
   mocks.configuredTenantId.mockReturnValue(tenantId);
   mocks.getSession.mockResolvedValue({ user: { id: userId } });
@@ -92,6 +103,30 @@ function assistantRequest(): Request {
 }
 
 describe("mall assistant provider failure mapping", () => {
+  it("blocks public AI safely while managed configuration is degraded", async () => {
+    mocks.getPlatformRouterEffectiveStatus.mockReturnValue({
+      ready: false,
+      source: "managed",
+      issues: ["model_mismatch"],
+      credentialConfigured: true,
+    });
+
+    const response = await POST(assistantRequest());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toMatchObject({
+      code: "upstream_configuration",
+      status: "degraded",
+      retryable: false,
+      provider: {
+        source: "managed",
+        issues: ["model_mismatch"],
+        credentialConfigured: true,
+      },
+    });
+    expect(mocks.answerPlatformShoppingQuestion).not.toHaveBeenCalled();
+  });
   it("maps provider timeout to a retryable 504 with no-store and Retry-After", async () => {
     mocks.answerPlatformShoppingQuestion.mockRejectedValue(
       new mocks.PlatformAssistantUnavailableError("响应超时，请稍后重试。", {

@@ -132,7 +132,6 @@ describe("buyer contact retrieval", () => {
             facts: [],
           },
         ],
-        authUserId: "buyer-1",
         locale: "zh",
         onNotice: vi.fn(),
       }),

@@ -172,6 +172,7 @@ export type PlatformProviderFailureKind =
   | "first_byte_timeout"
   | "total_timeout"
   | "upstream_http"
+  | "network_policy"
   | "quota"
   | "malformed_response"
   | "no_final_text"
@@ -421,7 +422,7 @@ function stableHash(value: string): number {
   return hash >>> 0;
 }
 
-interface ConfiguredPlatformRouter {
+export interface PlatformRouterProbeConfiguration {
   endpoint: string;
   apiKey: string;
   model: string;
@@ -435,7 +436,7 @@ interface ConfiguredPlatformRouter {
   assistantReasoningEffort: string;
 }
 
-function configuredPlatformRouter(): ConfiguredPlatformRouter | null {
+function configuredPlatformRouter(): PlatformRouterProbeConfiguration | null {
   const managed = readManagedPlatformRouterConfig();
   if (managed?.enabled && isAllowedEndpoint(managed.endpoint)) {
     return { ...managed, managed: true };
@@ -2104,6 +2105,9 @@ function classifyPlatformProviderFailure(
   if (deadline.timedOut()) {
     return providerTimeoutFailure(attempt, responseStatus);
   }
+  if (responseStatus === 451) {
+    return providerFailure("network_policy", "response", responseStatus);
+  }
   if (responseStatus === 429) {
     return providerFailure("quota", "response", responseStatus);
   }
@@ -2159,6 +2163,8 @@ function providerFailure(
     first_byte_timeout: "商城 AI 导购等待上游响应超时，请稍后重试。",
     total_timeout: "商城 AI 导购响应超时，请稍后重试。",
     upstream_http: "商城 AI 导购上游暂时不可用，请稍后重试。",
+    network_policy:
+      "商城 AI 导购当前受网络访问策略限制，请稍后再试或联系管理员。",
     quota: "商城 AI 导购上游额度暂时不可用，请稍后重试。",
     malformed_response: "AI 模型返回了无法解析的响应，请重试。",
     no_final_text: "AI 模型未返回有效回答，请重试。",
@@ -2178,7 +2184,10 @@ function providerFailure(
     phase,
     responseStatus,
     retryable:
-      !nonRetryableUpstream && kind !== "aborted" && kind !== "unconfigured",
+      !nonRetryableUpstream &&
+      kind !== "network_policy" &&
+      kind !== "aborted" &&
+      kind !== "unconfigured",
   });
 }
 
@@ -2351,13 +2360,14 @@ export interface PlatformRouterProbeResult {
 export async function probePlatformRouter(
   options: {
     fetcher?: typeof fetch;
+    configuration?: PlatformRouterProbeConfiguration;
     timeoutMs?: number;
     performanceBudgetMs?: number;
     requestId?: string;
     signal?: AbortSignal;
   } = {},
 ): Promise<PlatformRouterProbeResult> {
-  const router = configuredPlatformRouter();
+  const router = options.configuration ?? configuredPlatformRouter();
   const endpoint = router?.endpoint;
   const apiKey = router?.apiKey;
   const model = router?.model ?? null;

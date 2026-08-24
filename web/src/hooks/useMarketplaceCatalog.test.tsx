@@ -66,7 +66,11 @@ describe("useMarketplaceCatalog pending likes", () => {
       { initialProps: { authUserId: undefined as string | undefined } },
     );
 
-    await act(async () => result.current.likeListing(listing));
+    await act(async () => {
+      await expect(result.current.likeListing(listing)).rejects.toThrow(
+        "authentication required",
+      );
+    });
 
     expect(onAuthRequired).toHaveBeenCalledTimes(1);
     expect(readPendingMarketplaceLike()).toMatchObject({
@@ -88,5 +92,51 @@ describe("useMarketplaceCatalog pending likes", () => {
     expect(window.sessionStorage.getItem(PENDING_MARKETPLACE_LIKE_KEY)).toBeNull();
     expect(window.location.pathname).toBe("/used-car");
     expect(onNotice).not.toHaveBeenCalled();
+  });
+
+  it("rolls an optimistic like back when the authenticated mutation fails", async () => {
+    const onNotice = vi.fn();
+    let rejectMutation: ((reason: Error) => void) | undefined;
+    api.setMarketplaceOfferLikeCount.mockImplementationOnce(
+      async () =>
+        await new Promise<never>((_resolve, reject) => {
+          rejectMutation = reject;
+        }),
+    );
+    const { result } = renderHook(() =>
+      useMarketplaceCatalog({
+        hydrated: true,
+        locale: "zh",
+        subplatform: subplatform as never,
+        authUserId: "buyer-1",
+        onNotice,
+        onAuthRequired: vi.fn(),
+      }),
+    );
+    act(() => result.current.setListing(listing));
+
+    let mutation: Promise<void> | undefined;
+    act(() => {
+      mutation = result.current.likeListing(listing);
+    });
+    expect(result.current.listing).toMatchObject({
+      likeTotal: "1",
+      viewerLikeCount: 1,
+    });
+    const pendingMutation = mutation;
+    const rejectPendingMutation = rejectMutation;
+    if (!pendingMutation || !rejectPendingMutation)
+      throw new Error("mutation did not start");
+
+    await act(async () => {
+      rejectPendingMutation(new Error("provider unavailable"));
+      await expect(pendingMutation).rejects.toThrow("provider unavailable");
+    });
+
+    expect(result.current.listing).toMatchObject({
+      likeTotal: "0",
+      viewerLikeCount: 0,
+    });
+    expect(onNotice).toHaveBeenCalledWith("provider unavailable");
   });
 });
