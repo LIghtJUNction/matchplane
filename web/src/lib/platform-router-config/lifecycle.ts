@@ -23,6 +23,12 @@ import {
   type ProtectedPlatformRouterStorage,
   protectedPlatformRouterStorage,
 } from "./protected-storage";
+import {
+  getTransactionalManagedPlatformRouterConfig,
+  getTransactionalManagedPlatformRouterDraftConfig,
+  readTransactionalManagedPlatformRouterConfig,
+  readTransactionalManagedPlatformRouterDraftConfig,
+} from "./transactional-lifecycle";
 
 const DRAFT_ENTRIES: PlatformRouterStorageEntry[] = [
   "draft-config",
@@ -202,19 +208,19 @@ const lifecycle = createManagedPlatformRouterLifecycle({
 });
 
 export function readManagedPlatformRouterConfig(): ManagedPlatformRouterSecretConfig | null {
-  return lifecycle.readActive();
+  return readTransactionalManagedPlatformRouterConfig();
 }
 
 export function readManagedPlatformRouterDraftConfig(): ManagedPlatformRouterSecretConfig | null {
-  return lifecycle.readDraft();
+  return readTransactionalManagedPlatformRouterDraftConfig();
 }
 
 export function getManagedPlatformRouterConfig(): ManagedPlatformRouterConfig | null {
-  return lifecycle.getActive();
+  return getTransactionalManagedPlatformRouterConfig();
 }
 
 export function getManagedPlatformRouterDraftConfig(): ManagedPlatformRouterDraftConfig | null {
-  return lifecycle.getDraft();
+  return getTransactionalManagedPlatformRouterDraftConfig();
 }
 
 export function stageManagedPlatformRouterConfig(

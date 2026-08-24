@@ -8,6 +8,9 @@ import {
   writeSync,
 } from "node:fs";
 import {
+  createTransactionalManagedPlatformRouterLifecycle,
+} from "../transactional-lifecycle";
+import {
   acquirePlatformRouterLock,
   PlatformRouterLockTimeoutError,
   readCurrentSnapshot,
@@ -23,6 +26,10 @@ if (mode === "lock") {
   await runRaceReader();
 } else if (mode === "audit-short-append") {
   await runAuditShortAppendChild();
+} else if (mode === "lifecycle-stage") {
+  await runLifecycleStageChild();
+} else if (mode === "lifecycle-activate") {
+  await runLifecycleActivateChild();
 } else {
   throw new Error("unknown transaction child mode");
 }
@@ -110,6 +117,64 @@ async function runAuditShortAppendChild(): Promise<void> {
     writeFileSync(doneBarrier, "done");
   } finally {
     closeSync(descriptor);
+  }
+}
+
+async function runLifecycleStageChild(): Promise<void> {
+  const root = requiredArgument(3);
+  const startBarrier = requiredArgument(4);
+  const resultBarrier = requiredArgument(5);
+  const model = requiredArgument(6);
+  const apiKey = requiredArgument(7);
+  await waitForFile(startBarrier, 8_000);
+  const lifecycle = createTransactionalManagedPlatformRouterLifecycle({
+    transactionOptions: { root, timeoutMs: 8_000 },
+  });
+  try {
+    const result = await lifecycle.stage(
+      {
+        endpoint: "https://api.lmm.best/v1",
+        model,
+        protocol: "openai-compatible",
+        enabled: true,
+        apiKey,
+      },
+      { actor: `child-${model}`, requestId: `stage-${model}` },
+    );
+    writeFileSync(resultBarrier, JSON.stringify({ status: "committed", result }));
+  } catch (cause) {
+    writeFileSync(
+      resultBarrier,
+      JSON.stringify({
+        status: "error",
+        errorName: cause instanceof Error ? cause.name : "unknown",
+      }),
+    );
+  }
+}
+
+async function runLifecycleActivateChild(): Promise<void> {
+  const root = requiredArgument(3);
+  const startBarrier = requiredArgument(4);
+  const resultBarrier = requiredArgument(5);
+  await waitForFile(startBarrier, 8_000);
+  const lifecycle = createTransactionalManagedPlatformRouterLifecycle({
+    transactionOptions: { root, timeoutMs: 8_000 },
+  });
+  try {
+    const result = await lifecycle.activate({
+      actor: "child-activate",
+      requestId: "activate-race",
+    });
+    writeFileSync(resultBarrier, JSON.stringify({ status: "committed", result }));
+  } catch (cause) {
+    writeFileSync(
+      resultBarrier,
+      JSON.stringify({
+        status: "error",
+        errorName: cause instanceof Error ? cause.name : "unknown",
+      }),
+    );
   }
 }
 

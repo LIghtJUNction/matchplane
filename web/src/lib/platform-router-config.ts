@@ -53,6 +53,27 @@ export {
   platformRouterPolicyIssues,
 } from "./platform-router-config/effective-source";
 export {
+  activateTransactionalManagedPlatformRouterDraft,
+  createTransactionalManagedPlatformRouterLifecycle,
+  getTransactionalManagedPlatformRouterConfig,
+  getTransactionalManagedPlatformRouterDraftConfig,
+  markTransactionalManagedPlatformRouterDraftTested,
+  PlatformRouterStateIndeterminateError,
+  PlatformRouterStorageUncertainError,
+  prepareTransactionalManagedPlatformRouterDraftProbe,
+  readTransactionalManagedPlatformRouterConfig,
+  readTransactionalManagedPlatformRouterDraftConfig,
+  stageTransactionalManagedPlatformRouterConfig,
+} from "./platform-router-config/transactional-lifecycle";
+export type {
+  PlatformRouterDraftProbe,
+  PlatformRouterMarkTestedInput,
+  PlatformRouterMutationContext,
+  PlatformRouterMutationResult,
+  TransactionalLifecycleDependencies,
+  TransactionalManagedPlatformRouterLifecycle,
+} from "./platform-router-config/transactional-lifecycle";
+export {
   activateManagedPlatformRouterDraft,
   getManagedPlatformRouterDraftConfig,
   markManagedPlatformRouterDraftTested,

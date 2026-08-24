@@ -30,10 +30,38 @@ interface SelectedProviderStatus {
 }
 
 export function getPlatformRouterEffectiveStatus(): PlatformRouterEffectiveStatus {
-  return platformRouterEffectiveStatusFrom(
-    getManagedPlatformRouterConfig(),
-    readEnvironmentProviderStatus(),
-  );
+  const environment = readEnvironmentProviderStatus();
+  try {
+    return platformRouterEffectiveStatusFrom(
+      getManagedPlatformRouterConfig(),
+      environment,
+    );
+  } catch {
+    // A present but unreadable/corrupt managed generation must block the
+    // environment fallback. Keep the failure scoped to AI readiness instead
+    // of turning unrelated platform routes into configuration readers.
+    return platformRouterEffectiveStatusFrom(
+      unavailableManagedConfiguration(),
+      environment,
+    );
+  }
+}
+
+function unavailableManagedConfiguration(): ManagedPlatformRouterConfig {
+  return {
+    endpoint: M0_REQUIRED_ROUTER_ENDPOINT,
+    model: M0_REQUIRED_ROUTER_MODEL,
+    protocol: M0_REQUIRED_ROUTER_PROTOCOL,
+    enabled: false,
+    credentialConfigured: false,
+    assistantInstructions: "",
+    assistantMaxOutputTokens: 320,
+    assistantTemperature: 0.2,
+    assistantMaxSteps: 5,
+    assistantTimeoutMs: 20_000,
+    assistantReasoningEffort: "none",
+    modelReasoningEfforts: [],
+  };
 }
 
 export function platformRouterEffectiveStatusFrom(
@@ -188,7 +216,12 @@ function isSafeHttpsEndpoint(value: string | null): boolean {
 
 function safeEndpointOrigin(value: string | null): string | null {
   const endpoint = value ? safeNormalizedEndpoint(value) : null;
-  return endpoint ? new URL(endpoint).origin : null;
+  if (!endpoint) return null;
+  try {
+    return new URL(endpoint).origin;
+  } catch {
+    return null;
+  }
 }
 
 function endpointForComparison(value: string | null): string | null {
