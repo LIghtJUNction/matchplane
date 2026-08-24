@@ -19,7 +19,7 @@ import { useMediaQuery } from "@appica/ui-react/hooks/use-media-query";
 import {
   GripHorizontal,
   Maximize2,
-  MessageSquareMore,
+  Search,
   Minimize2,
   X,
 } from "lucide-react";
@@ -122,11 +122,11 @@ export function FloatingMarketplaceClerk({
           type="button"
           aria-controls="marketplace-clerk-panel"
           aria-expanded={open}
-          aria-label={isZh ? "问选货员" : "Ask the shopping assistant"}
+          aria-label={isZh ? "打开找商品" : "Open product search"}
           onClick={showClerk}
         >
-          <MessageSquareMore aria-hidden="true" />
-          <span>{isZh ? "问选货员" : "Ask the clerk"}</span>
+          <Search aria-hidden="true" />
+          <span>{isZh ? "帮我找" : "Find items"}</span>
         </Button>,
         portalNode,
       )
@@ -153,12 +153,12 @@ export function FloatingMarketplaceClerk({
             <DrawerHeader className="mobile-clerk-drawer-header">
               <div>
                 <DrawerTitle>
-                  {isZh ? "问选货员" : "Shopping clerk"}
+                  {isZh ? "找商品" : "Find products"}
                 </DrawerTitle>
                 <DrawerDescription>
                   {isZh
-                    ? "描述需求、预算或偏好。"
-                    : "Describe what you need, your budget, or preferences."}
+                    ? "填写预算、用途或偏好。"
+                    : "Enter your budget, use case, or preferences."}
                 </DrawerDescription>
               </div>
               <DrawerClose
@@ -168,7 +168,7 @@ export function FloatingMarketplaceClerk({
                     variant="ghost"
                     size="icon-sm"
                     type="button"
-                    aria-label={isZh ? "关闭选货员" : "Close shopping clerk"}
+                    aria-label={isZh ? "关闭" : "Close"}
                   >
                     <X aria-hidden="true" />
                   </Button>
@@ -235,15 +235,15 @@ export function FloatingMarketplaceClerk({
                   aria-hidden="true"
                 />
                 <div>
-                  <strong>{isZh ? "选货员" : "Shopping clerk"}</strong>
+                  <strong>{isZh ? "找商品" : "Find products"}</strong>
                   <span>
                     {collapsed
                       ? isZh
-                        ? "已收纳，拖动标题栏或展开继续"
+                        ? "已收起，拖动标题栏或展开继续"
                         : "Stowed — drag or expand to continue"
                       : isZh
-                        ? "可拖动、缩放和收纳"
-                        : "Move, resize, or stow this workspace"}
+                        ? "可拖动、缩放和收起"
+                        : "Move, resize, or stow this panel"}
                   </span>
                 </div>
                 <CollapsibleTrigger
@@ -256,11 +256,11 @@ export function FloatingMarketplaceClerk({
                       aria-label={
                         collapsed
                           ? isZh
-                            ? "展开选货员"
-                            : "Expand shopping clerk"
+                            ? "展开"
+                            : "Expand"
                           : isZh
-                            ? "收纳选货员"
-                            : "Stow shopping clerk"
+                            ? "收起"
+                            : "Stow"
                       }
                     >
                       {collapsed ? (
@@ -276,7 +276,7 @@ export function FloatingMarketplaceClerk({
                   variant="ghost"
                   size="icon-sm"
                   type="button"
-                  aria-label={isZh ? "关闭选货员" : "Close shopping clerk"}
+                  aria-label={isZh ? "关闭" : "Close"}
                   onClick={() => onOpenChange(false)}
                 >
                   <X aria-hidden="true" />

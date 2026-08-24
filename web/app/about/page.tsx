@@ -20,8 +20,8 @@ type Locale = "zh" | "en";
 const copy = {
   zh: {
     back: "返回商城",
-    eyebrow: "MatchPlane / AI 商城",
-    title: "告诉 AI 想买什么，从真实店铺里挑。",
+    eyebrow: "MatchPlane 商城",
+    title: "说说预算和需求，从真实店铺里挑。",
     lead: "MatchPlane 把一个商城和许多独立店铺连接在一起。顾客无需登录即可浏览、搜索和比价；想联系商家或购买时再创建账号。",
     flowEyebrow: "一次购物的路径",
     flowTitle: "从一句需求，到一组可比较的商品。",

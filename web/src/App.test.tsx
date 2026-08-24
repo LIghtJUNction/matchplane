@@ -124,7 +124,7 @@ describe("MatchPlane workspaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    const assistantToggle = screen.getByRole("button", { name: "问选货员" });
+    const assistantToggle = screen.getByRole("button", { name: "打开找商品" });
     expect(assistantToggle).toHaveAttribute("aria-expanded", "false");
     expect(
       screen.queryByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
@@ -143,7 +143,7 @@ describe("MatchPlane workspaces", () => {
     expect(
       screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭选货员" }));
+    await user.click(screen.getByRole("button", { name: "关闭" }));
     expect(assistantToggle).toHaveAttribute("aria-expanded", "false");
 
     expect(screen.queryByText("其他入口")).not.toBeInTheDocument();
@@ -195,7 +195,7 @@ describe("MatchPlane workspaces", () => {
       screen.queryByRole("button", { name: "设置" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "想买什么，告诉我就行。" }),
+      screen.queryByRole("heading", { name: "说说预算和需求" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("独立打开")).not.toBeInTheDocument();
   });
@@ -654,7 +654,7 @@ describe("MatchPlane workspaces", () => {
     );
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "问选货员" }));
+    await user.click(screen.getByRole("button", { name: "打开找商品" }));
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -688,7 +688,7 @@ describe("MatchPlane workspaces", () => {
     );
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "问选货员" }));
+    await user.click(screen.getByRole("button", { name: "打开找商品" }));
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -721,7 +721,7 @@ describe("MatchPlane workspaces", () => {
     );
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "问选货员" }));
+    await user.click(screen.getByRole("button", { name: "打开找商品" }));
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -760,7 +760,7 @@ describe("MatchPlane workspaces", () => {
       screen.getByRole("dialog", { name: /^我的店铺/ }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭我的店铺" }));
-    await user.click(screen.getByRole("button", { name: "问选货员" }));
+    await user.click(screen.getByRole("button", { name: "打开找商品" }));
 
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",

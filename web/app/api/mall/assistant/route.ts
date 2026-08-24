@@ -56,7 +56,7 @@ export async function POST(request: Request): Promise<Response> {
   if (body.storePath !== undefined && !requestedStorePath)
     return error("店铺地址无效", 400);
   if (!isPlatformRouterConfigured())
-    return error("商城 AI 导购尚未配置完整，请稍后再试。", 503);
+    return error("商品搜索尚未配置完整，请稍后再试。", 503);
   const tenantId = configuredTenantId();
   if (!tenantId) return error("商城尚未完成初始化", 503);
   const requestId = randomUUID();
@@ -155,7 +155,7 @@ export async function POST(request: Request): Promise<Response> {
     if (cause instanceof PlatformAssistantUnavailableError)
       return error(cause.message, 502);
     process.stderr.write("[mall-assistant] request failed\n");
-    return error("商城 AI 导购暂时不可用，请稍后再试。", 503);
+    return error("商品搜索暂时不可用，请稍后再试。", 503);
   }
 }
 

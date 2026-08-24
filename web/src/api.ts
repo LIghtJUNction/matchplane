@@ -1937,7 +1937,7 @@ export async function askMallShoppingAssistant(
   if (!response.ok || !body?.requestId || !body.answer) {
     throw new MarketplaceApiError(
       response.status,
-      body?.error || "商城 AI 导购暂时不可用",
+      body?.error || "商品搜索暂时不可用",
     );
   }
   return {

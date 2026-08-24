@@ -188,8 +188,8 @@ function MarketplaceProducts({
                 </AlertTitle>
                 <AlertDescription>
                     {locale === "en"
-                        ? "The shopping assistant is still available."
-                        : "选货员仍然可用，可以直接描述你的需要。"}
+                        ? "The shopping search is still available."
+                        : "仍可直接填写预算和需求进行搜索。"}
                 </AlertDescription>
                 <AlertAction>
                     <Button size="sm" type="button" onClick={onRetryCatalog}>
@@ -211,8 +211,8 @@ function MarketplaceProducts({
                     </strong>
                     <p>
                         {locale === "en"
-                            ? "Ask the shopping assistant, or browse the open stores below."
-                            : "可以询问选货员，也可以浏览下方已营业店铺。"}
+                            ? "Try the search below, or browse open stores."
+                            : "可以在下方搜索，也可以浏览已营业店铺。"}
                     </p>
                 </div>
                 <Button
@@ -361,8 +361,8 @@ export function MarketplaceHome({
                             </h1>
                             <span>
                                 {locale === "en"
-                                    ? "Browse real listings. The shopping assistant can help narrow the choice when needed."
-                                    : "浏览真实在售商品；需要帮助时，选货员会帮你缩小范围。"}
+                                    ? "Browse live listings. Use search when you want to narrow the choice."
+                                    : "浏览真实在售商品；需要筛选时，在下方填写预算和需求。"}
                             </span>
                             <MarketplaceNeedPrompt
                                 locale={locale}

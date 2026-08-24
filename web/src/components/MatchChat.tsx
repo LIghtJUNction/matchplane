@@ -10,10 +10,10 @@ import {
 } from "react";
 import {
   ArrowUp,
-  Brain,
   FileUp,
   History,
   LoaderCircle,
+  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 import { Button } from "@appica/ui-react/button";
@@ -299,14 +299,14 @@ interface ChatCopy {
 }
 
 const defaultChatCopy: ChatCopy = {
-  buyerEyebrow: "AI 导购",
+  buyerEyebrow: "商品筛选",
   sellerEyebrow: "供给方入口",
-  buyerTitle: "想买什么，告诉我就行。",
+  buyerTitle: "说说预算和需求",
   sellerTitle: "说说你能提供什么。",
   buyerHeadlines: [
-    "想买什么，告诉我就行。",
-    "帮你逛店、比价、算清总价。",
-    "从一句话开始挑选。",
+    "说说预算和需求",
+    "帮你逛店、比价、算清总价",
+    "从在售商品里开始挑",
   ],
   sellerHeadlines: [
     "说说你能提供什么。",
@@ -314,7 +314,7 @@ const defaultChatCopy: ChatCopy = {
     "把你的优势交给匹配。",
   ],
   buyerDescription:
-    "我会在商城店铺中找商品、比较价格，并说明为什么适合你。无需登录即可开始。",
+    "按你的描述，从各店铺在售商品里筛选、比价并说明理由。无需登录即可开始。",
   sellerDescription: "说出你能提供的内容、条件和限制。",
   buyerPlaceholder: "输入预算、用途和偏好……",
   buyerDiscoveryLabel: "允许供给方看到这条需求摘要（不含联系方式）",
@@ -327,14 +327,14 @@ const defaultChatCopy: ChatCopy = {
 };
 
 const defaultChatCopyEn: ChatCopy = {
-  buyerEyebrow: "AI shopping assistant",
+  buyerEyebrow: "Product search",
   sellerEyebrow: "Seller entry",
-  buyerTitle: "Tell me what you want to buy.",
+  buyerTitle: "Share your budget and needs",
   sellerTitle: "Tell us what you can offer.",
   buyerHeadlines: [
-    "Tell me what you want to buy.",
-    "Browse stores and compare prices.",
-    "Start with one sentence.",
+    "Share your budget and needs",
+    "Browse stores and compare prices",
+    "Start from what's on sale",
   ],
   sellerHeadlines: [
     "Tell us what you can offer.",
@@ -342,7 +342,7 @@ const defaultChatCopyEn: ChatCopy = {
     "Start with one sentence.",
   ],
   buyerDescription:
-    "I’ll search the mall, compare products, and explain the best options. No sign-in needed to browse.",
+    "We filter live listings, compare prices, and explain the fit. No sign-in needed to browse.",
   sellerDescription: "Share what you offer, the terms, and any constraints.",
   buyerPlaceholder: "Describe your budget, needs, and preferences…",
   buyerDiscoveryLabel:
@@ -446,9 +446,9 @@ function runtimeChatCopy(locale: InterfaceLocale): RuntimeChatCopy {
     routeNode: "商城",
     routeOverflow: " 等平台",
     routeDegraded: (names, overflow) =>
-      `AI 导购暂时不可用，已按相关性在 ${names}${overflow} 中查找商品。`,
+      `搜索服务暂时繁忙，已按相关性在 ${names}${overflow} 中查找商品。`,
     routeSelected: (names, overflow) =>
-      `AI 导购选择了 ${names}${overflow}，正在从这些店铺的在售商品中挑选并解释理由。`,
+      `已从 ${names}${overflow} 的在售商品中挑选并说明理由。`,
     noMatch:
       "暂时没有找到合适的店铺。你可以补充品类、预算或必须具备的功能后重试。",
     noChildren: "商城目前还没有上线店铺。",
@@ -652,7 +652,7 @@ export function MatchChat({
     compact && isRoot && !isSeller
       ? locale === "en"
         ? "Say what you need and your budget. Matching products will appear here."
-        : "说说想买什么和预算，合适的商品会直接出现在这里。"
+        : "填写预算和需求，匹配的商品会出现在下方。"
       : isSeller
         ? copy.sellerDescription
         : copy.buyerDescription;
@@ -1883,8 +1883,8 @@ export function MatchChat({
           type="button"
           onClick={() => setShoppingMemoryOpen(true)}
         >
-          <Brain size={14} aria-hidden="true" />
-          <span>{locale === "en" ? "Memory" : "记忆"}</span>
+          <SlidersHorizontal size={14} aria-hidden="true" />
+          <span>{locale === "en" ? "Preferences" : "偏好"}</span>
         </button>
       ) : null}
       {messages.length ? (
@@ -1934,7 +1934,7 @@ export function MatchChat({
             <ul
               className="match-chat-promises"
               aria-label={
-                locale === "en" ? "Shopping assistant capabilities" : "导购能力"
+                locale === "en" ? "Search capabilities" : "搜索能力"
               }
             >
               {shoppingPromises.map((item) => (
@@ -2048,8 +2048,8 @@ export function MatchChat({
                         ? "You can keep chatting and try the handoff again later."
                         : "你可以继续对话，稍后再请求人工介入。"
                       : locale === "en"
-                        ? "The AI manager remains available in this conversation. No contact details were shared."
-                        : "AI 店长会继续对话，本次没有交换任何联系方式。"}
+                        ? "You can keep chatting here. No contact details were shared."
+                        : "可以继续在这里咨询，本次没有交换任何联系方式。"}
                   </span>
                 </div>
               ) : null}

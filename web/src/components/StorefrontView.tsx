@@ -216,8 +216,8 @@ export function StorefrontView({
               </h2>
               <span>
                 {english
-                  ? "The AI manager can keep helping while store staff join when needed. Contact details are never shared without your confirmation."
-                  : "AI 店长会持续回答；需要时可通知店员介入。未经你确认，不会交换联系方式。"}
+                  ? "The store team can answer here and join when needed. Contact details are never shared without your confirmation."
+                  : "在线解答商品问题；需要时可联系店员。未经你确认，不会交换联系方式。"}
               </span>
             </div>
             <button

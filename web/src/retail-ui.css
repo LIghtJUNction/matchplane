@@ -1363,27 +1363,28 @@ select {
   z-index: 160;
   right: max(1.25rem, env(safe-area-inset-right));
   bottom: max(1.25rem, env(safe-area-inset-bottom));
-  min-height: 3.25rem;
-  padding: 0 1rem;
+  min-height: 3rem;
+  padding: 0 0.95rem;
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
-  border: 1px solid var(--retail-blue);
-  border-radius: 0.85rem;
-  background: var(--retail-blue);
-  color: var(--retail-accent-contrast);
-  box-shadow: 0 10px 28px rgba(23, 23, 21, 0.2);
+  gap: 0.5rem;
+  border: 1px solid var(--retail-line-strong);
+  border-radius: 999px;
+  background: var(--retail-paper);
+  color: var(--retail-ink);
+  box-shadow: 0 4px 14px rgba(30, 27, 22, 0.08);
   font-size: 0.82rem;
-  font-weight: 680;
+  font-weight: 620;
   cursor: pointer;
   transition:
     opacity 150ms ease,
-    transform 180ms ease;
+    transform 180ms ease,
+    border-color 150ms ease;
 }
 
 .root-marketplace-clerk-toggle:hover {
-  background: var(--retail-blue-strong);
-  transform: translateY(-2px);
+  border-color: var(--retail-ink);
+  transform: translateY(-1px);
 }
 
 .root-marketplace-clerk-toggle svg {

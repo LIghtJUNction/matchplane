@@ -146,10 +146,9 @@ describe("MarketplaceHome actions", () => {
       "预算 15 万以内的 SUV",
     );
     await user.click(screen.getByRole("button", { name: "帮我找" }));
-    expect(screen.getByRole("button", { name: "问选货员" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: "打开找商品" }),
+    ).toHaveAttribute("aria-expanded", "true");
   });
 
   it("uses a keyboard-navigable toggle group for category filtering", async () => {
@@ -241,7 +240,7 @@ describe("MarketplaceHome actions", () => {
     expect(
       screen.getByRole("textbox", { name: "描述想买的东西和预算" }),
     ).toBeInTheDocument();
-    const toggle = screen.getByRole("button", { name: "问选货员" });
+    const toggle = screen.getByRole("button", { name: "打开找商品" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     await user.click(toggle);
@@ -253,7 +252,7 @@ describe("MarketplaceHome actions", () => {
 
     await user.click(
       screen.getAllByRole("button", {
-        name: "关闭选货员",
+        name: "关闭",
       })[0],
     );
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -301,21 +300,21 @@ describe("MarketplaceHome actions", () => {
       />,
     );
 
-    const toggle = screen.getByRole("button", { name: "问选货员" });
+    const toggle = screen.getByRole("button", { name: "打开找商品" });
     await user.click(toggle);
     expect(document.querySelector(".floating-clerk-rnd")).toHaveClass(
       "is-open",
     );
     expect(
-      screen.getByRole("button", { name: "收纳选货员" }),
+      screen.getByRole("button", { name: "收起" }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "收纳选货员" }));
+    await user.click(screen.getByRole("button", { name: "收起" }));
     expect(
-      screen.getByRole("button", { name: "展开选货员" }),
+      screen.getByRole("button", { name: "展开" }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "关闭选货员" }));
+    await user.click(screen.getByRole("button", { name: "关闭" }));
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     view.unmount();
