@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const generateText = vi.hoisted(() => vi.fn());
 const createOpenAICompatible = vi.hoisted(() =>
-  vi.fn(() => ({
+  vi.fn((_options: { fetch?: typeof fetch }) => ({
     chatModel: vi.fn(() => ({ modelId: "shopping-model" })),
   })),
 );
@@ -61,10 +61,13 @@ import {
   applyShoppingMemoryDefaults,
   compactShoppingConversation,
   inferShoppingIntent,
+  PlatformAssistantUnavailableError,
   reviseShoppingMemoryWithAi,
 } from "./platform-router";
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   generateText.mockReset();
   createOpenAICompatible.mockClear();
   searchPublicStoreOfferPage.mockClear();
@@ -156,6 +159,26 @@ describe("platform shopping agent", () => {
     );
   });
 
+  it("preserves an already typed memory provider failure", async () => {
+    const typedFailure = new PlatformAssistantUnavailableError(
+      "购物记忆响应超时，请稍后重试。",
+      { kind: "total_timeout", phase: "total" },
+    );
+    generateText.mockRejectedValueOnce(typedFailure);
+
+    await expect(
+      reviseShoppingMemoryWithAi({
+        suggestion: "预算改为 8000 元",
+        memory: {
+          enabled: true,
+          facts: [],
+          version: 1,
+          updatedAt: "2026-08-22T08:00:00.000Z",
+        },
+      }),
+    ).rejects.toBe(typedFailure);
+  });
+
   it("uses durable memory only as a default and exposes it through a bounded recall tool", async () => {
     expect(
       applyShoppingMemoryDefaults(
@@ -178,8 +201,8 @@ describe("platform shopping agent", () => {
       };
     });
     const reply = await answerPlatformShoppingQuestion({
-      question: "帮我推荐一款合适的商品",
-      messages: [{ role: "user", content: "帮我推荐一款合适的商品" }],
+      question: "回顾我保存的购物偏好",
+      messages: [{ role: "user", content: "回顾我保存的购物偏好" }],
       stores: [],
       memory: {
         enabled: true,
@@ -314,6 +337,38 @@ describe("platform shopping agent", () => {
 
     expect(updateMemory).toHaveBeenCalledOnce();
     expect(generateText).toHaveBeenCalledOnce();
+  });
+
+  it("propagates request cancellation through a nested memory tool call", async () => {
+    const controller = new AbortController();
+    const updateMemory = vi.fn(
+      async () => await new Promise<never>(() => undefined),
+    );
+    generateText.mockImplementationOnce(async (options) => {
+      const pending = options.tools.update_shopping_memory.execute({
+        facts: [
+          { kind: "budget", key: "maximum", value: "9000", currency: "CNY" },
+        ],
+      });
+      controller.abort(new DOMException("client left", "AbortError"));
+      await pending;
+    });
+
+    await expect(
+      answerPlatformShoppingQuestion({
+        question: "把长期预算改成 9000 元",
+        messages: [{ role: "user", content: "把长期预算改成 9000 元" }],
+        stores: [],
+        memory: { enabled: true, facts: [], version: 3, updatedAt: null },
+        updateMemory,
+        signal: controller.signal,
+        requestId: "abort-request",
+      }),
+    ).rejects.toMatchObject({ kind: "aborted", retryable: false });
+    expect(updateMemory).toHaveBeenCalledOnce();
+    expect(generateText.mock.calls[0]?.[0].abortSignal).toBeInstanceOf(
+      AbortSignal,
+    );
   });
 
   it("returns a bounded choice UI when AI asks the user for a key condition", async () => {
@@ -768,7 +823,8 @@ describe("platform shopping agent", () => {
     ).rejects.toThrow("AI 模型未按协议完成必要的检索与工具调用");
   });
 
-  it("rejects an empty model response instead of synthesizing a product answer", async () => {
+  it("types no-final-text after tools and logs no prompt, key, or endpoint path", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     searchPublicStoreOffers.mockResolvedValue([
       {
         offer_id: "offer-a",
@@ -794,15 +850,52 @@ describe("platform shopping agent", () => {
 
     await expect(
       answerPlatformShoppingQuestion({
-        question: "帮我找通勤轻薄本",
-        messages: [{ role: "user", content: "帮我找通勤轻薄本" }],
+        question: "帮我找通勤轻薄本 private-user-text",
+        messages: [
+          { role: "user", content: "帮我找通勤轻薄本 private-user-text" },
+        ],
         stores: [],
+        requestId: "safe-assistant-request",
       }),
-    ).rejects.toThrow("AI 模型未返回有效回答");
+    ).rejects.toMatchObject({
+      kind: "no_final_text",
+      finishReason: "stop",
+      stepCount: 1,
+      toolNames: ["search_public_products"],
+    });
     expect(generateText).toHaveBeenCalledOnce();
+    const logged = stderr.mock.calls.flat().join(" ");
+    expect(logged).toContain('"requestId":"safe-assistant-request"');
+    expect(logged).toContain('"status":"no_final_text"');
+    expect(logged).not.toContain("private-user-text");
+    expect(logged).not.toContain("server-only-key");
+    expect(logged).not.toContain("/v1/chat/completions");
   });
 
-  it("returns the model response without replacing it with a canned no-results answer", async () => {
+  it("skips provider admission when a bounded public search already proves the catalog is empty", async () => {
+    searchPublicStoreOffers.mockResolvedValue([]);
+    const admitCall = vi.fn(async () => undefined);
+
+    const reply = await answerPlatformShoppingQuestion({
+      question: "推荐一些在售商品",
+      messages: [{ role: "user", content: "推荐一些在售商品" }],
+      stores: [],
+      admitCall,
+      requestId: "empty-catalog-request",
+    });
+
+    expect(reply).toEqual(
+      expect.objectContaining({
+        outcome: "empty_catalog",
+        modelCalls: 0,
+        recommendations: [],
+      }),
+    );
+    expect(generateText).not.toHaveBeenCalled();
+    expect(admitCall).not.toHaveBeenCalled();
+  });
+
+  it("returns a deterministic empty-catalog outcome after the public search proves zero results", async () => {
     searchPublicStoreOffers.mockResolvedValue([]);
     generateText.mockImplementation(async (options) => {
       await options.tools.search_public_products.execute({
@@ -825,11 +918,174 @@ describe("platform shopping agent", () => {
       admitCall,
     });
 
-    expect(reply.text).toBe("不如看看无关的二手车。");
-    expect(reply.recommendations).toEqual([]);
-    expect(reply.modelCalls).toBe(1);
+    expect(reply).toEqual(
+      expect.objectContaining({
+        text: "当前商城还没有可公开浏览的店铺或已审核在售商品，请稍后再来看看。",
+        outcome: "empty_catalog",
+        recommendations: [],
+        modelCalls: 1,
+      }),
+    );
     expect(admitCall).toHaveBeenCalledTimes(1);
     expect(generateText).toHaveBeenCalledTimes(1);
+  });
+
+  it("types retryable upstream HTTP, quota, and malformed provider failures", async () => {
+    const cases = [
+      { statusCode: 408, kind: "upstream_http" },
+      { statusCode: 425, kind: "upstream_http" },
+      { statusCode: 503, kind: "upstream_http" },
+      { statusCode: 429, kind: "quota" },
+      { statusCode: 200, kind: "malformed_response" },
+    ] as const;
+    for (const testCase of cases) {
+      generateText.mockRejectedValueOnce(
+        Object.assign(new Error("unsafe provider detail"), {
+          statusCode: testCase.statusCode,
+        }),
+      );
+      await expect(
+        answerPlatformShoppingQuestion({
+          question: "你好",
+          messages: [{ role: "user", content: "你好" }],
+          stores: [],
+          requestId: `provider-${testCase.kind}`,
+        }),
+      ).rejects.toMatchObject({
+        kind: testCase.kind,
+        responseStatus: testCase.statusCode,
+        retryable: true,
+      });
+    }
+  });
+
+  it.each([400, 401, 403, 404, 422])(
+    "keeps upstream HTTP %i bounded and non-retryable",
+    async (statusCode) => {
+      generateText.mockRejectedValueOnce(
+        Object.assign(new Error("unsafe provider body with credential"), {
+          statusCode,
+        }),
+      );
+
+      const failure = await answerPlatformShoppingQuestion({
+        question: "你好",
+        messages: [{ role: "user", content: "你好" }],
+        stores: [],
+      }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({
+        kind: "upstream_http",
+        phase: "response",
+        responseStatus: statusCode,
+        retryable: false,
+      });
+      expect((failure as Error).message).toContain("联系管理员");
+      expect((failure as Error).message).not.toContain("credential");
+      expect((failure as Error).message).not.toContain("重试");
+    },
+  );
+
+  it("classifies a nested catalog exception after a provider 200 as a tool failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    searchPublicStoreOfferPage.mockRejectedValueOnce(
+      new Error("unsafe database connection detail"),
+    );
+    generateText.mockImplementationOnce(async (options) => {
+      const observedFetch = createOpenAICompatible.mock.calls.at(-1)?.[0].fetch;
+      expect(observedFetch).toBeTypeOf("function");
+      await observedFetch!("https://router.example.com/v1/chat/completions");
+      await options.tools.search_public_products.execute({
+        query: "通勤电脑",
+        requirements: [],
+      });
+      throw new Error("unreachable");
+    });
+
+    const failure = await answerPlatformShoppingQuestion({
+      question: "你好",
+      messages: [{ role: "user", content: "你好" }],
+      stores: [],
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      kind: "tool_failure",
+      phase: "tool",
+      responseStatus: 200,
+      retryable: true,
+    });
+    expect((failure as Error).message).not.toContain("database");
+  });
+
+  it("classifies a memory update exception after a provider 200 as a tool failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 200 })),
+    );
+    const updateMemory = vi.fn(async () => {
+      throw Object.assign(new Error("unsafe memory database detail"), {
+        status: 500,
+      });
+    });
+    generateText.mockImplementationOnce(async (options) => {
+      const observedFetch = createOpenAICompatible.mock.calls.at(-1)?.[0].fetch;
+      expect(observedFetch).toBeTypeOf("function");
+      await observedFetch!("https://router.example.com/v1/chat/completions");
+      await options.tools.update_shopping_memory.execute({ facts: [] });
+      throw new Error("unreachable");
+    });
+
+    await expect(
+      answerPlatformShoppingQuestion({
+        question: "以后请记住我的购物偏好",
+        messages: [{ role: "user", content: "以后请记住我的购物偏好" }],
+        stores: [],
+        memory: {
+          enabled: true,
+          facts: [],
+          version: 1,
+          updatedAt: "2026-08-22T08:00:00.000Z",
+        },
+        updateMemory,
+      }),
+    ).rejects.toMatchObject({
+      kind: "tool_failure",
+      phase: "tool",
+      responseStatus: 200,
+    });
+  });
+
+  it("types initial pre-search and explicit handoff search exceptions as tool failures", async () => {
+    searchPublicStoreOffers.mockRejectedValueOnce(
+      Object.assign(new Error("unsafe initial search detail"), { status: 500 }),
+    );
+    await expect(
+      answerPlatformShoppingQuestion({
+        question: "推荐一些在售商品",
+        messages: [{ role: "user", content: "推荐一些在售商品" }],
+        stores: [],
+      }),
+    ).rejects.toMatchObject({ kind: "tool_failure", phase: "tool" });
+
+    searchPublicStoreOffers.mockRejectedValueOnce(
+      Object.assign(new Error("unsafe handoff search detail"), { status: 429 }),
+    );
+    await expect(
+      answerPlatformShoppingQuestion({
+        question: "请立刻让店员联系我",
+        messages: [{ role: "user", content: "请立刻让店员联系我" }],
+        stores: [],
+        storeContext: { path: "/test-store", name: "测试小店" },
+      }),
+    ).rejects.toMatchObject({ kind: "tool_failure", phase: "tool" });
   });
 
   it("uses AI SDK tools with a bounded, server-side tool loop", async () => {
@@ -901,7 +1157,10 @@ describe("platform shopping agent", () => {
         calculate_numbers: expect.anything(),
       }),
     );
-    expect(options.stopWhen).toEqual({ count: 4 });
+    expect(options.stopWhen).toEqual([
+      { count: 4 },
+      expect.any(Function),
+    ]);
     expect(options.messages).toEqual([
       { role: "user", content: "记住我偏好轻薄" },
       { role: "assistant", content: "记住了。" },
@@ -1003,7 +1262,7 @@ describe("platform shopping agent", () => {
         type: "human_handoff",
         id: "human-handoff-1",
         summary:
-          "我想买这件商品，请让店员确认交付时间，并询问我是否同意交换联系方式。",
+          "用户提出人工介入；意向等级：high；关联商品：1 个。未包含聊天原文或联系方式。",
         intent: "high",
         productIds: ["offer-1"],
       },
@@ -1019,5 +1278,8 @@ describe("platform shopping agent", () => {
     expect(searchPublicStoreOffers).toHaveBeenCalledTimes(1);
     expect(generateText.mock.calls[0]?.[0].system).toContain("AI 店长");
     expect(generateText.mock.calls[0]?.[0].system).toContain("不能替用户同意");
+    expect(generateText.mock.calls[0]?.[0].system).toContain(
+      "收到确定性确认成功结果前，绝不能声称",
+    );
   });
 });

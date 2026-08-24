@@ -1,5 +1,23 @@
 "use client";
 
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
+} from "@appica/ui-react/alert";
+import { Button } from "@appica/ui-react/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@appica/ui-react/dialog";
 import { useState } from "react";
 import {
   AlertTriangle,
@@ -8,6 +26,7 @@ import {
   MessageCircle,
   Moon,
   PackageOpen,
+  RefreshCw,
   Store,
   X,
 } from "lucide-react";
@@ -17,7 +36,7 @@ import {
   type MallAssistantContactConsentAction,
 } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
-import type { SubplatformConfig } from "../subplatform";
+import { subplatformCopy, type SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
 import { MatchChat } from "./MatchChat";
@@ -25,7 +44,9 @@ import { MatchChat } from "./MatchChat";
 /** A public store is a browse surface: identity, introduction, and products only. */
 export function StorefrontView({
   catalogResolved,
+  catalogError = false,
   listings,
+  onRetryCatalog,
   locale,
   onOpenListing,
   onLikeListing,
@@ -37,14 +58,16 @@ export function StorefrontView({
   onOpenStoreConsole,
 }: {
   catalogResolved: boolean;
+  catalogError?: boolean;
   listings: AssetListing[];
+  onRetryCatalog?: () => void;
   locale: InterfaceLocale;
   onOpenListing: (listing: AssetListing) => void;
   onLikeListing?: (listing: AssetListing) => Promise<void>;
   onNotice?: (message: string) => void;
   onHumanHandoff?: (input: {
     requestId: string;
-    summary: string;
+    conversionAttemptId: string;
     intent: "warm" | "high" | "urgent";
     productIds: string[];
   }) => Promise<void>;
@@ -59,6 +82,16 @@ export function StorefrontView({
   const [managerOpen, setManagerOpen] = useState(false);
   const status = subplatform.status ?? "active";
   const isInactive = status !== "active";
+  const verticalCopy = (
+    key: string,
+    chineseFallback: string,
+    englishFallback: string,
+  ) =>
+    subplatformCopy(
+      subplatform,
+      english ? `${key}En` : key,
+      english ? englishFallback : chineseFallback,
+    );
 
   return (
     <div className="storefront-view root-storefront-page">
@@ -107,16 +140,72 @@ export function StorefrontView({
           </div>
         </div>
         {!isInactive ? (
-          <button
-            className="storefront-manager-trigger"
-            type="button"
-            aria-expanded={managerOpen}
-            aria-controls="store-manager-chat"
-            onClick={() => setManagerOpen((current) => !current)}
-          >
-            <MessageCircle size={17} aria-hidden="true" />
-            {english ? "Chat with store manager" : "与店长对话"}
-          </button>
+          <Dialog open={managerOpen} onOpenChange={setManagerOpen}>
+            <DialogTrigger
+              render={
+                <button
+                  className="storefront-manager-trigger"
+                  type="button"
+                  aria-controls="store-manager-chat"
+                >
+                  <MessageCircle size={17} aria-hidden="true" />
+                  {english ? "Chat with store manager" : "与店长对话"}
+                </button>
+              }
+            />
+            <DialogContent
+              className="storefront-manager-dialog"
+              closeButton={false}
+              closeLabel={english ? "Close manager chat" : "关闭店长对话"}
+              frame={false}
+              id="store-manager-chat"
+              viewportProps={{
+                className: "storefront-manager-dialog-viewport",
+              }}
+            >
+              <DialogHeader className="storefront-manager-dialog-header">
+                <div>
+                  <DialogTitle id="store-manager-chat-title">
+                    {english
+                      ? `Ask ${subplatform.brandName || subplatform.label}`
+                      : `咨询${subplatform.brandName || subplatform.label}`}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {english
+                      ? "The AI manager can keep helping while store staff join when needed. Contact details are never shared without your confirmation."
+                      : "AI 店长会持续回答；需要时可通知店员介入。未经你确认，不会交换联系方式。"}
+                  </DialogDescription>
+                </div>
+                <DialogClose
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-md"
+                      type="button"
+                      aria-label={
+                        english ? "Close manager chat" : "关闭店长对话"
+                      }
+                    >
+                      <X size={18} aria-hidden="true" />
+                    </Button>
+                  }
+                />
+              </DialogHeader>
+              <DialogBody className="storefront-manager-dialog-body">
+                <MatchChat
+                  compact
+                  locale={locale}
+                  role="buyer"
+                  subplatform={subplatform}
+                  onNotice={onNotice}
+                  onOpenListing={onOpenListing}
+                  onLikeListing={onLikeListing}
+                  onHumanHandoff={onHumanHandoff}
+                  onContactConsent={onContactConsent}
+                />
+              </DialogBody>
+            </DialogContent>
+          </Dialog>
         ) : canManageStore && onOpenStoreConsole ? (
           <button
             className="storefront-manager-trigger"
@@ -135,7 +224,9 @@ export function StorefrontView({
           <div className="storefront-closed-badge">
             <Moon size={24} aria-hidden="true" />
           </div>
-          <h2>{english ? "Store is currently closed" : "该店铺已打烊 · 暂停营业"}</h2>
+          <h2>
+            {english ? "Store is currently closed" : "该店铺已打烊 · 暂停营业"}
+          </h2>
           <p>
             {english
               ? "The store owner has temporarily paused operations. Products and inquiries are not publicly available right now. All products and records remain safe."
@@ -153,7 +244,9 @@ export function StorefrontView({
                 onClick={onOpenStoreConsole}
               >
                 <Store size={16} aria-hidden="true" />
-                {english ? "Open store console (Reopen)" : "进入店铺工作台（恢复营业）"}
+                {english
+                  ? "Open store console (Reopen)"
+                  : "进入店铺工作台（恢复营业）"}
               </button>
             ) : null}
           </div>
@@ -165,7 +258,9 @@ export function StorefrontView({
           <div className="storefront-closed-badge is-suspended">
             <AlertTriangle size={24} aria-hidden="true" />
           </div>
-          <h2>{english ? "Store suspended by platform" : "该店铺已被平台暂停服务"}</h2>
+          <h2>
+            {english ? "Store suspended by platform" : "该店铺已被平台暂停服务"}
+          </h2>
           <p>
             {english
               ? "This store has been suspended by mall management. Please contact platform support for assistance."
@@ -200,48 +295,6 @@ export function StorefrontView({
         </div>
       )}
 
-      {managerOpen && !isInactive ? (
-        <section
-          className="storefront-manager-chat"
-          id="store-manager-chat"
-          aria-labelledby="store-manager-chat-title"
-        >
-          <div className="storefront-manager-chat-heading">
-            <div>
-              <p>{english ? "AI STORE MANAGER" : "AI 店长"}</p>
-              <h2 id="store-manager-chat-title">
-                {english
-                  ? `Ask ${subplatform.brandName || subplatform.label}`
-                  : `咨询${subplatform.brandName || subplatform.label}`}
-              </h2>
-              <span>
-                {english
-                  ? "The AI manager can keep helping while store staff join when needed. Contact details are never shared without your confirmation."
-                  : "AI 店长会持续回答；需要时可通知店员介入。未经你确认，不会交换联系方式。"}
-              </span>
-            </div>
-            <button
-              type="button"
-              aria-label={english ? "Close manager chat" : "关闭店长对话"}
-              onClick={() => setManagerOpen(false)}
-            >
-              <X size={18} aria-hidden="true" />
-            </button>
-          </div>
-          <MatchChat
-            compact
-            locale={locale}
-            role="buyer"
-            subplatform={subplatform}
-            onNotice={onNotice}
-            onOpenListing={onOpenListing}
-            onLikeListing={onLikeListing}
-            onHumanHandoff={onHumanHandoff}
-            onContactConsent={onContactConsent}
-          />
-        </section>
-      ) : null}
-
       {!isInactive ? (
         <main className="storefront-view-products" id="store-products">
           <div className="storefront-view-products-heading">
@@ -254,7 +307,40 @@ export function StorefrontView({
               </span>
             ) : null}
           </div>
-          {catalogResolved ? (
+          {catalogError ? (
+            <Alert
+              className="storefront-catalog-error"
+              variant="error"
+              layout="inline"
+            >
+              <AlertIcon>
+                <AlertTriangle aria-hidden="true" />
+              </AlertIcon>
+              <div>
+                <AlertTitle>
+                  {english ? "Products could not load" : "商品暂时无法读取"}
+                </AlertTitle>
+                <AlertDescription>
+                  {english
+                    ? "Your place in the store is unchanged. Retry the catalog when the service is available."
+                    : "当前店铺与操作不会丢失；服务恢复后可重新读取商品。"}
+                </AlertDescription>
+              </div>
+              {onRetryCatalog ? (
+                <AlertAction>
+                  <Button
+                    variant="primary-outline"
+                    size="sm"
+                    type="button"
+                    onClick={onRetryCatalog}
+                  >
+                    <RefreshCw size={15} aria-hidden="true" />
+                    {english ? "Retry" : "重新加载"}
+                  </Button>
+                </AlertAction>
+              ) : null}
+            </Alert>
+          ) : catalogResolved ? (
             listings.length ? (
               <div className="grid grid-cols-1 gap-0 lg:grid-cols-4 lg:gap-5">
                 {listings.map((listing) => (
@@ -277,17 +363,71 @@ export function StorefrontView({
                 <PackageOpen size={24} aria-hidden="true" />
                 <div>
                   <strong>
-                    {english
-                      ? "No products are listed yet"
-                      : "这家店暂时没有在售商品"}
+                    {canManageStore
+                      ? verticalCopy(
+                          "emptyManagerTitle",
+                          "还没有发布商品",
+                          "No products are published yet",
+                        )
+                      : verticalCopy(
+                          "emptyBuyerTitle",
+                          "这家店暂时没有在售商品",
+                          "This store has no active listings yet",
+                        )}
                   </strong>
                   <p>
-                    {english
-                      ? "You can return to the mall and continue browsing other stores."
-                      : "可以返回商城继续看看其他店铺。"}
+                    {canManageStore
+                      ? verticalCopy(
+                          "emptyManagerDescription",
+                          "添加真实商品资料，审核通过后即可对外展示。",
+                          "Add a real product. It becomes public after review.",
+                        )
+                      : verticalCopy(
+                          "emptyBuyerDescription",
+                          "可以先咨询店长，或继续浏览其他店铺。",
+                          "Ask the store manager or continue browsing other stores.",
+                        )}
                   </p>
                 </div>
-                <a href="/">{english ? "Browse other stores" : "浏览其他店铺"}</a>
+                <div className="storefront-view-empty-actions">
+                  {canManageStore && onOpenStoreConsole ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      type="button"
+                      onClick={onOpenStoreConsole}
+                    >
+                      {verticalCopy(
+                        "emptyManagerAction",
+                        "添加第一个商品",
+                        "Add the first product",
+                      )}
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        type="button"
+                        onClick={() => setManagerOpen(true)}
+                      >
+                        <MessageCircle size={15} aria-hidden="true" />
+                        {verticalCopy(
+                          "emptyBuyerAiAction",
+                          "咨询店长",
+                          "Ask the store manager",
+                        )}
+                      </Button>
+                      <a href="/">
+                        {verticalCopy(
+                          "emptyBrowseAction",
+                          "浏览其他店铺",
+                          "Browse other stores",
+                        )}
+                      </a>
+                    </>
+                  )}
+                </div>
               </div>
             )
           ) : (

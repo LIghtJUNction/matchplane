@@ -10,13 +10,25 @@ import {
 } from "react";
 import {
   ArrowUp,
+  ArrowUpRight,
   Brain,
+  Compass,
   FileUp,
   History,
   LoaderCircle,
+  MoreHorizontal,
+  RefreshCw,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { Button } from "@appica/ui-react/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@appica/ui-react/dropdown-menu";
 import { Textarea } from "@appica/ui-react/textarea";
 
 import {
@@ -27,6 +39,7 @@ import {
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
+  MarketplaceApiError,
   uploadMarketplaceAttachment,
   querySubplatformRetrieval,
   updateMarketplaceIntent,
@@ -52,6 +65,10 @@ import {
 } from "../lib/conversation-history";
 import type { InterfaceLocale } from "../lib/preferences";
 import { mapRecommendations } from "../marketplace-listings";
+import {
+  clearPendingConversion,
+  readPendingConversion,
+} from "../pending-conversion";
 import type { AssetListing } from "../types";
 import { ConversationHistoryPanel } from "./ConversationHistoryPanel";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
@@ -81,12 +98,40 @@ function useHomePlaceholder(
   _enabled: boolean,
   configuredPhrases?: string[],
 ) {
-  const phrases = configuredPhrases?.length
-    ? configuredPhrases
-    : locale === "en"
-      ? HOME_PLACEHOLDER_EXAMPLES.en
-      : HOME_PLACEHOLDER_EXAMPLES.zh;
-  return phrases[0];
+  if (configuredPhrases?.length) {
+    return configuredPhrases[0];
+  }
+  return HOME_PLACEHOLDER_EXAMPLES[locale][0];
+}
+
+interface RecoverableChatError {
+  detail: string;
+  failedUserMessageId: string;
+  prompt: string;
+  retryAfterMs?: number;
+}
+
+function formatRetryTiming(
+  retryAfterMs: number | undefined,
+  locale: InterfaceLocale,
+): string | null {
+  if (!retryAfterMs || retryAfterMs <= 0) return null;
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1_000));
+  if (seconds < 60) {
+    return locale === "en"
+      ? `Try again in about ${seconds} seconds.`
+      : `建议约 ${seconds} 秒后重试。`;
+  }
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) {
+    return locale === "en"
+      ? `Try again in about ${minutes} minutes.`
+      : `建议约 ${minutes} 分钟后重试。`;
+  }
+  const hours = Math.ceil(minutes / 60);
+  return locale === "en"
+    ? `Try again in about ${hours} hours.`
+    : `建议约 ${hours} 小时后重试。`;
 }
 
 interface ChatMessage {
@@ -96,10 +141,68 @@ interface ChatMessage {
   attachments?: MarketplaceAttachment[];
   choices?: Array<MallAssistantChoiceAction & { selectedValue?: string }>;
   recommendations?: AssetListing[];
-  handoff?: MallAssistantHumanHandoffAction & {
-    status: "pending" | "sent" | "failed";
+  handoff?: Pick<
+    MallAssistantHumanHandoffAction,
+    "type" | "intent" | "productIds"
+  > & {
+    requestId: string;
+    conversionAttemptId: string;
+    status:
+      | "confirmation_required"
+      | "sending"
+      | "sent"
+      | "failed"
+      | "cancelled";
   };
   contactConsent?: MallAssistantContactConsentAction;
+}
+
+type ChatHandoffStatus = NonNullable<ChatMessage["handoff"]>["status"];
+
+function localeText(locale: InterfaceLocale, en: string, zh: string): string {
+  return locale === "en" ? en : zh;
+}
+
+function assistantRoleLabel(
+  platformSlug: string,
+  locale: InterfaceLocale,
+): string {
+  if (platformSlug === "root") {
+    return localeText(locale, "Shopping Assistant", "选货员");
+  }
+  return localeText(locale, "AI Store Manager", "AI 店长");
+}
+
+function handoffStatusLabel(
+  status: ChatHandoffStatus,
+  locale: InterfaceLocale,
+): string {
+  switch (status) {
+    case "confirmation_required":
+      return localeText(locale, "Notify store staff?", "要通知店员吗？");
+    case "sending":
+      return localeText(
+        locale,
+        "Saving your handoff request…",
+        "正在记录人工介入请求…",
+      );
+    case "sent":
+      return localeText(locale, "Handoff request saved", "人工介入请求已记录");
+    case "cancelled":
+      return localeText(locale, "Store staff were not notified", "未通知店员");
+    case "failed":
+      return localeText(locale, "Handoff request failed", "人工介入请求失败");
+  }
+}
+
+function handoffActionLabel(
+  status: ChatHandoffStatus,
+  locale: InterfaceLocale,
+): string {
+  if (status === "failed") {
+    return localeText(locale, "Try again", "重试");
+  }
+  return localeText(locale, "Confirm and notify", "确认并通知");
 }
 
 function parseStoredChoices(value: unknown): ChatMessage["choices"] {
@@ -542,7 +645,7 @@ interface MatchChatProps {
   onRecommendations?: (recommendations: RecommendedBackendListing[]) => void;
   onHumanHandoff?: (input: {
     requestId: string;
-    summary: string;
+    conversionAttemptId: string;
     intent: MallAssistantHumanHandoffAction["intent"];
     productIds: string[];
   }) => Promise<void>;
@@ -590,7 +693,7 @@ export function MatchChat({
     null,
   );
   const [sending, setSending] = useState(false);
-  const [chatError, setChatError] = useState("");
+  const [chatError, setChatError] = useState<RecoverableChatError | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [shoppingMemoryOpen, setShoppingMemoryOpen] = useState(false);
   const [conversationAttachments, setConversationAttachments] = useState<
@@ -628,27 +731,35 @@ export function MatchChat({
   // scanning and makes a marketplace feel like a demo; merchants may still
   // customize the static copy through the manifest.
   const headline = isSeller ? copy.sellerTitle : copy.buyerTitle;
-  const visibleHeadline =
-    compact && isRoot && !isSeller
-      ? locale === "en"
-        ? "What are you looking for?"
-        : "想找什么？"
-      : headline;
-  const visibleDescription =
-    compact && isRoot && !isSeller
-      ? locale === "en"
-        ? "Say what you need and your budget. Matching products will appear here."
-        : "说说想买什么和预算，合适的商品会直接出现在这里。"
-      : isSeller
-        ? copy.sellerDescription
-        : copy.buyerDescription;
   const showCompactMarketplaceHeading = compact && isRoot && !isSeller;
+  let visibleHeadline = headline;
+  let visibleDescription = isSeller
+    ? copy.sellerDescription
+    : copy.buyerDescription;
+  if (showCompactMarketplaceHeading) {
+    visibleHeadline = localeText(
+      locale,
+      "What are you looking for?",
+      "想找什么？",
+    );
+    visibleDescription = localeText(
+      locale,
+      "Say what you need and your budget. Matching products will appear here.",
+      "说说想买什么和预算，合适的商品会直接出现在这里。",
+    );
+  }
   const hideMarketingHeading = home && !showCompactMarketplaceHeading;
   const homePlaceholder = useHomePlaceholder(
     locale,
     home && isRoot && !isSeller && !message && !composerFocused,
     subplatform.ui?.chat?.homePlaceholderPhrases,
   );
+  let composerPlaceholder = copy.buyerPlaceholder;
+  if (home && !isSeller) {
+    composerPlaceholder = homePlaceholder;
+  } else if (isSeller) {
+    composerPlaceholder = copy.sellerPlaceholder;
+  }
   const conversationStorageKey = `${SHOPPING_CONVERSATION_KEY}:${subplatform.slug}:${role}`;
 
   useEffect(() => {
@@ -713,18 +824,58 @@ export function MatchChat({
     locale === "en"
       ? ["Browse publicly", "Compare across stores", "Consent before contact"]
       : ["公开浏览", "跨店比较", "联系前征得同意"];
-  const quickPrompts =
-    locale === "en"
-      ? [
-          "A lightweight laptop for commuting, within my budget",
-          "Compare a few suitable options and explain the trade-offs",
-          "Find a reliable store for this product",
-        ]
-      : [
-          "预算内找一台适合通勤的轻薄电脑",
-          "比较几款合适的商品，并说明取舍",
-          "帮我找一家可靠的店铺",
-        ];
+  const starterPromptCardsByLocale = {
+    en: [
+      {
+        id: "describe",
+        badge: "Start",
+        title: "Describe what you need",
+        desc: "Share your budget, use case, and non-negotiable requirements",
+        prompt:
+          "Help me clarify my budget, use case, and must-have requirements.",
+      },
+      {
+        id: "compare",
+        badge: "Compare",
+        title: "Compare shown offers",
+        desc: "Explain trade-offs using only offers and facts already shown",
+        prompt:
+          "Compare the offers already shown and explain the factual trade-offs.",
+      },
+      {
+        id: "stores",
+        badge: "Browse",
+        title: "Browse public stores",
+        desc: "Show currently public stores without making verification claims",
+        prompt: "Show currently public stores and their listed categories.",
+      },
+    ],
+    zh: [
+      {
+        id: "describe",
+        badge: "开始",
+        title: "描述真实需求",
+        desc: "说明预算、用途和不能妥协的条件",
+        prompt: "帮我梳理预算、用途和必须满足的条件。",
+      },
+      {
+        id: "compare",
+        badge: "比较",
+        title: "比较已展示商品",
+        desc: "只依据已展示商品和事实说明取舍",
+        prompt: "比较已经展示的商品，并依据已知事实说明取舍。",
+      },
+      {
+        id: "stores",
+        badge: "浏览",
+        title: "查看公开店铺",
+        desc: "只列出当前公开店铺，不附加未经证实的认证声明",
+        prompt: "列出当前公开店铺及其已上架分类。",
+      },
+    ],
+  };
+  const starterPromptCards = isRoot ? starterPromptCardsByLocale[locale] : [];
+
   const applyQuickPrompt = (value: string) => {
     setMessage(value);
     window.requestAnimationFrame(() => {
@@ -764,6 +915,7 @@ export function MatchChat({
     // A platform path and a buyer/seller side define the matching scope. Do not carry a
     // conversation identifier or transcript into another node or role by accident.
     if (!isRoot || isSeller) setMessages([]);
+    setChatError(null);
     setSellerRouteChoices([]);
     setConversationAttachments([]);
     setSupplyDiscoveryEnabled(copy.buyerDiscoveryDefault);
@@ -856,13 +1008,15 @@ export function MatchChat({
               : "最多保留 8 个附件",
           );
       } catch (error) {
-        onNotice(
+        const detail =
           error instanceof Error
             ? error.message
-            : locale === "en"
-              ? "Could not upload the attachment."
-              : "附件上传失败，请稍后重试",
-        );
+            : localeText(
+                locale,
+                "Could not upload the attachment.",
+                "附件上传失败，请稍后重试",
+              );
+        onNotice(detail);
       } finally {
         setMediaUploading(false);
       }
@@ -887,43 +1041,52 @@ export function MatchChat({
       if ((!text && !conversationAttachments.length) || sending) return;
 
       setSending(true);
+      const failedUserMessageId = chatError?.failedUserMessageId;
+      setChatError(null);
       setMessage("");
       const submittedAttachments = conversationAttachments;
       setConversationAttachments([]);
       const requestId = crypto.randomUUID();
-      const conversationId =
-        conversationIdRef.current ??
-        (conversationIdRef.current = crypto.randomUUID());
+      if (!conversationIdRef.current) {
+        conversationIdRef.current = crypto.randomUUID();
+      }
+      const conversationId = conversationIdRef.current;
+      const retryBaseMessages = failedUserMessageId
+        ? messages.filter(
+            (messageItem) => messageItem.id !== failedUserMessageId,
+          )
+        : messages;
       const narrative = buildConversationNarrative(
-        messages
+        retryBaseMessages
           .filter((item) => item.role === "user")
           .map((item) => item.text),
         text,
       );
-      setMessages((current) => [
-        ...current,
-        {
-          id: `${requestId}-user`,
-          role: "user",
-          text,
-          ...(submittedAttachments.length
-            ? { attachments: submittedAttachments }
-            : {}),
-        },
-      ]);
+      const userMessage: ChatMessage = {
+        id: `${requestId}-user`,
+        role: "user",
+        text,
+        ...(submittedAttachments.length
+          ? { attachments: submittedAttachments }
+          : {}),
+      };
+      setMessages([...retryBaseMessages, userMessage]);
 
       try {
         const live = isLiveMarketplaceEnabled();
         if (!live) {
-          const message = isSeller
+          const detail = isSeller
             ? runtime.unavailableSupply
             : runtime.unavailableDemand;
-          setMessages((current) => [
-            ...current,
-            { id: `${requestId}-assistant`, role: "assistant", text: message },
-          ]);
+          setChatError({
+            detail,
+            failedUserMessageId: userMessage.id,
+            prompt: text,
+          });
           setMessage(text);
-          onNotice(message);
+          setConversationAttachments(submittedAttachments);
+          focusInputAfterErrorRef.current = true;
+          onNotice(detail);
           return;
         }
         const route = live
@@ -995,6 +1158,8 @@ export function MatchChat({
         }
         const routedRecommendations: RecommendedBackendListing[] = [];
         let retrievalDegraded = false;
+        let successfulTargetCount = 0;
+        let firstTargetError: unknown = null;
         if (live) {
           // The root and every child use the same generic marketplace transport. A route plan is
           // an allow-listed set of target nodes chosen by the platform Agent; send the request
@@ -1385,10 +1550,12 @@ export function MatchChat({
                   );
                 }
               }
-            } catch {
+              successfulTargetCount += 1;
+            } catch (error) {
               // One child being offline must not erase matches already returned by other active
               // nodes. Keep the partial result and make the degraded state visible below.
               retrievalDegraded = true;
+              firstTargetError ??= error;
             }
           };
           await runWithConcurrency(
@@ -1396,6 +1563,8 @@ export function MatchChat({
             CHAT_TARGET_CONCURRENCY,
             processTarget,
           );
+          if (isSeller && successfulTargetCount === 0 && firstTargetError)
+            throw firstTargetError;
           // A successful request with no candidates is still a new result. Clear
           // the previous cards instead of leaving stale offers on screen and
           // making them look like matches for the latest message.
@@ -1412,17 +1581,26 @@ export function MatchChat({
           route && route.routePlan.length > MAX_CHAT_TARGETS
             ? runtime.routeOverflow
             : "";
-        const assistantText = isSeller
-          ? copy.sellerSuccess
-          : live
-            ? route?.status === "degraded" && route.routePlan.length
-              ? runtime.routeDegraded(visibleRouteNames, routeOverflowSuffix)
-              : route?.routePlan.length
-                ? runtime.routeSelected(visibleRouteNames, routeOverflowSuffix)
-                : route?.routing.source === "ai"
-                  ? runtime.noMatch
-                  : runtime.noChildren
-            : runtime.recorded;
+        let assistantText = runtime.recorded;
+        if (isSeller) {
+          assistantText = copy.sellerSuccess;
+        } else if (live) {
+          if (route?.status === "degraded" && route.routePlan.length) {
+            assistantText = runtime.routeDegraded(
+              visibleRouteNames,
+              routeOverflowSuffix,
+            );
+          } else if (route?.routePlan.length) {
+            assistantText = runtime.routeSelected(
+              visibleRouteNames,
+              routeOverflowSuffix,
+            );
+          } else if (route?.routing.source === "ai") {
+            assistantText = runtime.noMatch;
+          } else {
+            assistantText = runtime.noChildren;
+          }
+        }
         const degradedSuffix = retrievalDegraded
           ? runtime.retrievalDegraded
           : "";
@@ -1434,34 +1612,36 @@ export function MatchChat({
             text: `${assistantText}${isSeller ? "" : degradedSuffix}`,
           },
         ]);
-        onNotice(
-          retrievalDegraded
-            ? runtime.retrievalDegradedNotice
-            : isSeller
-              ? copy.sellerSuccess
-              : copy.buyerSuccess,
-        );
+        let successNotice = isSeller ? copy.sellerSuccess : copy.buyerSuccess;
+        if (retrievalDegraded) {
+          successNotice = runtime.retrievalDegradedNotice;
+        }
+        onNotice(successNotice);
         if (isSeller)
           window.setTimeout(
             () => document.getElementById("seller-display-name")?.focus(),
             0,
           );
       } catch (error) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: `${requestId}-assistant`,
-            role: "assistant",
-            text: error instanceof Error ? error.message : runtime.sendFailed,
-          },
-        ]);
+        const detail =
+          error instanceof Error ? error.message : runtime.sendFailed;
+        setChatError({
+          detail,
+          failedUserMessageId: userMessage.id,
+          prompt: text,
+          ...(error instanceof MarketplaceApiError && error.retryAfterMs
+            ? { retryAfterMs: error.retryAfterMs }
+            : {}),
+        });
         setMessage(text);
+        setConversationAttachments(submittedAttachments);
         focusInputAfterErrorRef.current = true;
       } finally {
         setSending(false);
       }
     },
     [
+      chatError,
       conversationAttachments,
       copy.buyerSuccess,
       copy.sellerSuccess,
@@ -1497,7 +1677,8 @@ export function MatchChat({
       const text = rawText.trim();
       if (!text || sending) return;
       setSending(true);
-      setChatError("");
+      const failedUserMessageId = chatError?.failedUserMessageId;
+      setChatError(null);
       setMessage("");
       const requestId = crypto.randomUUID();
       const userMessage: ChatMessage = {
@@ -1505,8 +1686,13 @@ export function MatchChat({
         role: "user",
         text,
       };
+      const retryBaseMessages = failedUserMessageId
+        ? messages.filter(
+            (messageItem) => messageItem.id !== failedUserMessageId,
+          )
+        : messages;
       const priorMessages = answeredChoice
-        ? messages.map((messageItem) =>
+        ? retryBaseMessages.map((messageItem) =>
             messageItem.id === answeredChoice.messageId
               ? {
                   ...messageItem,
@@ -1521,7 +1707,7 @@ export function MatchChat({
                 }
               : messageItem,
           )
-        : messages;
+        : retryBaseMessages;
       const conversation = [...priorMessages, userMessage].slice(
         -MAX_CONVERSATION_MESSAGES,
       );
@@ -1561,40 +1747,33 @@ export function MatchChat({
               action.type === "choice" ? [action] : [],
             ),
             ...(recommendations.length ? { recommendations } : {}),
-            ...(handoff ? { handoff: { ...handoff, status: "pending" } } : {}),
+            ...(handoff
+              ? {
+                  handoff: {
+                    type: "human_handoff" as const,
+                    requestId: reply.requestId,
+                    conversionAttemptId: crypto.randomUUID(),
+                    intent: handoff.intent,
+                    productIds: handoff.productIds,
+                    status: "confirmation_required" as const,
+                  },
+                }
+              : {}),
             ...(contactConsent ? { contactConsent } : {}),
           },
         ]);
         onNotice(reply.answer);
-        if (handoff && onHumanHandoff) {
-          try {
-            await onHumanHandoff({
-              requestId: reply.requestId,
-              summary: handoff.summary,
-              intent: handoff.intent,
-              productIds: handoff.productIds,
-            });
-            setMessages((current) =>
-              current.map((item) =>
-                item.id === assistantId && item.handoff
-                  ? { ...item, handoff: { ...item.handoff, status: "sent" } }
-                  : item,
-              ),
-            );
-          } catch {
-            setMessages((current) =>
-              current.map((item) =>
-                item.id === assistantId && item.handoff
-                  ? { ...item, handoff: { ...item.handoff, status: "failed" } }
-                  : item,
-              ),
-            );
-          }
-        }
       } catch (error) {
         const detail =
           error instanceof Error ? error.message : runtime.sendFailed;
-        setChatError(detail);
+        setChatError({
+          detail,
+          failedUserMessageId: userMessage.id,
+          prompt: text,
+          ...(error instanceof MarketplaceApiError && error.retryAfterMs
+            ? { retryAfterMs: error.retryAfterMs }
+            : {}),
+        });
         setMessage(text);
         focusInputAfterErrorRef.current = true;
       } finally {
@@ -1602,16 +1781,116 @@ export function MatchChat({
       }
     },
     [
+      chatError,
       locale,
       messages,
       onNotice,
       onRecommendations,
-      onHumanHandoff,
       runtime.sendFailed,
       sending,
       subplatform,
     ],
   );
+
+  const confirmHumanHandoff = useCallback(
+    async (messageId: string) => {
+      const message = messages.find((item) => item.id === messageId);
+      if (
+        !message?.handoff ||
+        !["confirmation_required", "failed"].includes(message.handoff.status) ||
+        !onHumanHandoff
+      )
+        return;
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === messageId && item.handoff
+            ? { ...item, handoff: { ...item.handoff, status: "sending" } }
+            : item,
+        ),
+      );
+      try {
+        await onHumanHandoff({
+          requestId: message.handoff.requestId,
+          conversionAttemptId: message.handoff.conversionAttemptId,
+          intent: message.handoff.intent,
+          productIds: message.handoff.productIds,
+        });
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === messageId && item.handoff
+              ? { ...item, handoff: { ...item.handoff, status: "sent" } }
+              : item,
+          ),
+        );
+      } catch {
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === messageId && item.handoff
+              ? { ...item, handoff: { ...item.handoff, status: "failed" } }
+              : item,
+          ),
+        );
+      }
+    },
+    [messages, onHumanHandoff],
+  );
+
+  const cancelHumanHandoff = useCallback(
+    (messageId: string) => {
+      const message = messages.find((item) => item.id === messageId);
+      const pending = readPendingConversion();
+      if (
+        message?.handoff &&
+        pending?.conversionAttemptId === message.handoff.conversionAttemptId
+      )
+        clearPendingConversion(pending.offerId);
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === messageId && item.handoff
+            ? { ...item, handoff: { ...item.handoff, status: "cancelled" } }
+            : item,
+        ),
+      );
+    },
+    [messages],
+  );
+
+  useEffect(() => {
+    const pending = readPendingConversion();
+    if (
+      pending?.action !== "store_ai_handoff" ||
+      pending.storePath !== subplatform.path ||
+      !pending.intentLevel ||
+      !pending.productIds
+    )
+      return;
+    const intent = pending.intentLevel;
+    const productIds = pending.productIds;
+    const messageId = `pending-handoff-${pending.conversionAttemptId}`;
+    setMessages((current) =>
+      current.some((message) => message.id === messageId)
+        ? current
+        : [
+            ...current,
+            {
+              id: messageId,
+              role: "assistant",
+              text:
+                locale === "en"
+                  ? "Your earlier handoff request is ready for confirmation."
+                  : "已恢复登录前的人工介入请求，请再次确认是否通知店员。",
+              handoff: {
+                type: "human_handoff",
+                requestId: `restored-${pending.conversionAttemptId}`,
+                conversionAttemptId: pending.conversionAttemptId,
+                intent,
+                productIds,
+                status: "confirmation_required",
+              },
+            },
+          ],
+    );
+  }, [locale, subplatform.path]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1642,11 +1921,12 @@ export function MatchChat({
       setSignedIn(hasAuthSession);
       if (isRoot && !isSeller) {
         const authUserId = authState?.data?.user?.id;
-        const owner = session?.partyId
-          ? `party:${session.partyId}`
-          : typeof authUserId === "string" && authUserId
-            ? `user:${authUserId}`
-            : "guest";
+        let owner = "guest";
+        if (session?.partyId) {
+          owner = `party:${session.partyId}`;
+        } else if (typeof authUserId === "string" && authUserId) {
+          owner = `user:${authUserId}`;
+        }
         const storedConversation = readStoredConversation(
           conversationStorageKey,
           owner,
@@ -1767,7 +2047,7 @@ export function MatchChat({
     if (sending) return;
     window.sessionStorage.removeItem(conversationStorageKey);
     setActiveHistoryId(crypto.randomUUID());
-    setChatError("");
+    setChatError(null);
     setMessage("");
     setMessages([]);
     setConversationAttachments([]);
@@ -1797,7 +2077,7 @@ export function MatchChat({
   ) => {
     if (sending) return;
     setActiveHistoryId(conversation.id);
-    setChatError("");
+    setChatError(null);
     setMessages(conversation.messages);
     setConversationAttachments([]);
     setConversationHistoryOpen(false);
@@ -1823,7 +2103,7 @@ export function MatchChat({
     if (id !== activeHistoryId) return;
     window.sessionStorage.removeItem(conversationStorageKey);
     setActiveHistoryId(crypto.randomUUID());
-    setChatError("");
+    setChatError(null);
     setMessages([]);
     setConversationAttachments([]);
     conversationIdRef.current = null;
@@ -1853,37 +2133,51 @@ export function MatchChat({
 
   const chatActions = (
     <>
-      {isRoot && !isSeller ? (
-        <button
-          className="match-chat-clear"
-          type="button"
-          onClick={() => setConversationHistoryOpen(true)}
+      <DropdownMenu size="sm">
+        <DropdownMenuTrigger
+          render={
+            <Button
+              className="match-chat-more-trigger"
+              variant="ghost"
+              size="icon-sm"
+              type="button"
+              aria-label={locale === "en" ? "Conversation options" : "对话选项"}
+              title={locale === "en" ? "Conversation options" : "对话选项"}
+            >
+              <MoreHorizontal size={17} aria-hidden="true" />
+            </Button>
+          }
+        />
+        <DropdownMenuContent
+          className="match-chat-more-menu"
+          align="end"
+          sideOffset={8}
         >
-          <History size={14} aria-hidden="true" />
-          <span>{locale === "en" ? "History" : "历史"}</span>
-        </button>
-      ) : null}
-      {isRoot && !isSeller && signedIn ? (
-        <button
-          className="match-chat-clear"
-          type="button"
-          onClick={() => setShoppingMemoryOpen(true)}
-        >
-          <Brain size={14} aria-hidden="true" />
-          <span>{locale === "en" ? "Memory" : "记忆"}</span>
-        </button>
-      ) : null}
-      {messages.length ? (
-        <button
-          className="match-chat-clear"
-          type="button"
-          onClick={clearConversation}
-          disabled={sending}
-        >
-          <Trash2 size={14} aria-hidden="true" />
-          <span>{label("clearChatLabel", "清空")}</span>
-        </button>
-      ) : null}
+          <DropdownMenuItem onClick={() => setConversationHistoryOpen(true)}>
+            <History size={15} aria-hidden="true" />
+            <span>{locale === "en" ? "History" : "历史"}</span>
+          </DropdownMenuItem>
+          {isRoot && !isSeller && signedIn ? (
+            <DropdownMenuItem onClick={() => setShoppingMemoryOpen(true)}>
+              <Brain size={15} aria-hidden="true" />
+              <span>{locale === "en" ? "Memory" : "记忆"}</span>
+            </DropdownMenuItem>
+          ) : null}
+          {messages.length ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="match-chat-clear-menu-item"
+                disabled={sending}
+                onClick={clearConversation}
+              >
+                <Trash2 size={15} aria-hidden="true" />
+                <span>{label("clearChatLabel", "清空")}</span>
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <span className="sr-only" aria-live="polite">
         {!sending && signedIn ? label("signedInChatStatus", "已登录") : ""}
       </span>
@@ -1971,14 +2265,19 @@ export function MatchChat({
               key={item.id}
               className={`match-chat-message-group is-${item.role}`}
             >
+              {item.role === "assistant" ? (
+                <div className="match-chat-assistant-tag" aria-hidden="true">
+                  <Sparkles size={12} />
+                  <span>{assistantRoleLabel(subplatform.slug, locale)}</span>
+                </div>
+              ) : null}
               <p className={`match-chat-message is-${item.role}`}>
                 {item.text}
               </p>
               {item.choices?.map((choice) => (
-                <div
+                <fieldset
                   key={choice.id}
                   className="match-chat-tool-choice"
-                  role="group"
                   aria-label={choice.question}
                 >
                   <strong>{choice.question}</strong>
@@ -2001,7 +2300,7 @@ export function MatchChat({
                       </button>
                     ))}
                   </div>
-                </div>
+                </fieldset>
               ))}
               {item.contactConsent ? (
                 <StoreContactConsentCard
@@ -2016,31 +2315,38 @@ export function MatchChat({
                   role={item.handoff.status === "failed" ? "alert" : "status"}
                 >
                   <strong>
-                    {item.handoff.status === "pending"
-                      ? locale === "en"
-                        ? "Notifying store staff…"
-                        : "正在通知店员…"
-                      : item.handoff.status === "sent"
-                        ? locale === "en"
-                          ? "Store staff have been notified"
-                          : "已通知店员"
-                        : locale === "en"
-                          ? "Staff notification failed"
-                          : "通知店员失败"}
+                    {handoffStatusLabel(item.handoff.status, locale)}
                   </strong>
                   <span>
-                    {item.handoff.status === "failed"
-                      ? locale === "en"
-                        ? "You can keep chatting and try the handoff again later."
-                        : "你可以继续对话，稍后再请求人工介入。"
-                      : locale === "en"
-                        ? "The AI manager remains available in this conversation. No contact details were shared."
-                        : "AI 店长会继续对话，本次没有交换任何联系方式。"}
+                    {locale === "en"
+                      ? "Only your structured shopping intent and selected offer IDs will be shared. Chat text and contact details are excluded."
+                      : "只会共享结构化购买意向和已选商品编号；不会共享聊天原文或联系方式。"}
                   </span>
+                  {item.handoff.status === "confirmation_required" ||
+                  item.handoff.status === "failed" ? (
+                    <div className="match-chat-handoff-actions">
+                      <Button
+                        type="button"
+                        className="match-chat-handoff-confirm"
+                        onClick={() => void confirmHumanHandoff(item.id)}
+                      >
+                        {handoffActionLabel(item.handoff.status, locale)}
+                      </Button>
+                      {item.handoff.status === "confirmation_required" ? (
+                        <Button
+                          type="button"
+                          className="match-chat-handoff-cancel"
+                          onClick={() => cancelHumanHandoff(item.id)}
+                        >
+                          {locale === "en" ? "Not now" : "暂不通知"}
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               {item.recommendations?.length ? (
-                <div
+                <section
                   className="match-chat-recommendations"
                   aria-label={
                     locale === "en" ? "Recommended products" : "推荐商品"
@@ -2062,7 +2368,7 @@ export function MatchChat({
                       }
                     />
                   ))}
-                </div>
+                </section>
               ) : null}
               {item.attachments?.length ? (
                 <ul
@@ -2080,6 +2386,10 @@ export function MatchChat({
           ))}
           {sending ? (
             <div className="match-chat-message-group is-assistant">
+              <div className="match-chat-assistant-tag" aria-hidden="true">
+                <Sparkles size={12} />
+                <span>{assistantRoleLabel(subplatform.slug, locale)}</span>
+              </div>
               <div
                 className="chat-typing-indicator"
                 role="status"
@@ -2095,9 +2405,8 @@ export function MatchChat({
       ) : null}
 
       {sellerRouteChoices.length ? (
-        <div
+        <fieldset
           className="match-chat-route-choices"
-          role="group"
           aria-label={runtime.routeChoicesAria}
         >
           {sellerRouteChoices.map((target) => (
@@ -2112,7 +2421,7 @@ export function MatchChat({
               <small>{target.path}</small>
             </button>
           ))}
-        </div>
+        </fieldset>
       ) : null}
 
       {mediaUploadEnabled && conversationAttachments.length ? (
@@ -2142,34 +2451,75 @@ export function MatchChat({
           ))}
         </ul>
       ) : null}
-      {isRoot && !isSeller && !compact && !messages.length ? (
-        <div
+      {isRoot && !isSeller && !messages.length ? (
+        <section
           className="match-chat-suggestions"
           aria-label={
             locale === "en" ? "Example shopping requests" : "购物需求示例"
           }
         >
-          <span>{locale === "en" ? "Try asking" : "试着这样问"}</span>
-          <div>
-            {quickPrompts.map((prompt) => (
+          <div className="match-chat-starter-title-row">
+            <Compass size={14} aria-hidden="true" />
+            <span>
+              {locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}
+            </span>
+          </div>
+
+          <div className="match-chat-starter-grid">
+            {starterPromptCards.map((card) => (
               <button
-                key={prompt}
+                key={card.id}
                 type="button"
-                onClick={() => applyQuickPrompt(prompt)}
+                className="match-chat-starter-card"
+                onClick={() => {
+                  if (isRoot && !isSeller) {
+                    void submitGuestMessage(card.prompt);
+                  } else {
+                    applyQuickPrompt(card.prompt);
+                  }
+                }}
               >
-                {prompt}
+                <div className="match-chat-starter-card-top">
+                  <span className="match-chat-starter-badge">{card.badge}</span>
+                  <ArrowUpRight
+                    size={13}
+                    className="match-chat-starter-arrow"
+                    aria-hidden="true"
+                  />
+                </div>
+                <strong className="match-chat-starter-title">
+                  {card.title}
+                </strong>
+                <span className="match-chat-starter-desc">{card.desc}</span>
               </button>
             ))}
           </div>
-        </div>
+        </section>
       ) : null}
       {chatError ? (
         <div className="home-chat-error" role="alert">
-          <span>{chatError}</span>
+          <span className="home-chat-error-copy">
+            <strong>
+              {locale === "en"
+                ? "That reply did not complete"
+                : "这次没有完成回复"}
+            </strong>
+            <span>
+              {chatError.detail}{" "}
+              {formatRetryTiming(chatError.retryAfterMs, locale)}
+            </span>
+            <small>
+              {locale === "en"
+                ? "Your message and attachments are kept for retry."
+                : "原输入和附件仍会保留，可直接重试。"}
+            </small>
+          </span>
           <button
             type="button"
             onClick={() => inputRef.current?.form?.requestSubmit()}
+            disabled={sending || mediaUploading}
           >
+            <RefreshCw size={15} aria-hidden="true" />
             {locale === "en" ? "Retry answer" : "重试回答"}
           </button>
         </div>
@@ -2227,22 +2577,13 @@ export function MatchChat({
           onFocus={() => setComposerFocused(true)}
           onBlur={() => setComposerFocused(false)}
           onKeyDown={handleInputKeyDown}
-          placeholder={
-            home && !isSeller
-              ? homePlaceholder
-              : isSeller
-                ? copy.sellerPlaceholder
-                : copy.buyerPlaceholder
-          }
+          placeholder={composerPlaceholder}
           rows={home ? 1 : 2}
           maxLength={10000}
           aria-describedby="match-chat-footnote"
           readOnly={sending}
           aria-disabled={sending}
         />
-        {home ? (
-          <div className="home-chat-inline-actions">{chatActions}</div>
-        ) : null}
         <Button
           className={
             home ? "home-chat-send size-14 shrink-0" : "match-chat-send"
@@ -2269,7 +2610,53 @@ export function MatchChat({
             <ArrowUp size={18} aria-hidden="true" />
           )}
         </Button>
+        {home ? <div className="home-chat-toolbar">{chatActions}</div> : null}
       </form>
+      {isRoot && !isSeller && !messages.length ? (
+        <section
+          className="match-chat-suggestions"
+          aria-label={
+            locale === "en" ? "Example shopping requests" : "购物需求示例"
+          }
+        >
+          <div className="match-chat-starter-title-row">
+            <Compass size={14} aria-hidden="true" />
+            <span>
+              {locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}
+            </span>
+          </div>
+
+          <div className="match-chat-starter-grid">
+            {starterPromptCards.map((card) => (
+              <button
+                key={card.id}
+                type="button"
+                className="match-chat-starter-card"
+                onClick={() => {
+                  if (isRoot && !isSeller) {
+                    void submitGuestMessage(card.prompt);
+                  } else {
+                    applyQuickPrompt(card.prompt);
+                  }
+                }}
+              >
+                <div className="match-chat-starter-card-top">
+                  <span className="match-chat-starter-badge">{card.badge}</span>
+                  <ArrowUpRight
+                    size={13}
+                    className="match-chat-starter-arrow"
+                    aria-hidden="true"
+                  />
+                </div>
+                <strong className="match-chat-starter-title">
+                  {card.title}
+                </strong>
+                <span className="match-chat-starter-desc">{card.desc}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {!isSeller && signedIn && !isRoot ? (
         <label className="match-chat-discovery">
           <input
@@ -2395,11 +2782,15 @@ function currentLocation(): string {
 }
 
 function isSafePendingLocation(value: string): boolean {
+  const hasControlCharacter = Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  });
   return (
     value.startsWith("/") &&
     !value.startsWith("//") &&
     !value.includes("\\") &&
-    !/[\u0000-\u001f\u007f]/.test(value)
+    !hasControlCharacter
   );
 }
 

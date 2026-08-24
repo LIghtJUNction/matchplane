@@ -17,7 +17,12 @@ import { HostedStoreOnboarding } from "../HostedStoreOnboarding";
 import type { AssetListing, WorkspaceRole } from "../../types";
 import type { SubplatformConfig } from "../../subplatform";
 import type { StoreSummary } from "../../api";
-import type { InterfaceLocale, InterfacePalette, InterfaceTheme } from "../../lib/preferences";
+import type {
+  InterfaceLocale,
+  InterfacePalette,
+  InterfaceTextSize,
+  InterfaceTheme,
+} from "../../lib/preferences";
 import type { AuthenticatedUser } from "../../hooks/useAuthSession";
 import {
   requestedStoreConsoleSection,
@@ -33,9 +38,11 @@ interface PlatformOverlaysHostProps {
   locale: InterfaceLocale;
   theme: InterfaceTheme;
   palette: InterfacePalette;
+  textSize: InterfaceTextSize;
   onThemeChange: (theme: InterfaceTheme) => void;
   onLocaleChange: (locale: InterfaceLocale) => void;
   onPaletteChange: (palette: InterfacePalette) => void;
+  onTextSizeChange: (textSize: InterfaceTextSize) => void;
   subplatform: SubplatformConfig;
   fullscreenPlugin: boolean;
   storeConsoleOpen: boolean;
@@ -69,9 +76,11 @@ export function PlatformOverlaysHost({
   locale,
   theme,
   palette,
+  textSize,
   onThemeChange,
   onLocaleChange,
   onPaletteChange,
+  onTextSizeChange,
   subplatform,
   fullscreenPlugin,
   storeConsoleOpen,
@@ -250,12 +259,15 @@ export function PlatformOverlaysHost({
                   </h3>
                 </div>
                 <PreferenceControls
+                  mode="panel"
                   theme={theme}
                   locale={locale}
                   palette={palette}
+                  textSize={textSize}
                   onThemeChange={onThemeChange}
                   onLocaleChange={onLocaleChange}
                   onPaletteChange={onPaletteChange}
+                  onTextSizeChange={onTextSizeChange}
                 />
               </section>
               <ChangePasswordPanel

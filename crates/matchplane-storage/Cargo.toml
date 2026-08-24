@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 bigdecimal.workspace = true
+hex.workspace = true
 matchplane-domain.workspace = true
 matchplane-engine.workspace = true
 matchplane-events.workspace = true

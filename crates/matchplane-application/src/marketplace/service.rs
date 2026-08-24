@@ -297,13 +297,15 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
         headers: &HeaderMap,
         request: &CreateMarketplaceSalesHandoff,
     ) -> Result<MarketplaceSalesHandoff, ApplicationError> {
-        self.authenticate_domain(
-            headers,
-            request.tenant_id,
-            request.participant_id,
-            request.domain_id,
-        )
-        .await?;
+        let party = self
+            .authenticate_domain(
+                headers,
+                request.tenant_id,
+                request.participant_id,
+                request.domain_id,
+            )
+            .await?;
+        require_marketplace_side(&party, "demand")?;
         self.writer
             .create_marketplace_sales_handoff(request)
             .await

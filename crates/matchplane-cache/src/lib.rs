@@ -45,8 +45,19 @@ pub enum ProjectionOutcome {
     Applied,
     /// The event was already present and required no change.
     Duplicate,
-    /// The incoming sequence skipped at least one event and must trigger rebuild.
+    /// The incoming sequence skipped prior state or the canonical cache pair is incomplete.
     Gap,
+    /// The same sequence already exists with a different canonical state hash.
+    Conflict,
+}
+
+/// Outcome of atomically repairing a projection from its durable source of truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectionRepairOutcome {
+    /// The durable full projection replaced missing or older cache state.
+    Repaired,
+    /// A complete projection at the same or a newer sequence was already present.
+    Current,
 }
 
 /// Valkey client and sequence-guarded book projector.
@@ -78,6 +89,15 @@ pub enum CacheError {
     /// Projection script returned an unknown code.
     #[error("Valkey projection returned unexpected code {0}")]
     UnexpectedProjectionCode(i64),
+    /// A full projection contained malformed exact values.
+    #[error("Valkey projection contains invalid exact values")]
+    InvalidProjectionData,
+    /// The cached projection sequence marker was malformed.
+    #[error("Valkey projection sequence state is corrupt")]
+    InvalidProjectionSequence,
+    /// The canonical projection sequence/JSON key pair was only partially present.
+    #[error("Valkey projection state is incomplete")]
+    IncompleteProjection,
     /// Rate-limit script returned an unknown code.
     #[error("Valkey rate limiter returned unexpected code {0}")]
     UnexpectedRateLimitCode(i64),
@@ -217,26 +237,123 @@ return 0
     ///
     /// Exact price text is left-padded and indexed as a zero-score lexicographic ZSET member. This
     /// avoids converting money into IEEE-754 scores while still satisfying low-latency ZSET reads.
+    /// A missing sequence/JSON pair is reported as a gap instead of accepting a false duplicate.
     ///
     /// # Errors
     ///
-    /// Returns [`CacheError`] for Valkey protocol failures or invalid script results.
+    /// Returns [`CacheError`] for Valkey protocol failures or invalid projection data.
     pub async fn apply_book(&mut self, book: &CachedBook) -> Result<ProjectionOutcome, CacheError> {
+        match self.project_book(book, false).await? {
+            1 => Ok(ProjectionOutcome::Applied),
+            0 => Ok(ProjectionOutcome::Duplicate),
+            -1 => Ok(ProjectionOutcome::Gap),
+            -4 => Ok(ProjectionOutcome::Conflict),
+            other => Err(CacheError::UnexpectedProjectionCode(other)),
+        }
+    }
+
+    /// Atomically installs a full PostgreSQL-authoritative projection without requiring replay.
+    ///
+    /// A complete projection at the same or a newer sequence wins, fencing delayed repairers. An
+    /// incomplete sequence/JSON pair is replaced even when its sequence marker is newer.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CacheError`] for Valkey protocol failures or invalid projection data.
+    pub async fn repair_book(
+        &mut self,
+        book: &CachedBook,
+    ) -> Result<ProjectionRepairOutcome, CacheError> {
+        match self.project_book(book, true).await? {
+            1 => Ok(ProjectionRepairOutcome::Repaired),
+            0 => Ok(ProjectionRepairOutcome::Current),
+            other => Err(CacheError::UnexpectedProjectionCode(other)),
+        }
+    }
+
+    async fn project_book(&mut self, book: &CachedBook, repair: bool) -> Result<i64, CacheError> {
         const LUA: &str = r#"
-local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-local incoming = tonumber(ARGV[1])
-if incoming <= current then return 0 end
-if incoming ~= current + 1 then return -1 end
-local book = cjson.decode(ARGV[2])
+local function normalize_decimal(value)
+  if type(value) ~= 'string' or string.match(value, '^%d+$') == nil then return nil end
+  local normalized = string.gsub(value, '^0+', '')
+  if normalized == '' then return '0' end
+  return normalized
+end
+local function compare_decimal(left, right)
+  if string.len(left) < string.len(right) then return -1 end
+  if string.len(left) > string.len(right) then return 1 end
+  if left < right then return -1 end
+  if left > right then return 1 end
+  return 0
+end
+local function increment_decimal(value)
+  local result = {}
+  local carry = 1
+  for index = string.len(value), 1, -1 do
+    local digit = string.byte(value, index) - 48 + carry
+    if digit >= 10 then digit = digit - 10 else carry = 0 end
+    table.insert(result, 1, string.char(48 + digit))
+  end
+  if carry == 1 then table.insert(result, 1, '1') end
+  return table.concat(result)
+end
+local function valid_exact(value)
+  if type(value) ~= 'string' or string.len(value) == 0 or string.len(value) > 38 then return false end
+  if string.match(value, '^%d+$') == nil or value == '0' then return false end
+  if string.len(value) > 1 and string.sub(value, 1, 1) == '0' then return false end
+  return true
+end
+local function valid_side(side, descending)
+  local previous = nil
+  for _, level in ipairs(side) do
+    if type(level) ~= 'table' then return false end
+    if not valid_exact(level.price) or not valid_exact(level.quantity) then return false end
+    if previous ~= nil then
+      local comparison = compare_decimal(level.price, previous)
+      if descending and comparison >= 0 then return false end
+      if not descending and comparison <= 0 then return false end
+    end
+    previous = level.price
+  end
+  return true
+end
+local function valid_book(book)
+  if type(book) ~= 'table' or type(book.market_id) ~= 'string' or book.market_id == '' then return false end
+  if type(book.bids) ~= 'table' or type(book.asks) ~= 'table' then return false end
+  if type(book.state_hash) ~= 'string' or string.len(book.state_hash) ~= 64 or string.match(book.state_hash, '^[0-9a-f]+$') == nil then return false end
+  return valid_side(book.bids, true) and valid_side(book.asks, false)
+end
+local sequence_value = redis.call('GET', KEYS[1])
+local existing_json = redis.call('GET', KEYS[6])
+local current = normalize_decimal(sequence_value or '0')
+local incoming = normalize_decimal(ARGV[1])
+local repair = ARGV[3] == '1'
+if incoming == nil then return -3 end
+if current == nil then
+  if not repair then return -3 end
+  current = '0'
+end
+local decoded, book = pcall(cjson.decode, ARGV[2])
+local book_sequence = normalize_decimal(string.match(ARGV[2], '"sequence"%s*:%s*(%d+)'))
+if not decoded or not valid_book(book) or book_sequence ~= incoming then return -2 end
+local complete = sequence_value ~= false and existing_json ~= false
+local comparison = compare_decimal(incoming, current)
+if complete and comparison < 0 then return 0 end
+if complete and comparison == 0 then
+  local existing_decoded, existing_book = pcall(cjson.decode, existing_json)
+  local existing_sequence = normalize_decimal(string.match(existing_json, '"sequence"%s*:%s*(%d+)'))
+  local same_identity = existing_decoded and valid_book(existing_book) and existing_sequence == current and existing_book.market_id == book.market_id
+  if same_identity and existing_book.state_hash == book.state_hash then return 0 end
+  if not repair then return -4 end
+end
+if not repair and incoming ~= increment_decimal(current) then return -1 end
 redis.call('DEL', KEYS[2], KEYS[3], KEYS[4], KEYS[5])
 for _, level in ipairs(book.bids) do
-  if string.len(level.price) > 38 or string.match(level.price, '^%d+$') == nil then return -2 end
   local member = string.rep('0', 38 - string.len(level.price)) .. level.price
   redis.call('ZADD', KEYS[2], 0, member)
   redis.call('HSET', KEYS[3], member, level.quantity)
 end
 for _, level in ipairs(book.asks) do
-  if string.len(level.price) > 38 or string.match(level.price, '^%d+$') == nil then return -2 end
   local member = string.rep('0', 38 - string.len(level.price)) .. level.price
   redis.call('ZADD', KEYS[4], 0, member)
   redis.call('HSET', KEYS[5], member, level.quantity)
@@ -265,36 +382,95 @@ return 1
                     ask_quantities_key,
                     json_key,
                 ],
-                vec![book.sequence.to_string(), json],
+                vec![
+                    book.sequence.to_string(),
+                    json,
+                    if repair { "1" } else { "0" }.to_owned(),
+                ],
             )
             .await?;
         match code {
-            1 => Ok(ProjectionOutcome::Applied),
-            0 => Ok(ProjectionOutcome::Duplicate),
-            -1 => Ok(ProjectionOutcome::Gap),
-            -2 => Err(CacheError::UnexpectedProjectionCode(-2)),
-            other => Err(CacheError::UnexpectedProjectionCode(other)),
+            -2 => Err(CacheError::InvalidProjectionData),
+            -3 => Err(CacheError::InvalidProjectionSequence),
+            other => Ok(other),
         }
     }
 
-    /// Reads the exact JSON projection used by the HTTP query path.
+    /// Reads and validates the canonical sequence/JSON projection pair used by HTTP queries.
     ///
     /// # Errors
     ///
-    /// Returns [`CacheError`] if Valkey is unavailable or stored JSON is corrupt.
+    /// Returns [`CacheError`] if Valkey is unavailable, one canonical key is missing, or the stored
+    /// projection is malformed or belongs to a different market/sequence.
     pub async fn book(&mut self, market_id: &str) -> Result<Option<CachedBook>, CacheError> {
-        let key = format!("mp:book:{market_id}:json");
-        let value: Option<String> = self.client.get(key).await?;
-        value
-            .map(|json| serde_json::from_str(&json))
-            .transpose()
-            .map_err(CacheError::from)
+        let prefix = format!("mp:book:{market_id}");
+        let values: Vec<Option<String>> = self
+            .client
+            .mget(vec![format!("{prefix}:sequence"), format!("{prefix}:json")])
+            .await?;
+        let (sequence, json) = match values.as_slice() {
+            [None, None] => return Ok(None),
+            [Some(sequence), Some(json)] => (sequence, json),
+            _ => return Err(CacheError::IncompleteProjection),
+        };
+        let sequence = sequence
+            .parse::<u64>()
+            .map_err(|_| CacheError::InvalidProjectionSequence)?;
+        let book: CachedBook = serde_json::from_str(json)?;
+        let valid_hash = book.state_hash.len() == 64
+            && book
+                .state_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        let valid_levels = valid_book_side(&book.bids, true) && valid_book_side(&book.asks, false);
+        if book.market_id != market_id || book.sequence != sequence || !valid_hash || !valid_levels
+        {
+            return Err(CacheError::InvalidProjectionData);
+        }
+        Ok(Some(book))
     }
+}
+
+fn valid_exact_value(value: &str) -> Option<i128> {
+    if value.is_empty()
+        || value.len() > 38
+        || (value.len() > 1 && value.starts_with('0'))
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    value.parse::<i128>().ok().filter(|number| *number > 0)
+}
+
+fn valid_book_side(levels: &[CachedLevel], descending: bool) -> bool {
+    let mut previous_price = None;
+    for level in levels {
+        let Some(price) = valid_exact_value(&level.price) else {
+            return false;
+        };
+        if valid_exact_value(&level.quantity).is_none()
+            || previous_price.is_some_and(|previous| {
+                if descending {
+                    price >= previous
+                } else {
+                    price <= previous
+                }
+            })
+        {
+            return false;
+        }
+        previous_price = Some(price);
+    }
+    true
 }
 
 #[cfg(test)]
 mod tests {
-    use fred::rustls::crypto::CryptoProvider;
+    use fred::{
+        interfaces::{KeysInterface, LuaInterface},
+        rustls::crypto::CryptoProvider,
+    };
+    use uuid::Uuid;
 
     use super::*;
 
@@ -303,5 +479,151 @@ mod tests {
         install_default_crypto_provider();
 
         assert!(CryptoProvider::get_default().is_some());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Valkey; CI runs ignored cache tests explicitly"]
+    async fn durable_repair_should_seed_gap_and_fence_stale_writers()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let url = std::env::var("MATCHPLANE_TEST_VALKEY_URL")?;
+        let market_id = Uuid::now_v7().to_string();
+        let mut cache = ValkeyCache::connect(&url).await?;
+        let initial_sequence = 9_007_199_254_740_992;
+        let initial_book = test_book(&market_id, initial_sequence, "100");
+
+        assert_eq!(
+            cache.apply_book(&initial_book).await?,
+            ProjectionOutcome::Gap
+        );
+        assert_eq!(
+            cache.repair_book(&initial_book).await?,
+            ProjectionRepairOutcome::Repaired
+        );
+
+        let next_book = test_book(&market_id, initial_sequence + 1, "101");
+        assert_eq!(
+            cache.apply_book(&next_book).await?,
+            ProjectionOutcome::Applied
+        );
+        assert_eq!(
+            cache.apply_book(&next_book).await?,
+            ProjectionOutcome::Duplicate
+        );
+        let mut forked_book = next_book.clone();
+        forked_book.bids[0].quantity = "9".to_owned();
+        forked_book.state_hash = "f".repeat(64);
+        assert_eq!(
+            cache.apply_book(&forked_book).await?,
+            ProjectionOutcome::Conflict
+        );
+        assert_eq!(cache.book(&market_id).await?, Some(next_book.clone()));
+        assert_eq!(
+            cache.repair_book(&initial_book).await?,
+            ProjectionRepairOutcome::Current
+        );
+        assert_eq!(cache.book(&market_id).await?, Some(next_book.clone()));
+
+        let json_key = format!("mp:book:{market_id}:json");
+        let _: i64 = cache.client.del(json_key.clone()).await?;
+        assert!(matches!(
+            cache.book(&market_id).await,
+            Err(CacheError::IncompleteProjection)
+        ));
+        assert_eq!(cache.apply_book(&next_book).await?, ProjectionOutcome::Gap);
+        assert_eq!(
+            cache.repair_book(&next_book).await?,
+            ProjectionRepairOutcome::Repaired
+        );
+        assert_eq!(cache.book(&market_id).await?, Some(next_book.clone()));
+
+        let stale_json = serde_json::to_string(&initial_book)?;
+        let _: String = cache
+            .client
+            .eval(
+                "return redis.call('SET', KEYS[1], ARGV[1])",
+                vec![json_key.clone()],
+                vec![stale_json],
+            )
+            .await?;
+        assert!(matches!(
+            cache.book(&market_id).await,
+            Err(CacheError::InvalidProjectionData)
+        ));
+        assert_eq!(
+            cache.repair_book(&next_book).await?,
+            ProjectionRepairOutcome::Repaired
+        );
+
+        let _: String = cache
+            .client
+            .eval(
+                "return redis.call('SET', KEYS[1], ARGV[1])",
+                vec![json_key],
+                vec!["{"],
+            )
+            .await?;
+        assert!(matches!(
+            cache.book(&market_id).await,
+            Err(CacheError::Json(_))
+        ));
+        assert_eq!(
+            cache.repair_book(&next_book).await?,
+            ProjectionRepairOutcome::Repaired
+        );
+        assert_eq!(cache.book(&market_id).await?, Some(next_book.clone()));
+
+        let sequence_key = format!("mp:book:{market_id}:sequence");
+        let _: String = cache
+            .client
+            .eval(
+                "return redis.call('SET', KEYS[1], ARGV[1])",
+                vec![sequence_key],
+                vec!["corrupt-sequence"],
+            )
+            .await?;
+        assert!(matches!(
+            cache.apply_book(&next_book).await,
+            Err(CacheError::InvalidProjectionSequence)
+        ));
+        assert_eq!(
+            cache.repair_book(&next_book).await?,
+            ProjectionRepairOutcome::Repaired
+        );
+        assert_eq!(cache.book(&market_id).await?, Some(next_book.clone()));
+
+        let invalid = CachedBook {
+            sequence: initial_sequence + 2,
+            bids: vec![CachedLevel {
+                price: "not-an-integer".to_owned(),
+                quantity: "1".to_owned(),
+            }],
+            ..next_book.clone()
+        };
+        assert!(matches!(
+            cache.apply_book(&invalid).await,
+            Err(CacheError::InvalidProjectionData)
+        ));
+        assert_eq!(cache.book(&market_id).await?, Some(next_book));
+        Ok(())
+    }
+
+    fn test_book(market_id: &str, sequence: u64, price: &str) -> CachedBook {
+        CachedBook {
+            market_id: market_id.to_owned(),
+            sequence,
+            bids: vec![CachedLevel {
+                price: price.to_owned(),
+                quantity: "2".to_owned(),
+            }],
+            asks: vec![CachedLevel {
+                price: price
+                    .parse::<u64>()
+                    .unwrap_or(0)
+                    .saturating_add(1)
+                    .to_string(),
+                quantity: "3".to_owned(),
+            }],
+            state_hash: format!("{sequence:064x}"),
+        }
     }
 }

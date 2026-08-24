@@ -227,10 +227,34 @@ export interface PlatformAiStatus {
 }
 
 export interface PlatformAiProbeResult {
-  status: "ready" | "unconfigured" | "failed";
+  status: "ready" | "slow" | "unconfigured" | "failed";
+  outcome:
+    | "ready"
+    | "slow"
+    | "unconfigured"
+    | "connect_timeout"
+    | "first_byte_timeout"
+    | "total_timeout"
+    | "upstream_http"
+    | "quota"
+    | "malformed_response"
+    | "no_final_text"
+    | "aborted"
+    | "unreachable";
+  phase:
+    | "configuration"
+    | "admission"
+    | "connect"
+    | "first_byte"
+    | "response"
+    | "tool"
+    | "total";
   model: string | null;
   responseStatus: number | null;
   latencyMs: number;
+  firstByteLatencyMs: number | null;
+  performanceBudgetMs: number;
+  hardTimeoutMs: number;
   message: string;
 }
 
@@ -1889,11 +1913,11 @@ export async function updateStoreCustomer(input: {
       body: JSON.stringify({
         id: input.customerId,
         expectedVersion: input.expectedVersion,
-        ...(input.favorite !== undefined ? { favorite: input.favorite } : {}),
-        ...(input.stage !== undefined ? { stage: input.stage } : {}),
-        ...(input.staffNotes !== undefined
-          ? { staffNotes: input.staffNotes }
-          : {}),
+        ...(input.favorite === undefined ? {} : { favorite: input.favorite }),
+        ...(input.stage === undefined ? {} : { stage: input.stage }),
+        ...(input.staffNotes === undefined
+          ? {}
+          : { staffNotes: input.staffNotes }),
       }),
     },
   );
@@ -1917,6 +1941,7 @@ export async function askMallShoppingAssistant(
   answer: string;
   recommendations: RecommendedBackendListing[];
   uiActions: MallAssistantUiAction[];
+  outcome?: "empty_catalog" | "no_matching_products";
 }> {
   const response = await fetch("/api/mall/assistant", {
     method: "POST",
@@ -1932,14 +1957,48 @@ export async function askMallShoppingAssistant(
     answer?: string;
     recommendations?: unknown;
     uiActions?: unknown;
-    error?: string;
+    outcome?: unknown;
+    error?:
+      | string
+      | {
+          message?: string;
+          code?: string;
+          retryable?: boolean;
+          retryAfterMs?: number;
+          retry_after_ms?: number;
+        };
+    code?: string;
+    retryable?: boolean;
+    retryAfterMs?: number;
+    retry_after_ms?: number;
+    retryAfterSeconds?: number;
   } | null;
   if (!response.ok || !body?.requestId || !body.answer) {
+    const typedError =
+      body?.error && typeof body.error === "object" ? body.error : null;
+    const errorMessage =
+      typeof body?.error === "string" ? body.error : typedError?.message;
     throw new MarketplaceApiError(
       response.status,
-      body?.error || "商城 AI 导购暂时不可用",
+      errorMessage || "商城 AI 导购暂时不可用",
+      {
+        code: typedError?.code || body?.code,
+        retryable:
+          typedError?.retryable ??
+          body?.retryable ??
+          [429, 503, 504].includes(response.status),
+        retryAfterMs: readRetryAfterMs(response, {
+          retryAfterMs: typedError?.retryAfterMs ?? body?.retryAfterMs,
+          retryAfterSnakeMs: typedError?.retry_after_ms ?? body?.retry_after_ms,
+          retryAfterSeconds: body?.retryAfterSeconds,
+        }),
+      },
     );
   }
+  const outcome =
+    body.outcome === "empty_catalog" || body.outcome === "no_matching_products"
+      ? body.outcome
+      : undefined;
   return {
     requestId: body.requestId,
     answer: body.answer,
@@ -1949,6 +2008,7 @@ export async function askMallShoppingAssistant(
     uiActions: Array.isArray(body.uiActions)
       ? (body.uiActions as MallAssistantUiAction[])
       : [],
+    ...(outcome ? { outcome } : {}),
   };
 }
 
@@ -2096,14 +2156,60 @@ export interface PlatformIntentRoute {
   }>;
 }
 
+interface MarketplaceApiErrorOptions {
+  code?: string;
+  retryable?: boolean;
+  retryAfterMs?: number;
+}
+
 export class MarketplaceApiError extends Error {
   readonly status: number;
+  readonly code?: string;
+  readonly retryable: boolean;
+  readonly retryAfterMs?: number;
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    options: MarketplaceApiErrorOptions = {},
+  ) {
     super(message);
     this.name = "MarketplaceApiError";
     this.status = status;
+    this.code = options.code;
+    this.retryable = options.retryable ?? [429, 503, 504].includes(status);
+    this.retryAfterMs = options.retryAfterMs;
   }
+}
+
+function readRetryAfterMs(
+  response: Response,
+  body: {
+    retryAfterMs?: number;
+    retryAfterSnakeMs?: number;
+    retryAfterSeconds?: number;
+  },
+): number | undefined {
+  const bodyMilliseconds = body.retryAfterMs ?? body.retryAfterSnakeMs;
+  if (Number.isFinite(bodyMilliseconds) && Number(bodyMilliseconds) > 0) {
+    return Math.round(Number(bodyMilliseconds));
+  }
+  if (
+    Number.isFinite(body.retryAfterSeconds) &&
+    Number(body.retryAfterSeconds) > 0
+  ) {
+    return Math.round(Number(body.retryAfterSeconds) * 1_000);
+  }
+
+  const retryAfter = response.headers.get("retry-after")?.trim();
+  if (!retryAfter) return undefined;
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.round(seconds * 1_000);
+  }
+  const retryDate = Date.parse(retryAfter);
+  if (!Number.isFinite(retryDate)) return undefined;
+  return Math.max(0, retryDate - Date.now()) || undefined;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -2162,12 +2268,12 @@ async function apiJson<T>(path: string, options: ApiJsonOptions): Promise<T> {
     cache: options.cache,
     headers: {
       accept: "application/json",
-      ...(options.body !== undefined
-        ? { "content-type": "application/json" }
-        : {}),
+      ...(options.body === undefined
+        ? {}
+        : { "content-type": "application/json" }),
       ...options.headers,
     },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   const body = await readJson<T & { error?: string }>(response);
   const valid = options.ok ? options.ok(body) : Boolean(body);

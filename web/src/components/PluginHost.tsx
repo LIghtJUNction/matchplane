@@ -117,14 +117,7 @@ export function PluginHost({
           pricing: pricingFor(subplatform),
           assetSchema: subplatform.assetSchema,
           ui: subplatform.ui,
-          capabilities: fullscreen
-            ? ["match.results", "listing.open", "listing.submit"]
-            : [
-                "chat.open",
-                "match.results",
-                "listing.open",
-                "listing.submit",
-              ],
+          capabilities: pluginCapabilitiesForRole(role, fullscreen),
           ...(role === "seller" && sellerDraft
             ? { agentDraft: sellerDraft }
             : {}),
@@ -192,6 +185,26 @@ export function PluginHost({
           onOpenListing(selected);
         }
       } else if (event.data.type === "listing.submit") {
+        if (role !== "seller") {
+          const messageText = copy(
+            "pluginSellerCapabilityRequired",
+            "只有已授权卖家工作区可以提交商品",
+          );
+          onNotice(messageText);
+          pluginResponder(
+            event.data,
+            {
+              frame: frameRef.current?.contentWindow,
+              targetOrigin: OPAQUE_SANDBOX_TARGET_ORIGIN,
+              contextToken: contextTokenRef.current,
+              role,
+              subplatform,
+              onNotice,
+            },
+            "listing.submit.result",
+          )(false, messageText);
+          return;
+        }
         void submitPluginListing(event.data, {
           frame: frameRef.current?.contentWindow,
           targetOrigin: OPAQUE_SANDBOX_TARGET_ORIGIN,
@@ -276,6 +289,16 @@ export function PluginHost({
   );
 }
 
+export function pluginCapabilitiesForRole(
+  role: WorkspaceRole,
+  fullscreen: boolean,
+): string[] {
+  const capabilities = ["match.results", "listing.open"];
+  if (!fullscreen) capabilities.unshift("chat.open");
+  if (role === "seller") capabilities.push("listing.submit");
+  return capabilities;
+}
+
 interface PluginActionInput {
   frame: Window | null | undefined;
   targetOrigin: string;
@@ -309,6 +332,8 @@ async function submitPluginListing(
   const respond = pluginResponder(message, input, "listing.submit.result");
 
   try {
+    if (input.role !== "seller")
+      throw new Error("只有已授权卖家工作区可以提交商品");
     if (!isLiveMarketplaceEnabled())
       throw new Error("插件供给提交需要连接真实平台 API");
     if (!input.subplatform.tenantId || !input.subplatform.domainId) {

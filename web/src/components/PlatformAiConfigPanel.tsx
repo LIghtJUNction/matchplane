@@ -105,8 +105,10 @@ export function PlatformAiConfigPanel({
   const test = async () => {
     setTesting(true);
     try {
-      await testPlatformAi();
-      onNotice("AI 连接测试成功");
+      const result = await testPlatformAi();
+      onNotice(
+        result.status === "ready" ? "AI 连接测试成功" : result.message,
+      );
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "AI 连接测试失败");
     } finally {
@@ -164,7 +166,10 @@ export function PlatformAiConfigPanel({
         在这里配置模型、导购行为和输出边界。API Key 只保存在服务器受保护存储中。
       </p>
       <div className="seller-upload-form">
-        <label htmlFor="platform-ai-endpoint">
+        <label
+          className="platform-ai-endpoint-field"
+          htmlFor="platform-ai-endpoint"
+        >
           <span>模型网关主机</span>
           <Input
             id="platform-ai-endpoint"

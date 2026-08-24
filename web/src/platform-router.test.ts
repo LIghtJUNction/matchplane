@@ -31,6 +31,7 @@ const candidates: PlatformRouteCandidate[] = [
 ];
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
@@ -48,9 +49,12 @@ describe("platform Agent router", () => {
     process.env.MATCHPLANE_ROUTER_AI_URL = "http://127.0.0.1:9000/v1/chat/completions";
     process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
     process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify({
-      choices: [{ message: { content: "ok" } }],
-    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      void init;
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "ok" } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
 
     const result = await probePlatformRouter({ fetcher: fetchMock as unknown as typeof fetch });
 
@@ -64,6 +68,181 @@ describe("platform Agent router", () => {
       { role: "system", content: "Respond with one short token." },
       { role: "user", content: "healthcheck" },
     ]);
+  });
+
+  it("reports a provider that responds beyond the performance budget as slow, not unreachable", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL =
+      "https://router.example.com/private/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const now = vi.spyOn(Date, "now").mockReturnValue(0);
+    const fetchMock = vi.fn(async () => {
+      now.mockReturnValue(5_000);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const result = await probePlatformRouter({
+      fetcher: fetchMock as unknown as typeof fetch,
+      performanceBudgetMs: 4_000,
+      timeoutMs: 20_000,
+      requestId: "probe-slow",
+    });
+
+    expect(result).toMatchObject({
+      status: "slow",
+      outcome: "slow",
+      firstByteLatencyMs: 5_000,
+      performanceBudgetMs: 4_000,
+      hardTimeoutMs: 20_000,
+    });
+  });
+
+  it("reports an unreachable provider separately from a slow response", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL =
+      "https://router.example.com/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const fetchMock = vi.fn(async () => {
+      throw new Error("getaddrinfo ENOTFOUND private.internal");
+    });
+
+    const result = await probePlatformRouter({
+      fetcher: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      outcome: "unreachable",
+      phase: "connect",
+    });
+    expect(result.message).not.toContain("private.internal");
+  });
+
+  it("classifies a hard deadline before provider headers as a first-byte timeout", async () => {
+    vi.useFakeTimers();
+    process.env.MATCHPLANE_ROUTER_AI_URL =
+      "https://router.example.com/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const fetchMock = vi.fn(
+      async (_url: string, init?: RequestInit): Promise<Response> =>
+        await new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        }),
+    );
+
+    const pending = probePlatformRouter({
+      fetcher: fetchMock as unknown as typeof fetch,
+      timeoutMs: 1_000,
+      performanceBudgetMs: 500,
+    });
+    await vi.advanceTimersByTimeAsync(1_001);
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      status: "failed",
+      outcome: "first_byte_timeout",
+      phase: "first_byte",
+      hardTimeoutMs: 1_000,
+    });
+  });
+
+  it.each([200, 429, 503])(
+    "classifies a deadline while reading an HTTP %i body as a total timeout",
+    async (responseStatus) => {
+      vi.useFakeTimers();
+      process.env.MATCHPLANE_ROUTER_AI_URL =
+        "https://router.example.com/v1/chat/completions";
+      process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+      process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener(
+              "abort",
+              () => controller.error(init.signal?.reason),
+              { once: true },
+            );
+          },
+        });
+        return new Response(body, {
+          status: responseStatus,
+          headers: { "content-type": "application/json" },
+        });
+      });
+
+      const pending = probePlatformRouter({
+        fetcher: fetchMock as unknown as typeof fetch,
+        timeoutMs: 1_000,
+        performanceBudgetMs: 500,
+      });
+      await vi.advanceTimersByTimeAsync(1_001);
+      const result = await pending;
+
+      expect(result).toMatchObject({
+        status: "failed",
+        outcome: "total_timeout",
+        phase: "total",
+        responseStatus,
+      });
+    },
+  );
+
+  it("classifies Undici's headers timeout as a first-byte timeout", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL =
+      "https://router.example.com/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const fetchMock = vi.fn(async () => {
+      throw Object.assign(new Error("unsafe upstream detail"), {
+        code: "UND_ERR_HEADERS_TIMEOUT",
+      });
+    });
+
+    const result = await probePlatformRouter({
+      fetcher: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      outcome: "first_byte_timeout",
+      phase: "first_byte",
+      responseStatus: null,
+    });
+    expect(result.message).not.toContain("unsafe upstream detail");
+  });
+
+  it("logs only bounded provider metadata", async () => {
+    process.env.MATCHPLANE_ROUTER_AI_URL =
+      "https://router.example.com/private/v1/chat/completions";
+    process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ choices: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await probePlatformRouter({
+      fetcher: fetchMock as unknown as typeof fetch,
+      requestId: "safe-request-id",
+    });
+
+    const logged = stderr.mock.calls.flat().join(" ");
+    expect(logged).toContain('"origin":"https://router.example.com"');
+    expect(logged).toContain('"requestId":"safe-request-id"');
+    expect(logged).not.toContain("server-only-key");
+    expect(logged).not.toContain("/private/v1");
+    expect(logged).not.toContain("choices");
   });
 
   it("uses the Anthropic Messages protocol without exposing a bearer credential", async () => {

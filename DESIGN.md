@@ -44,8 +44,8 @@ colors:
 
 ## Component Styling
 
-- [confirmed] `PalettePicker` 使用 Appica/Base UI `Popover` 和 `ColorSwatchPicker`；选择写入 `matchplane.palette` 并在 hydration 前恢复。
-- [confirmed] 桌面 `FloatingMarketplaceClerk` 使用 `react-rnd` 处理拖动、缩放和边界；Appica `Collapsible` 处理收纳。
+- [confirmed] `PalettePicker` 使用 Appica/Base UI `Popover`、`RadioGroup` 与 `Radio` 多色主题卡；选择写入 `matchplane.palette` 并在 hydration 前恢复。
+- [confirmed] 桌面 `FloatingMarketplaceClerk` 使用 Appica/Base UI `Dialog` 呈现固定右侧、有视口边界的面板；禁止拖动、缩放、收纳和布局持久化。
 - [confirmed] 移动 Clerk 使用 Appica/Base UI `Drawer`，支持关闭、Escape 与手势；不得手写拖拽或浮层底层逻辑。
 - [confirmed] 商品卡以真实媒体、店铺、名称、价格和明确查看动作为核心；边界轻，媒体比例稳定。
 - [confirmed] Button 至少 44px 高。主要动作使用当前 accent 与 `--retail-accent-contrast`，次要动作使用纸面和边界。

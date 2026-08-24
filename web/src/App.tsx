@@ -28,10 +28,22 @@ import {
 } from "./hooks/useSubplatformRoute";
 import { useOwnedStores } from "./hooks/useOwnedStores";
 import { useStoreHandoff } from "./hooks/useStoreHandoff";
+import {
+  clearPendingConversion,
+  readPendingConversion,
+} from "./pending-conversion";
 
 export function App({ initialPath = "/" }: { initialPath?: string }) {
-  const { theme, locale, palette, setTheme, setLocale, setPalette } =
-    useInterfacePreferences();
+  const {
+    theme,
+    locale,
+    palette,
+    textSize,
+    setTheme,
+    setLocale,
+    setPalette,
+    setTextSize,
+  } = useInterfacePreferences();
   const ui = appCopy(locale);
   const [notice, setNotice] = useState<string | null>(null);
   const [pluginFailed, setPluginFailed] = useState(false);
@@ -134,6 +146,50 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       onNotice: setNotice,
     });
 
+  useEffect(() => {
+    if (!authResolved || !authUser || !catalogResolved || listing) return;
+    const pending = readPendingConversion();
+    if (!pending || pending.storePath !== subplatform.path) return;
+    const selected = listings.find(
+      (candidate) =>
+        candidate.offerId === pending.offerId ||
+        candidate.id === pending.offerId,
+    );
+    if (!selected) {
+      setNotice(
+        catalogError
+          ? locale === "en"
+            ? "The saved request is still available. Catalog lookup failed temporarily; retry before submitting."
+            : "已保留登录前的申请；目录暂时读取失败，请重试后再提交。"
+          : locale === "en"
+            ? "The saved listing is not in the current page. It will remain pending until a direct lookup confirms its status."
+            : "已保留登录前的申请；当前页面未包含该商品，需单项查询确认状态后再恢复。",
+      );
+      return;
+    }
+    setListing(selected);
+    setNotice(
+      locale === "en"
+        ? "Your saved request is ready. Review it before submitting."
+        : "已恢复登录前的申请，请确认商品信息后再提交。",
+    );
+  }, [
+    authResolved,
+    authUser,
+    catalogResolved,
+    catalogError,
+    listing,
+    listings,
+    locale,
+    setListing,
+    subplatform.path,
+  ]);
+
+  const closeListingAndCancelPending = useCallback(() => {
+    clearPendingConversion(listing?.offerId ?? listing?.id);
+    closeListing();
+  }, [closeListing, listing]);
+
   // Auto-dismiss notice
   useEffect(() => {
     if (!notice) return;
@@ -201,7 +257,13 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     void signOut(ui.signedOut, ui.signOutFailed);
     setAccountSettingsSection(null);
     setStoreConsoleOpen(false);
-  }, [signOut, ui.signedOut, ui.signOutFailed, setAccountSettingsSection, setStoreConsoleOpen]);
+  }, [
+    signOut,
+    ui.signedOut,
+    ui.signOutFailed,
+    setAccountSettingsSection,
+    setStoreConsoleOpen,
+  ]);
 
   const genericWorkspace: ReactNode =
     role === "platform" ? (
@@ -226,7 +288,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     ) : (
       <StorefrontView
         catalogResolved={catalogResolved}
+        catalogError={catalogError}
         listings={listings}
+        onRetryCatalog={retryCatalog}
         locale={locale}
         onOpenListing={setListing}
         onLikeListing={likeListing}
@@ -309,9 +373,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             theme={theme}
             locale={locale}
             palette={palette}
+            textSize={textSize}
             onThemeChange={setTheme}
             onLocaleChange={setLocale}
             onPaletteChange={setPalette}
+            onTextSizeChange={setTextSize}
             authUser={authUser}
             authResolved={authResolved}
             ownedStoresCount={ownedStores.length}
@@ -379,9 +445,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           locale={locale}
           theme={theme}
           palette={palette}
+          textSize={textSize}
           onThemeChange={setTheme}
           onLocaleChange={setLocale}
           onPaletteChange={setPalette}
+          onTextSizeChange={setTextSize}
           subplatform={subplatform}
           fullscreenPlugin={fullscreenPlugin}
           storeConsoleOpen={storeConsoleOpen}
@@ -398,7 +466,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           setAuthUser={setAuthUser}
           onSignOut={handleSignOut}
           listing={listing}
-          closeListing={closeListing}
+          closeListing={closeListingAndCancelPending}
           onContactListing={contactListing}
           modeDialogOpen={modeDialogOpen}
           closeModeDialog={() => setModeDialogOpen(false)}
