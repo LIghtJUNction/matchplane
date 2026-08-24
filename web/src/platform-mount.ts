@@ -23,7 +23,7 @@ export async function isMountedPlatformPath(platformPath: string): Promise<boole
   if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath)) return false;
 
   try {
-    const store = await readActiveStoreScope(rootTenantId, platformPath);
+    const store = await readMountedStoreScope(rootTenantId, platformPath);
     if (store) return true;
     // Once a path has entered the flat directory, `stores` is authoritative. In particular,
     // suspension must not expose the same organization through its historical registration.
@@ -156,6 +156,45 @@ export async function readActivePlatformScope(
     console.error("active platform scope lookup failed", error);
     return null;
   }
+}
+
+async function readMountedStoreScope(rootTenantId: string, platformPath: string): Promise<MountedPlatformScope | null> {
+  const result = await authDatabase.query<MountedPlatformScope>(
+      `SELECT store.organization_id::text AS "organizationId",
+              store.tenant_id::text AS "tenantId",
+              store.domain_id::text AS "domainId",
+              store.slug
+         FROM stores store
+         JOIN store_path_aliases alias
+           ON alias.tenant_id = store.tenant_id
+          AND alias.store_id = store.id
+         JOIN domains domain
+           ON domain.tenant_id = store.tenant_id
+          AND domain.id = store.domain_id
+          AND domain.status = 'active'
+         LEFT JOIN subplatform_registrations registration
+           ON registration.id = store.current_registration_id
+        WHERE store.tenant_id = $1::uuid
+          AND alias.path = $2
+          AND store.status IN ('active', 'closed', 'suspended', 'pending')
+          AND (
+            store.integration_kind = 'hosted'
+            OR (registration.id IS NOT NULL AND registration.state IN ('active', 'draft'))
+          )
+          AND (
+            store.integration_kind <> 'external'
+            OR EXISTS (
+              SELECT 1 FROM platform_federation_bindings binding
+               WHERE binding.id = store.federation_binding_id
+            )
+          )
+        LIMIT 1`,
+      [rootTenantId, platformPath],
+  );
+  const row = result.rows[0];
+  return row && isUuid(row.organizationId) && isUuid(row.tenantId) && isUuid(row.domainId)
+    ? row
+    : null;
 }
 
 async function readActiveStoreScope(rootTenantId: string, platformPath: string): Promise<MountedPlatformScope | null> {

@@ -36,7 +36,7 @@ export async function isActivePlatformPathVisible(
          LEFT JOIN subplatform_registrations registration ON registration.id = store.current_registration_id
         WHERE store.tenant_id = $1::uuid
           AND alias.path = $2
-          AND store.status = 'active'
+          AND store.status IN ('active', 'closed', 'suspended', 'pending')
           AND (store.integration_kind = 'hosted' OR registration.state = 'active')
           AND (store.integration_kind <> 'external' OR EXISTS (
             SELECT 1 FROM platform_federation_bindings binding

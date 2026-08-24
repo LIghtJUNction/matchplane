@@ -72,4 +72,54 @@ describe("StorefrontView", () => {
       "/",
     );
   });
+
+  it("renders a clear closed notice with a button to reopen for store managers", () => {
+    const onOpenStoreConsole = vi.fn();
+    render(
+      <StorefrontView
+        catalogResolved
+        listings={[]}
+        locale="zh"
+        onOpenListing={vi.fn()}
+        canManageStore={true}
+        onOpenStoreConsole={onOpenStoreConsole}
+        subplatform={{
+          ...resolveSubplatform("/stores/closed-store"),
+          brandName: "打烊小店",
+          label: "打烊小店",
+          status: "closed",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("该店铺已打烊 · 暂停营业")).toBeVisible();
+    expect(screen.getByText(/店主已暂时暂停对外营业/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "返回商城首页" })).toHaveAttribute("href", "/");
+
+    const reopenBtn = screen.getByRole("button", { name: "进入店铺工作台（恢复营业）" });
+    expect(reopenBtn).toBeVisible();
+    fireEvent.click(reopenBtn);
+    expect(onOpenStoreConsole).toHaveBeenCalled();
+  });
+
+  it("renders a suspended notice when the store is suspended by the platform", () => {
+    render(
+      <StorefrontView
+        catalogResolved
+        listings={[]}
+        locale="zh"
+        onOpenListing={vi.fn()}
+        subplatform={{
+          ...resolveSubplatform("/stores/suspended-store"),
+          brandName: "暂停小店",
+          label: "暂停小店",
+          status: "suspended",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("该店铺已被平台暂停服务")).toBeVisible();
+    expect(screen.getByText(/该店铺已被商城管理暂停营业/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "返回商城首页" })).toHaveAttribute("href", "/");
+  });
 });

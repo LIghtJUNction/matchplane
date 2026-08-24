@@ -27,6 +27,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
               store.slug,
               store.display_name AS "displayName",
               store.description,
+              store.status,
               store.version::text
          FROM stores store
          JOIN store_path_aliases alias
@@ -36,7 +37,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
         WHERE store.tenant_id = $1::uuid
           AND alias.path = $2
           AND store.integration_kind = 'hosted'
-          AND store.status = 'active'
+          AND store.status IN ('active', 'closed', 'suspended', 'pending')
         LIMIT 1`,
       [rootTenantId, platformPath],
     );
@@ -48,6 +49,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
         slug: hostedStore.slug,
         displayName: hostedStore.displayName,
         description: hostedStore.description,
+        status: hostedStore.status,
         marketplaceContract: "generic-v1",
         pricing: { mode: "fixed", currency: "CNY", currencyScale: 2, label: "价格" },
         rootApiVersion: "v1",
@@ -84,6 +86,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
                 store.organization_id::text AS "organizationId",
                 registration.tenant_id::text AS "tenantId",
                 registration.domain_id::text AS "domainId",
+                store.status,
                 schema_default.id AS "assetSchemaId",
                 schema_default.schema_document AS "assetSchema",
                 market_default.quote_asset_key AS currency,
@@ -126,7 +129,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
            ) market_default ON true
           WHERE store.tenant_id = $1::uuid
             AND alias.path = $2
-            AND store.status = 'active'
+            AND store.status IN ('active', 'closed', 'suspended', 'pending')
             AND store.integration_kind IN ('package', 'external')
             AND (store.integration_kind <> 'external' OR EXISTS (
               SELECT 1
@@ -254,6 +257,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
       organizationId?: unknown;
       tenantId?: unknown;
       domainId?: unknown;
+      status?: unknown;
       assetSchemaId?: unknown;
       assetSchema?: unknown;
       currency?: unknown;
@@ -281,6 +285,7 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
     const manifest = {
       ...(row.manifest as Record<string, unknown>),
       ...(assets ? { assets } : {}),
+      status: typeof row.status === "string" ? row.status : "active",
       organizationId: typeof row.organizationId === "string" ? row.organizationId : undefined,
       tenantId: typeof row.tenantId === "string" ? row.tenantId : undefined,
       domainId: typeof row.domainId === "string" ? row.domainId : undefined,

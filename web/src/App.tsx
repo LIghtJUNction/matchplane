@@ -234,6 +234,15 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         onHumanHandoff={requestStoreAiHandoff}
         onContactConsent={requestStoreContactConsent}
         subplatform={subplatform}
+        canManageStore={Boolean(currentManagedStore || canManageStoreConsole)}
+        onOpenStoreConsole={() => {
+          if (currentManagedStore) {
+            setStoreConsoleContext({ subplatform, store: currentManagedStore });
+            setStoreConsoleOpen(true);
+          } else {
+            setAccountSettingsSection("stores");
+          }
+        }}
       />
     );
 

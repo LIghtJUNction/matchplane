@@ -41,6 +41,7 @@ export interface SubplatformConfig {
   brandLogoUrl?: string;
   label: string;
   description: string;
+  status?: "active" | "closed" | "pending" | "suspended";
   /** Better Auth organization id for an active child; supplied by the root manifest endpoint. */
   organizationId?: string;
   tenantId?: string;
@@ -185,6 +186,7 @@ export async function loadSubplatform(
       displayName?: string;
       description?: string;
       label?: string;
+      status?: string;
       tenantId?: string;
       domainId?: string;
       organizationId?: string;
@@ -225,6 +227,9 @@ export async function loadSubplatform(
       label:
         manifest.label?.trim() || manifest.displayName?.trim() || base.label,
       description: manifest.description?.trim() || base.description,
+      status:
+        (manifest.status as SubplatformConfig["status"]) ||
+        (base.slug === "root" ? "active" : undefined),
       tenantId: manifest.tenantId,
       domainId: manifest.domainId,
       organizationId: manifest.organizationId,

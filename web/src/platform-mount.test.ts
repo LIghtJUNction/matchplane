@@ -15,7 +15,25 @@ describe("flat store mount precedence", () => {
     query.mockReset();
   });
 
-  it("does not remount a suspended projected store through a legacy registration", async () => {
+  it("mounts a closed or suspended store so its status page and workspace are accessible", async () => {
+    query.mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [
+        {
+          organizationId: "11111111-1111-4111-8111-111111111111",
+          tenantId: "00000000-0000-4000-8000-000000000001",
+          domainId: "22222222-2222-4222-8222-222222222222",
+          slug: "closed-store",
+        },
+      ],
+    });
+
+    await expect(isMountedPlatformPath("/closed-store")).resolves.toBe(true);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0]?.[0]).toContain("store.status IN ('active', 'closed', 'suspended', 'pending')");
+  });
+
+  it("does not remount a missing projected store through a legacy registration", async () => {
     query
       .mockResolvedValueOnce({ rowCount: 0, rows: [] })
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ exists: 1 }] });
