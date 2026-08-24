@@ -5138,6 +5138,7 @@ dependencies = [
  "matchplane-storage",
  "reqwest 0.13.4",
  "rpassword",
+ "rustix",
  "scrypt",
  "secrecy",
  "serde",
@@ -5149,6 +5150,7 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

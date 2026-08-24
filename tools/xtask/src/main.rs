@@ -3,7 +3,7 @@ use std::{
     future::Future,
     io::{self, IsTerminal, Write},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
-    path::{Path, PathBuf},
+    path::Path,
     process::Command as ProcessCommand,
     time::{Duration, Instant},
 };
@@ -29,6 +29,13 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use unicode_normalization::UnicodeNormalization;
 use url::Url;
 use uuid::{Uuid, Variant};
+use zeroize::Zeroize;
+
+mod platform_router;
+
+use platform_router::{
+    ManagedRouterRead, ManagedSource, PlatformRouterReader, reserved_platform_router_slot,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "matchplane", about = "MatchPlane operator and agent CLI")]
@@ -115,6 +122,13 @@ enum Command {
     Secret {
         #[command(subcommand)]
         command: SecretCommand,
+    },
+    /// Validate protected managed-AI mounts without exposing secret material.
+    #[command(name = "validate-mounts")]
+    ValidateMounts {
+        /// Emit machine-readable JSON (the default output is also JSON for agent stability).
+        #[arg(long)]
+        json: bool,
     },
     /// Issue a one-time invite for a signed remote MatchPlane platform enrollment.
     #[command(name = "federation-invite")]
@@ -297,6 +311,7 @@ async fn main() -> Result<()> {
         Command::Secret {
             command: SecretCommand::Put { slot, secret_stdin },
         } => put_root_email_secret(&slot, secret_stdin),
+        Command::ValidateMounts { json: _ } => validate_mounts_command(),
         Command::FederationInvite {
             domain_id,
             parent_organization_id,
@@ -322,25 +337,46 @@ async fn main() -> Result<()> {
     }
 }
 
+const RESERVED_ROUTER_SLOT_MESSAGE: &str =
+    "platform router state is managed by the Web managed-AI API; this secret slot is reserved";
+
 fn put_root_email_secret(slot: &str, secret_stdin: bool) -> Result<()> {
     if !valid_root_email_secret_slot(slot) {
         bail!("--slot must contain 1..=128 letters, numbers, dots, underscores, or hyphens");
     }
-    let secret = if secret_stdin {
+    if reserved_platform_router_slot(slot) {
+        bail!(RESERVED_ROUTER_SLOT_MESSAGE);
+    }
+    let mut secret = if secret_stdin {
         read_single_secret_line_from_stdin()?
     } else {
         rpassword::prompt_password("SMTP password or API credential: ")
             .context("could not read the secret from the terminal")?
     };
-    let secret = secret.trim_end_matches(['\r', '\n']);
+    let trimmed_length = secret.trim_end_matches(['\r', '\n']).len();
+    let result = write_root_email_secret_at(
+        Path::new("/etc/matchplane/secrets/root-email"),
+        slot,
+        &secret[..trimmed_length],
+    );
+    secret.zeroize();
+    result?;
+    println!("Root email secret slot `{slot}` is ready.");
+    Ok(())
+}
+
+fn write_root_email_secret_at(root: &Path, slot: &str, secret: &str) -> Result<()> {
+    if !valid_root_email_secret_slot(slot) {
+        bail!("--slot must contain 1..=128 letters, numbers, dots, underscores, or hyphens");
+    }
+    if reserved_platform_router_slot(slot) {
+        bail!(RESERVED_ROUTER_SLOT_MESSAGE);
+    }
     if secret.is_empty() || secret.len() > 16_384 {
         bail!("secret must contain 1..=16384 bytes");
     }
-    let root = Path::new("/etc/matchplane/secrets/root-email");
     if !root.is_dir() {
-        bail!(
-            "/etc/matchplane/secrets/root-email is missing; install or initialize the MatchPlane host first"
-        );
+        bail!("protected root email secret directory is missing");
     }
     let destination = root.join(slot);
     let temporary = root.join(format!(".{slot}.{}.tmp", Uuid::now_v7()));
@@ -361,8 +397,27 @@ fn put_root_email_secret(slot: &str, secret_stdin: bool) -> Result<()> {
     fs::rename(&temporary, &destination).context("could not activate the protected secret file")?;
     fs::set_permissions(&destination, fs::Permissions::from_mode(0o640))
         .context("could not protect the root email secret file")?;
-    println!("Root email secret slot `{slot}` is ready.");
     Ok(())
+}
+
+fn validate_mounts_command() -> Result<()> {
+    let read = PlatformRouterReader::default().read();
+    validate_mounts_output(&read, &mut io::stdout())
+}
+
+fn validate_mounts_output(read: &ManagedRouterRead, output: &mut dyn Write) -> Result<()> {
+    let report = read.mount_report();
+    writeln!(
+        output,
+        "{}",
+        serde_json::to_string_pretty(&report).context("mount validation encoding failed")?
+    )
+    .context("mount validation output failed")?;
+    if report.ok {
+        Ok(())
+    } else {
+        bail!("managed-AI mount validation found a blocking error")
+    }
 }
 
 fn valid_root_email_secret_slot(slot: &str) -> bool {
@@ -1249,16 +1304,20 @@ async fn doctor() -> Result<()> {
 }
 
 async fn doctor_report() -> DoctorReport {
-    let provider_preflight = provider_preflight_report().await;
+    let managed = PlatformRouterReader::default().read();
+    let provider_preflight = provider_preflight_report_from_managed(&managed).await;
+    let hosted_agent = hosted_agent_report_from_managed(&managed);
     let mut report = match AppConfig::load_diagnostics() {
-        Ok(diagnostics) => doctor_report_from_diagnostics(diagnostics, provider_preflight),
+        Ok(diagnostics) => {
+            doctor_report_from_diagnostics(diagnostics, hosted_agent, provider_preflight)
+        }
         Err(error) => DoctorReport {
             ok: false,
             environment: env::var("MATCHPLANE_ENVIRONMENT").ok(),
             service_role: env::var("MATCHPLANE_SERVICE_ROLE").ok(),
             error: Some(safe_error(&error.to_string())),
             errors: vec![safe_error(&error.to_string())],
-            hosted_agent: hosted_agent_report(),
+            hosted_agent,
             provider_preflight,
         },
     };
@@ -1275,6 +1334,7 @@ async fn doctor_report() -> DoctorReport {
 
 fn doctor_report_from_diagnostics(
     diagnostics: ConfigurationDiagnostics,
+    hosted_agent: HostedAgentReport,
     provider_preflight: ProviderPreflightReport,
 ) -> DoctorReport {
     let errors = diagnostics
@@ -1288,7 +1348,7 @@ fn doctor_report_from_diagnostics(
         service_role: Some(diagnostics.service_role),
         error: errors.first().cloned(),
         errors,
-        hosted_agent: hosted_agent_report(),
+        hosted_agent,
         provider_preflight,
     }
 }
@@ -1701,6 +1761,8 @@ struct StatusReport {
 #[derive(Debug, Clone, Serialize)]
 struct HostedAgentReport {
     configured: bool,
+    enabled: bool,
+    source: String,
     protocol: String,
     model: Option<String>,
     endpoint_origin: Option<String>,
@@ -1708,18 +1770,6 @@ struct HostedAgentReport {
     issues: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ManagedHostedAgentConfig {
-    endpoint: String,
-    model: String,
-    protocol: String,
-    enabled: bool,
-    credential_file: Option<String>,
-}
-
-const MANAGED_ROUTER_CONFIG_PATH: &str = "/etc/matchplane/secrets/root-email/platform-router.json";
-const LEGACY_MANAGED_ROUTER_KEY_FILE: &str = "platform-router.key";
 const M0_REQUIRED_ROUTER_ENDPOINT: &str = "https://api.lmm.best/v1";
 const M0_REQUIRED_ROUTER_MODEL: &str = "gpt-5.6-sol";
 const M0_REQUIRED_ROUTER_PROTOCOL: &str = "openai-compatible";
@@ -1778,11 +1828,6 @@ struct ProviderResolution {
     issues: Vec<String>,
 }
 
-struct ManagedProviderValues {
-    config: ManagedHostedAgentConfig,
-    api_key: Option<SecretString>,
-}
-
 #[derive(Default)]
 struct EnvironmentProviderValues {
     endpoint: Option<String>,
@@ -1792,7 +1837,8 @@ struct EnvironmentProviderValues {
 }
 
 async fn provider_preflight_command() -> Result<()> {
-    let report = provider_preflight_report().await;
+    let managed = PlatformRouterReader::default().read();
+    let report = provider_preflight_report_from_managed(&managed).await;
     println!(
         "{}",
         serde_json::to_string_pretty(&report).context("provider preflight encoding failed")?
@@ -1805,7 +1851,14 @@ async fn provider_preflight_command() -> Result<()> {
 }
 
 async fn provider_preflight_report() -> ProviderPreflightReport {
-    let resolution = resolve_effective_provider();
+    let managed = PlatformRouterReader::default().read();
+    provider_preflight_report_from_managed(&managed).await
+}
+
+async fn provider_preflight_report_from_managed(
+    managed: &ManagedRouterRead,
+) -> ProviderPreflightReport {
+    let resolution = resolve_effective_provider(managed);
     let mut report = preflight_report_from_resolution(&resolution);
     if !resolution.intent_enabled {
         report.status = "disabled".to_owned();
@@ -1855,7 +1908,7 @@ async fn provider_preflight_report() -> ProviderPreflightReport {
     report
 }
 
-fn resolve_effective_provider() -> ProviderResolution {
+fn resolve_effective_provider(managed: &ManagedRouterRead) -> ProviderResolution {
     let environment = EnvironmentProviderValues {
         endpoint: nonempty_environment("MATCHPLANE_ROUTER_AI_URL"),
         api_key: nonempty_environment("MATCHPLANE_ROUTER_AI_KEY").map(SecretString::from),
@@ -1863,110 +1916,148 @@ fn resolve_effective_provider() -> ProviderResolution {
         protocol: nonempty_environment("MATCHPLANE_ROUTER_AI_PROTOCOL")
             .or_else(|| Some(M0_REQUIRED_ROUTER_PROTOCOL.to_owned())),
     };
+    resolve_effective_provider_with_environment(
+        managed,
+        environment,
+        environment_flag("MATCHPLANE_ROUTER_AI_REQUIRED"),
+    )
+}
+
+fn resolve_effective_provider_with_environment(
+    managed: &ManagedRouterRead,
+    environment: EnvironmentProviderValues,
+    required: bool,
+) -> ProviderResolution {
     let environment_present = environment.endpoint.is_some()
         || environment.api_key.is_some()
         || environment.model.is_some();
-    let managed = load_managed_provider_values();
-    let managed_enabled = managed.as_ref().is_some_and(|values| values.config.enabled);
-    let managed_effective = managed
-        .as_ref()
-        .is_some_and(|values| values.config.enabled && values.api_key.is_some());
-    let environment_effective = environment.endpoint.is_some()
-        && environment.api_key.is_some()
-        && environment.model.is_some();
-    let (source, endpoint, api_key, model, protocol) = if managed_effective {
-        if let Some(values) = managed.as_ref() {
-            (
-                "managed",
-                Some(values.config.endpoint.clone()),
-                values.api_key.clone(),
-                Some(values.config.model.clone()),
-                Some(values.config.protocol.clone()),
-            )
-        } else {
-            ("unconfigured", None, None, None, None)
+    let managed_authoritative = matches!(
+        managed.source(),
+        ManagedSource::ManagedGeneration | ManagedSource::Legacy
+    );
+    let managed_config = managed.active();
+    let managed_disabled =
+        managed_authoritative && managed_config.is_some_and(|config| !config.enabled);
+    let managed_enabled =
+        managed_authoritative && managed_config.is_some_and(|config| config.enabled);
+    let managed_unreadable = managed.source() == ManagedSource::ManagedUnreadable;
+
+    let mut managed_secret_error = None;
+    let managed_secret = if managed_enabled {
+        match managed.read_active_secret() {
+            Ok(secret) => secret,
+            Err(error) => {
+                managed_secret_error = Some(error.code().to_owned());
+                None
+            }
         }
-    } else if environment_effective {
+    } else {
+        None
+    };
+    let (source, endpoint, api_key, model, protocol, credential_configured) = if managed_unreadable
+    {
+        ("managed_unreadable", None, None, None, None, false)
+    } else if managed_authoritative {
+        (
+            managed.source().as_str(),
+            managed_config.map(|config| config.endpoint.clone()),
+            managed_secret,
+            managed_config.map(|config| config.model.clone()),
+            managed_config.map(|config| config.protocol.clone()),
+            managed.active_credential_configured(),
+        )
+    } else if environment_present {
         (
             "environment",
             environment.endpoint.clone(),
             environment.api_key.clone(),
             environment.model.clone(),
             environment.protocol.clone(),
+            environment.api_key.is_some(),
         )
     } else {
-        ("unconfigured", None, None, None, None)
+        ("absent", None, None, None, None, false)
     };
     let parsed_endpoint = endpoint.as_deref().and_then(parse_provider_endpoint);
-    let credential_configured = api_key.is_some();
     let endpoint_matches_required = endpoint
         .as_deref()
         .is_some_and(|value| canonical_endpoint(value) == M0_REQUIRED_ROUTER_ENDPOINT);
     let model_matches_required = model.as_deref() == Some(M0_REQUIRED_ROUTER_MODEL);
     let protocol_matches_required = protocol.as_deref() == Some(M0_REQUIRED_ROUTER_PROTOCOL);
     let mut issues = Vec::new();
-    if source == "unconfigured" {
-        issues.push("provider_not_configured".to_owned());
+    if let Some(error) = managed.unreadable() {
+        issues.push(error.code().to_owned());
+        issues.push("managed_state_unreadable".to_owned());
     }
-    if parsed_endpoint.is_none() {
-        issues.push("endpoint_invalid".to_owned());
+    if let Some(error) = managed_secret_error {
+        issues.push(error);
+        issues.push("managed_state_unreadable".to_owned());
     }
-    if !credential_configured {
-        issues.push("credential_not_configured".to_owned());
-    }
-    if !endpoint_matches_required {
-        issues.push("endpoint_mismatch".to_owned());
-    }
-    if !model_matches_required {
-        issues.push("model_mismatch".to_owned());
-    }
-    if !protocol_matches_required {
-        issues.push("protocol_mismatch".to_owned());
+    if !managed_disabled {
+        if source == "absent" || (managed_authoritative && managed_config.is_none()) {
+            issues.push("provider_not_configured".to_owned());
+        }
+        if parsed_endpoint.is_none() {
+            issues.push("endpoint_invalid".to_owned());
+        }
+        if !credential_configured {
+            issues.push("credential_not_configured".to_owned());
+        }
+        if !endpoint_matches_required {
+            issues.push("endpoint_mismatch".to_owned());
+        }
+        if !model_matches_required {
+            issues.push("model_mismatch".to_owned());
+        }
+        if !protocol_matches_required {
+            issues.push("protocol_mismatch".to_owned());
+        }
     }
     issues.sort();
     issues.dedup();
-    let config = match (
-        parsed_endpoint.clone(),
-        api_key,
-        model.clone(),
-        protocol.clone(),
-    ) {
-        (Some(endpoint), Some(api_key), Some(model), Some(protocol)) => {
-            Some(EffectiveProviderConfig {
-                endpoint,
-                api_key,
-                model,
-                protocol,
-            })
+    let config = if managed_disabled {
+        None
+    } else {
+        match (
+            parsed_endpoint.clone(),
+            api_key,
+            model.clone(),
+            protocol.clone(),
+        ) {
+            (Some(endpoint), Some(api_key), Some(model), Some(protocol)) => {
+                Some(EffectiveProviderConfig {
+                    endpoint,
+                    api_key,
+                    model,
+                    protocol,
+                })
+            }
+            _ => None,
         }
-        _ => None,
     };
-    let required = environment_flag("MATCHPLANE_ROUTER_AI_REQUIRED");
     let conflicts = ProviderConfigConflicts {
-        endpoint: managed_effective
+        endpoint: managed_enabled
             && environment.endpoint.as_ref().is_some_and(|value| {
-                managed.as_ref().is_some_and(|managed| {
-                    canonical_endpoint(value) != canonical_endpoint(&managed.config.endpoint)
+                managed_config.is_some_and(|managed| {
+                    canonical_endpoint(value) != canonical_endpoint(&managed.endpoint)
                 })
             }),
-        model: managed_effective
-            && environment.model.as_ref().is_some_and(|value| {
-                managed
-                    .as_ref()
-                    .is_some_and(|managed| value != &managed.config.model)
-            }),
-        protocol: managed_effective
+        model: managed_enabled
+            && environment
+                .model
+                .as_ref()
+                .is_some_and(|value| managed_config.is_some_and(|managed| value != &managed.model)),
+        protocol: managed_enabled
             && environment.protocol.as_ref().is_some_and(|value| {
-                managed
-                    .as_ref()
-                    .is_some_and(|managed| value != &managed.config.protocol)
+                managed_config.is_some_and(|managed| value != &managed.protocol)
             }),
     };
     ProviderResolution {
         config,
-        intent_enabled: required || managed_enabled || environment_present,
+        intent_enabled: !managed_disabled
+            && (required || managed_authoritative || managed_unreadable || environment_present),
         source: source.to_owned(),
-        managed_overrides_environment: managed_effective && environment_present,
+        managed_overrides_environment: managed_enabled && environment_present,
         conflicts,
         endpoint_origin: parsed_endpoint.map(|url| url.origin().ascii_serialization()),
         model,
@@ -2113,37 +2204,6 @@ fn completion_endpoint(endpoint: &Url) -> String {
     }
 }
 
-fn load_managed_provider_values() -> Option<ManagedProviderValues> {
-    let raw = fs::read_to_string(MANAGED_ROUTER_CONFIG_PATH).ok()?;
-    let config = serde_json::from_str::<ManagedHostedAgentConfig>(&raw).ok()?;
-    let key_path = managed_router_key_path(&config)?;
-    let api_key = fs::read_to_string(key_path)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .map(SecretString::from);
-    Some(ManagedProviderValues { config, api_key })
-}
-
-fn managed_router_key_path(config: &ManagedHostedAgentConfig) -> Option<PathBuf> {
-    let file = config
-        .credential_file
-        .as_deref()
-        .unwrap_or(LEGACY_MANAGED_ROUTER_KEY_FILE);
-    let valid = file == LEGACY_MANAGED_ROUTER_KEY_FILE
-        || file
-            .strip_prefix("platform-router-key-")
-            .and_then(|value| value.strip_suffix(".key"))
-            .and_then(|value| Uuid::parse_str(value).ok())
-            .is_some();
-    if !valid {
-        return None;
-    }
-    Path::new(MANAGED_ROUTER_CONFIG_PATH)
-        .parent()
-        .map(|root| root.join(file))
-}
-
 fn parse_provider_endpoint(value: &str) -> Option<Url> {
     let url = Url::parse(&canonical_endpoint(value)).ok()?;
     (url.scheme() == "https"
@@ -2183,56 +2243,98 @@ fn bounded_environment_millis(name: &str, fallback: u64, minimum: u64, maximum: 
 }
 
 fn hosted_agent_report() -> HostedAgentReport {
+    let managed = PlatformRouterReader::default().read();
+    hosted_agent_report_from_managed(&managed)
+}
+
+fn hosted_agent_report_from_managed(managed: &ManagedRouterRead) -> HostedAgentReport {
     let environment =
         env::var("MATCHPLANE_ENVIRONMENT").unwrap_or_else(|_| "development".to_owned());
-    let environment_report = hosted_agent_report_from_values(
-        &environment,
-        env::var("MATCHPLANE_ROUTER_AI_URL").ok().as_deref(),
-        env::var("MATCHPLANE_ROUTER_AI_KEY").ok().as_deref(),
-        env::var("MATCHPLANE_ROUTER_AI_MODEL").ok().as_deref(),
-        env::var("MATCHPLANE_ROUTER_AI_PROTOCOL").ok().as_deref(),
-    );
-    let Some(managed_report) = managed_hosted_agent_report(&environment) else {
-        return environment_report;
-    };
-    if managed_report.configured || !environment_report.configured {
-        managed_report
-    } else {
-        environment_report
+    match managed.source() {
+        ManagedSource::ManagedUnreadable => HostedAgentReport {
+            configured: false,
+            enabled: false,
+            source: ManagedSource::ManagedUnreadable.as_str().to_owned(),
+            protocol: M0_REQUIRED_ROUTER_PROTOCOL.to_owned(),
+            model: None,
+            endpoint_origin: None,
+            key_configured: false,
+            issues: vec![managed.unreadable().map_or_else(
+                || "managed_state_unreadable".to_owned(),
+                |error| error.code().to_owned(),
+            )],
+        },
+        ManagedSource::ManagedGeneration | ManagedSource::Legacy => {
+            let Some(config) = managed.active() else {
+                return HostedAgentReport {
+                    configured: false,
+                    enabled: false,
+                    source: managed.source().as_str().to_owned(),
+                    protocol: M0_REQUIRED_ROUTER_PROTOCOL.to_owned(),
+                    model: None,
+                    endpoint_origin: None,
+                    key_configured: false,
+                    issues: vec!["managed hosted Agent has no active configuration".to_owned()],
+                };
+            };
+            let mut report = hosted_agent_report_from_values_with_source(
+                &environment,
+                Some(&config.endpoint),
+                Some("configured"),
+                Some(&config.model),
+                Some(&config.protocol),
+                managed.source().as_str(),
+            );
+            report.enabled = config.enabled;
+            report
+        }
+        ManagedSource::Absent => {
+            let endpoint = env::var("MATCHPLANE_ROUTER_AI_URL").ok();
+            let key = env::var("MATCHPLANE_ROUTER_AI_KEY").ok();
+            let model = env::var("MATCHPLANE_ROUTER_AI_MODEL").ok();
+            let protocol = env::var("MATCHPLANE_ROUTER_AI_PROTOCOL").ok();
+            let source = if endpoint.is_some() || key.is_some() || model.is_some() {
+                "environment"
+            } else {
+                "absent"
+            };
+            hosted_agent_report_from_values_with_source(
+                &environment,
+                endpoint.as_deref(),
+                key.as_deref(),
+                model.as_deref(),
+                protocol.as_deref(),
+                source,
+            )
+        }
     }
 }
 
-fn managed_hosted_agent_report(environment: &str) -> Option<HostedAgentReport> {
-    let config = fs::read_to_string(MANAGED_ROUTER_CONFIG_PATH).ok()?;
-    let parsed = serde_json::from_str::<ManagedHostedAgentConfig>(&config).ok()?;
-    let key = managed_router_key_path(&parsed).and_then(|path| fs::read_to_string(path).ok());
-    hosted_agent_report_from_managed_values(environment, &config, key.as_deref())
-}
-
-fn hosted_agent_report_from_managed_values(
-    environment: &str,
-    config: &str,
-    key: Option<&str>,
-) -> Option<HostedAgentReport> {
-    let config: ManagedHostedAgentConfig = serde_json::from_str(config).ok()?;
-    if !config.enabled {
-        return None;
-    }
-    Some(hosted_agent_report_from_values(
-        environment,
-        Some(&config.endpoint),
-        key,
-        Some(&config.model),
-        Some(&config.protocol),
-    ))
-}
-
+#[cfg(test)]
 fn hosted_agent_report_from_values(
     environment: &str,
     endpoint: Option<&str>,
     key: Option<&str>,
     model: Option<&str>,
     protocol: Option<&str>,
+) -> HostedAgentReport {
+    hosted_agent_report_from_values_with_source(
+        environment,
+        endpoint,
+        key,
+        model,
+        protocol,
+        "environment",
+    )
+}
+
+fn hosted_agent_report_from_values_with_source(
+    environment: &str,
+    endpoint: Option<&str>,
+    key: Option<&str>,
+    model: Option<&str>,
+    protocol: Option<&str>,
+    source: &str,
 ) -> HostedAgentReport {
     let protocol = protocol
         .map(str::trim)
@@ -2270,6 +2372,8 @@ fn hosted_agent_report_from_values(
     }
     HostedAgentReport {
         configured: issues.is_empty(),
+        enabled: true,
+        source: source.to_owned(),
         protocol,
         model,
         endpoint_origin,
@@ -2347,17 +2451,23 @@ impl JsonRpcResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdminInviteRole, AuthCommand, Cli, Command, EffectiveProviderConfig, ProcessCommand,
+        AdminInviteRole, AuthCommand, Cli, Command, EffectiveProviderConfig,
+        EnvironmentProviderValues, ManagedRouterRead, PlatformRouterReader, ProcessCommand,
         ProviderConfigConflicts, ProviderResolution, SecretCommand, Service,
         admin_invite_role_value, better_auth_derived_key, dotenv_value,
-        execute_provider_probe_with, hosted_agent_report_from_managed_values,
-        hosted_agent_report_from_values, normalize_admin_base_url,
-        preflight_report_from_resolution, resolve_web_node_with,
+        execute_provider_probe_with, hosted_agent_report_from_values, normalize_admin_base_url,
+        preflight_report_from_resolution, put_root_email_secret,
+        resolve_effective_provider_with_environment, resolve_web_node_with,
         run_workload_with_detached_preflight, safe_endpoint_origin, select_root_admin_email,
-        service_command, sha256, valid_root_email_secret_slot, validate_operator_email,
-        validate_operator_uuid,
+        service_command, sha256, valid_root_email_secret_slot, validate_mounts_output,
+        validate_operator_email, validate_operator_uuid, write_root_email_secret_at,
     };
-    use std::time::Duration;
+    use std::{
+        fs,
+        os::unix::fs::{MetadataExt, PermissionsExt},
+        path::Path,
+        time::Duration,
+    };
 
     use anyhow::Context as _;
     use clap::Parser;
@@ -2607,34 +2717,6 @@ mod tests {
     }
 
     #[test]
-    fn hosted_agent_report_accepts_an_enabled_managed_provider() -> anyhow::Result<()> {
-        let report = hosted_agent_report_from_managed_values(
-            "production",
-            r#"{"endpoint":"https://managed.example/v1/chat","model":"managed/model","protocol":"openai-compatible","enabled":true,"assistantInstructions":"ignored by operations output"}"#,
-            Some("server-only-key"),
-        )
-        .ok_or_else(|| anyhow::anyhow!("enabled managed provider should produce a report"))?;
-
-        assert!(report.configured);
-        assert_eq!(
-            report.endpoint_origin.as_deref(),
-            Some("https://managed.example")
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn hosted_agent_report_ignores_a_disabled_managed_provider() {
-        let report = hosted_agent_report_from_managed_values(
-            "production",
-            r#"{"endpoint":"https://managed.example/v1/chat","model":"managed/model","protocol":"openai-compatible","enabled":false}"#,
-            Some("server-only-key"),
-        );
-
-        assert!(report.is_none());
-    }
-
-    #[test]
     fn hosted_agent_report_accepts_a_secure_supported_provider() {
         let report = hosted_agent_report_from_values(
             "production",
@@ -2669,6 +2751,129 @@ mod tests {
             safe_endpoint_origin("https://user:secret@llm.example/v1/chat"),
             Some("https://llm.example".to_owned())
         );
+    }
+
+    #[test]
+    fn validate_mounts_command_parses_and_returns_safe_blocking_output() -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(["matchplane", "validate-mounts", "--json"])?;
+        assert!(matches!(
+            cli.command,
+            Command::ValidateMounts { json: true }
+        ));
+
+        let missing = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/xtask-platform-router-tests")
+            .join(format!("missing-{}", Uuid::now_v7()));
+        let read = PlatformRouterReader::new(missing).read();
+        let mut output = Vec::new();
+        assert!(validate_mounts_output(&read, &mut output).is_err());
+        let output = String::from_utf8(output)?;
+        assert!(output.contains("managed_unreadable"));
+        assert!(!output.contains("/etc/matchplane"));
+        assert!(!output.contains("secret"));
+        Ok(())
+    }
+
+    #[test]
+    fn secret_put_rejects_reserved_router_slots_before_prompting() -> anyhow::Result<()> {
+        let error = put_root_email_secret("platform-router.key", false)
+            .expect_err("reserved slot must fail before a terminal prompt");
+        assert_eq!(error.to_string(), super::RESERVED_ROUTER_SLOT_MESSAGE);
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/xtask-platform-router-tests")
+            .join(Uuid::now_v7().to_string());
+        fs::create_dir_all(&root)?;
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o750))?;
+        for slot in [
+            "platform-router.key",
+            "platform-router-key-018f47a2-4e8d-7a31-8e34-2feea4be9a13.key",
+            "platform-router.current.018f47a2-4e8d-7a31-8e34-2feea4be9a14.tmp",
+            "platform-router.transaction",
+        ] {
+            let error = write_root_email_secret_at(&root, slot, "must-not-write")
+                .expect_err("reserved router slot must be rejected");
+            assert_eq!(error.to_string(), super::RESERVED_ROUTER_SLOT_MESSAGE);
+            assert!(!root.join(slot).exists());
+        }
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn unrelated_secret_slot_still_writes_with_protected_permissions() -> anyhow::Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/xtask-platform-router-tests")
+            .join(Uuid::now_v7().to_string());
+        fs::create_dir_all(&root)?;
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o750))?;
+        write_root_email_secret_at(&root, "smtp-password", "generic-secret")?;
+        let destination = root.join("smtp-password");
+        assert_eq!(fs::read_to_string(&destination)?, "generic-secret\n");
+        assert_eq!(fs::metadata(&destination)?.mode() & 0o777, 0o640);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn corrupt_present_pointer_never_falls_back_to_ready_environment() -> anyhow::Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/xtask-platform-router-tests")
+            .join(Uuid::now_v7().to_string());
+        fs::create_dir_all(&root)?;
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o750))?;
+        let pointer = root.join("platform-router.current");
+        fs::write(&pointer, b"{malformed")?;
+        fs::set_permissions(&pointer, fs::Permissions::from_mode(0o640))?;
+        let managed = PlatformRouterReader::new(&root).read();
+        let ready_environment = EnvironmentProviderValues {
+            endpoint: Some("https://api.lmm.best/v1".to_owned()),
+            api_key: Some(SecretString::from("ready-environment-value")),
+            model: Some("gpt-5.6-sol".to_owned()),
+            protocol: Some("openai-compatible".to_owned()),
+        };
+        let resolution =
+            resolve_effective_provider_with_environment(&managed, ready_environment, true);
+        assert_eq!(resolution.source, "managed_unreadable");
+        assert!(resolution.config.is_none());
+        assert!(
+            resolution
+                .issues
+                .iter()
+                .any(|issue| issue == "managed_state_unreadable")
+        );
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn absent_managed_state_allows_environment_and_disabled_generation_is_authoritative()
+    -> anyhow::Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/xtask-platform-router-tests")
+            .join(Uuid::now_v7().to_string());
+        fs::create_dir_all(&root)?;
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o750))?;
+        let absent = PlatformRouterReader::new(&root).read();
+        let ready_environment = || EnvironmentProviderValues {
+            endpoint: Some("https://api.lmm.best/v1".to_owned()),
+            api_key: Some(SecretString::from("ready-environment-value")),
+            model: Some("gpt-5.6-sol".to_owned()),
+            protocol: Some("openai-compatible".to_owned()),
+        };
+        let environment_resolution =
+            resolve_effective_provider_with_environment(&absent, ready_environment(), true);
+        assert_eq!(environment_resolution.source, "environment");
+        assert!(environment_resolution.config.is_some());
+
+        let disabled = ManagedRouterRead::test_managed_generation(false);
+        let disabled_resolution =
+            resolve_effective_provider_with_environment(&disabled, ready_environment(), true);
+        assert_eq!(disabled_resolution.source, "managed_generation");
+        assert!(!disabled_resolution.intent_enabled);
+        assert!(disabled_resolution.config.is_none());
+        fs::remove_dir_all(root)?;
+        Ok(())
     }
 
     #[test]
