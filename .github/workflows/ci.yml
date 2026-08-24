@@ -185,7 +185,14 @@ jobs:
         run: ./tests/integration/compose-smoke.sh
       - name: Collect service logs
         if: always()
-        run: docker compose --env-file .env.example -f deploy/compose/compose.yaml logs --no-color > compose.log
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file .env.example -f deploy/compose/compose.yaml)
+          if [[ -n "$("${compose[@]}" ps --all --quiet)" ]]; then
+            "${compose[@]}" logs --no-color > compose.log
+          elif [[ ! -f compose.log ]]; then
+            : > compose.log
+          fi
       - name: Upload integration log
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
