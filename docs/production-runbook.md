@@ -137,6 +137,14 @@ journalctl -u matchplane-matcher -u matchplane-projector --since '-10 min' --no-
 
 ## 6. 安全更新与回滚
 
+生产迁移前先按 [PostgreSQL backup gate](./postgresql-backup-gate.md) 显式启用本机 timer、执行一次 service，再把只读校验作为迁移门禁：
+
+```sh
+sudo matchplane-postgres-backup-verify && sudo matchplane migrate
+```
+
+校验失败时不得绕过；该门禁不实现自动 restore，也不能替代加密异机副本。
+
 每次更新前先记录当前运行版本，并同时备份加密后的 PostgreSQL 与当前二进制、web 发布件、Nginx 配置、密钥引用。使用 `pg_restore --list`（或同等 PostgreSQL 工具）验证 dump，再把第二份备份放到独立主机。解包前下载 `SHA256SUMS` 并校验；CI 发布版本建议再校验 GitHub Artifact Attestation 与仓库、ref 对应关系（示例：
 `gh attestation verify matchplane-*.tar.zst --repo LIghtJUNction/matchplane`）。在健康与业务探针运行阶段保持一份针对发布版本的单次回滚定时器，至少十分钟。仅当运营方确认本次发布有效时再关闭该定时器，否则应按定时器自动回退到上一个应用版本与配置。
 

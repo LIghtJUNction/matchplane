@@ -13,6 +13,8 @@ if [[ $(id -u) -ne 0 ]]; then
   exit 1
 fi
 
+repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+
 node_id=${MATCHPLANE_NODE_ID:-}
 if [[ -z $node_id ]]; then
   node_id=$(cat /proc/sys/kernel/random/uuid)
@@ -25,6 +27,10 @@ if [[ $node_id == 00000000-0000-7000-8000-00000000000a ]]; then
   echo 'MATCHPLANE_NODE_ID must not use the development default' >&2
   exit 1
 fi
+
+# Prepare the local backup target, but never enable its timer from this test-only
+# bootstrap. Production operators must opt in after running the first backup.
+"$repository_root/packaging/scripts/postgres-backup-prepare.sh"
 
 install -d -m 0750 -o root -g matchplane /etc/matchplane/secrets
 install -d -m 0750 -o root -g matchplane-gateway /etc/matchplane/secrets/gateway

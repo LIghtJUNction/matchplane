@@ -22,7 +22,8 @@ binaries=(
   matchplane
 )
 
-install -d "$root/usr/bin" "$root/etc/matchplane" "$root/etc/matchplane/services" "$root/usr/lib/systemd/system"
+install -d "$root/usr/bin" "$root/usr/sbin" "$root/usr/libexec"
+install -d "$root/etc/matchplane" "$root/etc/matchplane/services" "$root/usr/lib/systemd/system"
 install -d "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" "$root/usr/share/doc/matchplane"
 install -d "$root/usr/share/licenses/matchplane"
 install -d "$root/usr/share/matchplane/web"
@@ -43,7 +44,16 @@ for binary in "${binaries[@]}"; do
   install -Dm0755 "$binary_directory/$binary" "$root/usr/bin/$binary"
 done
 install -Dm0640 "$repository_root/packaging/config/matchplane.env" "$root/etc/matchplane/matchplane.env"
+install -Dm0644 "$repository_root/packaging/config/postgres-backup.conf" \
+  "$root/etc/matchplane/postgres-backup.conf"
+install -Dm0755 "$repository_root/packaging/scripts/postgres-backup.sh" \
+  "$root/usr/libexec/matchplane-postgres-backup"
+install -Dm0755 "$repository_root/packaging/scripts/postgres-backup-prepare.sh" \
+  "$root/usr/sbin/matchplane-postgres-backup-prepare"
+install -Dm0755 "$repository_root/packaging/scripts/postgres-backup-verify.sh" \
+  "$root/usr/bin/matchplane-postgres-backup-verify"
 install -Dm0644 "$repository_root"/packaging/systemd/*.service "$root/usr/lib/systemd/system/"
+install -Dm0644 "$repository_root"/packaging/systemd/*.timer "$root/usr/lib/systemd/system/"
 install -Dm0644 "$repository_root/packaging/sysusers/matchplane.conf" "$root/usr/lib/sysusers.d/matchplane.conf"
 install -Dm0644 "$repository_root/packaging/tmpfiles/matchplane.conf" "$root/usr/lib/tmpfiles.d/matchplane.conf"
 install -Dm0644 "$repository_root/README.md" "$root/usr/share/doc/matchplane/README.md"
@@ -53,6 +63,8 @@ install -Dm0644 "$repository_root/docs/marketplace-payments.md" \
   "$root/usr/share/doc/matchplane/marketplace-payments.md"
 install -Dm0644 "$repository_root/docs/cli-and-mcp.md" \
   "$root/usr/share/doc/matchplane/cli-and-mcp.md"
+install -Dm0644 "$repository_root/docs/postgresql-backup-gate.md" \
+  "$root/usr/share/doc/matchplane/postgresql-backup-gate.md"
 cp -a "$repository_root/.agents/skills/." "$root/usr/share/matchplane/skills/"
 cp -a "$standalone_web_root/." "$root/usr/share/matchplane/web/"
 # Next can place the standalone server below the traced runtime while keeping

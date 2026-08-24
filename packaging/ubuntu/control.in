@@ -5,7 +5,7 @@ Priority: optional
 Architecture: amd64
 Installed-Size: __INSTALLED_SIZE__
 Maintainer: LIghtJUNction <lightjunction.me@gmail.com>
-Depends: bubblewrap, ca-certificates, git, libc6, libgcc-s1, nodejs (>= 22.12.0), zlib1g
+Depends: bash, bubblewrap, ca-certificates, coreutils, git, libc6, libgcc-s1, nodejs (>= 22.12.0), postgresql-client, util-linux, zlib1g
 Description: Federated AI matching infrastructure
  MatchPlane combines deterministic matching, PostgreSQL authority,
  Kafka facts, Valkey projections, and a federated gRPC control plane.

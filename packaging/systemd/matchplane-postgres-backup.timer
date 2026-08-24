@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the MatchPlane PostgreSQL backup daily
+Documentation=file:///usr/share/doc/matchplane/postgresql-backup-gate.md
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=45m
+FixedRandomDelay=true
+AccuracySec=1m
+Persistent=true
+Unit=matchplane-postgres-backup.service
+
+[Install]
+WantedBy=timers.target
