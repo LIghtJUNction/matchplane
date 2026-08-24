@@ -26,6 +26,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         responses = {
             "/ok": (200, "application/json", b'{"status":"ok"}'),
+            "/array": (200, "application/json", b'["ok"]'),
+            "/object": (200, "application/json", b'{"status":"ok"}'),
+            "/invalid": (200, "application/json", b'{invalid'),
             "/not-found": (404, "text/html", b"<html>not found</html>"),
             "/unavailable": (503, "application/json", b'{"error":"unavailable"}'),
             "/empty": (200, "application/json", b""),
@@ -58,8 +61,16 @@ export HTTP_JSON_WORK_DIRECTORY
 
 http_json "$work_directory/ok.json" "http://127.0.0.1:$port/ok"
 jq -e '.status == "ok"' "$work_directory/ok.json" >/dev/null
+http_json "$work_directory/ok-after-header.json" "http://127.0.0.1:$port/ok" \
+  --header 'x-test-header: URL comes before headers'
+jq -e '.status == "ok"' "$work_directory/ok-after-header.json" >/dev/null
+http_json "$work_directory/array.json" "http://127.0.0.1:$port/array"
+jq -e 'type == "array" and .[0] == "ok"' "$work_directory/array.json" >/dev/null
+http_json_pipe "http://127.0.0.1:$port/object" \
+  --header 'x-test-header: URL comes before headers' \
+  | jq -e 'type == "object" and .status == "ok"' >/dev/null
 
-for path in not-found unavailable empty; do
+for path in invalid not-found unavailable empty; do
   if http_json "$work_directory/$path.json" "http://127.0.0.1:$port/$path"; then
     echo "expected JSON probe to reject $path" >&2
     exit 1

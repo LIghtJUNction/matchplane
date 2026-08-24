@@ -27,18 +27,23 @@ trap 'rm -rf "$HTTP_JSON_WORK_DIRECTORY" "$work_directory"' EXIT
 
 wait_for() {
   local description=$1
-  local command=$2
+  local request_target=$2
+  local jq_filter=$3
+  shift 3
+  local response_file="$HTTP_JSON_WORK_DIRECTORY/wait.json"
+
   for _ in $(seq 1 90); do
-    if bash -o pipefail -c "$command" >/dev/null 2>&1; then
+    if http_json "$response_file" "$request_target" "$@" 2>/dev/null \
+      && jq -e "$jq_filter" "$response_file" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
   done
-  echo "timed out waiting for $description" >&2
+  echo "timed out waiting for $description: $request_target (HTTP ${HTTP_JSON_LAST_STATUS:-unknown}; content-type ${HTTP_JSON_LAST_CONTENT_TYPE:-unknown})" >&2
   return 1
 }
 
-wait_for 'gateway readiness' "http_json_pipe '$base_url/health/ready' | jq -e '.status == \"ready\"'"
+wait_for 'gateway readiness' "$base_url/health/ready" '.status == "ready"'
 
 unauthenticated_core=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --request POST --header 'content-type: application/json' \
@@ -64,7 +69,7 @@ printf '%s\n' "{\"order_id\":\"00000000-0000-7000-8000-000000008003\",\"tenant_i
 http_json_pipe "$base_url/v1/orders" \
   --request POST --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$seller_request" \
   | jq -e '.duplicate == false' >/dev/null
-wait_for 'seller order admission' "http_json_pipe '$base_url/v1/orders/00000000-0000-7000-8000-000000008001' --header '$core_authorization' | jq -e '.status == \"open\"'"
+wait_for 'seller order admission' "$base_url/v1/orders/00000000-0000-7000-8000-000000008001" '.status == "open"' --header "$core_authorization"
 
 http_json_pipe "$base_url/v1/orders" \
   --request POST --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$buyer_one_request" \
@@ -72,8 +77,8 @@ http_json_pipe "$base_url/v1/orders" \
 http_json_pipe "$base_url/v1/orders" \
   --request POST --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$buyer_one_request" \
   | jq -e '.duplicate == true' >/dev/null
-wait_for 'first deterministic trade' "http_json_pipe '$base_url/v1/markets/$market_id/trades' --header '$core_authorization' | jq -e 'length == 1 and .[0].price == \"100\" and .[0].quantity == \"3\"'"
-wait_for 'first projected book' "http_json_pipe '$base_url/v1/markets/$market_id/book' --header '$core_authorization' | jq -e '.sequence == 2 and (.asks | length) == 1 and .asks[0].price == \"100\" and .asks[0].quantity == \"2\"'"
+wait_for 'first deterministic trade' "$base_url/v1/markets/$market_id/trades" 'length == 1 and .[0].price == "100" and .[0].quantity == "3"' --header "$core_authorization"
+wait_for 'first projected book' "$base_url/v1/markets/$market_id/book" '.sequence == 2 and (.asks | length) == 1 and .asks[0].price == "100" and .asks[0].quantity == "2"' --header "$core_authorization"
 
 conflict_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --request POST "$base_url/v1/orders" \
   --header "$core_authorization" --header 'content-type: application/json' \
@@ -84,8 +89,8 @@ test "$conflict_status" = 409
 http_json_pipe "$base_url/v1/orders" \
   --request POST --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$buyer_two_request" \
   | jq -e '.duplicate == false' >/dev/null
-wait_for 'post-restart snapshot recovery and trade' "http_json_pipe '$base_url/v1/markets/$market_id/trades' --header '$core_authorization' | jq -e 'length == 2'"
-wait_for 'empty projected book after second fill' "http_json_pipe '$base_url/v1/markets/$market_id/book' --header '$core_authorization' | jq -e '.sequence == 3 and (.bids | length) == 0 and (.asks | length) == 0'"
+wait_for 'post-restart snapshot recovery and trade' "$base_url/v1/markets/$market_id/trades" 'length == 2' --header "$core_authorization"
+wait_for 'empty projected book after second fill' "$base_url/v1/markets/$market_id/book" '.sequence == 3 and (.bids | length) == 0 and (.asks | length) == 0' --header "$core_authorization"
 
 database_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane --tuples-only --no-align --command \
   "SELECT (SELECT count(*) FROM orders), (SELECT count(*) FROM trades), (SELECT count(*) FROM ledger_entries), (SELECT count(*) FROM consumer_inbox WHERE status='applied'), (SELECT count(*) FROM asset_embeddings), (SELECT available_amount::text FROM accounts WHERE id='00000000-0000-7000-8000-000000000505');")
