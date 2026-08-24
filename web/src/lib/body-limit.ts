@@ -12,11 +12,11 @@ export class ResponseBodyTooLargeError extends Error {
   }
 }
 
-/** Read a JSON request with a byte cap that also covers chunked transfer encoding. */
-export async function readJsonBody<T>(
+/** Read an optional JSON request with a byte cap; exactly zero bytes returns undefined. */
+export async function readOptionalJsonBody<T>(
   request: Request,
   maximumBytes: number,
-): Promise<T> {
+): Promise<T | undefined> {
   const declaredLength = Number.parseInt(
     request.headers.get("content-length") ?? "",
     10,
@@ -24,13 +24,24 @@ export async function readJsonBody<T>(
   if (Number.isSafeInteger(declaredLength) && declaredLength > maximumBytes) {
     throw new RequestBodyTooLargeError(maximumBytes);
   }
-  if (!request.body) throw new SyntaxError("empty request body");
+  if (!request.body) return undefined;
   const bytes = await readBoundedBytes(
     request.body,
     maximumBytes,
     () => new RequestBodyTooLargeError(maximumBytes),
   );
+  if (bytes.byteLength === 0) return undefined;
   return parseJson<T>(new TextDecoder().decode(bytes));
+}
+
+/** Read a JSON request with a byte cap that also covers chunked transfer encoding. */
+export async function readJsonBody<T>(
+  request: Request,
+  maximumBytes: number,
+): Promise<T> {
+  const value = await readOptionalJsonBody<T>(request, maximumBytes);
+  if (value === undefined) throw new SyntaxError("empty request body");
+  return value;
 }
 
 /** Read an upstream JSON response with a byte cap that also covers chunked transfer encoding. */

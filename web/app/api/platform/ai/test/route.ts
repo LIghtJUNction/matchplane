@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 
 import { auth } from "../../../../../src/lib/auth";
 import {
-  readJsonBody,
+  readOptionalJsonBody,
   RequestBodyTooLargeError,
 } from "../../../../../src/lib/body-limit";
 import { hasTrustedCookieOrigin } from "../../../../../src/lib/request-origin";
@@ -183,9 +183,9 @@ async function candidateRequested(
   request: Request,
   requestId: string,
 ): Promise<boolean | Response> {
-  if (!request.body) return false;
   try {
-    const value = await readJsonBody<unknown>(request, 4 * 1024);
+    const value = await readOptionalJsonBody<unknown>(request, 4 * 1024);
+    if (value === undefined) return false;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return response({ error: "AI 测试请求必须是对象", requestId }, 400);
     }

@@ -287,6 +287,8 @@ describe("platform AI transactional probe route", () => {
     });
     const cases = [
       { body: "{", status: 400 },
+      { body: "   ", status: 400 },
+      { body: "null", status: 400 },
       { body: "true", status: 400 },
       { body: "[]", status: 400 },
       { body: JSON.stringify({ candidate: "true" }), status: 400 },
@@ -323,18 +325,41 @@ describe("platform AI transactional probe route", () => {
     expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
   });
 
-  it("accepts an empty body, empty object, or explicit candidate false as an active read-only probe", async () => {
-    for (const body of [undefined, "{}", '{"candidate":false}'] as const) {
-      const response = await POST(
-        new Request("http://localhost/api/platform/ai/test", {
-          method: "POST",
-          headers: { origin: "http://localhost" },
-          ...(body === undefined ? {} : { body }),
+  it("accepts null and non-null zero-byte bodies, an empty object, or candidate false as active probes", async () => {
+    const requests = [
+      new Request("http://localhost/api/platform/ai/test", {
+        method: "POST",
+        headers: { origin: "http://localhost" },
+      }),
+      new Request("http://localhost/api/platform/ai/test", {
+        method: "POST",
+        headers: { origin: "http://localhost" },
+        body: "",
+      }),
+      new Request("http://localhost/api/platform/ai/test", {
+        method: "POST",
+        headers: { origin: "http://localhost" },
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
         }),
-      );
-      expect(response.status).toBe(200);
+        duplex: "half",
+      } as RequestInit & { duplex: "half" }),
+      ...["{}", '{"candidate":false}'].map(
+        (body) =>
+          new Request("http://localhost/api/platform/ai/test", {
+            method: "POST",
+            headers: { origin: "http://localhost" },
+            body,
+          }),
+      ),
+    ];
+
+    for (const request of requests) {
+      expect((await POST(request)).status).toBe(200);
     }
-    expect(mocks.probePlatformRouter).toHaveBeenCalledTimes(3);
+    expect(mocks.probePlatformRouter).toHaveBeenCalledTimes(5);
     expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
     expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
   });
