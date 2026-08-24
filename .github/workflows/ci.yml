@@ -141,8 +141,18 @@ jobs:
         run: cargo test --workspace --locked
       - name: Apply every migration to a fresh PostgreSQL database
         env:
-          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
-        run: cargo test --locked -p matchplane-storage --test migration_fresh_install -- --ignored
+          COMPOSE_PROJECT_NAME: matchplane-migration-gate
+          DATABASE_URL: postgres://matchplane:matchplane_dev_only@127.0.0.1:15432/matchplane
+          MATCHPLANE_POSTGRES_HOST_PORT: "15432"
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file .env.example -f deploy/compose/compose.yaml)
+          cleanup() {
+            "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          "${compose[@]}" up --build --detach --wait postgres
+          cargo test --locked -p matchplane-storage --test migration_fresh_install -- --ignored
       - name: Test ordered outbox claims against PostgreSQL
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
