@@ -98,12 +98,10 @@ function useHomePlaceholder(
   _enabled: boolean,
   configuredPhrases?: string[],
 ) {
-  const phrases = configuredPhrases?.length
-    ? configuredPhrases
-    : locale === "en"
-      ? HOME_PLACEHOLDER_EXAMPLES.en
-      : HOME_PLACEHOLDER_EXAMPLES.zh;
-  return phrases[0];
+  if (configuredPhrases?.length) {
+    return configuredPhrases[0];
+  }
+  return HOME_PLACEHOLDER_EXAMPLES[locale][0];
 }
 
 interface RecoverableChatError {
@@ -157,6 +155,58 @@ interface ChatMessage {
       | "cancelled";
   };
   contactConsent?: MallAssistantContactConsentAction;
+}
+
+type ChatHandoffStatus = NonNullable<ChatMessage["handoff"]>["status"];
+
+function localeText(locale: InterfaceLocale, en: string, zh: string): string {
+  return locale === "en" ? en : zh;
+}
+
+function assistantRoleLabel(
+  platformSlug: string,
+  locale: InterfaceLocale,
+): string {
+  if (platformSlug === "root") {
+    return localeText(locale, "Shopping Assistant", "选货员");
+  }
+  return localeText(locale, "AI Store Manager", "AI 店长");
+}
+
+function handoffStatusLabel(
+  status: ChatHandoffStatus,
+  locale: InterfaceLocale,
+): string {
+  switch (status) {
+    case "confirmation_required":
+      return localeText(locale, "Notify store staff?", "要通知店员吗？");
+    case "sending":
+      return localeText(
+        locale,
+        "Saving your handoff request…",
+        "正在记录人工介入请求…",
+      );
+    case "sent":
+      return localeText(locale, "Handoff request saved", "人工介入请求已记录");
+    case "cancelled":
+      return localeText(
+        locale,
+        "Store staff were not notified",
+        "未通知店员",
+      );
+    case "failed":
+      return localeText(locale, "Handoff request failed", "人工介入请求失败");
+  }
+}
+
+function handoffActionLabel(
+  status: ChatHandoffStatus,
+  locale: InterfaceLocale,
+): string {
+  if (status === "failed") {
+    return localeText(locale, "Try again", "重试");
+  }
+  return localeText(locale, "Confirm and notify", "确认并通知");
 }
 
 function parseStoredChoices(value: unknown): ChatMessage["choices"] {
@@ -685,27 +735,31 @@ export function MatchChat({
   // scanning and makes a marketplace feel like a demo; merchants may still
   // customize the static copy through the manifest.
   const headline = isSeller ? copy.sellerTitle : copy.buyerTitle;
-  const visibleHeadline =
-    compact && isRoot && !isSeller
-      ? locale === "en"
-        ? "What are you looking for?"
-        : "想找什么？"
-      : headline;
-  const visibleDescription =
-    compact && isRoot && !isSeller
-      ? locale === "en"
-        ? "Say what you need and your budget. Matching products will appear here."
-        : "说说想买什么和预算，合适的商品会直接出现在这里。"
-      : isSeller
-        ? copy.sellerDescription
-        : copy.buyerDescription;
   const showCompactMarketplaceHeading = compact && isRoot && !isSeller;
+  let visibleHeadline = headline;
+  let visibleDescription = isSeller
+    ? copy.sellerDescription
+    : copy.buyerDescription;
+  if (showCompactMarketplaceHeading) {
+    visibleHeadline = localeText(locale, "What are you looking for?", "想找什么？");
+    visibleDescription = localeText(
+      locale,
+      "Say what you need and your budget. Matching products will appear here.",
+      "说说想买什么和预算，合适的商品会直接出现在这里。",
+    );
+  }
   const hideMarketingHeading = home && !showCompactMarketplaceHeading;
   const homePlaceholder = useHomePlaceholder(
     locale,
     home && isRoot && !isSeller && !message && !composerFocused,
     subplatform.ui?.chat?.homePlaceholderPhrases,
   );
+  let composerPlaceholder = copy.buyerPlaceholder;
+  if (home && !isSeller) {
+    composerPlaceholder = homePlaceholder;
+  } else if (isSeller) {
+    composerPlaceholder = copy.sellerPlaceholder;
+  }
   const conversationStorageKey = `${SHOPPING_CONVERSATION_KEY}:${subplatform.slug}:${role}`;
 
   useEffect(() => {
@@ -770,56 +824,58 @@ export function MatchChat({
     locale === "en"
       ? ["Browse publicly", "Compare across stores", "Consent before contact"]
       : ["公开浏览", "跨店比较", "联系前征得同意"];
+  const starterPromptCardsByLocale = {
+    en: [
+      {
+        id: "describe",
+        badge: "Start",
+        title: "Describe what you need",
+        desc: "Share your budget, use case, and non-negotiable requirements",
+        prompt:
+          "Help me clarify my budget, use case, and must-have requirements.",
+      },
+      {
+        id: "compare",
+        badge: "Compare",
+        title: "Compare shown offers",
+        desc: "Explain trade-offs using only offers and facts already shown",
+        prompt:
+          "Compare the offers already shown and explain the factual trade-offs.",
+      },
+      {
+        id: "stores",
+        badge: "Browse",
+        title: "Browse public stores",
+        desc: "Show currently public stores without making verification claims",
+        prompt: "Show currently public stores and their listed categories.",
+      },
+    ],
+    zh: [
+      {
+        id: "describe",
+        badge: "开始",
+        title: "描述真实需求",
+        desc: "说明预算、用途和不能妥协的条件",
+        prompt: "帮我梳理预算、用途和必须满足的条件。",
+      },
+      {
+        id: "compare",
+        badge: "比较",
+        title: "比较已展示商品",
+        desc: "只依据已展示商品和事实说明取舍",
+        prompt: "比较已经展示的商品，并依据已知事实说明取舍。",
+      },
+      {
+        id: "stores",
+        badge: "浏览",
+        title: "查看公开店铺",
+        desc: "只列出当前公开店铺，不附加未经证实的认证声明",
+        prompt: "列出当前公开店铺及其已上架分类。",
+      },
+    ],
+  };
   const starterPromptCards = isRoot
-    ? locale === "en"
-      ? [
-          {
-            id: "describe",
-            badge: "Start",
-            title: "Describe what you need",
-            desc: "Share your budget, use case, and non-negotiable requirements",
-            prompt:
-              "Help me clarify my budget, use case, and must-have requirements.",
-          },
-          {
-            id: "compare",
-            badge: "Compare",
-            title: "Compare shown offers",
-            desc: "Explain trade-offs using only offers and facts already shown",
-            prompt:
-              "Compare the offers already shown and explain the factual trade-offs.",
-          },
-          {
-            id: "stores",
-            badge: "Browse",
-            title: "Browse public stores",
-            desc: "Show currently public stores without making verification claims",
-            prompt: "Show currently public stores and their listed categories.",
-          },
-        ]
-      : [
-          {
-            id: "describe",
-            badge: "开始",
-            title: "描述真实需求",
-            desc: "说明预算、用途和不能妥协的条件",
-            prompt: "帮我梳理预算、用途和必须满足的条件。",
-          },
-          {
-            id: "compare",
-            badge: "比较",
-            title: "比较已展示商品",
-            desc: "只依据已展示商品和事实说明取舍",
-            prompt: "比较已经展示的商品，并依据已知事实说明取舍。",
-          },
-          {
-            id: "stores",
-            badge: "浏览",
-            title: "查看公开店铺",
-            desc: "只列出当前公开店铺，不附加未经证实的认证声明",
-            prompt: "列出当前公开店铺及其已上架分类。",
-          },
-        ]
+    ? starterPromptCardsByLocale[locale]
     : [];
 
   const applyQuickPrompt = (value: string) => {
@@ -954,13 +1010,15 @@ export function MatchChat({
               : "最多保留 8 个附件",
           );
       } catch (error) {
-        onNotice(
+        const detail =
           error instanceof Error
             ? error.message
-            : locale === "en"
-              ? "Could not upload the attachment."
-              : "附件上传失败，请稍后重试",
-        );
+            : localeText(
+                locale,
+                "Could not upload the attachment.",
+                "附件上传失败，请稍后重试",
+              );
+        onNotice(detail);
       } finally {
         setMediaUploading(false);
       }
@@ -991,9 +1049,10 @@ export function MatchChat({
       const submittedAttachments = conversationAttachments;
       setConversationAttachments([]);
       const requestId = crypto.randomUUID();
-      const conversationId =
-        conversationIdRef.current ??
-        (conversationIdRef.current = crypto.randomUUID());
+      if (!conversationIdRef.current) {
+        conversationIdRef.current = crypto.randomUUID();
+      }
+      const conversationId = conversationIdRef.current;
       const retryBaseMessages = failedUserMessageId
         ? messages.filter(
             (messageItem) => messageItem.id !== failedUserMessageId,
@@ -1524,17 +1583,26 @@ export function MatchChat({
           route && route.routePlan.length > MAX_CHAT_TARGETS
             ? runtime.routeOverflow
             : "";
-        const assistantText = isSeller
-          ? copy.sellerSuccess
-          : live
-            ? route?.status === "degraded" && route.routePlan.length
-              ? runtime.routeDegraded(visibleRouteNames, routeOverflowSuffix)
-              : route?.routePlan.length
-                ? runtime.routeSelected(visibleRouteNames, routeOverflowSuffix)
-                : route?.routing.source === "ai"
-                  ? runtime.noMatch
-                  : runtime.noChildren
-            : runtime.recorded;
+        let assistantText = runtime.recorded;
+        if (isSeller) {
+          assistantText = copy.sellerSuccess;
+        } else if (live) {
+          if (route?.status === "degraded" && route.routePlan.length) {
+            assistantText = runtime.routeDegraded(
+              visibleRouteNames,
+              routeOverflowSuffix,
+            );
+          } else if (route?.routePlan.length) {
+            assistantText = runtime.routeSelected(
+              visibleRouteNames,
+              routeOverflowSuffix,
+            );
+          } else if (route?.routing.source === "ai") {
+            assistantText = runtime.noMatch;
+          } else {
+            assistantText = runtime.noChildren;
+          }
+        }
         const degradedSuffix = retrievalDegraded
           ? runtime.retrievalDegraded
           : "";
@@ -1546,13 +1614,13 @@ export function MatchChat({
             text: `${assistantText}${isSeller ? "" : degradedSuffix}`,
           },
         ]);
-        onNotice(
-          retrievalDegraded
-            ? runtime.retrievalDegradedNotice
-            : isSeller
-              ? copy.sellerSuccess
-              : copy.buyerSuccess,
-        );
+        let successNotice = isSeller
+          ? copy.sellerSuccess
+          : copy.buyerSuccess;
+        if (retrievalDegraded) {
+          successNotice = runtime.retrievalDegradedNotice;
+        }
+        onNotice(successNotice);
         if (isSeller)
           window.setTimeout(
             () => document.getElementById("seller-display-name")?.focus(),
@@ -1857,11 +1925,12 @@ export function MatchChat({
       setSignedIn(hasAuthSession);
       if (isRoot && !isSeller) {
         const authUserId = authState?.data?.user?.id;
-        const owner = session?.partyId
-          ? `party:${session.partyId}`
-          : typeof authUserId === "string" && authUserId
-            ? `user:${authUserId}`
-            : "guest";
+        let owner = "guest";
+        if (session?.partyId) {
+          owner = `party:${session.partyId}`;
+        } else if (typeof authUserId === "string" && authUserId) {
+          owner = `user:${authUserId}`;
+        }
         const storedConversation = readStoredConversation(
           conversationStorageKey,
           owner,
@@ -2203,25 +2272,16 @@ export function MatchChat({
               {item.role === "assistant" ? (
                 <div className="match-chat-assistant-tag" aria-hidden="true">
                   <Sparkles size={12} />
-                  <span>
-                    {subplatform.slug === "root"
-                      ? locale === "en"
-                        ? "Shopping Assistant"
-                        : "选货员"
-                      : locale === "en"
-                        ? "AI Store Manager"
-                        : "AI 店长"}
-                  </span>
+                  <span>{assistantRoleLabel(subplatform.slug, locale)}</span>
                 </div>
               ) : null}
               <p className={`match-chat-message is-${item.role}`}>
                 {item.text}
               </p>
               {item.choices?.map((choice) => (
-                <div
+                <fieldset
                   key={choice.id}
                   className="match-chat-tool-choice"
-                  role="group"
                   aria-label={choice.question}
                 >
                   <strong>{choice.question}</strong>
@@ -2244,7 +2304,7 @@ export function MatchChat({
                       </button>
                     ))}
                   </div>
-                </div>
+                </fieldset>
               ))}
               {item.contactConsent ? (
                 <StoreContactConsentCard
@@ -2259,25 +2319,7 @@ export function MatchChat({
                   role={item.handoff.status === "failed" ? "alert" : "status"}
                 >
                   <strong>
-                    {item.handoff.status === "confirmation_required"
-                      ? locale === "en"
-                        ? "Notify store staff?"
-                        : "要通知店员吗？"
-                      : item.handoff.status === "sending"
-                        ? locale === "en"
-                          ? "Saving your handoff request…"
-                          : "正在记录人工介入请求…"
-                        : item.handoff.status === "sent"
-                          ? locale === "en"
-                            ? "Handoff request saved"
-                            : "人工介入请求已记录"
-                          : item.handoff.status === "cancelled"
-                            ? locale === "en"
-                              ? "Store staff were not notified"
-                              : "未通知店员"
-                            : locale === "en"
-                              ? "Handoff request failed"
-                              : "人工介入请求失败"}
+                    {handoffStatusLabel(item.handoff.status, locale)}
                   </strong>
                   <span>
                     {locale === "en"
@@ -2292,13 +2334,7 @@ export function MatchChat({
                         className="match-chat-handoff-confirm"
                         onClick={() => void confirmHumanHandoff(item.id)}
                       >
-                        {item.handoff.status === "failed"
-                          ? locale === "en"
-                            ? "Try again"
-                            : "重试"
-                          : locale === "en"
-                            ? "Confirm and notify"
-                            : "确认并通知"}
+                        {handoffActionLabel(item.handoff.status, locale)}
                       </Button>
                       {item.handoff.status === "confirmation_required" ? (
                         <Button
@@ -2314,7 +2350,7 @@ export function MatchChat({
                 </div>
               ) : null}
               {item.recommendations?.length ? (
-                <div
+                <section
                   className="match-chat-recommendations"
                   aria-label={
                     locale === "en" ? "Recommended products" : "推荐商品"
@@ -2336,7 +2372,7 @@ export function MatchChat({
                       }
                     />
                   ))}
-                </div>
+                </section>
               ) : null}
               {item.attachments?.length ? (
                 <ul
@@ -2356,15 +2392,7 @@ export function MatchChat({
             <div className="match-chat-message-group is-assistant">
               <div className="match-chat-assistant-tag" aria-hidden="true">
                 <Sparkles size={12} />
-                <span>
-                  {subplatform.slug === "root"
-                    ? locale === "en"
-                      ? "Shopping Assistant"
-                      : "选货员"
-                    : locale === "en"
-                      ? "AI Store Manager"
-                      : "AI 店长"}
-                </span>
+                <span>{assistantRoleLabel(subplatform.slug, locale)}</span>
               </div>
               <div
                 className="chat-typing-indicator"
@@ -2381,9 +2409,8 @@ export function MatchChat({
       ) : null}
 
       {sellerRouteChoices.length ? (
-        <div
+        <fieldset
           className="match-chat-route-choices"
-          role="group"
           aria-label={runtime.routeChoicesAria}
         >
           {sellerRouteChoices.map((target) => (
@@ -2398,7 +2425,7 @@ export function MatchChat({
               <small>{target.path}</small>
             </button>
           ))}
-        </div>
+        </fieldset>
       ) : null}
 
       {mediaUploadEnabled && conversationAttachments.length ? (
@@ -2429,7 +2456,7 @@ export function MatchChat({
         </ul>
       ) : null}
       {isRoot && !isSeller && !messages.length ? (
-        <div
+        <section
           className="match-chat-suggestions"
           aria-label={
             locale === "en" ? "Example shopping requests" : "购物需求示例"
@@ -2471,7 +2498,7 @@ export function MatchChat({
               </button>
             ))}
           </div>
-        </div>
+        </section>
       ) : null}
       {chatError ? (
         <div className="home-chat-error" role="alert">
@@ -2554,13 +2581,7 @@ export function MatchChat({
           onFocus={() => setComposerFocused(true)}
           onBlur={() => setComposerFocused(false)}
           onKeyDown={handleInputKeyDown}
-          placeholder={
-            home && !isSeller
-              ? homePlaceholder
-              : isSeller
-                ? copy.sellerPlaceholder
-                : copy.buyerPlaceholder
-          }
+          placeholder={composerPlaceholder}
           rows={home ? 1 : 2}
           maxLength={10000}
           aria-describedby="match-chat-footnote"
@@ -2593,10 +2614,10 @@ export function MatchChat({
             <ArrowUp size={18} aria-hidden="true" />
           )}
         </Button>
+        {home ? <div className="home-chat-toolbar">{chatActions}</div> : null}
       </form>
-      {home ? <div className="home-chat-toolbar">{chatActions}</div> : null}
       {isRoot && !isSeller && !messages.length ? (
-        <div
+        <section
           className="match-chat-suggestions"
           aria-label={
             locale === "en" ? "Example shopping requests" : "购物需求示例"
@@ -2638,7 +2659,7 @@ export function MatchChat({
               </button>
             ))}
           </div>
-        </div>
+        </section>
       ) : null}
       {!isSeller && signedIn && !isRoot ? (
         <label className="match-chat-discovery">
@@ -2765,11 +2786,15 @@ function currentLocation(): string {
 }
 
 function isSafePendingLocation(value: string): boolean {
+  const hasControlCharacter = Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  });
   return (
     value.startsWith("/") &&
     !value.startsWith("//") &&
     !value.includes("\\") &&
-    !/[\u0000-\u001f\u007f]/.test(value)
+    !hasControlCharacter
   );
 }
 

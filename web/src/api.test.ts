@@ -169,4 +169,74 @@ describe("shopping assistant retry metadata", () => {
       retryAfterMs: 90_000,
     });
   });
+
+  it("preserves gateway timeout Retry-After metadata", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "下游平台响应超时，请稍后重试。",
+              code: "gateway_timeout",
+              retryable: true,
+            },
+            requestId: "44444444-4444-4444-8444-444444444444",
+          }),
+          {
+            status: 504,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "5",
+              "x-request-id": "44444444-4444-4444-8444-444444444444",
+            },
+          },
+        ),
+      ),
+    );
+
+    const error = await askMallShoppingAssistant([
+      { role: "user", content: "帮我找一台电脑" },
+    ]).catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({
+      status: 504,
+      code: "gateway_timeout",
+      message: "下游平台响应超时，请稍后重试。",
+      retryable: true,
+      retryAfterMs: 5_000,
+    });
+  });
+
+  it("returns request identity with a typed empty-catalog outcome", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            requestId: "55555555-5555-4555-8555-555555555555",
+            answer: "当前公开目录里暂时还没有可推荐的商品。",
+            recommendations: [],
+            uiActions: [],
+            outcome: "empty_catalog",
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      askMallShoppingAssistant([
+        { role: "user", content: "现在有什么商品？" },
+      ]),
+    ).resolves.toMatchObject({
+      requestId: "55555555-5555-4555-8555-555555555555",
+      answer: "当前公开目录里暂时还没有可推荐的商品。",
+      recommendations: [],
+      outcome: "empty_catalog",
+    });
+  });
 });

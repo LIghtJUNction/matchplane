@@ -102,9 +102,26 @@ describe("PlatformHeader account actions", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
 
     await user.click(trigger);
+    await screen.findByRole("menu", { name: "账户菜单" });
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
+  });
+
+  it("does not expose platform administration to an ordinary account", async () => {
+    const user = userEvent.setup();
+    renderHeader({
+      id: "buyer-1",
+      name: "Buyer",
+      email: "buyer@example.test",
+      role: "customer",
+    });
+
+    await user.click(screen.getByRole("button", { name: "账户菜单" }));
+    const menu = await screen.findByRole("menu", { name: "账户菜单" });
+    expect(
+      within(menu).queryByRole("menuitem", { name: "商城控制台" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows only public entry actions while signed out", async () => {

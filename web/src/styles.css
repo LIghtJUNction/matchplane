@@ -636,7 +636,7 @@ main.subplatform-fullscreen-main { min-height: 0; padding: 0; overflow: hidden; 
 .match-chat-more-menu [role="menuitem"][data-highlighted] { background: var(--paper-muted); }
 .match-chat-more-menu .match-chat-clear-menu-item { color: var(--danger); }
 .match-chat-clear { min-height: 2.25rem; padding: 0 0.7rem; display: inline-flex; align-items: center; gap: 0.28rem; border: 1px solid var(--line); border-radius: 0.75rem; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.72rem; }
-.match-chat-route-choices { margin-top: 0.8rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.55rem; }
+.match-chat-route-choices { min-inline-size: 0; margin: 0.8rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.55rem; border: 0; }
 .match-chat-route-choice { min-width: 0; padding: 0.7rem 0.8rem; display: grid; gap: 0.18rem; border: 1px solid var(--line); border-radius: 0.9rem; background: var(--paper); color: var(--ink); cursor: pointer; text-align: left; transition: border-color 160ms ease, background 160ms ease, transform 160ms ease; }
 .match-chat-route-choice:hover, .match-chat-route-choice:focus-visible { border-color: var(--ink-soft); background: var(--ivory); transform: translateY(-1px); }
 .match-chat-route-choice:disabled { cursor: wait; opacity: 0.55; transform: none; }
@@ -647,7 +647,7 @@ main.subplatform-fullscreen-main { min-height: 0; padding: 0; overflow: hidden; 
 .match-chat-message-group { width: fit-content; max-width: min(90%, 42rem); }
 .match-chat-message-group.is-user { justify-self: end; }
 .match-chat-message-group .match-chat-message { max-width: 100%; }
-.match-chat-tool-choice { margin-top: 0.45rem; padding: 0.75rem; display: grid; gap: 0.6rem; border: 1px solid var(--line); border-radius: 0.85rem; background: color-mix(in srgb, var(--paper) 88%, transparent); }
+.match-chat-tool-choice { min-inline-size: 0; margin: 0.45rem 0 0; padding: 0.75rem; display: grid; gap: 0.6rem; border: 1px solid var(--line); border-radius: 0.85rem; background: color-mix(in srgb, var(--paper) 88%, transparent); }
 .match-chat-tool-choice strong { color: var(--ink); font-size: 0.78rem; line-height: 1.45; }
 .match-chat-tool-choice > div { display: flex; flex-wrap: wrap; gap: 0.45rem; }
 .match-chat-tool-choice button { min-height: 2.5rem; padding: 0.45rem 0.7rem; border: 1px solid var(--line-strong); border-radius: 0.7rem; background: var(--surface); color: var(--ink); font-size: 0.76rem; text-align: left; }

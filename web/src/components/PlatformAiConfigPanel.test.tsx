@@ -45,11 +45,16 @@ describe("PlatformAiConfigPanel connection probe", () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();
     api.testPlatformAi.mockResolvedValue({
-      status: "failed",
+      status: "slow",
+      outcome: "slow",
+      phase: "first_byte",
       model: "test-model",
-      responseStatus: 504,
-      latencyMs: 20_000,
-      message: "模型在 20000 ms 内没有完成响应，请检查超时设置后重试。",
+      responseStatus: 200,
+      latencyMs: 9_200,
+      firstByteLatencyMs: 9_100,
+      performanceBudgetMs: 4_000,
+      hardTimeoutMs: 20_000,
+      message: "模型网关可达，但响应较慢。",
     });
 
     const { container } = render(
@@ -68,9 +73,7 @@ describe("PlatformAiConfigPanel connection probe", () => {
     await user.click(testButton);
 
     await waitFor(() =>
-      expect(onNotice).toHaveBeenCalledWith(
-        "模型在 20000 ms 内没有完成响应，请检查超时设置后重试。",
-      ),
+      expect(onNotice).toHaveBeenCalledWith("模型网关可达，但响应较慢。"),
     );
     expect(onNotice).not.toHaveBeenCalledWith("AI 连接测试成功");
   });

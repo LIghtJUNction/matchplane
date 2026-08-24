@@ -202,7 +202,7 @@ describe("MarketplaceHome actions", () => {
             />,
         );
 
-        expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+        expect(screen.getAllByRole("textbox")).toHaveLength(1);
         const toggle = screen.getByRole("button", { name: "问选货员" });
         expect(toggle).toHaveAttribute("aria-expanded", "false");
 

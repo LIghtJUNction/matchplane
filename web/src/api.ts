@@ -1957,6 +1957,7 @@ export async function askMallShoppingAssistant(
     answer?: string;
     recommendations?: unknown;
     uiActions?: unknown;
+    outcome?: unknown;
     error?:
       | string
       | {
@@ -1995,6 +1996,11 @@ export async function askMallShoppingAssistant(
       },
     );
   }
+  const outcome =
+    body.outcome === "empty_catalog" ||
+    body.outcome === "no_matching_products"
+      ? body.outcome
+      : undefined;
   return {
     requestId: body.requestId,
     answer: body.answer,
@@ -2004,6 +2010,7 @@ export async function askMallShoppingAssistant(
     uiActions: Array.isArray(body.uiActions)
       ? (body.uiActions as MallAssistantUiAction[])
       : [],
+    ...(outcome ? { outcome } : {}),
   };
 }
 

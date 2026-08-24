@@ -124,8 +124,8 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     expect(
-      screen.queryByRole("button", { name: "问选货员" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "问选货员" }),
+    ).toHaveAttribute("aria-expanded", "false");
     expect(
       screen.getByRole("heading", { name: "想找什么？" }),
     ).toBeInTheDocument();

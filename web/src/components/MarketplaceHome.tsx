@@ -18,6 +18,7 @@ import type { RecommendedBackendListing } from "../api";
 import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
 import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
+import { FloatingMarketplaceClerk } from "./FloatingMarketplaceClerk";
 import { MatchChat } from "./MatchChat";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
 import { StorefrontDirectory } from "./StorefrontDirectory";
@@ -203,8 +204,8 @@ function MarketplaceProducts({
                     </strong>
                     <p>
                         {locale === "en"
-                            ? "Describe what you need above. The assistant only returns currently available listings, or you can browse open stores below."
-                            : "可以在上方描述需要；选货员只会返回当前可用的真实商品，也可以浏览下方已营业店铺。"}
+                            ? "Ask the shopping assistant, or browse the open stores below."
+                            : "可以询问选货员，也可以浏览下方已营业店铺。"}
                     </p>
                 </div>
                 <Button
@@ -264,6 +265,7 @@ export function MarketplaceHome({
 }: MarketplaceHomeProps) {
     const allLabel = locale === "en" ? "All" : "全部";
     const [category, setCategory] = useState(allLabel);
+    const [clerkOpen, setClerkOpen] = useState(false);
     const categories = useMemo(
         () => [
             allLabel,
@@ -287,23 +289,47 @@ export function MarketplaceHome({
 
     return (
         <div
-            className="root-marketplace-page min-h-screen bg-background-subtle text-foreground"
+            className={`root-marketplace-page min-h-screen bg-background-subtle text-foreground${clerkOpen ? " is-clerk-open" : ""}`}
             id="top"
         >
             <div className="root-marketplace-main">
                 <div className="root-marketplace-catalog">
                     <header className="root-marketplace-catalog-intro">
                         <div>
+                            <p>
+                                {locale === "en"
+                                    ? "MATCHPLANE MARKET"
+                                    : "MATCHPLANE 商城"}
+                            </p>
                             <h1>
                                 {locale === "en"
-                                    ? "Find the right product"
-                                    : "找合适的商品"}
+                                    ? "Find products that fit."
+                                    : "发现适合你的商品"}
                             </h1>
                             <span>
                                 {locale === "en"
-                                    ? "Describe what you need, or browse verified listings from open stores."
-                                    : "先描述你的需要，也可以直接浏览营业店铺的真实商品。"}
+                                    ? "Browse real listings. The shopping assistant can help narrow the choice when needed."
+                                    : "浏览真实在售商品；需要帮助时，选货员会帮你缩小范围。"}
                             </span>
+                        </div>
+                        <div className="root-marketplace-catalog-actions">
+                            <Button
+                                variant="outline"
+                                nativeButton={false}
+                                render={
+                                    <a href="#stores">
+                                        {locale === "en"
+                                            ? "Browse stores"
+                                            : "浏览店铺"}
+                                    </a>
+                                }
+                            />
+                            <Button type="button" onClick={onPublishProduct}>
+                                <ShoppingBag aria-hidden="true" />
+                                {locale === "en"
+                                    ? "List a product"
+                                    : "发布商品"}
+                            </Button>
                         </div>
                     </header>
                     <div className="root-marketplace-concierge">
@@ -315,15 +341,6 @@ export function MarketplaceHome({
                             onRecommendations={onRecommendations}
                             subplatform={subplatform}
                         />
-                    </div>
-                    <div className="root-marketplace-catalog-actions">
-                        <Button variant="outline" render={<a href="#stores" />}>
-                            {locale === "en" ? "Browse stores" : "浏览店铺"}
-                        </Button>
-                        <Button type="button" onClick={onPublishProduct}>
-                            <ShoppingBag aria-hidden="true" />
-                            {locale === "en" ? "List a product" : "发布商品"}
-                        </Button>
                     </div>
                     {categories.length > 1 ? (
                         <ToggleGroup
@@ -376,6 +393,20 @@ export function MarketplaceHome({
                     </div>
                 </div>
             </div>
+            <FloatingMarketplaceClerk
+                open={clerkOpen}
+                locale={locale}
+                onOpenChange={setClerkOpen}
+            >
+                <MarketplaceSearchPanel
+                    locale={locale}
+                    onLikeListing={onLikeListing}
+                    onNotice={onNotice}
+                    onOpenListing={onOpenListing}
+                    onRecommendations={onRecommendations}
+                    subplatform={subplatform}
+                />
+            </FloatingMarketplaceClerk>
         </div>
     );
 }
