@@ -1,7 +1,9 @@
 use std::{
+    collections::BTreeSet,
     env, fs,
     future::Future,
     io::{self, IsTerminal, Write},
+    net::SocketAddr,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::Path,
     process::Command as ProcessCommand,
@@ -34,7 +36,8 @@ use zeroize::Zeroize;
 mod platform_router;
 
 use platform_router::{
-    ManagedRouterRead, ManagedSource, PlatformRouterReader, reserved_platform_router_slot,
+    ManagedRouterRead, ManagedSource, PlatformRouterReader, private_or_reserved_ip,
+    reserved_platform_router_slot,
 };
 
 #[derive(Debug, Parser)]
@@ -2107,19 +2110,102 @@ async fn execute_provider_probe_with(
     timeout: Duration,
     budget: Duration,
 ) -> ProviderProbeOutcome {
+    execute_provider_probe_with_resolver(config, timeout, budget, |host, port| async move {
+        tokio::net::lookup_host((host.as_str(), port))
+            .await
+            .map(|addresses| addresses.collect())
+            .map_err(|_| ())
+    })
+    .await
+}
+
+struct ProviderProbePlan {
+    client: Client,
+    endpoint: String,
+    #[cfg(test)]
+    resolved_addresses: Vec<SocketAddr>,
+    #[cfg(test)]
+    proxy_disabled: bool,
+}
+
+async fn execute_provider_probe_with_resolver<R, F>(
+    config: &EffectiveProviderConfig,
+    timeout: Duration,
+    budget: Duration,
+    resolver: R,
+) -> ProviderProbeOutcome
+where
+    R: FnOnce(String, u16) -> F,
+    F: Future<Output = Result<Vec<SocketAddr>, ()>>,
+{
     let started = Instant::now();
     if config.protocol != M0_REQUIRED_ROUTER_PROTOCOL {
         return provider_probe_outcome(started, "unsupported_protocol", None);
     }
-    let client = match Client::builder()
+    let plan = match prepare_provider_probe_plan(config, timeout, resolver).await {
+        Ok(plan) => plan,
+        Err(issue) => return provider_probe_outcome(started, issue, None),
+    };
+    execute_provider_probe_request(config, plan.client, plan.endpoint, budget, started).await
+}
+
+async fn prepare_provider_probe_plan<R, F>(
+    config: &EffectiveProviderConfig,
+    timeout: Duration,
+    resolver: R,
+) -> Result<ProviderProbePlan, &'static str>
+where
+    R: FnOnce(String, u16) -> F,
+    F: Future<Output = Result<Vec<SocketAddr>, ()>>,
+{
+    let host = config
+        .endpoint
+        .host_str()
+        .ok_or("provider_dns_untrusted")?
+        .to_owned();
+    let port = config
+        .endpoint
+        .port_or_known_default()
+        .ok_or("provider_dns_untrusted")?;
+    let addresses = resolver(host.clone(), port)
+        .await
+        .map_err(|()| "provider_dns_resolution")?
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if addresses.is_empty()
+        || addresses
+            .iter()
+            .any(|address| address.port() != port || private_or_reserved_ip(address.ip()))
+    {
+        return Err("provider_dns_untrusted");
+    }
+    let client = Client::builder()
         .timeout(timeout)
+        .no_proxy()
+        .resolve_to_addrs(&host, &addresses)
         .redirect(reqwest::redirect::Policy::none())
         .build()
-    {
-        Ok(client) => client,
-        Err(_) => return provider_probe_outcome(started, "client_configuration", None),
-    };
-    let endpoint = completion_endpoint(&config.endpoint);
+        .map_err(|_| "client_configuration")?;
+    Ok(ProviderProbePlan {
+        client,
+        endpoint: completion_endpoint(&config.endpoint),
+        #[cfg(test)]
+        resolved_addresses: addresses,
+        #[cfg(test)]
+        proxy_disabled: true,
+    })
+}
+
+async fn execute_provider_probe_request(
+    config: &EffectiveProviderConfig,
+    client: Client,
+    endpoint: String,
+    budget: Duration,
+    started: Instant,
+) -> ProviderProbeOutcome {
+    // The key is attached only after DNS policy validation and client address pinning succeed.
     let response = match client
         .post(endpoint)
         .bearer_auth(config.api_key.expose_secret())
@@ -2454,9 +2540,11 @@ mod tests {
         AdminInviteRole, AuthCommand, Cli, Command, EffectiveProviderConfig,
         EnvironmentProviderValues, ManagedRouterRead, PlatformRouterReader, ProcessCommand,
         ProviderConfigConflicts, ProviderResolution, SecretCommand, Service,
-        admin_invite_role_value, better_auth_derived_key, dotenv_value,
-        execute_provider_probe_with, hosted_agent_report_from_values, normalize_admin_base_url,
-        preflight_report_from_resolution, put_root_email_secret,
+        admin_invite_role_value, better_auth_derived_key, completion_endpoint, dotenv_value,
+        execute_provider_probe_request, execute_provider_probe_with_resolver,
+        hosted_agent_report_from_managed, hosted_agent_report_from_values,
+        normalize_admin_base_url, preflight_report_from_resolution, prepare_provider_probe_plan,
+        provider_preflight_report_from_managed, put_root_email_secret,
         resolve_effective_provider_with_environment, resolve_web_node_with,
         run_workload_with_detached_preflight, safe_endpoint_origin, select_root_admin_email,
         service_command, sha256, valid_root_email_secret_slot, validate_mounts_output,
@@ -2464,9 +2552,14 @@ mod tests {
     };
     use std::{
         fs,
+        net::SocketAddr,
         os::unix::fs::{MetadataExt, PermissionsExt},
         path::Path,
-        time::Duration,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::{Duration, Instant},
     };
 
     use anyhow::Context as _;
@@ -2821,7 +2914,8 @@ mod tests {
             .join("../../target/xtask-platform-router-tests")
             .join(Uuid::now_v7().to_string());
         fs::create_dir_all(&root)?;
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o750))?;
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o770))?;
+        let root = fs::canonicalize(root)?;
         let pointer = root.join("platform-router.current");
         fs::write(&pointer, b"{malformed")?;
         fs::set_permissions(&pointer, fs::Permissions::from_mode(0o640))?;
@@ -2853,7 +2947,8 @@ mod tests {
             .join("../../target/xtask-platform-router-tests")
             .join(Uuid::now_v7().to_string());
         fs::create_dir_all(&root)?;
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o750))?;
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o770))?;
+        let root = fs::canonicalize(root)?;
         let absent = PlatformRouterReader::new(&root).read();
         let ready_environment = || EnvironmentProviderValues {
             endpoint: Some("https://api.lmm.best/v1".to_owned()),
@@ -2950,6 +3045,110 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unsafe_managed_modes_block_environment_hosted_readiness_and_provider_probe() {
+        let managed = ManagedRouterRead::test_security_policy_unreadable();
+        let resolution = resolve_effective_provider_with_environment(
+            &managed,
+            EnvironmentProviderValues {
+                endpoint: Some("https://api.lmm.best/v1".to_owned()),
+                api_key: Some(SecretString::from("environment-must-not-win")),
+                model: Some("deepseek-v3.2".to_owned()),
+                protocol: Some("openai-compatible".to_owned()),
+            },
+            true,
+        );
+        assert_eq!(resolution.source, "managed_unreadable");
+        assert!(resolution.config.is_none());
+        assert!(
+            resolution
+                .issues
+                .iter()
+                .any(|issue| issue == "managed_security_policy_invalid")
+        );
+        assert_eq!(
+            managed
+                .read_active_secret()
+                .expect_err("unreadable state refuses key reads")
+                .code(),
+            "managed_security_policy_invalid"
+        );
+
+        let hosted = hosted_agent_report_from_managed(&managed);
+        assert!(!hosted.configured);
+        assert!(!hosted.enabled);
+        assert_eq!(hosted.source, "managed_unreadable");
+        let preflight = provider_preflight_report_from_managed(&managed).await;
+        assert!(!preflight.ready);
+        assert!(preflight.blocking);
+        assert!(
+            preflight
+                .issues
+                .iter()
+                .any(|issue| issue == "managed_security_policy_invalid")
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_dns_policy_rejects_empty_private_ipv6_and_mixed_answers() {
+        let config = test_provider_config(
+            Url::parse("https://provider.example/v1").expect("valid provider URL"),
+        );
+        let cases: Vec<Vec<SocketAddr>> = vec![
+            Vec::new(),
+            vec!["127.0.0.1:443".parse().expect("loopback fixture")],
+            vec!["10.0.0.1:443".parse().expect("private fixture")],
+            vec!["[::1]:443".parse().expect("IPv6 loopback fixture")],
+            vec!["[fc00::1]:443".parse().expect("IPv6 private fixture")],
+            vec![
+                "8.8.8.8:443".parse().expect("public fixture"),
+                "169.254.169.254:443".parse().expect("metadata fixture"),
+            ],
+            vec!["8.8.8.8:444".parse().expect("wrong-port fixture")],
+        ];
+        for addresses in cases {
+            let outcome = execute_provider_probe_with_resolver(
+                &config,
+                Duration::from_secs(1),
+                Duration::from_secs(1),
+                move |_, _| async move { Ok(addresses) },
+            )
+            .await;
+            assert_eq!(outcome.status, "provider_dns_untrusted");
+            assert_eq!(outcome.response_status, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_dns_policy_accepts_public_answers_and_pins_the_first_resolution() {
+        let config = test_provider_config(
+            Url::parse("https://provider.example/v1").expect("valid provider URL"),
+        );
+        let public: Vec<SocketAddr> = vec![
+            "8.8.8.8:443".parse().expect("public IPv4 fixture"),
+            "[2606:4700:4700::1111]:443"
+                .parse()
+                .expect("public IPv6 fixture"),
+        ];
+        let resolver_state = Arc::new(Mutex::new(public.clone()));
+        let resolver_calls = Arc::new(AtomicUsize::new(0));
+        let state = Arc::clone(&resolver_state);
+        let calls = Arc::clone(&resolver_calls);
+        let plan = prepare_provider_probe_plan(&config, Duration::from_secs(1), move |_, _| {
+            let addresses = state.lock().expect("resolver state lock").clone();
+            calls.fetch_add(1, Ordering::SeqCst);
+            async move { Ok(addresses) }
+        })
+        .await
+        .expect("public DNS answers are accepted");
+        *resolver_state.lock().expect("resolver state lock") =
+            vec!["127.0.0.1:443".parse().expect("simulated rebound fixture")];
+
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(plan.resolved_addresses, public);
+        assert!(plan.proxy_disabled);
+    }
+
+    #[tokio::test]
     async fn provider_preflight_accepts_a_bounded_openai_compatible_response() -> anyhow::Result<()>
     {
         let endpoint = spawn_provider_response(
@@ -2958,7 +3157,7 @@ mod tests {
             Duration::ZERO,
         )
         .await?;
-        let outcome = execute_provider_probe_with(
+        let outcome = execute_provider_probe_with_test_transport(
             &test_provider_config(endpoint),
             Duration::from_secs(1),
             Duration::from_secs(1),
@@ -2978,7 +3177,7 @@ mod tests {
             Duration::from_millis(100),
         )
         .await?;
-        let outcome = execute_provider_probe_with(
+        let outcome = execute_provider_probe_with_test_transport(
             &test_provider_config(endpoint),
             Duration::from_millis(20),
             Duration::from_secs(1),
@@ -2996,7 +3195,7 @@ mod tests {
         let endpoint =
             spawn_provider_response(503, "sensitive upstream response body", Duration::ZERO)
                 .await?;
-        let outcome = execute_provider_probe_with(
+        let outcome = execute_provider_probe_with_test_transport(
             &test_provider_config(endpoint),
             Duration::from_secs(1),
             Duration::from_secs(1),
@@ -3007,6 +3206,27 @@ mod tests {
         assert_eq!(outcome.response_status, Some(503));
         assert!(!outcome.issue.contains("sensitive"));
         Ok(())
+    }
+
+    async fn execute_provider_probe_with_test_transport(
+        config: &EffectiveProviderConfig,
+        timeout: Duration,
+        budget: Duration,
+    ) -> super::ProviderProbeOutcome {
+        let client = super::Client::builder()
+            .timeout(timeout)
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("build deliberately injected loopback test client");
+        execute_provider_probe_request(
+            config,
+            client,
+            completion_endpoint(&config.endpoint),
+            budget,
+            Instant::now(),
+        )
+        .await
     }
 
     fn test_provider_config(endpoint: Url) -> EffectiveProviderConfig {

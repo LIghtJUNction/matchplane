@@ -3,8 +3,9 @@ use std::{
     fs::File,
     io::Read,
     net::IpAddr,
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
+    os::unix::fs::{FileExt, PermissionsExt},
+    path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 
 use rustix::{
@@ -64,6 +65,7 @@ pub enum ManagedUnreadableKind {
     CredentialMissing,
     CredentialInvalid,
     LegacyInvalid,
+    SecurityPolicyInvalid,
 }
 
 impl ManagedUnreadableKind {
@@ -80,6 +82,7 @@ impl ManagedUnreadableKind {
             Self::CredentialMissing => "managed_credential_missing",
             Self::CredentialInvalid => "managed_credential_invalid",
             Self::LegacyInvalid => "legacy_managed_config_invalid",
+            Self::SecurityPolicyInvalid => "managed_security_policy_invalid",
         }
     }
 }
@@ -99,18 +102,41 @@ impl ManagedUnreadable {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ManagedRouterConfig {
     pub endpoint: String,
     pub model: String,
     pub protocol: String,
     pub enabled: bool,
     credential_file: String,
+    assistant_instructions: String,
+    assistant_max_output_tokens: i64,
+    assistant_temperature: f64,
+    assistant_max_steps: i64,
+    assistant_timeout_ms: i64,
+    assistant_reasoning_effort: String,
+    model_reasoning_efforts: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+impl ManagedRouterConfig {
+    fn tuning_invariants_hold(&self) -> bool {
+        utf16_len(&self.assistant_instructions) <= 4_000
+            && (64..=512).contains(&self.assistant_max_output_tokens)
+            && (0.0..=1.0).contains(&self.assistant_temperature)
+            && (2..=8).contains(&self.assistant_max_steps)
+            && (4_000..=30_000).contains(&self.assistant_timeout_ms)
+            && (self.assistant_reasoning_effort == "none"
+                || self
+                    .model_reasoning_efforts
+                    .contains(&self.assistant_reasoning_effort))
+            && self.model_reasoning_efforts.len() <= 16
+    }
+}
+
+#[derive(Clone)]
 pub struct ManagedRouterRead {
-    root: PathBuf,
+    _root: Option<Arc<File>>,
+    active_credential: Option<Arc<File>>,
     source: ManagedSource,
     active: Option<ManagedRouterConfig>,
     draft: Option<ManagedRouterConfig>,
@@ -144,16 +170,20 @@ impl ManagedRouterRead {
     }
 
     pub fn read_active_secret(&self) -> Result<Option<SecretString>, ManagedUnreadable> {
-        let Some(config) = self.active.as_ref() else {
+        if let Some(unreadable) = self.unreadable.as_ref() {
+            return Err(unreadable.clone());
+        }
+        let Some(file) = self.active_credential.as_deref() else {
             return Ok(None);
         };
-        read_secret(&self.root, &config.credential_file).map(Some)
+        read_secret(file).map(Some)
     }
 
     #[cfg(test)]
     pub(crate) fn test_managed_generation(enabled: bool) -> Self {
         Self {
-            root: PathBuf::new(),
+            _root: None,
+            active_credential: None,
             source: ManagedSource::ManagedGeneration,
             active: Some(ManagedRouterConfig {
                 endpoint: "https://api.lmm.best/v1".to_owned(),
@@ -161,12 +191,38 @@ impl ManagedRouterRead {
                 protocol: "openai-compatible".to_owned(),
                 enabled,
                 credential_file: LEGACY_KEY_FILE.to_owned(),
+                assistant_instructions: String::new(),
+                assistant_max_output_tokens: 320,
+                assistant_temperature: 0.2,
+                assistant_max_steps: 5,
+                assistant_timeout_ms: 20_000,
+                assistant_reasoning_effort: "none".to_owned(),
+                model_reasoning_efforts: Vec::new(),
             }),
             draft: None,
             unreadable: None,
             pointer_valid: Some(true),
             generation_valid: Some(true),
             permission_issues: Vec::new(),
+            orphan_temp_count: 0,
+            oldest_orphan_age_seconds: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_security_policy_unreadable() -> Self {
+        Self {
+            _root: None,
+            active_credential: None,
+            source: ManagedSource::ManagedUnreadable,
+            active: None,
+            draft: None,
+            unreadable: Some(ManagedUnreadable::new(
+                ManagedUnreadableKind::SecurityPolicyInvalid,
+            )),
+            pointer_valid: Some(true),
+            generation_valid: Some(false),
+            permission_issues: vec!["credential_mode".to_owned()],
             orphan_temp_count: 0,
             oldest_orphan_age_seconds: None,
         }
@@ -211,7 +267,7 @@ pub struct OrphanTempReport {
     pub oldest_age_seconds: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PlatformRouterReader {
     root: PathBuf,
 }
@@ -245,16 +301,34 @@ impl PlatformRouterReader {
                 );
             }
         };
+        let root = Arc::new(root);
         let mut permissions = Vec::new();
-        record_mode_issue(&root, 0o750, "root_mode", &mut permissions);
+        if !record_mode_issue(&root, 0o770, "root_mode", &mut permissions) {
+            return self.unreadable(
+                ManagedUnreadableKind::SecurityPolicyInvalid,
+                None,
+                None,
+                permissions,
+                OrphanTempReport {
+                    count: 0,
+                    oldest_age_seconds: None,
+                },
+            );
+        }
         let orphan_temps = match inspect_orphan_temps(&root) {
             Ok(report) => report,
             Err(()) => {
                 permissions.push("orphan_temp_scan_unavailable".to_owned());
-                OrphanTempReport {
-                    count: 0,
-                    oldest_age_seconds: None,
-                }
+                return self.unreadable(
+                    ManagedUnreadableKind::SecurityPolicyInvalid,
+                    None,
+                    None,
+                    permissions,
+                    OrphanTempReport {
+                        count: 0,
+                        oldest_age_seconds: None,
+                    },
+                );
             }
         };
 
@@ -271,7 +345,15 @@ impl PlatformRouterReader {
                 );
             }
         };
-        record_mode_issue(&pointer_file, 0o640, "pointer_mode", &mut permissions);
+        if !record_mode_issue(&pointer_file, 0o640, "pointer_mode", &mut permissions) {
+            return self.unreadable(
+                ManagedUnreadableKind::SecurityPolicyInvalid,
+                Some(false),
+                None,
+                permissions,
+                orphan_temps,
+            );
+        }
         let pointer_bytes = match read_bounded(pointer_file, MAX_POINTER_BYTES) {
             Ok(bytes) => bytes,
             Err(_) => {
@@ -323,12 +405,20 @@ impl PlatformRouterReader {
                 orphan_temps,
             );
         }
-        record_mode_issue(
+        if !record_mode_issue(
             &generation_directory,
             0o750,
             "generation_directory_mode",
             &mut permissions,
-        );
+        ) {
+            return self.unreadable(
+                ManagedUnreadableKind::SecurityPolicyInvalid,
+                Some(true),
+                Some(false),
+                permissions,
+                orphan_temps,
+            );
+        }
         let generation_name = format!("{}.json", pointer.generation_id);
         let generation_file = match open_required_regular(
             &generation_directory,
@@ -346,12 +436,20 @@ impl PlatformRouterReader {
                 );
             }
         };
-        record_mode_issue(
+        if !record_mode_issue(
             &generation_file,
             0o640,
             "generation_file_mode",
             &mut permissions,
-        );
+        ) {
+            return self.unreadable(
+                ManagedUnreadableKind::SecurityPolicyInvalid,
+                Some(true),
+                Some(false),
+                permissions,
+                orphan_temps,
+            );
+        }
         let generation_bytes = match read_bounded(generation_file, MAX_GENERATION_BYTES) {
             Ok(bytes) => bytes,
             Err(_) => {
@@ -395,16 +493,29 @@ impl PlatformRouterReader {
                 orphan_temps,
             );
         }
-        if let Err(kind) = validate_credentials(
+        let active_credential = match validate_credentials(
             &root,
             generation.active.as_ref(),
             generation.draft.as_ref(),
             &mut permissions,
         ) {
-            return self.unreadable(kind, Some(true), Some(false), permissions, orphan_temps);
+            Ok(file) => file,
+            Err(kind) => {
+                return self.unreadable(kind, Some(true), Some(false), permissions, orphan_temps);
+            }
+        };
+        if !permissions.is_empty() {
+            return self.unreadable(
+                ManagedUnreadableKind::SecurityPolicyInvalid,
+                Some(true),
+                Some(false),
+                permissions,
+                orphan_temps,
+            );
         }
         ManagedRouterRead {
-            root: self.root.clone(),
+            _root: Some(root),
+            active_credential,
             source: ManagedSource::ManagedGeneration,
             active: generation.active,
             draft: generation.draft,
@@ -419,7 +530,7 @@ impl PlatformRouterReader {
 
     fn read_legacy(
         &self,
-        root: &File,
+        root: &Arc<File>,
         mut permissions: Vec<String>,
         orphan_temps: OrphanTempReport,
     ) -> ManagedRouterRead {
@@ -427,7 +538,8 @@ impl PlatformRouterReader {
             Ok(Some(file)) => file,
             Ok(None) => {
                 return ManagedRouterRead {
-                    root: self.root.clone(),
+                    _root: Some(Arc::clone(root)),
+                    active_credential: None,
                     source: ManagedSource::Absent,
                     active: None,
                     draft: None,
@@ -449,7 +561,15 @@ impl PlatformRouterReader {
                 );
             }
         };
-        record_mode_issue(&legacy_file, 0o640, "legacy_config_mode", &mut permissions);
+        if !record_mode_issue(&legacy_file, 0o640, "legacy_config_mode", &mut permissions) {
+            return self.unreadable(
+                ManagedUnreadableKind::SecurityPolicyInvalid,
+                None,
+                None,
+                permissions,
+                orphan_temps,
+            );
+        }
         let bytes = match read_bounded(legacy_file, MAX_LEGACY_BYTES) {
             Ok(bytes) => bytes,
             Err(_) => {
@@ -474,11 +594,23 @@ impl PlatformRouterReader {
                 );
             }
         };
-        if let Err(kind) = validate_credentials(root, Some(&active), None, &mut permissions) {
-            return self.unreadable(kind, None, None, permissions, orphan_temps);
+        let active_credential =
+            match validate_credentials(root, Some(&active), None, &mut permissions) {
+                Ok(file) => file,
+                Err(kind) => return self.unreadable(kind, None, None, permissions, orphan_temps),
+            };
+        if !permissions.is_empty() {
+            return self.unreadable(
+                ManagedUnreadableKind::SecurityPolicyInvalid,
+                None,
+                None,
+                permissions,
+                orphan_temps,
+            );
         }
         ManagedRouterRead {
-            root: self.root.clone(),
+            _root: Some(Arc::clone(root)),
+            active_credential,
             source: ManagedSource::Legacy,
             active: Some(active),
             draft: None,
@@ -500,7 +632,8 @@ impl PlatformRouterReader {
         orphan_temps: OrphanTempReport,
     ) -> ManagedRouterRead {
         ManagedRouterRead {
-            root: self.root.clone(),
+            _root: None,
+            active_credential: None,
             source: ManagedSource::ManagedUnreadable,
             active: None,
             draft: None,
@@ -553,6 +686,20 @@ struct RawConfig {
     protocol: String,
     enabled: bool,
     credential_file: Option<String>,
+    #[serde(default)]
+    assistant_instructions: Value,
+    #[serde(default)]
+    assistant_max_output_tokens: Value,
+    #[serde(default)]
+    assistant_temperature: Value,
+    #[serde(default)]
+    assistant_max_steps: Value,
+    #[serde(default)]
+    assistant_timeout_ms: Value,
+    #[serde(default)]
+    assistant_reasoning_effort: Value,
+    #[serde(default)]
+    model_reasoning_efforts: Value,
 }
 
 #[derive(Deserialize)]
@@ -664,7 +811,10 @@ fn decode_generation(bytes: &[u8]) -> Result<Generation, ()> {
 }
 
 fn decode_config_bytes(bytes: &[u8], legacy_default: bool) -> Result<ManagedRouterConfig, ()> {
-    let raw: RawConfig = serde_json::from_slice(bytes).map_err(|_| ())?;
+    // JSON.parse, used by the Web decoder, keeps the last duplicate key. Parsing through Value
+    // preserves that behavior instead of serde's derived-struct duplicate-field rejection.
+    let value: Value = serde_json::from_slice(bytes).map_err(|_| ())?;
+    let raw: RawConfig = serde_json::from_value(value).map_err(|_| ())?;
     normalize_config_with_default(raw, legacy_default)
 }
 
@@ -679,17 +829,20 @@ fn normalize_config_with_default(
     let candidate = raw.endpoint.trim();
     let parsed = Url::parse(candidate).map_err(|_| ())?;
     if candidate.is_empty()
-        || candidate.len() > 2_048
         || parsed.scheme() != "https"
         || parsed.host_str().is_none()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
         || parsed.query().is_some()
         || parsed.fragment().is_some()
-        || parsed.path().len() > 512
-        || parsed
-            .host_str()
-            .is_some_and(private_or_reserved_ip_literal)
+        || utf16_len(parsed.path()) > 512
+        || parsed.host_str().is_some_and(|hostname| {
+            hostname
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .parse::<IpAddr>()
+                .is_ok_and(private_or_reserved_ip)
+        })
     {
         return Err(());
     }
@@ -711,13 +864,51 @@ fn normalize_config_with_default(
         None if legacy_default => LEGACY_KEY_FILE.to_owned(),
         None => return Err(()),
     };
-    Ok(ManagedRouterConfig {
+    let assistant_instructions = match raw.assistant_instructions.as_str() {
+        Some(value) => {
+            let value = value.trim();
+            if utf16_len(value) > 4_000 {
+                return Err(());
+            }
+            value.to_owned()
+        }
+        None => String::new(),
+    };
+    let assistant_max_output_tokens =
+        bounded_safe_integer(&raw.assistant_max_output_tokens, 320, 64, 512);
+    let assistant_temperature = bounded_number(&raw.assistant_temperature, 0.2, 0.0, 1.0);
+    let assistant_max_steps = bounded_safe_integer(&raw.assistant_max_steps, 5, 2, 8);
+    let assistant_timeout_ms =
+        bounded_safe_integer(&raw.assistant_timeout_ms, 20_000, 4_000, 30_000);
+    let model_reasoning_efforts = normalize_reasoning_efforts(&raw.model_reasoning_efforts);
+    let assistant_reasoning_effort = raw
+        .assistant_reasoning_effort
+        .as_str()
+        .filter(|value| {
+            model_reasoning_efforts
+                .iter()
+                .any(|effort| effort == *value)
+        })
+        .unwrap_or("none")
+        .to_owned();
+    let config = ManagedRouterConfig {
         endpoint,
         model,
         protocol: raw.protocol,
         enabled: raw.enabled,
         credential_file,
-    })
+        assistant_instructions,
+        assistant_max_output_tokens,
+        assistant_temperature,
+        assistant_max_steps,
+        assistant_timeout_ms,
+        assistant_reasoning_effort,
+        model_reasoning_efforts,
+    };
+    if !config.tuning_invariants_hold() {
+        return Err(());
+    }
+    Ok(config)
 }
 
 fn validate_draft(raw: RawDraft) -> Result<ManagedRouterConfig, ()> {
@@ -745,9 +936,13 @@ fn validate_audit_record(record: &RawAuditRecord) -> Result<(), ()> {
     let endpoint = Url::parse(&record.endpoint_origin).map_err(|_| ())?;
     if endpoint.scheme() != "https"
         || endpoint.host_str().is_none()
-        || endpoint
-            .host_str()
-            .is_some_and(private_or_reserved_ip_literal)
+        || endpoint.host_str().is_some_and(|hostname| {
+            hostname
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .parse::<IpAddr>()
+                .is_ok_and(private_or_reserved_ip)
+        })
         || endpoint.origin().ascii_serialization() != record.endpoint_origin
     {
         return Err(());
@@ -761,44 +956,59 @@ fn validate_credentials(
     active: Option<&ManagedRouterConfig>,
     draft: Option<&ManagedRouterConfig>,
     permission_issues: &mut Vec<String>,
-) -> Result<(), ManagedUnreadableKind> {
-    let mut credentials = HashSet::new();
-    if let Some(config) = active {
-        credentials.insert(config.credential_file.as_str());
-    }
-    if let Some(config) = draft {
-        credentials.insert(config.credential_file.as_str());
-    }
-    for credential in credentials {
-        validate_credential_name(credential)
+) -> Result<Option<Arc<File>>, ManagedUnreadableKind> {
+    let active_credential = if let Some(config) = active {
+        validate_credential_name(&config.credential_file)
             .map_err(|_| ManagedUnreadableKind::CredentialInvalid)?;
-        let file =
-            open_required_metadata_regular(root, credential, MAX_KEY_BYTES).map_err(|error| {
-                if error == FileReadError::Missing {
-                    ManagedUnreadableKind::CredentialMissing
-                } else {
-                    ManagedUnreadableKind::CredentialInvalid
-                }
-            })?;
-        record_mode_issue(&file, 0o640, "credential_mode", permission_issues);
+        let file = open_required_regular(root, &config.credential_file, MAX_KEY_BYTES)
+            .map_err(credential_open_error)?;
+        let _ = record_mode_issue(&file, 0o640, "credential_mode", permission_issues);
+        Some(Arc::new(file))
+    } else {
+        None
+    };
+    if let Some(config) = draft
+        && active.is_none_or(|active| active.credential_file != config.credential_file)
+    {
+        validate_credential_name(&config.credential_file)
+            .map_err(|_| ManagedUnreadableKind::CredentialInvalid)?;
+        let file = open_required_metadata_regular(root, &config.credential_file, MAX_KEY_BYTES)
+            .map_err(credential_open_error)?;
+        let _ = record_mode_issue(&file, 0o640, "credential_mode", permission_issues);
     }
-    Ok(())
+    Ok(active_credential)
 }
 
-fn read_secret(root: &Path, credential: &str) -> Result<SecretString, ManagedUnreadable> {
-    validate_credential_name(credential)
-        .map_err(|_| ManagedUnreadable::new(ManagedUnreadableKind::CredentialInvalid))?;
-    let root = open_directory(root)
-        .map_err(|_| ManagedUnreadable::new(ManagedUnreadableKind::RootInvalid))?;
-    let file = open_required_regular(&root, credential, MAX_KEY_BYTES).map_err(|error| {
-        ManagedUnreadable::new(if error == FileReadError::Missing {
-            ManagedUnreadableKind::CredentialMissing
-        } else {
-            ManagedUnreadableKind::CredentialInvalid
-        })
-    })?;
-    let mut bytes = read_bounded(file, MAX_KEY_BYTES)
-        .map_err(|_| ManagedUnreadable::new(ManagedUnreadableKind::CredentialInvalid))?;
+fn credential_open_error(error: FileReadError) -> ManagedUnreadableKind {
+    if error == FileReadError::Missing {
+        ManagedUnreadableKind::CredentialMissing
+    } else {
+        ManagedUnreadableKind::CredentialInvalid
+    }
+}
+
+fn read_secret(file: &File) -> Result<SecretString, ManagedUnreadable> {
+    let mut bytes = vec![0_u8; MAX_KEY_BYTES as usize + 1];
+    let mut read = 0_usize;
+    while read < bytes.len() {
+        match file.read_at(&mut bytes[read..], read as u64) {
+            Ok(0) => break,
+            Ok(count) => read += count,
+            Err(_) => {
+                bytes.zeroize();
+                return Err(ManagedUnreadable::new(
+                    ManagedUnreadableKind::CredentialInvalid,
+                ));
+            }
+        }
+    }
+    if read == 0 || read > MAX_KEY_BYTES as usize {
+        bytes.zeroize();
+        return Err(ManagedUnreadable::new(
+            ManagedUnreadableKind::CredentialInvalid,
+        ));
+    }
+    bytes.truncate(read);
     while bytes
         .last()
         .is_some_and(|byte| matches!(byte, b'\r' | b'\n'))
@@ -810,7 +1020,7 @@ fn read_secret(root: &Path, credential: &str) -> Result<SecretString, ManagedUnr
         bytes.zeroize();
         ManagedUnreadable::new(ManagedUnreadableKind::CredentialInvalid)
     })?;
-    if secret.is_empty() || secret.len() > MAX_KEY_BYTES as usize {
+    if secret.is_empty() {
         let mut secret = secret;
         secret.zeroize();
         return Err(ManagedUnreadable::new(
@@ -821,10 +1031,28 @@ fn read_secret(root: &Path, credential: &str) -> Result<SecretString, ManagedUnr
 }
 
 fn open_directory(path: &Path) -> Result<File, Errno> {
-    let fd = open(path, read_directory_flags(), Mode::empty())?;
-    let file = File::from(fd);
-    if is_directory(&file) {
-        Ok(file)
+    let anchor = if path.is_absolute() {
+        Path::new("/")
+    } else {
+        Path::new(".")
+    };
+    let mut directory = File::from(open(anchor, read_directory_flags(), Mode::empty())?);
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::CurDir => continue,
+            Component::Normal(name) => {
+                directory = File::from(openat(
+                    &directory,
+                    name,
+                    read_directory_flags(),
+                    Mode::empty(),
+                )?);
+            }
+            Component::ParentDir | Component::Prefix(_) => return Err(Errno::INVAL),
+        }
+    }
+    if is_directory(&directory) {
+        Ok(directory)
     } else {
         Err(Errno::NOTDIR)
     }
@@ -909,17 +1137,19 @@ fn read_bounded(mut file: File, maximum: u64) -> Result<Vec<u8>, ()> {
     Ok(bytes)
 }
 
-fn record_mode_issue(file: &File, expected: u32, code: &str, output: &mut Vec<String>) {
+fn record_mode_issue(file: &File, expected: u32, code: &str, output: &mut Vec<String>) -> bool {
     let mode = match file.metadata() {
         Ok(metadata) => metadata.permissions().mode() & 0o777,
         Err(_) => {
             output.push(format!("{code}_unavailable"));
-            return;
+            return false;
         }
     };
     if mode != expected {
         output.push(code.to_owned());
+        return false;
     }
+    true
 }
 
 fn inspect_orphan_temps(root: &File) -> Result<OrphanTempReport, ()> {
@@ -1007,9 +1237,58 @@ fn lowercase_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+fn utf16_len(value: &str) -> usize {
+    value.encode_utf16().count()
+}
+
+fn bounded_safe_integer(value: &Value, fallback: i64, minimum: i64, maximum: i64) -> i64 {
+    value
+        .as_f64()
+        .filter(|value| value.is_finite() && value.fract() == 0.0)
+        .filter(|value| value.abs() <= MAX_SAFE_INTEGER)
+        .map(|value| (value as i64).clamp(minimum, maximum))
+        .unwrap_or(fallback)
+}
+
+fn bounded_number(value: &Value, fallback: f64, minimum: f64, maximum: f64) -> f64 {
+    value
+        .as_f64()
+        .filter(|value| value.is_finite())
+        .map(|value| value.clamp(minimum, maximum))
+        .unwrap_or(fallback)
+}
+
+fn normalize_reasoning_efforts(value: &Value) -> Vec<String> {
+    let Some(values) = value.as_array() else {
+        return Vec::new();
+    };
+    let mut normalized = Vec::new();
+    for value in values {
+        let Some(value) = value.as_str() else {
+            continue;
+        };
+        if value.is_empty()
+            || value.len() > 32
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            || normalized.iter().any(|candidate| candidate == value)
+        {
+            continue;
+        }
+        normalized.push(value.to_owned());
+        if normalized.len() == 16 {
+            break;
+        }
+    }
+    normalized
+}
+
 fn bounded_text(value: &str, maximum: usize) -> Result<String, ()> {
     let value = value.trim();
-    if value.is_empty() || value.chars().count() > maximum {
+    if value.is_empty() || utf16_len(value) > maximum {
         return Err(());
     }
     Ok(value.to_owned())
@@ -1018,7 +1297,7 @@ fn bounded_text(value: &str, maximum: usize) -> Result<String, ()> {
 fn bounded_line(value: &str, maximum: usize) -> Result<(), ()> {
     let value = value.trim();
     if value.is_empty()
-        || value.chars().count() > maximum
+        || utf16_len(value) > maximum
         || value.contains('\r')
         || value.contains('\n')
     {
@@ -1047,14 +1326,7 @@ fn valid_timestamp(value: &str) -> bool {
     value == canonical
 }
 
-fn private_or_reserved_ip_literal(hostname: &str) -> bool {
-    let Ok(address) = hostname
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse::<IpAddr>()
-    else {
-        return false;
-    };
+pub(crate) fn private_or_reserved_ip(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => {
             let value = u32::from(address);
@@ -1072,7 +1344,9 @@ fn private_or_reserved_ip_literal(hostname: &str) -> bool {
                 (u32::from_be_bytes([198, 18, 0, 0]), 15),
                 (u32::from_be_bytes([198, 51, 100, 0]), 24),
                 (u32::from_be_bytes([203, 0, 113, 0]), 24),
-                (u32::from_be_bytes([224, 0, 0, 0]), 4),
+                // Multicast and the former Class E / limited-broadcast space are never valid
+                // credential-bearing provider destinations.
+                (u32::from_be_bytes([224, 0, 0, 0]), 3),
             ]
             .into_iter()
             .any(|(network, prefix)| cidr_contains_u32(value, network, prefix))
@@ -1080,13 +1354,20 @@ fn private_or_reserved_ip_literal(hostname: &str) -> bool {
         IpAddr::V6(address) => {
             let value = u128::from(address);
             [
-                (0_u128, 128),
+                // Unspecified, loopback, IPv4-compatible, and IPv4-mapped addresses.
+                (0_u128, 96),
                 (1_u128, 128),
-                (0x0000_0000_0000_0000_0000_ffff_0000_0000_u128, 96),
+                // Well-known and local-use NAT64 prefixes can encode forbidden IPv4 targets.
+                (0x0064_ff9b_0000_0000_0000_0000_0000_0000_u128, 96),
+                (0x0064_ff9b_0001_0000_0000_0000_0000_0000_u128, 48),
+                // Discard-only, IETF protocol assignments, and documentation ranges.
                 (0x0100_0000_0000_0000_0000_0000_0000_0000_u128, 64),
-                (0x2001_0db8_0000_0000_0000_0000_0000_0000_u128, 32),
+                (0x2001_0000_0000_0000_0000_0000_0000_0000_u128, 23),
+                (0x3fff_0000_0000_0000_0000_0000_0000_0000_u128, 20),
+                // Unique-local, link-local, deprecated site-local, and multicast ranges.
                 (0xfc00_0000_0000_0000_0000_0000_0000_0000_u128, 7),
                 (0xfe80_0000_0000_0000_0000_0000_0000_0000_u128, 10),
+                (0xfec0_0000_0000_0000_0000_0000_0000_0000_u128, 10),
                 (0xff00_0000_0000_0000_0000_0000_0000_0000_u128, 8),
             ]
             .into_iter()
@@ -1143,8 +1424,9 @@ mod tests {
                 .join("../../target/xtask-platform-router-tests")
                 .join(Uuid::now_v7().to_string());
             fs::create_dir_all(&path).expect("create managed reader test root");
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o750))
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o770))
                 .expect("protect managed reader test root");
+            let path = fs::canonicalize(path).expect("canonicalize managed reader test root");
             Self { path }
         }
 
@@ -1658,6 +1940,307 @@ mod tests {
         assert!(!output.contains(root.path.to_string_lossy().as_ref()));
         assert!(!output.contains(&credential));
         assert!(!output.contains(&checksum));
+    }
+
+    #[test]
+    fn rejects_intermediate_parent_symlink_components() {
+        let holder = TestRoot::new();
+        let real_parent = holder.path.join("real-parent");
+        let child = real_parent.join("child");
+        fs::create_dir_all(&child).expect("create real intermediate root");
+        fs::set_permissions(&real_parent, fs::Permissions::from_mode(0o770))
+            .expect("protect real parent");
+        fs::set_permissions(&child, fs::Permissions::from_mode(0o770)).expect("protect real child");
+        let linked_parent = holder.path.join("linked-parent");
+        symlink(&real_parent, &linked_parent).expect("link intermediate root component");
+
+        let read = PlatformRouterReader::new(linked_parent.join("child")).read();
+        assert_eq!(read.source(), ManagedSource::ManagedUnreadable);
+        assert_eq!(
+            read.unreadable().map(ManagedUnreadable::code),
+            Some("managed_root_invalid")
+        );
+
+        let parent_path = child.join("..").join("child");
+        let read = PlatformRouterReader::new(parent_path).read();
+        assert_eq!(read.source(), ManagedSource::ManagedUnreadable);
+        assert_eq!(
+            read.unreadable().map(ManagedUnreadable::code),
+            Some("managed_root_invalid")
+        );
+    }
+
+    #[test]
+    fn unsafe_modes_are_managed_unreadable_and_never_expose_a_secret_capability() {
+        fn valid_root() -> (TestRoot, String) {
+            let root = TestRoot::new();
+            let credential = TestRoot::credential_name();
+            root.install_credential(&credential, SECRET.as_bytes());
+            root.install_generation(
+                TestRoot::generation_value(true, &credential),
+                GENERATION_ID,
+                None,
+            );
+            (root, credential)
+        }
+
+        let (root, _) = valid_root();
+        fs::set_permissions(&root.path, fs::Permissions::from_mode(0o750))
+            .expect("make root mode unsafe");
+        let read = root.reader().read();
+        assert_eq!(
+            read.unreadable().map(ManagedUnreadable::code),
+            Some("managed_security_policy_invalid")
+        );
+        assert_eq!(
+            read.read_active_secret()
+                .expect_err("unsafe root mode refuses key reads")
+                .code(),
+            "managed_security_policy_invalid"
+        );
+
+        let (root, _) = valid_root();
+        fs::set_permissions(
+            root.path.join(POINTER_FILE),
+            fs::Permissions::from_mode(0o660),
+        )
+        .expect("make pointer mode unsafe");
+        assert_eq!(
+            root.reader()
+                .read()
+                .unreadable()
+                .map(ManagedUnreadable::code),
+            Some("managed_security_policy_invalid")
+        );
+
+        let (root, _) = valid_root();
+        fs::set_permissions(
+            root.path.join(GENERATION_DIRECTORY),
+            fs::Permissions::from_mode(0o770),
+        )
+        .expect("make generation directory mode unsafe");
+        assert_eq!(
+            root.reader()
+                .read()
+                .unreadable()
+                .map(ManagedUnreadable::code),
+            Some("managed_security_policy_invalid")
+        );
+
+        let (root, _) = valid_root();
+        fs::set_permissions(
+            root.path
+                .join(GENERATION_DIRECTORY)
+                .join(format!("{GENERATION_ID}.json")),
+            fs::Permissions::from_mode(0o600),
+        )
+        .expect("make generation file mode unsafe");
+        assert_eq!(
+            root.reader()
+                .read()
+                .unreadable()
+                .map(ManagedUnreadable::code),
+            Some("managed_security_policy_invalid")
+        );
+
+        let (root, credential) = valid_root();
+        fs::set_permissions(
+            root.path.join(credential),
+            fs::Permissions::from_mode(0o600),
+        )
+        .expect("make credential mode unsafe");
+        let read = root.reader().read();
+        assert_eq!(
+            read.unreadable().map(ManagedUnreadable::code),
+            Some("managed_security_policy_invalid")
+        );
+        assert_eq!(
+            read.read_active_secret()
+                .expect_err("unsafe credential mode refuses key reads")
+                .code(),
+            "managed_security_policy_invalid"
+        );
+
+        let root = TestRoot::new();
+        root.install_credential(LEGACY_KEY_FILE, SECRET.as_bytes());
+        let legacy = serde_json::to_vec(&json!({
+            "endpoint": "https://api.lmm.best/v1",
+            "model": "deepseek-v3.2",
+            "protocol": "openai-compatible",
+            "enabled": true
+        }))
+        .expect("encode legacy fixture");
+        root.write_file(LEGACY_CONFIG_FILE, &legacy, 0o600);
+        assert_eq!(
+            root.reader()
+                .read()
+                .unreadable()
+                .map(ManagedUnreadable::code),
+            Some("managed_security_policy_invalid")
+        );
+    }
+
+    #[test]
+    fn active_credential_capability_survives_path_replacement_unlink_and_root_swap() {
+        let root = TestRoot::new();
+        let credential = TestRoot::credential_name();
+        root.install_credential(&credential, SECRET.as_bytes());
+        root.install_generation(
+            TestRoot::generation_value(true, &credential),
+            GENERATION_ID,
+            None,
+        );
+        let read = root.reader().read();
+        let original_path = root.path.join(&credential);
+        let old_path = root.path.join("old-credential");
+        fs::rename(&original_path, &old_path).expect("move original credential");
+        root.install_credential(&credential, b"replacement-secret");
+        let secret = read
+            .read_active_secret()
+            .expect("read retained credential")
+            .expect("retained active credential");
+        assert_eq!(secrecy::ExposeSecret::expose_secret(&secret), SECRET);
+        fs::remove_file(&old_path).expect("unlink original credential inode");
+        let secret = read
+            .read_active_secret()
+            .expect("read unlinked retained credential")
+            .expect("retained unlinked credential");
+        assert_eq!(secrecy::ExposeSecret::expose_secret(&secret), SECRET);
+
+        let old_root = root
+            .path
+            .parent()
+            .expect("test root parent")
+            .join(format!("swapped-root-{}", Uuid::now_v7()));
+        fs::rename(&root.path, &old_root).expect("swap validated root away");
+        fs::create_dir(&root.path).expect("create replacement root");
+        fs::set_permissions(&root.path, fs::Permissions::from_mode(0o770))
+            .expect("protect replacement root");
+        root.install_credential(&credential, b"replacement-root-secret");
+        let secret = read
+            .read_active_secret()
+            .expect("read retained credential after root swap")
+            .expect("retained credential after root swap");
+        assert_eq!(secrecy::ExposeSecret::expose_secret(&secret), SECRET);
+        fs::remove_dir_all(old_root).expect("remove swapped original root");
+    }
+
+    #[test]
+    fn web_contract_fixture_matrix_preserves_exact_bytes_and_normalization() {
+        const BASE: &str = "\"endpoint\":\"https://api.lmm.best/v1\",\"model\":\"deepseek-v3.2\",\"protocol\":\"openai-compatible\",\"enabled\":true,\"credentialFile\":\"platform-router.key\"";
+        fn fixture(prefix: &str, suffix: &str) -> Vec<u8> {
+            format!("{{{prefix}{BASE}{suffix}}}").into_bytes()
+        }
+        fn assert_checksum(bytes: &[u8], expected: &str) {
+            assert_eq!(hex::encode(Sha256::digest(bytes)), expected);
+        }
+
+        let defaults = fixture("", "");
+        assert_checksum(
+            &defaults,
+            "86e97338e2fa7564ef710fc5d7d8b66b58a6c07a880ebe3beab2bc332cc08ca6",
+        );
+        let config = decode_config_bytes(&defaults, false).expect("decode Web defaults fixture");
+        assert_eq!(config.assistant_instructions, "");
+        assert_eq!(config.assistant_max_output_tokens, 320);
+        assert_eq!(config.assistant_temperature, 0.2);
+        assert_eq!(config.assistant_max_steps, 5);
+        assert_eq!(config.assistant_timeout_ms, 20_000);
+        assert_eq!(config.assistant_reasoning_effort, "none");
+        assert!(config.model_reasoning_efforts.is_empty());
+
+        let exact_utf16_boundary = fixture(
+            "",
+            &format!(",\"assistantInstructions\":\"{}\"", "😀".repeat(2_000)),
+        );
+        assert_checksum(
+            &exact_utf16_boundary,
+            "adf5a104b3dda940cbb2cc542ddcf4a2e40e0972d33e12acdff7127d64636703",
+        );
+        assert_eq!(
+            decode_config_bytes(&exact_utf16_boundary, false)
+                .expect("accept 4000 UTF-16 code units")
+                .assistant_instructions
+                .encode_utf16()
+                .count(),
+            4_000
+        );
+
+        for (length, expected) in [
+            (
+                4_001,
+                "50444ab9c9fea1c6dac8900cc9f5f2e7dccaeaa9b08a2c5e1dcfd01cbfe9ba9f",
+            ),
+            (
+                5_001,
+                "a27487d90cf544a6b0bb071a5da13c230497e993f373d44502499a6eee6bbdee",
+            ),
+        ] {
+            let bytes = fixture(
+                "",
+                &format!(",\"assistantInstructions\":\"{}\"", "a".repeat(length)),
+            );
+            assert_checksum(&bytes, expected);
+            assert!(
+                decode_config_bytes(&bytes, false).is_err(),
+                "Web rejects an instruction field with {length} UTF-16 code units"
+            );
+        }
+
+        let malformed = fixture(
+            "",
+            ",\"assistantMaxOutputTokens\":\"bad\",\"assistantTemperature\":null,\"assistantMaxSteps\":1.5,\"assistantTimeoutMs\":9007199254740992",
+        );
+        assert_checksum(
+            &malformed,
+            "055be838a28cb60ae786d38ac9111c81b55f6f351ba38cdffbab8f0c3f667241",
+        );
+        let config = decode_config_bytes(&malformed, false).expect("default malformed tuning");
+        assert_eq!(config.assistant_max_output_tokens, 320);
+        assert_eq!(config.assistant_temperature, 0.2);
+        assert_eq!(config.assistant_max_steps, 5);
+        assert_eq!(config.assistant_timeout_ms, 20_000);
+
+        let malformed_text_and_reasoning = fixture(
+            "",
+            ",\"assistantInstructions\":7,\"assistantReasoningEffort\":false,\"modelReasoningEfforts\":\"high\"",
+        );
+        assert_checksum(
+            &malformed_text_and_reasoning,
+            "928913bea6d47ec427b36191ed581e719a8f131e9a6f8b3c86c8d7b6d7f4b5b6",
+        );
+        let config = decode_config_bytes(&malformed_text_and_reasoning, false)
+            .expect("default malformed text and reasoning fields");
+        assert_eq!(config.assistant_instructions, "");
+        assert_eq!(config.assistant_reasoning_effort, "none");
+        assert!(config.model_reasoning_efforts.is_empty());
+
+        let reasoning = fixture(
+            "",
+            ",\"assistantReasoningEffort\":\"high\",\"modelReasoningEfforts\":[\"low\",\"high\",\"low\",\"bad value\",7,\"medium\"]",
+        );
+        assert_checksum(
+            &reasoning,
+            "a1e3cbf8e7f92de4c8aeabcc275d7347630df207ab2ebde377d57e3f091efeb9",
+        );
+        let config = decode_config_bytes(&reasoning, false).expect("normalize reasoning fixture");
+        assert_eq!(config.model_reasoning_efforts, ["low", "high", "medium"]);
+        assert_eq!(config.assistant_reasoning_effort, "high");
+
+        let unknown_and_duplicate = fixture(
+            "\"unknown\":{\"nested\":true},\"endpoint\":\"https://wrong.example/v1\",",
+            ",\"assistantMaxOutputTokens\":99999",
+        );
+        assert_checksum(
+            &unknown_and_duplicate,
+            "00e53e7b89a6e7f15291c2a7d75b44df11d18727af080e82a03a759df5a6705f",
+        );
+        let config = decode_config_bytes(&unknown_and_duplicate, false)
+            .expect("ignore unknown and keep the last duplicate like JSON.parse");
+        assert_eq!(config.endpoint, "https://api.lmm.best/v1");
+        assert_eq!(config.assistant_max_output_tokens, 512);
+
+        assert!(decode_config_bytes(br#"{\"endpoint\":7}"#, false).is_err());
     }
 
     #[test]
