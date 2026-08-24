@@ -64,6 +64,45 @@ describe("hosted store onboarding", () => {
     );
   });
 
+  it("shows active stores first and keeps inactive stores in a secondary disclosure", async () => {
+    const user = userEvent.setup();
+    const closedStore = {
+      ...store,
+      id: "22222222-2222-4222-8222-222222222222",
+      path: "/archived-store",
+      displayName: "已归档验证店",
+      description: "automated production validation archive",
+      status: "closed" as const,
+    };
+    const suspendedStore = {
+      ...store,
+      id: "33333333-3333-4333-8333-333333333333",
+      path: "/paused-store",
+      displayName: "暂停店铺",
+      description: "dogfood internal test",
+      status: "suspended" as const,
+    };
+    api.getOwnedStores.mockResolvedValue([closedStore, suspendedStore, store]);
+
+    render(<HostedStoreOnboarding locale="zh" onNotice={vi.fn()} />);
+
+    expect(await screen.findByText(store.displayName)).toBeVisible();
+    const disclosure = screen.getByRole("button", {
+      name: /其他状态的店铺2/,
+    });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(closedStore.displayName)).not.toBeInTheDocument();
+    expect(screen.queryByText(closedStore.description)).not.toBeInTheDocument();
+
+    await user.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(closedStore.displayName)).toBeVisible();
+    expect(screen.getByText(suspendedStore.displayName)).toBeVisible();
+    expect(screen.getByText(/已暂停公开营业/)).toBeVisible();
+    expect(screen.getByText(/已暂停公开展示/)).toBeVisible();
+    expect(screen.queryByText("dogfood internal test")).not.toBeInTheDocument();
+  });
+
   it("opens product management in place when the host provides a store callback", async () => {
     const user = userEvent.setup();
     const onManageStore = vi.fn();

@@ -16,10 +16,18 @@ import {
   FileUp,
   History,
   LoaderCircle,
+  MoreHorizontal,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import { Button } from "@appica/ui-react/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@appica/ui-react/dropdown-menu";
 import { Textarea } from "@appica/ui-react/textarea";
 
 import {
@@ -730,9 +738,8 @@ export function MatchChat({
     locale === "en"
       ? ["Browse publicly", "Compare across stores", "Consent before contact"]
       : ["公开浏览", "跨店比较", "联系前征得同意"];
-  const starterPromptCards = !isRoot
-    ? []
-    : locale === "en"
+  const starterPromptCards = isRoot
+    ? locale === "en"
       ? [
           {
             id: "describe",
@@ -778,7 +785,8 @@ export function MatchChat({
             desc: "只列出当前公开店铺，不附加未经证实的认证声明",
             prompt: "列出当前公开店铺及其已上架分类。",
           },
-        ];
+        ]
+    : [];
 
   const applyQuickPrompt = (value: string) => {
     setMessage(value);
@@ -1995,37 +2003,53 @@ export function MatchChat({
 
   const chatActions = (
     <>
-      {isRoot && !isSeller ? (
-        <button
-          className="match-chat-clear"
-          type="button"
-          onClick={() => setConversationHistoryOpen(true)}
+      <DropdownMenu size="sm">
+        <DropdownMenuTrigger
+          render={
+            <Button
+              className="match-chat-more-trigger"
+              variant="ghost"
+              size="icon-sm"
+              type="button"
+              aria-label={
+                locale === "en" ? "Conversation options" : "对话选项"
+              }
+              title={locale === "en" ? "Conversation options" : "对话选项"}
+            >
+              <MoreHorizontal size={17} aria-hidden="true" />
+            </Button>
+          }
+        />
+        <DropdownMenuContent
+          className="match-chat-more-menu"
+          align="end"
+          sideOffset={8}
         >
-          <History size={14} aria-hidden="true" />
-          <span>{locale === "en" ? "History" : "历史"}</span>
-        </button>
-      ) : null}
-      {isRoot && !isSeller && signedIn ? (
-        <button
-          className="match-chat-clear"
-          type="button"
-          onClick={() => setShoppingMemoryOpen(true)}
-        >
-          <Brain size={14} aria-hidden="true" />
-          <span>{locale === "en" ? "Memory" : "记忆"}</span>
-        </button>
-      ) : null}
-      {messages.length ? (
-        <button
-          className="match-chat-clear"
-          type="button"
-          onClick={clearConversation}
-          disabled={sending}
-        >
-          <Trash2 size={14} aria-hidden="true" />
-          <span>{label("clearChatLabel", "清空")}</span>
-        </button>
-      ) : null}
+          <DropdownMenuItem onClick={() => setConversationHistoryOpen(true)}>
+            <History size={15} aria-hidden="true" />
+            <span>{locale === "en" ? "History" : "历史"}</span>
+          </DropdownMenuItem>
+          {isRoot && !isSeller && signedIn ? (
+            <DropdownMenuItem onClick={() => setShoppingMemoryOpen(true)}>
+              <Brain size={15} aria-hidden="true" />
+              <span>{locale === "en" ? "Memory" : "记忆"}</span>
+            </DropdownMenuItem>
+          ) : null}
+          {messages.length ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="match-chat-clear-menu-item"
+                disabled={sending}
+                onClick={clearConversation}
+              >
+                <Trash2 size={15} aria-hidden="true" />
+                <span>{label("clearChatLabel", "清空")}</span>
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <span className="sr-only" aria-live="polite">
         {!sending && signedIn ? label("signedInChatStatus", "已登录") : ""}
       </span>
@@ -2388,12 +2412,24 @@ export function MatchChat({
       ) : null}
       {chatError ? (
         <div className="home-chat-error" role="alert">
-          <span>{chatError}</span>
+          <div>
+            <strong>
+              {locale === "en"
+                ? "The assistant could not finish this request"
+                : "选货员暂时未能完成这次回复"}
+            </strong>
+            <span>{chatError}</span>
+            <small>
+              {locale === "en"
+                ? "Your message is still in the input. Retry without retyping it."
+                : "原输入仍在下方，可直接再次发送，无需重填。"}
+            </small>
+          </div>
           <button
             type="button"
             onClick={() => inputRef.current?.form?.requestSubmit()}
           >
-            {locale === "en" ? "Retry answer" : "重试回答"}
+            {locale === "en" ? "Send again" : "再次发送"}
           </button>
         </div>
       ) : null}

@@ -1,11 +1,6 @@
 "use client";
 
 import { Button } from "@appica/ui-react/button";
-import { formatColor, type Color } from "@appica/ui-react/color";
-import {
-  ColorSwatchPicker,
-  ColorSwatchPickerItem,
-} from "@appica/ui-react/color-swatch-picker";
 import {
   Popover,
   PopoverContent,
@@ -13,7 +8,9 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@appica/ui-react/popover";
-import { Palette } from "lucide-react";
+import { Radio } from "@appica/ui-react/radio";
+import { RadioGroup } from "@appica/ui-react/radio-group";
+import { Check, Palette } from "lucide-react";
 
 import {
   INTERFACE_PALETTES,
@@ -27,6 +24,14 @@ interface PalettePickerProps {
   onPaletteChange: (palette: InterfacePalette) => void;
 }
 
+const PALETTE_PREVIEWS: Record<InterfacePalette, readonly string[]> = {
+  ink: ["#f2efe7", "#fffdf8", "#171715", "#72736d"],
+  moss: ["#e5ede7", "#fbfcf9", "#315c47", "#203329"],
+  clay: ["#f2e2da", "#fffaf6", "#a34a2b", "#43251b"],
+  plum: ["#ece2ea", "#fcf9fc", "#6f506b", "#342832"],
+  amber: ["#f0e6d5", "#fffaf2", "#8a5a10", "#382b16"],
+};
+
 export function PalettePicker({
   palette,
   locale,
@@ -36,14 +41,6 @@ export function PalettePicker({
     INTERFACE_PALETTES.find((option) => option.id === palette) ??
     INTERFACE_PALETTES[0];
   const isZh = locale === "zh";
-
-  const chooseColor = (color: Color) => {
-    const value = formatColor(color, "hex").slice(0, 7).toLowerCase();
-    const next = INTERFACE_PALETTES.find(
-      (option) => option.swatch.toLowerCase() === value,
-    );
-    if (next) onPaletteChange(next.id);
-  };
 
   return (
     <Popover>
@@ -82,36 +79,35 @@ export function PalettePicker({
         </PopoverTitle>
         <PopoverDescription className="palette-popover-description">
           {isZh
-            ? "墨色是默认方案；选择会保存在这台设备上。"
-            : "Ink is the default. Your choice stays on this device."}
+            ? "预览背景、表面、强调色和文字；选择会保存在这台设备上。"
+            : "Preview background, surface, accent, and text. Your choice stays on this device."}
         </PopoverDescription>
-        <ColorSwatchPicker
-          className="palette-swatch-picker"
-          value={selected.swatch}
-          onValueChange={chooseColor}
-          layout="grid"
-          shape="circle"
-          size={44}
+        <RadioGroup
+          className="palette-radio-group"
+          value={palette}
+          onValueChange={(value) => onPaletteChange(value as InterfacePalette)}
           aria-label={isZh ? "配色方案" : "Color palettes"}
         >
           {INTERFACE_PALETTES.map((option) => (
-            <ColorSwatchPickerItem
-              color={option.swatch}
-              colorName={option.label[locale]}
-              key={option.id}
-            />
+            <label className="palette-radio-card" key={option.id}>
+              <span className="palette-radio-preview" aria-hidden="true">
+                {PALETTE_PREVIEWS[option.id].map((color) => (
+                  <span key={color} style={{ backgroundColor: color }} />
+                ))}
+              </span>
+              <span className="palette-radio-label">
+                <span>{option.label[locale]}</span>
+                {option.id === palette ? (
+                  <Check size={14} aria-hidden="true" />
+                ) : null}
+              </span>
+              <Radio
+                className="palette-radio-control"
+                value={option.id}
+              />
+            </label>
           ))}
-        </ColorSwatchPicker>
-        <div className="palette-popover-options" aria-hidden="true">
-          {INTERFACE_PALETTES.map((option) => (
-            <span
-              className={option.id === palette ? "is-selected" : undefined}
-              key={option.id}
-            >
-              {option.label[locale]}
-            </span>
-          ))}
-        </div>
+        </RadioGroup>
       </PopoverContent>
     </Popover>
   );

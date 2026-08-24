@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -219,7 +219,7 @@ describe("MarketplaceHome actions", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("uses a collapsible viewport workspace on desktop", async () => {
+  it("uses a bounded dialog workspace on desktop", async () => {
     const originalMatchMedia = window.matchMedia;
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
@@ -263,20 +263,19 @@ describe("MarketplaceHome actions", () => {
 
     const toggle = screen.getByRole("button", { name: "问选货员" });
     await user.click(toggle);
-    expect(document.querySelector(".floating-clerk-rnd")).toHaveClass(
-      "is-open",
-    );
     expect(
-      screen.getByRole("button", { name: "收纳选货员" }),
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "收纳选货员" }));
+      await screen.findByRole("dialog", { name: "选货员" }),
+    ).toHaveClass("desktop-clerk-dialog");
     expect(
-      screen.getByRole("button", { name: "展开选货员" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /收纳|展开|缩放|拖动/ }),
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "关闭选货员" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "选货员" })).not.toBeInTheDocument(),
+    );
     expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveFocus();
 
     view.unmount();
     Object.defineProperty(window, "matchMedia", {

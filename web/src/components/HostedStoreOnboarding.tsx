@@ -1,7 +1,13 @@
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appica/ui-react/collapsible";
+import {
   ArrowRight,
   Check,
   CheckCircle2,
+  ChevronDown,
   Copy,
   Link2,
   Plus,
@@ -43,6 +49,8 @@ export function HostedStoreOnboarding({
   const [invite, setInvite] = useState<StoreCollaboratorInvite | null>(null);
   const [invitingStoreId, setInvitingStoreId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const activeStores = stores.filter((store) => store.status === "active");
+  const inactiveStores = stores.filter((store) => store.status !== "active");
 
   useEffect(() => {
     let active = true;
@@ -238,113 +246,67 @@ export function HostedStoreOnboarding({
       ) : null}
 
       {!loading && !loadError && stores.length > 0 ? (
-        <ul className="owned-store-grid">
-          {stores.map((store) => {
-            const canInvite =
-              store.membershipRole === "owner" ||
-              store.membershipRole === "mall_operator";
-            const showsInvite =
-              invite?.storeId === store.id && createdStore?.id !== store.id;
-            const inviteLabel =
-              invitingStoreId === store.id
-                ? locale === "en"
-                  ? "Creating…"
-                  : "生成中…"
-                : invite?.storeId === store.id
-                  ? locale === "en"
-                    ? "Link ready"
-                    : "链接已生成"
-                  : locale === "en"
-                    ? "Invite"
-                    : "邀请协作";
-            return (
-              <li key={store.id} className="owned-store-card">
-                <div className="owned-store-card-main">
-                  <div className="owned-store-card-copy">
-                    <div className="owned-store-card-title-row">
-                      <strong>{store.displayName}</strong>
-                      {store.status === "active" && (
-                        <span className="store-status-badge is-active">
-                          {locale === "en" ? "Open" : "营业中"}
-                        </span>
-                      )}
-                      {store.status === "closed" && (
-                        <span className="store-status-badge is-closed">
-                          {locale === "en" ? "Closed" : "已打烊"}
-                        </span>
-                      )}
-                      {store.status === "pending" && (
-                        <span className="store-status-badge is-pending">
-                          {locale === "en" ? "Review" : "审核中"}
-                        </span>
-                      )}
-                      {store.status === "suspended" && (
-                        <span className="store-status-badge is-suspended">
-                          {locale === "en" ? "Suspended" : "已暂停"}
-                        </span>
-                      )}
-                    </div>
-                    <p>
-                      {store.description ||
-                        (locale === "en" ? "Hosted store" : "托管店铺")}
-                    </p>
-                  </div>
-                  <a className="owned-store-enter" href={store.path}>
-                    {locale === "en" ? "Open store" : "进入店铺"}
-                    <ArrowRight size={16} aria-hidden="true" />
-                  </a>
-                </div>
-                <div className="owned-store-card-toolbar">
-                  {canInvite ? (
-                    <button
-                      type="button"
-                      className="owned-store-secondary-action"
-                      onClick={() => {
-                        if (invite?.storeId !== store.id)
-                          void generateInvite(store.id);
-                      }}
-                      disabled={
-                        invitingStoreId !== null || invite?.storeId === store.id
+        <div className="owned-store-groups">
+          {activeStores.length > 0 ? (
+            <ul className="owned-store-grid" aria-label={locale === "en" ? "Active stores" : "营业中的店铺"}>
+              {activeStores.map((store) => (
+                <OwnedStoreCard
+                  key={store.id}
+                  store={store}
+                  secondary={false}
+                  locale={locale}
+                  invite={invite}
+                  createdStoreId={createdStore?.id}
+                  invitingStoreId={invitingStoreId}
+                  copied={copied}
+                  onGenerateInvite={(storeId) => void generateInvite(storeId)}
+                  onCopyInvite={() => void copyInviteLink()}
+                  onManageStore={onManageStore}
+                />
+              ))}
+            </ul>
+          ) : null}
+          {inactiveStores.length > 0 ? (
+            <Collapsible
+              className="owned-store-inactive-group"
+              defaultOpen={activeStores.length === 0}
+            >
+              <CollapsibleTrigger className="owned-store-inactive-trigger">
+                <span>
+                  {locale === "en" ? "Other stores" : "其他状态的店铺"}
+                  <small>{inactiveStores.length}</small>
+                </span>
+                <ChevronDown aria-hidden="true" />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="owned-store-inactive-content">
+                <ul
+                  className="owned-store-grid"
+                  aria-label={
+                    locale === "en" ? "Inactive stores" : "非营业店铺"
+                  }
+                >
+                  {inactiveStores.map((store) => (
+                    <OwnedStoreCard
+                      key={store.id}
+                      store={store}
+                      secondary
+                      locale={locale}
+                      invite={invite}
+                      createdStoreId={createdStore?.id}
+                      invitingStoreId={invitingStoreId}
+                      copied={copied}
+                      onGenerateInvite={(storeId) =>
+                        void generateInvite(storeId)
                       }
-                      aria-disabled={
-                        invite?.storeId === store.id ? true : undefined
-                      }
-                    >
-                      <UserPlus size={15} aria-hidden="true" />
-                      {inviteLabel}
-                    </button>
-                  ) : null}
-                  {onManageStore ? (
-                    <button
-                      className="owned-store-secondary-action"
-                      type="button"
-                      onClick={() => onManageStore(store)}
-                    >
-                      {locale === "en" ? "Products" : "管理商品"}
-                    </button>
-                  ) : (
-                    <a
-                      className="owned-store-secondary-action"
-                      href={`${store.path}?console=products`}
-                    >
-                      {locale === "en" ? "Products" : "管理商品"}
-                    </a>
-                  )}
-                </div>
-                {showsInvite ? (
-                  <InviteLinkPanel
-                    invite={invite}
-                    locale={locale}
-                    copied={copied}
-                    regenerating={invitingStoreId === store.id}
-                    onCopy={() => void copyInviteLink()}
-                    onRegenerate={() => void generateInvite(store.id)}
-                  />
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
+                      onCopyInvite={() => void copyInviteLink()}
+                      onManageStore={onManageStore}
+                    />
+                  ))}
+                </ul>
+              </CollapsibleContent>
+            </Collapsible>
+          ) : null}
+        </div>
       ) : null}
 
       {!loading && !loadError && !opening ? (
@@ -438,6 +400,144 @@ export function HostedStoreOnboarding({
         </form>
       ) : null}
     </section>
+  );
+}
+
+function OwnedStoreCard({
+  store,
+  secondary,
+  locale,
+  invite,
+  createdStoreId,
+  invitingStoreId,
+  copied,
+  onGenerateInvite,
+  onCopyInvite,
+  onManageStore,
+}: {
+  store: StoreSummary;
+  secondary: boolean;
+  locale: InterfaceLocale;
+  invite: StoreCollaboratorInvite | null;
+  createdStoreId?: string;
+  invitingStoreId: string | null;
+  copied: boolean;
+  onGenerateInvite: (storeId: string) => void;
+  onCopyInvite: () => void;
+  onManageStore?: (store: StoreSummary) => void;
+}) {
+  const english = locale === "en";
+  const status = store.status ?? "pending";
+  const canInvite =
+    store.membershipRole === "owner" ||
+    store.membershipRole === "mall_operator";
+  const showsInvite =
+    invite?.storeId === store.id && createdStoreId !== store.id;
+  const inviteLabel =
+    invitingStoreId === store.id
+      ? english
+        ? "Creating…"
+        : "生成中…"
+      : invite?.storeId === store.id
+        ? english
+          ? "Link ready"
+          : "链接已生成"
+        : english
+          ? "Invite"
+          : "邀请协作";
+  const statusLabel = {
+    active: english ? "Open" : "营业中",
+    closed: english ? "Closed" : "已打烊",
+    pending: english ? "Review" : "审核中",
+    suspended: english ? "Suspended" : "已暂停",
+  }[status];
+  const inactiveDescription = {
+    active: store.description || (english ? "Hosted store" : "托管店铺"),
+    closed: english
+      ? "Public sales are paused; products and collaborators remain available to manage."
+      : "已暂停公开营业；商品与协作入口仍可管理。",
+    pending: english
+      ? "Store details are under review before public opening."
+      : "店铺资料正在审核，通过后恢复公开营业。",
+    suspended: english
+      ? "Public access is suspended; open the workspace to review its status."
+      : "店铺已暂停公开展示；可进入工作台查看状态。",
+  }[status];
+  const enterLabel =
+    status === "active"
+      ? english
+        ? "Open store"
+        : "进入店铺"
+      : english
+        ? "View status"
+        : "查看状态";
+
+  return (
+    <li className={`owned-store-card${secondary ? " is-secondary" : ""}`}>
+      <div className="owned-store-card-main">
+        <div className="owned-store-card-copy">
+          <div className="owned-store-card-title-row">
+            <strong>{store.displayName}</strong>
+            <span className={`store-status-badge is-${status}`}>
+              {statusLabel}
+            </span>
+          </div>
+          <p>
+            {secondary
+              ? inactiveDescription
+              : store.description || (english ? "Hosted store" : "托管店铺")}
+          </p>
+        </div>
+        <a className="owned-store-enter" href={store.path}>
+          {enterLabel}
+          <ArrowRight size={16} aria-hidden="true" />
+        </a>
+      </div>
+      <div className="owned-store-card-toolbar">
+        {canInvite ? (
+          <button
+            type="button"
+            className="owned-store-secondary-action"
+            onClick={() => {
+              if (invite?.storeId !== store.id) onGenerateInvite(store.id);
+            }}
+            disabled={
+              invitingStoreId !== null || invite?.storeId === store.id
+            }
+            aria-disabled={invite?.storeId === store.id ? true : undefined}
+          >
+            <UserPlus size={15} aria-hidden="true" />
+            {inviteLabel}
+          </button>
+        ) : null}
+        {onManageStore ? (
+          <button
+            className="owned-store-secondary-action"
+            type="button"
+            onClick={() => onManageStore(store)}
+          >
+            {english ? "Products" : "管理商品"}
+          </button>
+        ) : (
+          <a
+            className="owned-store-secondary-action"
+            href={`${store.path}?console=products`}
+          >
+            {english ? "Products" : "管理商品"}
+          </a>
+        )}
+      </div>
+      {showsInvite && invite ? (
+        <InviteLinkPanel
+          invite={invite}
+          locale={locale}
+          copied={copied}
+          regenerating={invitingStoreId === store.id}
+          onCopy={onCopyInvite}
+          onRegenerate={() => onGenerateInvite(store.id)}
+        />
+      ) : null}
+    </li>
   );
 }
 

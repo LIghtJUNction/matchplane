@@ -661,9 +661,11 @@ describe("MatchPlane workspaces", () => {
     await user.type(input, "我有一个需要被认真匹配的问题");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "这是模型生成的购物导购回答。",
-    );
+    expect(
+      await screen.findByText("这是模型生成的购物导购回答。", {
+        selector: "p.match-chat-message",
+      }),
+    ).toBeVisible();
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "/api/mall/assistant",
       expect.objectContaining({ method: "POST" }),
@@ -698,9 +700,11 @@ describe("MatchPlane workspaces", () => {
     expect(input).toHaveValue("第一行\n第二行");
     await user.keyboard("{Enter}");
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "这是模型生成的购物导购回答。",
-    );
+    expect(
+      await screen.findByText("这是模型生成的购物导购回答。", {
+        selector: "p.match-chat-message",
+      }),
+    ).toBeVisible();
   });
 
   it("lets the user clear the visible conversation without leaving the page", async () => {
@@ -727,9 +731,8 @@ describe("MatchPlane workspaces", () => {
     });
     await user.type(input, "把这段需求整理一下");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
-    await screen.findByRole("button", { name: "清空" });
-
-    await user.click(screen.getByRole("button", { name: "清空" }));
+    await user.click(await screen.findByRole("button", { name: "对话选项" }));
+    await user.click(await screen.findByRole("menuitem", { name: "清空" }));
     expect(
       screen.queryByRole("log", { name: "对话记录" }),
     ).not.toBeInTheDocument();
@@ -769,6 +772,34 @@ describe("MatchPlane workspaces", () => {
     expect(input).toHaveFocus();
   });
 
+  it("keeps the platform console in the privileged account menu only", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    window.history.replaceState(null, "", "/?role=platform");
+    render(<App />);
+
+    expect(
+      screen.queryByRole("link", { name: "商城控制台" }),
+    ).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "账号菜单" }));
+    const consoleItem = await screen.findByRole("menuitem", {
+      name: "商城控制台",
+    });
+    expect(consoleItem).toHaveAttribute("href", "/?role=platform");
+    expect(screen.getAllByText("商城控制台")).toHaveLength(1);
+  });
+
+  it("does not expose the platform console to an unprivileged account", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "账号菜单" }));
+    expect(
+      screen.queryByRole("menuitem", { name: "商城控制台" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps account controls out of settings and signs out through Better Auth", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
@@ -804,7 +835,7 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "选择配色：墨色" }));
-    await user.click(screen.getByRole("option", { name: "苔绿" }));
+    await user.click(screen.getByRole("radio", { name: "苔绿" }));
 
     await waitFor(() =>
       expect(document.documentElement.dataset.palette).toBe("moss"),

@@ -273,7 +273,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     ) : (
       <StorefrontView
         catalogResolved={catalogResolved}
+        catalogError={catalogError}
         listings={listings}
+        onRetryCatalog={retryCatalog}
         locale={locale}
         onOpenListing={setListing}
         onLikeListing={likeListing}

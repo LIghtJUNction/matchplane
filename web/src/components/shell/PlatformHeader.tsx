@@ -1,6 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLinkItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@appica/ui-react/dropdown-menu";
 import { LogIn, LogOut, Store, UserRound } from "lucide-react";
 import { motion } from "motion/react";
 
@@ -66,7 +73,8 @@ export function PlatformHeader({
   onSignOut,
   ui,
 }: PlatformHeaderProps) {
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const canOpenPlatformConsole =
+    authUser?.role === "rootSuperAdmin" || authUser?.role === "rootAdmin";
 
   return (
     <header className="app-header">
@@ -131,106 +139,88 @@ export function PlatformHeader({
               <span>{ui.signIn}</span>
             </motion.button>
           ) : null}
-          {authUser?.role === "rootSuperAdmin" ||
-          authUser?.role === "rootAdmin" ? (
-            <a className="header-admin-action" href="/?role=platform">
-              <UserRound size={17} aria-hidden="true" />
-              <span>{ui.platformAdmin}</span>
-            </a>
-          ) : null}
           {authUser ? (
             <NotificationBell locale={locale} userId={authUser.id} />
           ) : null}
           {authUser ? (
-            <div className="account-menu-anchor">
-              <motion.button
-                className="profile-button"
-                type="button"
-                aria-expanded={accountMenuOpen}
-                aria-haspopup="menu"
-                aria-label={ui.accountMenu}
-                onClick={() => setAccountMenuOpen((open) => !open)}
-                whileTap={{ scale: 0.95 }}
-                transition={spring}
-              >
-                <span className="profile-button-avatar">
-                  {authUser.image ? (
-                    <img src={authUser.image} alt="" />
-                  ) : (
-                    <UserRound size={18} aria-hidden="true" />
-                  )}
-                </span>
-                <span className="profile-copy">
-                  <strong>{authUser.name || ui.user}</strong>
-                  <small>{roleLabel(role, locale, subplatform)}</small>
-                </span>
-              </motion.button>
-              {accountMenuOpen ? (
-                <div
-                  className="account-menu"
-                  role="menu"
-                  aria-label={ui.accountMenu}
-                >
-                  <div className="account-menu-identity">
-                    <strong>{authUser.name || ui.user}</strong>
-                    <small>{authUser.email || ui.unifiedIdentity}</small>
-                  </div>
-                  <div className="account-menu-links">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setAccountMenuOpen(false);
-                        onOpenAccountSection("profile");
-                      }}
-                    >
-                      <UserRound size={16} aria-hidden="true" />
-                      {ui.profile}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setAccountMenuOpen(false);
-                        onOpenAccountSection("account");
-                      }}
-                    >
-                      <UserRound size={16} aria-hidden="true" />
-                      {ui.account}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      aria-label={ui.myStores}
-                      onClick={() => {
-                        setAccountMenuOpen(false);
-                        onOpenAccountSection("stores");
-                      }}
-                    >
-                      <Store size={16} aria-hidden="true" />
-                      <span>{ui.myStores}</span>
-                      {ownedStoresResolved ? (
-                        <strong className="account-menu-count">
-                          {ownedStoresCount}
-                        </strong>
-                      ) : null}
-                    </button>
-                  </div>
-                  <button
-                    className="account-menu-signout"
+            <DropdownMenu size="sm">
+              <DropdownMenuTrigger
+                render={
+                  <motion.button
+                    className="profile-button"
                     type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setAccountMenuOpen(false);
-                      onSignOut();
-                    }}
+                    aria-label={ui.accountMenu}
+                    whileTap={{ scale: 0.95 }}
+                    transition={spring}
                   >
-                    <LogOut size={16} aria-hidden="true" />
-                    {ui.signOut}
-                  </button>
+                    <span className="profile-button-avatar">
+                      {authUser.image ? (
+                        <img src={authUser.image} alt="" />
+                      ) : (
+                        <UserRound size={18} aria-hidden="true" />
+                      )}
+                    </span>
+                    <span className="profile-copy">
+                      <strong>{authUser.name || ui.user}</strong>
+                      <small>{roleLabel(role, locale, subplatform)}</small>
+                    </span>
+                  </motion.button>
+                }
+              />
+              <DropdownMenuContent
+                className="account-menu"
+                align="end"
+                sideOffset={10}
+                aria-label={ui.accountMenu}
+              >
+                <div className="account-menu-identity">
+                  <strong>{authUser.name || ui.user}</strong>
+                  <small>{authUser.email || ui.unifiedIdentity}</small>
                 </div>
-              ) : null}
-            </div>
+                <div className="account-menu-links">
+                  <DropdownMenuItem
+                    onClick={() => onOpenAccountSection("profile")}
+                  >
+                    <UserRound size={16} aria-hidden="true" />
+                    {ui.profile}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => onOpenAccountSection("account")}
+                  >
+                    <UserRound size={16} aria-hidden="true" />
+                    {ui.account}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    aria-label={ui.myStores}
+                    onClick={() => onOpenAccountSection("stores")}
+                  >
+                    <Store size={16} aria-hidden="true" />
+                    <span>{ui.myStores}</span>
+                    {ownedStoresResolved ? (
+                      <strong className="account-menu-count">
+                        {ownedStoresCount}
+                      </strong>
+                    ) : null}
+                  </DropdownMenuItem>
+                  {canOpenPlatformConsole ? (
+                    <DropdownMenuLinkItem
+                      render={<a href="/?role=platform" />}
+                    >
+                      <UserRound size={16} aria-hidden="true" />
+                      <span>{ui.platformAdmin}</span>
+                    </DropdownMenuLinkItem>
+                  ) : null}
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="account-menu-signout"
+                  onClick={onSignOut}
+                >
+                  <LogOut size={16} aria-hidden="true" />
+                  {ui.signOut}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : null}
         </div>
       </div>

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveSubplatform } from "../subplatform";
@@ -16,7 +17,8 @@ const listing = {
 };
 
 describe("StorefrontView", () => {
-  it("shows store identity and products without account or management controls", () => {
+  it("shows store identity and products with an accessible manager dialog", async () => {
+    const user = userEvent.setup();
     const onOpenListing = vi.fn();
     const { container } = render(
       <StorefrontView
@@ -47,9 +49,20 @@ describe("StorefrontView", () => {
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "通勤背包" }));
     expect(onOpenListing).toHaveBeenCalledWith(listing);
-    fireEvent.click(screen.getByRole("button", { name: "与店长对话" }));
-    expect(screen.getByRole("heading", { name: "咨询山间小店" })).toBeVisible();
+    const managerTrigger = screen.getByRole("button", { name: "与店长对话" });
+    await user.click(managerTrigger);
+    expect(
+      screen.getByRole("dialog", { name: "咨询山间小店" }),
+    ).toBeVisible();
     expect(screen.getByText(/未经你确认，不会交换联系方式/)).toBeVisible();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "咨询山间小店" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(managerTrigger).toHaveFocus();
   });
 
   it("has a human empty state with a route back to the mall", () => {
@@ -67,10 +80,79 @@ describe("StorefrontView", () => {
       />,
     );
     expect(screen.getByText("这家店暂时没有在售商品")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "咨询店长" })).toBeVisible();
     expect(screen.getByRole("link", { name: "浏览其他店铺" })).toHaveAttribute(
       "href",
       "/",
     );
+  });
+
+  it("uses manifest copy for a manager's first-product action", async () => {
+    const user = userEvent.setup();
+    const onOpenStoreConsole = vi.fn();
+    render(
+      <StorefrontView
+        catalogResolved
+        listings={[]}
+        locale="zh"
+        onOpenListing={vi.fn()}
+        canManageStore
+        onOpenStoreConsole={onOpenStoreConsole}
+        subplatform={{
+          ...resolveSubplatform("/used-car"),
+          brandName: "Matx Auto",
+          label: "Matx Auto",
+          ui: {
+            copy: {
+              emptyManagerTitle: "还没有发布车辆",
+              emptyManagerAction: "发布第一辆车",
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("还没有发布车辆")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "发布第一辆车" }));
+    expect(onOpenStoreConsole).toHaveBeenCalledTimes(1);
+  });
+
+  it("distinguishes catalog loading from a recoverable error", async () => {
+    const user = userEvent.setup();
+    const onRetryCatalog = vi.fn();
+    const view = render(
+      <StorefrontView
+        catalogResolved={false}
+        listings={[]}
+        locale="zh"
+        onOpenListing={vi.fn()}
+        subplatform={{
+          ...resolveSubplatform("/stores/loading"),
+          brandName: "读取中店铺",
+          label: "读取中店铺",
+        }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("正在读取商品");
+
+    view.rerender(
+      <StorefrontView
+        catalogResolved={false}
+        catalogError
+        listings={[]}
+        locale="zh"
+        onOpenListing={vi.fn()}
+        onRetryCatalog={onRetryCatalog}
+        subplatform={{
+          ...resolveSubplatform("/stores/loading"),
+          brandName: "读取中店铺",
+          label: "读取中店铺",
+        }}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("商品暂时无法读取");
+    await user.click(screen.getByRole("button", { name: "重新加载" }));
+    expect(onRetryCatalog).toHaveBeenCalledTimes(1);
   });
 
   it("renders a clear closed notice with a button to reopen for store managers", () => {

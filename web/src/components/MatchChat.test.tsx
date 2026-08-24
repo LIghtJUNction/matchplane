@@ -178,7 +178,7 @@ describe("MatchChat sending state", () => {
       recommendations: [],
       uiActions: [],
     });
-    await user.click(screen.getByRole("button", { name: "重试回答" }));
+    await user.click(screen.getByRole("button", { name: "再次发送" }));
 
     expect(
       await screen.findByText("可以。你具体想找什么？"),
@@ -321,7 +321,10 @@ describe("MatchChat sending state", () => {
     const user = userEvent.setup();
     render(<MatchChat home onNotice={vi.fn()} subplatform={subplatform} />);
 
-    await user.click(await screen.findByRole("button", { name: "历史" }));
+    await user.click(
+      await screen.findByRole("button", { name: "对话选项" }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "历史" }));
     expect(
       screen.getByRole("heading", { name: "历史对话" }),
     ).toBeInTheDocument();
@@ -396,7 +399,8 @@ describe("MatchChat sending state", () => {
     expect(option).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("uses operator-configured home placeholder phrases with memory inside the composer", async () => {
+  it("keeps history, memory, and conditional clear inside one composer menu", async () => {
+    const user = userEvent.setup();
     render(
       <MatchChat
         compact
@@ -419,8 +423,19 @@ describe("MatchChat sending state", () => {
       name: "告诉 MatchPlane 你的需求",
     });
     expect(input).toHaveAttribute("placeholder", "自定义首页提示");
-    const memory = await screen.findByRole("button", { name: "记忆" });
-    expect(memory.closest("form")).toBe(input.closest("form"));
+    const options = await screen.findByRole("button", { name: "对话选项" });
+    expect(options.closest("form")).toBe(input.closest("form"));
+    await user.click(options);
+    expect(await screen.findByRole("menuitem", { name: "历史" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "记忆" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "清空" })).not.toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await user.type(input, "给我一个真实建议");
+    await user.click(screen.getByRole("button", { name: "发送需求" }));
+    expect(await screen.findByText("这是模型生成的导购回答。")).toBeVisible();
+    await user.click(options);
+    expect(await screen.findByRole("menuitem", { name: "清空" })).toBeVisible();
   });
 
   it("lets the Agent decide how to handle a simple calculation", async () => {
