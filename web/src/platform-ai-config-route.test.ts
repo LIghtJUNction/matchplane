@@ -89,6 +89,10 @@ function mutation(
 ) {
   return {
     value,
+    state:
+      "testedReady" in value
+        ? { config, draft: value }
+        : { config: value, draft: null },
     committed: true as const,
     auditPending: pending.auditPending ?? false,
     maintenancePending: pending.maintenancePending ?? false,
@@ -173,9 +177,10 @@ describe("platform AI transactional config route", () => {
     });
     expect(JSON.stringify(body)).not.toContain("test-only-secret");
     expect(JSON.stringify(body)).not.toContain("credentialFile");
+    expect(mocks.getManagedPlatformRouterState).not.toHaveBeenCalled();
   });
 
-  it("activates without a pre-read and returns committed public state", async () => {
+  it("activates without a post-commit reread and returns its exact committed public state", async () => {
     const response = await patch(
       { action: "activate" },
       "request-activate-1",
@@ -186,7 +191,12 @@ describe("platform AI transactional config route", () => {
       actor: "11111111-1111-4111-8111-111111111111",
       requestId: "request-activate-1",
     });
-    expect(mocks.getManagedPlatformRouterState).toHaveBeenCalledTimes(1);
+    expect(mocks.getManagedPlatformRouterState).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      config,
+      draft: null,
+      generationId: "generation-2",
+    });
   });
 
   it.each([
@@ -275,6 +285,15 @@ describe("platform AI transactional config route", () => {
     expect(mocks.activateTransactionalManagedPlatformRouterDraft).not.toHaveBeenCalled();
   });
 
+  it("includes a request id on authentication failures", async () => {
+    mocks.getSession.mockResolvedValue(null);
+    const response = await patch({ action: "activate" }, "request-auth-1");
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      requestId: "request-auth-1",
+    });
+  });
+
   it("retains bounded malformed and oversized request handling", async () => {
     const malformed = await PATCH(
       new Request("http://localhost/api/platform/ai/config", {
@@ -284,9 +303,15 @@ describe("platform AI transactional config route", () => {
       }),
     );
     expect(malformed.status).toBe(400);
+    await expect(malformed.json()).resolves.toMatchObject({
+      requestId: expect.any(String),
+    });
 
     const oversized = await patch({ payload: "x".repeat(33 * 1024) });
     expect(oversized.status).toBe(413);
+    await expect(oversized.json()).resolves.toMatchObject({
+      requestId: "request-stage-1",
+    });
     expect(mocks.stageTransactionalManagedPlatformRouterConfig).not.toHaveBeenCalled();
   });
 

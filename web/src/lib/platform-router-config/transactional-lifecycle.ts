@@ -61,6 +61,7 @@ export interface PlatformRouterDraftProbe {
 
 export interface PlatformRouterMutationResult<T> {
   value: T;
+  state: TransactionalManagedPlatformRouterPublicState;
   committed: true;
   auditPending: boolean;
   maintenancePending: boolean;
@@ -157,16 +158,26 @@ export function createTransactionalManagedPlatformRouterLifecycle(
     };
   }
 
-  function getState(): TransactionalManagedPlatformRouterPublicState {
-    const snapshot = readValidatedSnapshot();
-    const activeSecret = readSecret(snapshot.active);
-    const draftSecret = readSecret(snapshot.draft?.config ?? null);
+  function publicState(
+    snapshot: PlatformRouterSnapshot,
+    activeApiKey: string | null,
+    draftApiKey: string | null,
+  ): TransactionalManagedPlatformRouterPublicState {
     return {
       config: snapshot.active
-        ? presentManagedConfig(snapshot.active, Boolean(activeSecret))
+        ? presentManagedConfig(snapshot.active, Boolean(activeApiKey))
         : null,
-      draft: publicDraft(snapshot.draft, draftSecret?.apiKey ?? null),
+      draft: publicDraft(snapshot.draft, draftApiKey),
     };
+  }
+
+  function getState(): TransactionalManagedPlatformRouterPublicState {
+    const snapshot = readValidatedSnapshot();
+    return publicState(
+      snapshot,
+      readSecret(snapshot.active)?.apiKey ?? null,
+      readSecret(snapshot.draft?.config ?? null)?.apiKey ?? null,
+    );
   }
 
   function getActive(): ManagedPlatformRouterConfig | null {
@@ -220,6 +231,7 @@ export function createTransactionalManagedPlatformRouterLifecycle(
     await recoverPlatformRouterTransactions(transactionOptions);
     return withPlatformRouterLock(async (handle) => {
       const current = readValidatedSnapshot();
+      const activeApiKey = readSecret(current.active)?.apiKey ?? null;
       const suppliedKey = input.apiKey?.trim() || null;
       const inherited = current.draft?.config ?? current.active;
       const existingKey = readSecret(inherited)?.apiKey ?? null;
@@ -268,18 +280,22 @@ export function createTransactionalManagedPlatformRouterLifecycle(
         nextId,
         [audit],
       );
+      const state = publicState(
+        committed,
+        activeApiKey,
+        suppliedKey ?? existingKey,
+      );
       const pending = finalizeCommittedGeneration(
         committed,
         handle,
         transactionOptions,
       );
-      const value = publicDraft(draft, suppliedKey ?? existingKey);
-      if (!value) {
+      if (!state.draft) {
         throw new PlatformRouterStateIndeterminateError(
           "AI 待测配置已提交但无法读取",
         );
       }
-      return mutationResult(value, committed, pending);
+      return mutationResult(state.draft, state, committed, pending);
     }, transactionOptions);
   }
 
@@ -296,6 +312,7 @@ export function createTransactionalManagedPlatformRouterLifecycle(
     await recoverPlatformRouterTransactions(transactionOptions);
     return withPlatformRouterLock(async (handle) => {
       const current = readValidatedSnapshot();
+      const activeApiKey = readSecret(current.active)?.apiKey ?? null;
       if (
         current.source !== "generation" ||
         current.generationId !== input.expectedGenerationId ||
@@ -347,18 +364,18 @@ export function createTransactionalManagedPlatformRouterLifecycle(
         nextId,
         [audit],
       );
+      const state = publicState(committed, activeApiKey, secret.apiKey);
       const pending = finalizeCommittedGeneration(
         committed,
         handle,
         transactionOptions,
       );
-      const value = publicDraft(draft, secret.apiKey);
-      if (!value) {
+      if (!state.draft) {
         throw new PlatformRouterStateIndeterminateError(
           "AI 测试凭据已提交但无法读取",
         );
       }
-      return mutationResult(value, committed, pending);
+      return mutationResult(state.draft, state, committed, pending);
     }, transactionOptions);
   }
 
@@ -415,16 +432,18 @@ export function createTransactionalManagedPlatformRouterLifecycle(
         nextId,
         [audit],
       );
+      const state = publicState(committed, secret.apiKey, null);
       const pending = finalizeCommittedGeneration(
         committed,
         handle,
         transactionOptions,
       );
-      return mutationResult(
-        presentManagedConfig(active, true),
-        committed,
-        pending,
-      );
+      if (!state.config) {
+        throw new PlatformRouterStateIndeterminateError(
+          "AI 配置已提交但无法读取",
+        );
+      }
+      return mutationResult(state.config, state, committed, pending);
     }, transactionOptions);
   }
 
@@ -591,6 +610,7 @@ function writeCredentialWithReconciliation(
 
 function mutationResult<T>(
   value: T,
+  state: TransactionalManagedPlatformRouterPublicState,
   committed: PlatformRouterSnapshot,
   pending: FinalizationState,
 ): PlatformRouterMutationResult<T> {
@@ -601,6 +621,7 @@ function mutationResult<T>(
   }
   return {
     value,
+    state,
     committed: true,
     auditPending: pending.auditPending,
     maintenancePending: pending.maintenancePending,

@@ -278,6 +278,9 @@ export interface PlatformAiProbeResult {
   auditPending?: boolean;
   maintenancePending?: boolean;
   generationId?: string;
+  config?: ManagedPlatformRouterConfig | null;
+  draft?: ManagedPlatformRouterDraftConfig | null;
+  effective?: PlatformRouterEffectiveStatus;
 }
 
 export interface PlatformSiteSettings {

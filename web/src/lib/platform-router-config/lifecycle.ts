@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { lstatSync } from "node:fs";
+import path from "node:path";
 import {
   boundedAuditText,
   decodeStoredRouterConfig,
@@ -21,6 +23,7 @@ import {
   credentialStorageEntry,
   type PlatformRouterStorageEntry,
   type ProtectedPlatformRouterStorage,
+  PLATFORM_ROUTER_SECRET_ROOT,
   protectedPlatformRouterStorage,
 } from "./protected-storage";
 import {
@@ -29,6 +32,10 @@ import {
   readTransactionalManagedPlatformRouterConfig,
   readTransactionalManagedPlatformRouterDraftConfig,
 } from "./transactional-lifecycle";
+import {
+  PLATFORM_ROUTER_POINTER_FILE,
+  PlatformRouterConflictError,
+} from "./transaction";
 
 const DRAFT_ENTRIES: PlatformRouterStorageEntry[] = [
   "draft-config",
@@ -56,12 +63,21 @@ interface LifecycleDependencies {
   storage: ProtectedPlatformRouterStorage;
   nextId(): string;
   now(): Date;
+  transactionalStatePresent?(): boolean;
 }
 
 export function createManagedPlatformRouterLifecycle(
   dependencies: LifecycleDependencies,
 ): ManagedPlatformRouterLifecycle {
   const { storage } = dependencies;
+
+  function assertLegacyMutationAllowed(): void {
+    if (dependencies.transactionalStatePresent?.()) {
+      throw new PlatformRouterConflictError(
+        "事务型 AI 配置已启用，旧版写入已拒绝",
+      );
+    }
+  }
 
   function readConfig(
     entry: "active-config" | "draft-config",
@@ -110,6 +126,7 @@ export function createManagedPlatformRouterLifecycle(
   function stage(
     input: ManagedPlatformRouterInput,
   ): ManagedPlatformRouterDraftConfig {
+    assertLegacyMutationAllowed();
     const snapshot = captureSnapshot(storage, DRAFT_ENTRIES);
     const previousDraft = readConfig("draft-config");
     const active = readConfig("active-config");
@@ -151,6 +168,7 @@ export function createManagedPlatformRouterLifecycle(
   }
 
   function markTested(requestId: string): void {
+    assertLegacyMutationAllowed();
     const draft = readSecret("draft-config");
     if (!draft) throw new Error("没有可测试的 AI 待测配置");
     storage.write(
@@ -165,6 +183,7 @@ export function createManagedPlatformRouterLifecycle(
   }
 
   function activate(): ManagedPlatformRouterConfig {
+    assertLegacyMutationAllowed();
     const snapshot = captureSnapshot(storage, ACTIVATION_ENTRIES);
     const previousActive = readConfig("active-config");
     const draft = readSecret("draft-config");
@@ -205,6 +224,10 @@ const lifecycle = createManagedPlatformRouterLifecycle({
   storage: protectedPlatformRouterStorage,
   nextId: randomUUID,
   now: () => new Date(),
+  transactionalStatePresent: () =>
+    pathExists(
+      path.join(PLATFORM_ROUTER_SECRET_ROOT, PLATFORM_ROUTER_POINTER_FILE),
+    ),
 });
 
 export function readManagedPlatformRouterConfig(): ManagedPlatformRouterSecretConfig | null {
@@ -235,6 +258,22 @@ export function markManagedPlatformRouterDraftTested(requestId: string): void {
 
 export function activateManagedPlatformRouterDraft(): ManagedPlatformRouterConfig {
   return lifecycle.activate();
+}
+
+function pathExists(target: string): boolean {
+  try {
+    lstatSync(target);
+    return true;
+  } catch (cause) {
+    if (
+      cause instanceof Error &&
+      "code" in cause &&
+      (cause as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return false;
+    }
+    throw cause;
+  }
 }
 
 function captureSnapshot(

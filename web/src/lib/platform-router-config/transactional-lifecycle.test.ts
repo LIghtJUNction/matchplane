@@ -104,6 +104,10 @@ describe("transactional managed platform router lifecycle", () => {
       committed: true,
       auditPending: false,
       value: { model: "draft-model", testedReady: false, keyChanged: true },
+      state: {
+        config: null,
+        draft: { model: "draft-model", testedReady: false, keyChanged: true },
+      },
     });
     expect(JSON.stringify(staged)).not.toContain(SENTINEL);
     const prepared = lifecycle.prepareDraftProbe();
@@ -123,9 +127,15 @@ describe("transactional managed platform router lifecycle", () => {
       actor: "admin@example.com",
       requestId: "activate-1",
     });
-    expect(activated.value).toMatchObject({
-      model: "draft-model",
-      credentialConfigured: true,
+    expect(activated).toMatchObject({
+      value: {
+        model: "draft-model",
+        credentialConfigured: true,
+      },
+      state: {
+        config: { model: "draft-model", credentialConfigured: true },
+        draft: null,
+      },
     });
     expect(lifecycle.readActive()).toMatchObject({
       model: "draft-model",
@@ -145,6 +155,23 @@ describe("transactional managed platform router lifecycle", () => {
     }
     expect(existsSync(path.join(root, "platform-router.json"))).toBe(false);
     expect(existsSync(path.join(root, "platform-router.draft.json"))).toBe(false);
+  });
+
+  it("keeps each mutation result pinned to its committed generation after a later writer wins", async () => {
+    const { lifecycle } = fixture("committed-result-snapshot");
+    const first = await lifecycle.stage(input("first", "first-key"), {
+      actor: "first-admin",
+      requestId: "first-stage",
+    });
+    const second = await lifecycle.stage(input("second", "second-key"), {
+      actor: "second-admin",
+      requestId: "second-stage",
+    });
+
+    expect(first.generationId).not.toBe(second.generationId);
+    expect(first.state.draft?.model).toBe("first");
+    expect(second.state.draft?.model).toBe("second");
+    expect(lifecycle.getState().draft?.model).toBe("second");
   });
 
   it("preserves the draft credential before active and rejects a keyless first config", async () => {

@@ -299,14 +299,15 @@ describe("PlatformAiConfigPanel staged cutover", () => {
       auditPending: false,
       maintenancePending: true,
       generationId: "generation-test-pending",
+      config,
+      draft: testedDraft,
+      effective,
     });
-    api.getManagedPlatformRouterState
-      .mockResolvedValueOnce({
-        config,
-        draft: { ...config, testedReady: false, testedAt: null, keyChanged: true },
-        effective,
-      })
-      .mockResolvedValueOnce({ config, draft: testedDraft, effective });
+    api.getManagedPlatformRouterState.mockResolvedValueOnce({
+      config,
+      draft: { ...config, testedReady: false, testedAt: null, keyChanged: true },
+      effective,
+    });
 
     render(
       <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
@@ -324,6 +325,7 @@ describe("PlatformAiConfigPanel staged cutover", () => {
       screen.getByRole("button", { name: "启用已测试配置" }),
     ).toBeEnabled();
     expect(onNotice).not.toHaveBeenCalledWith(expect.stringContaining("失败"));
+    expect(api.getManagedPlatformRouterState).toHaveBeenCalledTimes(1);
   });
 
   it("does not fabricate a managed conflict from unreadable null fields", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ManagedPlatformRouterInput } from "./contract";
 import { createManagedPlatformRouterLifecycle } from "./lifecycle";
+import { PlatformRouterConflictError } from "./transaction";
 import {
   credentialStorageEntry,
   type PlatformRouterStorageEntry,
@@ -74,7 +75,7 @@ function input(overrides: Partial<ManagedPlatformRouterInput> = {}) {
   };
 }
 
-function createFixture() {
+function createFixture(transactionalStatePresent = false) {
   const storage = new MemoryStorage();
   storage.write(
     "active-config",
@@ -94,11 +95,26 @@ function createFixture() {
       return id;
     },
     now: () => new Date("2026-08-25T00:00:00.000Z"),
+    transactionalStatePresent: () => transactionalStatePresent,
   });
   return { lifecycle, storage };
 }
 
 describe("managed platform router lifecycle", () => {
+  it("fails every legacy mutation closed once transactional state exists", () => {
+    const { lifecycle, storage } = createFixture(true);
+    const before = storage.snapshot();
+
+    for (const mutate of [
+      () => lifecycle.stage(input({ apiKey: "must-not-write" })),
+      () => lifecycle.markTested("must-not-attest"),
+      () => lifecycle.activate(),
+    ]) {
+      expect(mutate).toThrow(PlatformRouterConflictError);
+      expect(storage.snapshot()).toEqual(before);
+    }
+  });
+
   it("rolls back every draft file and the new credential when staging fails", () => {
     const { lifecycle, storage } = createFixture();
     lifecycle.stage(input({ apiKey: "first-draft-key" }));

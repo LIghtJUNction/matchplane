@@ -3,9 +3,13 @@ import {
   platformRouterEffectiveStatusFrom,
   readEnvironmentProviderStatus,
   unreadableManagedPlatformRouterEffectiveStatus,
+  type EnvironmentProviderStatus,
 } from "./platform-router-config/effective-source";
 import type { PlatformRouterTransactionOptions } from "./platform-router-config/transaction";
-import { getTransactionalManagedPlatformRouterState } from "./platform-router-config/transactional-lifecycle";
+import {
+  getTransactionalManagedPlatformRouterState,
+  type TransactionalManagedPlatformRouterPublicState,
+} from "./platform-router-config/transactional-lifecycle";
 
 export type {
   ManagedPlatformRouterConfig,
@@ -90,21 +94,25 @@ export {
   modelReasoningEffortsFromRecord,
 } from "./platform-router-config/models";
 
+export function managedPlatformRouterStateFromTransactionalState(
+  state: TransactionalManagedPlatformRouterPublicState,
+  environment: EnvironmentProviderStatus = readEnvironmentProviderStatus(),
+): ManagedPlatformRouterState {
+  return {
+    ...state,
+    effective: platformRouterEffectiveStatusFrom(state.config, environment),
+  };
+}
+
 export function getManagedPlatformRouterState(
   transactionOptions?: PlatformRouterTransactionOptions,
 ): ManagedPlatformRouterState {
   const environment = readEnvironmentProviderStatus();
   try {
-    const state = getTransactionalManagedPlatformRouterState(
-      transactionOptions,
+    return managedPlatformRouterStateFromTransactionalState(
+      getTransactionalManagedPlatformRouterState(transactionOptions),
+      environment,
     );
-    return {
-      ...state,
-      effective: platformRouterEffectiveStatusFrom(
-        state.config,
-        environment,
-      ),
-    };
   } catch {
     return {
       config: null,

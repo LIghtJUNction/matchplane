@@ -131,8 +131,18 @@ export function PlatformAiConfigPanel({
     setTesting(true);
     try {
       const result = await testPlatformAi({ candidate: true });
-      const state = await getManagedPlatformRouterState();
-      applyState(state);
+      if (
+        result.committed &&
+        "config" in result &&
+        "draft" in result &&
+        result.effective
+      ) {
+        applyState({
+          config: result.config ?? null,
+          draft: result.draft ?? null,
+          effective: result.effective,
+        });
+      }
       onNotice(
         result.status === "ready"
           ? committedNotice(

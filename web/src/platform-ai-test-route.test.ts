@@ -106,6 +106,10 @@ beforeEach(() => {
   mocks.probePlatformRouter.mockResolvedValue(readyProbe);
   mocks.markTransactionalManagedPlatformRouterDraftTested.mockResolvedValue({
     value: { ...draft, testedReady: true },
+    state: {
+      config: null,
+      draft: { ...draft, testedReady: true },
+    },
     committed: true,
     auditPending: false,
     maintenancePending: false,
@@ -170,6 +174,8 @@ describe("platform AI transactional probe route", () => {
     expect(text).not.toContain("test-only-secret");
     expect(text).not.toContain("expectedDraftDigest");
     expect(text).not.toContain("credentialFile");
+    expect(text).toContain('"draft"');
+    expect(text).toContain('"testedReady":true');
   });
 
   it("returns committed 202 metadata when ready attestation finalization is pending", async () => {
@@ -178,6 +184,10 @@ describe("platform AI transactional probe route", () => {
     });
     mocks.markTransactionalManagedPlatformRouterDraftTested.mockResolvedValue({
       value: { ...draft, testedReady: true },
+      state: {
+        config: null,
+        draft: { ...draft, testedReady: true },
+      },
       committed: true,
       auditPending: true,
       maintenancePending: true,
@@ -271,12 +281,77 @@ describe("platform AI transactional probe route", () => {
     expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed, oversized, primitive, and unsupported candidate bodies before probing", async () => {
+    mocks.getSession.mockResolvedValue({
+      user: { id: "super", role: "rootSuperAdmin" },
+    });
+    const cases = [
+      { body: "{", status: 400 },
+      { body: "true", status: 400 },
+      { body: "[]", status: 400 },
+      { body: JSON.stringify({ candidate: false }), status: 400 },
+      {
+        body: JSON.stringify({ candidate: true, extra: true }),
+        status: 400,
+      },
+      {
+        body: JSON.stringify({ payload: "x".repeat(33 * 1024) }),
+        status: 413,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const response = await POST(
+        new Request("http://localhost/api/platform/ai/test", {
+          method: "POST",
+          headers: {
+            origin: "http://localhost",
+            "content-type": "application/json",
+            "x-request-id": "request-invalid-body",
+          },
+          body: testCase.body,
+        }),
+      );
+      expect(response.status).toBe(testCase.status);
+      await expect(response.json()).resolves.toMatchObject({
+        requestId: "request-invalid-body",
+      });
+    }
+    expect(mocks.probePlatformRouter).not.toHaveBeenCalled();
+    expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
+    expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
+  });
+
+  it("accepts an empty body or empty object only as an active read-only probe", async () => {
+    for (const body of [undefined, "{}"] as const) {
+      const response = await POST(
+        new Request("http://localhost/api/platform/ai/test", {
+          method: "POST",
+          headers: { origin: "http://localhost" },
+          ...(body === undefined ? {} : { body }),
+        }),
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(mocks.probePlatformRouter).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
+    expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
+  });
+
   it("keeps candidate role and trusted-origin boundaries before preparation", async () => {
-    expect((await POST(candidateRequest())).status).toBe(403);
+    const roleDenied = await POST(candidateRequest());
+    expect(roleDenied.status).toBe(403);
+    await expect(roleDenied.json()).resolves.toMatchObject({
+      requestId: "request-test-1",
+    });
     expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
 
     mocks.hasTrustedCookieOrigin.mockReturnValue(false);
-    expect((await POST(candidateRequest())).status).toBe(403);
+    const originDenied = await POST(candidateRequest());
+    expect(originDenied.status).toBe(403);
+    await expect(originDenied.json()).resolves.toMatchObject({
+      requestId: "request-test-1",
+    });
     expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
   });
 });

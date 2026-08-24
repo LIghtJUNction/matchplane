@@ -3,9 +3,14 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { auth } from "../../../../../src/lib/auth";
+import {
+  readJsonBody,
+  RequestBodyTooLargeError,
+} from "../../../../../src/lib/body-limit";
 import { hasTrustedCookieOrigin } from "../../../../../src/lib/request-origin";
 import {
   getPlatformRouterEffectiveStatus,
+  managedPlatformRouterStateFromTransactionalState,
   markTransactionalManagedPlatformRouterDraftTested,
   platformRouterPolicyIssues,
   prepareTransactionalManagedPlatformRouterDraftProbe,
@@ -30,13 +35,17 @@ interface AuthorizedAdmin {
 
 /** Run a bounded server-side probe without returning credentials or provider response bodies. */
 export async function POST(request: Request): Promise<Response> {
-  const authorized = await authorize(request);
-  if (authorized instanceof Response) return authorized;
-  const candidate = await candidateRequested(request);
-  if (candidate && authorized.role !== "rootSuperAdmin")
-    return response({ error: "只有超级管理员可以测试待测 AI 配置" }, 403);
-
   const requestId = safeRequestId(request.headers.get("x-request-id"));
+  const authorized = await authorize(request, requestId);
+  if (authorized instanceof Response) return authorized;
+  const candidate = await candidateRequested(request, requestId);
+  if (candidate instanceof Response) return candidate;
+  if (candidate && authorized.role !== "rootSuperAdmin")
+    return response(
+      { error: "只有超级管理员可以测试待测 AI 配置", requestId },
+      403,
+    );
+
   if (!candidate) return activeProbe(request, requestId);
 
   let prepared: PlatformRouterDraftProbe;
@@ -93,7 +102,14 @@ export async function POST(request: Request): Promise<Response> {
       expectedDraftDigest: prepared.expectedDraftDigest,
       status: "ready",
     });
-    return committedMutationResponse(probe, mutation, requestId);
+    return committedMutationResponse(
+      {
+        ...probe,
+        ...managedPlatformRouterStateFromTransactionalState(mutation.state),
+      },
+      mutation,
+      requestId,
+    );
   } catch (cause) {
     return platformRouterMutationErrorResponse(
       cause,
@@ -144,24 +160,49 @@ async function activeProbe(
 
 async function authorize(
   request: Request,
+  requestId: string,
 ): Promise<AuthorizedAdmin | Response> {
   if (!hasTrustedCookieOrigin(request))
-    return response({ error: "请求来源未被平台信任" }, 403);
+    return response({ error: "请求来源未被平台信任", requestId }, 403);
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session)
-    return response({ error: "Better Auth session is required" }, 401);
+    return response(
+      { error: "Better Auth session is required", requestId },
+      401,
+    );
   const user = session.user as { id?: string; role?: string | null };
   if (user.role !== "rootSuperAdmin" && user.role !== "rootAdmin")
-    return response({ error: "只有根平台管理员可以测试托管 AI" }, 403);
+    return response(
+      { error: "只有根平台管理员可以测试托管 AI", requestId },
+      403,
+    );
   return { id: String(user.id ?? "unknown"), role: user.role };
 }
 
-async function candidateRequested(request: Request): Promise<boolean> {
+async function candidateRequested(
+  request: Request,
+  requestId: string,
+): Promise<boolean | Response> {
+  if (!request.body) return false;
   try {
-    const body = (await request.json()) as { candidate?: unknown };
-    return body?.candidate === true;
-  } catch {
-    return false;
+    const value = await readJsonBody<unknown>(request, 32 * 1024);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return response({ error: "AI 测试请求必须是对象", requestId }, 400);
+    }
+    const body = value as Record<string, unknown>;
+    const keys = Object.keys(body);
+    if (keys.length === 0) return false;
+    if (keys.length === 1 && body.candidate === true) return true;
+    return response({ error: "AI 测试请求字段无效", requestId }, 400);
+  } catch (cause) {
+    const tooLarge = cause instanceof RequestBodyTooLargeError;
+    return response(
+      {
+        error: tooLarge ? "AI 测试请求过大" : "AI 测试请求必须是有效 JSON",
+        requestId,
+      },
+      tooLarge ? 413 : 400,
+    );
   }
 }
 

@@ -11,6 +11,7 @@ import { hasTrustedCookieOrigin } from "../../../../../src/lib/request-origin";
 import {
   activateTransactionalManagedPlatformRouterDraft,
   getManagedPlatformRouterState,
+  managedPlatformRouterStateFromTransactionalState,
   stageTransactionalManagedPlatformRouterConfig,
   type ManagedRouterProtocol,
 } from "../../../../../src/lib/platform-router-config";
@@ -28,7 +29,8 @@ interface AuthorizedAdmin {
 }
 
 export async function GET(request: Request): Promise<Response> {
-  const guard = await requireAdmin(request, false);
+  const requestId = safeRequestId(request.headers.get("x-request-id"));
+  const guard = await requireAdmin(request, false, requestId);
   if (guard instanceof Response) return guard;
   return NextResponse.json(getManagedPlatformRouterState(), {
     headers: { "cache-control": "no-store" },
@@ -36,13 +38,14 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function PATCH(request: Request): Promise<Response> {
-  const guard = await requireAdmin(request, true);
+  const requestId = safeRequestId(request.headers.get("x-request-id"));
+  const guard = await requireAdmin(request, true, requestId);
   if (guard instanceof Response) return guard;
   let body: Record<string, unknown>;
   try {
     const value = await readJsonBody<unknown>(request, 32 * 1024);
     if (!value || typeof value !== "object" || Array.isArray(value))
-      return error("AI 配置必须是对象", 400);
+      return error("AI 配置必须是对象", 400, requestId);
     body = value as Record<string, unknown>;
   } catch (cause) {
     return error(
@@ -50,10 +53,10 @@ export async function PATCH(request: Request): Promise<Response> {
         ? "AI 配置请求过大"
         : "AI 配置必须是有效 JSON",
       cause instanceof RequestBodyTooLargeError ? 413 : 400,
+      requestId,
     );
   }
 
-  const requestId = safeRequestId(request.headers.get("x-request-id"));
   if (body.action === "activate") {
     try {
       const mutation = await activateTransactionalManagedPlatformRouterDraft({
@@ -61,7 +64,7 @@ export async function PATCH(request: Request): Promise<Response> {
         requestId,
       });
       return committedMutationResponse(
-        getManagedPlatformRouterState(),
+        managedPlatformRouterStateFromTransactionalState(mutation.state),
         mutation,
         requestId,
       );
@@ -95,7 +98,7 @@ export async function PATCH(request: Request): Promise<Response> {
       { actor: guard.id, requestId },
     );
     return committedMutationResponse(
-      getManagedPlatformRouterState(),
+      managedPlatformRouterStateFromTransactionalState(mutation.state),
       mutation,
       requestId,
     );
@@ -107,11 +110,12 @@ export async function PATCH(request: Request): Promise<Response> {
 async function requireAdmin(
   request: Request,
   write: boolean,
+  requestId: string,
 ): Promise<AuthorizedAdmin | Response> {
   if (!hasTrustedCookieOrigin(request))
-    return error("请求来源未被平台信任", 403);
+    return error("请求来源未被平台信任", 403, requestId);
   const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return error("需要登录", 401);
+  if (!session) return error("需要登录", 401, requestId);
   const role = (session.user as { role?: string | null }).role;
   if (role !== "rootSuperAdmin" && (write || role !== "rootAdmin"))
     return error(
@@ -119,6 +123,7 @@ async function requireAdmin(
         ? "只有超级管理员可以保存 AI 配置"
         : "只有根平台管理员可以查看 AI 配置",
       403,
+      requestId,
     );
   return {
     id: String((session.user as { id?: string }).id ?? "unknown"),
