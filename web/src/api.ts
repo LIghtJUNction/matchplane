@@ -2038,6 +2038,70 @@ export async function saveNationalIdentityConfig(input: {
   };
 }
 
+export interface SmsGatewayConfig {
+  enabled: boolean;
+  gatewayUrl: string;
+  tokenConfigured: boolean;
+}
+
+export async function getSmsGatewayConfig(): Promise<SmsGatewayConfig | null> {
+  const response = await fetch("/api/platform/sms-gateway/config", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: SmsGatewayConfig | null;
+    error?: string;
+  } | null;
+  if (!response.ok || !body)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "短信网关配置读取失败",
+    );
+  return body.config ?? null;
+}
+
+export async function saveSmsGatewayConfig(input: {
+  enabled: boolean;
+  gatewayUrl: string;
+  token?: string;
+}): Promise<SmsGatewayConfig> {
+  const response = await fetch("/api/platform/sms-gateway/config", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: SmsGatewayConfig;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.config)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "短信网关配置保存失败",
+    );
+  return body.config;
+}
+
+export async function testSmsGatewayConfig(phoneNumber: string): Promise<void> {
+  const response = await fetch("/api/platform/sms-gateway/test", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ phoneNumber }),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "测试短信发送失败",
+    );
+}
+
 export interface ContactResponse {
   counterpart: {
     party_id: string;
