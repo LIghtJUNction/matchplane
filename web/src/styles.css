@@ -388,6 +388,19 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .national-identity-endpoints label > span { color: var(--ink-soft); font-size: 0.68rem; font-weight: 650; }
 .national-identity-actions { margin-top: 0.2rem; }
 .national-identity-restart { margin: 0.8rem 0 0; color: var(--ink-soft); font-size: 0.7rem; line-height: 1.5; }
+.login-methods-panel { margin-top: 1rem; padding: clamp(1rem, 2vw, 1.35rem); }
+.login-methods-panel .provider-list { margin-top: 0.75rem; }
+.login-method-row > b.status-chip { background: rgba(217, 119, 87, 0.14); color: #91432a; }
+.login-method-row > b.status-chip.is-on { background: rgba(120, 140, 93, 0.14); color: #4d622f; }
+.login-method-env { padding: 0.65rem 0.75rem; display: grid; gap: 0.4rem; border: 1px dashed var(--line); border-radius: 0.9rem; background: var(--paper); }
+.login-method-env p { margin: 0; display: grid; gap: 0.14rem; font-size: 0.62rem; }
+.login-method-env code { color: var(--ink); font-size: 0.62rem; word-break: break-all; }
+.login-method-env p > span { color: var(--muted); }
+.login-methods-footer { margin-top: 0.85rem; padding-top: 0.55rem; display: flex; align-items: flex-start; justify-content: space-between; gap: 0.8rem; border-top: 1px solid var(--line); }
+.login-methods-footer p { margin: 0; color: var(--muted); font-size: 0.62rem; line-height: 1.55; }
+.login-methods-footer code { font-size: 0.6rem; }
+.login-methods-footer button { min-height: 2.35rem; padding: 0 0.8rem; display: inline-flex; flex-shrink: 0; align-items: center; gap: 0.38rem; border: 1px solid var(--line-strong); border-radius: 0.7rem; background: var(--paper); color: var(--ink); cursor: pointer; font: inherit; font-size: 0.68rem; font-weight: 650; }
+.login-methods-footer button:disabled { cursor: not-allowed; opacity: 0.55; }
 .platform-access-select { min-width: min(100%, 18rem); display: grid; gap: 0.3rem; }
 .platform-access-select span, .platform-access-invite label > span { color: var(--ink-soft); font-size: 0.66rem; font-weight: 650; }
 .platform-access-select select, .platform-access-invite input, .platform-access-invite select, .platform-member-row select { width: 100%; padding: 0.62rem 0.7rem; border: 1px solid var(--line); border-radius: 0.72rem; outline: 0; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.72rem; }
@@ -1975,7 +1988,7 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .store-contact-consent-heading span, .store-contact-consent-explain { margin: 0; color: var(--muted); font-size: 0.67rem; line-height: 1.52; }
 .store-contact-consent-loading, .store-contact-consent-error { min-height: 2.75rem; display: flex; align-items: center; gap: 0.45rem; color: var(--muted); font-size: 0.68rem; }
 .store-contact-consent-error span { flex: 1; }
-.store-contact-consent-error button, .store-contact-consent-empty a { min-height: 2.5rem; padding: 0 0.72rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: 0.55rem; background: var(--paper); color: var(--ink-soft); font: inherit; font-size: 0.66rem; font-weight: 680; text-decoration: none; cursor: pointer; }
+.store-contact-consent-error button, .store-contact-consent-error a, .store-contact-consent-empty a, .store-contact-consent-empty-actions button { min-height: 2.5rem; padding: 0 0.72rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: 0.55rem; background: var(--paper); color: var(--ink-soft); font: inherit; font-size: 0.66rem; font-weight: 680; text-decoration: none; cursor: pointer; }
 .store-contact-consent-channels { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.4rem; }
 .store-contact-consent-channels li { min-height: 3.2rem; padding: 0.48rem 0.6rem; display: flex; align-items: center; gap: 0.55rem; border: 1px solid var(--line); border-radius: 0.58rem; background: var(--paper); }
 .store-contact-consent-channels li > svg { flex: 0 0 auto; color: var(--muted); }
@@ -1986,7 +1999,7 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .store-contact-consent-empty { display: grid; gap: 0.3rem; }
 .store-contact-consent-empty strong { color: var(--ink); font-size: 0.72rem; }
 .store-contact-consent-empty span { color: var(--muted); font-size: 0.66rem; line-height: 1.5; }
-.store-contact-consent-empty a { justify-self: start; margin-top: 0.25rem; }
+.store-contact-consent-empty-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.25rem; }
 .store-contact-consent-result { margin-top: 0.55rem; padding: 0.7rem 0.76rem; display: flex; align-items: flex-start; gap: 0.55rem; border: 1px solid var(--line); border-radius: 0.72rem; background: var(--paper); }
 .store-contact-consent-result > svg { flex: 0 0 auto; color: var(--cactus-strong); }
 .store-contact-consent-result.is-declined > svg { color: var(--muted); }

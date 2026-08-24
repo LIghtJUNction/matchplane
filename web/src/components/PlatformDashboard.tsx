@@ -50,12 +50,14 @@ import {
   type SubplatformArchiveUpload,
   type SubplatformOrganizationRecord,
 } from "../api";
+import { LoginMethodsPanel } from "./LoginMethodsPanel";
 import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
 import { NationalIdentityConfigPanel } from "./NationalIdentityConfigPanel";
+import { PhoneLoginConfigPanel } from "./PhoneLoginConfigPanel";
 import { MallCatalogModeration } from "./MallCatalogModeration";
 import { MallBrandPanel } from "./MallBrandPanel";
 import { StoreCommercialTermsPanel } from "./StoreCommercialTermsPanel";
@@ -888,6 +890,7 @@ export function PlatformDashboard({
                 onBrandUpdated={onBrandUpdated}
                 onNotice={onNotice}
               />
+              <LoginMethodsPanel />
               <section
                 className="platform-component-panel"
                 aria-label="商城账号邮件服务"
@@ -898,6 +901,7 @@ export function PlatformDashboard({
                 rootRole={rootRole}
                 onNotice={onNotice}
               />
+              <PhoneLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
               <PlatformSiteSettingsPanel
                 organizationId={setup?.root.organization?.id}
                 platformPath="/"
