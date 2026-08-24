@@ -208,7 +208,7 @@ export function StorefrontView({
         >
           <div className="storefront-manager-chat-heading">
             <div>
-              <p>{english ? "AI STORE MANAGER" : "AI 店长"}</p>
+              <p>{english ? "STORE CHAT" : "店铺咨询"}</p>
               <h2 id="store-manager-chat-title">
                 {english
                   ? `Ask ${subplatform.brandName || subplatform.label}`

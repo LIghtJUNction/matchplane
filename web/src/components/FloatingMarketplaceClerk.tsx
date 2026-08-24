@@ -48,10 +48,10 @@ const COLLAPSED_HEIGHT = 68;
 
 function initialLayout(): ClerkLayout {
   if (typeof window === "undefined") {
-    return { x: VIEWPORT_GUTTER, y: VIEWPORT_GUTTER, width: 500, height: 680 };
+    return { x: VIEWPORT_GUTTER, y: VIEWPORT_GUTTER, width: 400, height: 560 };
   }
-  const width = Math.min(500, window.innerWidth - VIEWPORT_GUTTER * 2);
-  const height = Math.min(680, window.innerHeight - VIEWPORT_GUTTER * 2);
+  const width = Math.min(400, window.innerWidth - VIEWPORT_GUTTER * 2);
+  const height = Math.min(560, window.innerHeight - VIEWPORT_GUTTER * 2);
   return {
     width,
     height,
@@ -199,8 +199,8 @@ export function FloatingMarketplaceClerk({
             disableDragging={!open}
             dragHandleClassName="floating-clerk-drag-handle"
             enableResizing={open && !collapsed}
-            minWidth={400}
-            minHeight={480}
+            minWidth={340}
+            minHeight={440}
             maxWidth="calc(100vw - 2rem)"
             maxHeight="calc(100dvh - 2rem)"
             position={{ x: layout.x, y: layout.y }}
