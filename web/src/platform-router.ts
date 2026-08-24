@@ -175,6 +175,7 @@ export type PlatformProviderFailureKind =
   | "quota"
   | "malformed_response"
   | "no_final_text"
+  | "tool_failure"
   | "aborted"
   | "unreachable";
 
@@ -834,7 +835,11 @@ export async function reviseShoppingMemoryWithAi(input: {
       },
     };
   } catch (error) {
-    if (error instanceof PlatformRouterQuotaExceededError) throw error;
+    if (
+      error instanceof PlatformRouterQuotaExceededError ||
+      error instanceof PlatformAssistantUnavailableError
+    )
+      throw error;
     throw new PlatformAssistantUnavailableError(
       "购物记忆暂时无法更新，请稍后重试。",
       { kind: "unreachable", phase: "connect" },
@@ -877,6 +882,10 @@ export async function answerPlatformShoppingQuestion(input: {
   const startedAt = Date.now();
   const deadline = createProviderDeadline(input.signal, router.assistantTimeoutMs);
   const attempt: ProviderAttemptState = { phase: "connect" };
+  const awaitToolOperation = <T>(operation: () => Promise<T>) => {
+    attempt.phase = "tool";
+    return awaitWithSignal(operation, deadline.signal);
+  };
   let admitted = false;
   let emptyCatalogOutcome:
     | "empty_catalog"
@@ -944,7 +953,7 @@ export async function answerPlatformShoppingQuestion(input: {
         ),
     );
     let recommendations: RecommendedBackendListing[] = initialSearchCompleted
-      ? await awaitWithSignal(
+      ? await awaitToolOperation(
           () =>
             searchPublicStoreOffers({
               stores: input.stores,
@@ -952,7 +961,6 @@ export async function answerPlatformShoppingQuestion(input: {
               intent: inferredIntent,
               limit: 6,
             }),
-          deadline.signal,
         )
       : [];
     if (
@@ -1003,7 +1011,7 @@ export async function answerPlatformShoppingQuestion(input: {
       });
     if (explicitStoreHandoff) {
       if (!recommendations.length) {
-        recommendations = await awaitWithSignal(
+        recommendations = await awaitToolOperation(
           () =>
             searchPublicStoreOffers({
               stores: input.stores,
@@ -1013,7 +1021,6 @@ export async function answerPlatformShoppingQuestion(input: {
               intent: inferredIntent,
               limit: 6,
             }),
-          deadline.signal,
         );
       }
       const products = rememberOffers(recommendations);
@@ -1335,9 +1342,8 @@ export async function answerPlatformShoppingQuestion(input: {
                         facts: z.array(shoppingMemoryFactSchema).max(4),
                       }),
                       execute: async ({ facts }) => {
-                        activeMemory = await awaitWithSignal(
-                          () => input.updateMemory!(facts),
-                          deadline.signal,
+                        activeMemory = await awaitToolOperation(() =>
+                          input.updateMemory!(facts),
                         );
                         return {
                           updated: true,
@@ -1413,7 +1419,7 @@ export async function answerPlatformShoppingQuestion(input: {
             offset,
             limit,
           }) => {
-            const page = await awaitWithSignal(
+            const page = await awaitToolOperation(
               () =>
                 searchPublicStoreOfferPage({
                   stores: input.stores,
@@ -1427,7 +1433,6 @@ export async function answerPlatformShoppingQuestion(input: {
                   offset,
                   limit,
                 }),
-              deadline.signal,
             );
             recommendations = page.items;
             if (page.total === 0) {
@@ -2059,6 +2064,8 @@ function createObservedProviderFetch(
   const fetcher = globalThis.fetch.bind(globalThis);
   return (async (resource: RequestInfo | URL, init?: RequestInit) => {
     attempt.phase = "first_byte";
+    attempt.firstByteAt = undefined;
+    attempt.responseStatus = undefined;
     const signals = [deadlineSignal, init?.signal].filter(
       (signal): signal is AbortSignal => Boolean(signal),
     );
@@ -2083,40 +2090,63 @@ function classifyPlatformProviderFailure(
   if (parentSignal?.aborted) {
     return providerFailure("aborted", "total", responseStatus);
   }
-  if (responseStatus === 429) {
-    return providerFailure("quota", "response", responseStatus);
-  }
-  if (responseStatus !== null && responseStatus >= 400) {
-    return providerFailure("upstream_http", "response", responseStatus);
+  if (attempt.phase === "tool") {
+    return deadline.timedOut()
+      ? providerFailure("total_timeout", "total", responseStatus)
+      : providerFailure("tool_failure", "tool", responseStatus);
   }
   if (providerErrorHasCode(error, CONNECT_TIMEOUT_CODES)) {
     return providerFailure("connect_timeout", "connect", responseStatus);
   }
-  if (deadline.timedOut() || providerErrorIsTimeout(error)) {
-    return providerFailure(
-      attempt.phase === "first_byte" ? "first_byte_timeout" : "total_timeout",
-      attempt.phase === "first_byte" ? "first_byte" : "total",
-      responseStatus,
-    );
+  if (providerErrorHasCode(error, HEADER_TIMEOUT_CODES)) {
+    return providerFailure("first_byte_timeout", "first_byte", responseStatus);
+  }
+  if (deadline.timedOut()) {
+    return providerTimeoutFailure(attempt, responseStatus);
+  }
+  if (responseStatus === 429) {
+    return providerFailure("quota", "response", responseStatus);
+  }
+  if (isUpstreamErrorStatus(responseStatus)) {
+    return providerFailure("upstream_http", "response", responseStatus);
+  }
+  if (providerErrorIsTimeout(error)) {
+    return providerTimeoutFailure(attempt, responseStatus);
   }
   if (providerErrorIsAbort(error)) {
     return providerFailure("aborted", attempt.phase, responseStatus);
   }
-  if (
-    responseStatus !== null &&
-    responseStatus >= 200 &&
-    responseStatus < 300
-  ) {
+  if (isUpstreamSuccessStatus(responseStatus)) {
     return providerFailure("malformed_response", "response", responseStatus);
   }
   return providerFailure("unreachable", "connect", responseStatus);
 }
 
+function providerTimeoutFailure(
+  attempt: ProviderAttemptState,
+  responseStatus: number | null,
+): PlatformAssistantUnavailableError {
+  const beforeFirstByte = attempt.phase === "first_byte";
+  return providerFailure(
+    beforeFirstByte ? "first_byte_timeout" : "total_timeout",
+    beforeFirstByte ? "first_byte" : "total",
+    responseStatus,
+  );
+}
+
+function isUpstreamErrorStatus(status: number | null): status is number {
+  return status !== null && status >= 400;
+}
+
+function isUpstreamSuccessStatus(status: number | null): status is number {
+  return status !== null && status >= 200 && status < 300;
+}
+
 const CONNECT_TIMEOUT_CODES = new Set([
   "ETIMEDOUT",
   "UND_ERR_CONNECT_TIMEOUT",
-  "UND_ERR_HEADERS_TIMEOUT",
 ]);
+const HEADER_TIMEOUT_CODES = new Set(["UND_ERR_HEADERS_TIMEOUT"]);
 
 function providerFailure(
   kind: PlatformProviderFailureKind,
@@ -2132,16 +2162,27 @@ function providerFailure(
     quota: "商城 AI 导购上游额度暂时不可用，请稍后重试。",
     malformed_response: "AI 模型返回了无法解析的响应，请重试。",
     no_final_text: "AI 模型未返回有效回答，请重试。",
+    tool_failure: "商城 AI 导购的内部工具暂时不可用，请稍后重试。",
     aborted: "请求已取消。",
     unreachable: "商城 AI 导购暂时无法连接模型服务，请稍后重试。",
   };
-  return new PlatformAssistantUnavailableError(messages[kind], {
+  const nonRetryableUpstream =
+    kind === "upstream_http" &&
+    responseStatus !== null &&
+    NON_RETRYABLE_UPSTREAM_STATUSES.has(responseStatus);
+  const message = nonRetryableUpstream
+    ? "商城 AI 导购上游拒绝了请求，请联系管理员检查服务配置。"
+    : messages[kind];
+  return new PlatformAssistantUnavailableError(message, {
     kind,
     phase,
     responseStatus,
-    retryable: kind !== "aborted" && kind !== "unconfigured",
+    retryable:
+      !nonRetryableUpstream && kind !== "aborted" && kind !== "unconfigured",
   });
 }
+
+const NON_RETRYABLE_UPSTREAM_STATUSES = new Set([400, 401, 403, 404, 422]);
 
 function providerErrorHttpStatus(error: unknown): number | null {
   for (const candidate of providerErrorChain(error)) {
