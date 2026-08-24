@@ -59,6 +59,7 @@ export function PlatformMenu({ locale }: PlatformMenuProps) {
         type="button"
         aria-expanded={open}
         aria-controls={menuId}
+        style={{ minHeight: 44, minWidth: 44 }}
         onClick={() => setOpen((value) => !value)}
       >
         {label}

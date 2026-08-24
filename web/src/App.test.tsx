@@ -123,7 +123,9 @@ describe("MatchPlane workspaces", () => {
   it("keeps the root entry focused on one public buyer chat and a visible sign-in entry", async () => {
     render(<App />);
 
-    expect(screen.queryByRole("button", { name: "问选货员" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "问选货员" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "想找什么？" }),
     ).toBeInTheDocument();
@@ -829,9 +831,7 @@ describe("MatchPlane workspaces", () => {
       expect(document.documentElement.dataset.palette).toBe("moss"),
     );
     expect(window.localStorage.getItem("matchplane.palette")).toBe("moss");
-    expect(
-      screen.getByRole("radio", { name: "苔绿，当前配色" }),
-    ).toBeChecked();
+    expect(screen.getByRole("radio", { name: "苔绿，当前配色" })).toBeChecked();
   });
 
   it("keeps a persisted dark preference during the initial hydration", async () => {

@@ -2694,7 +2694,8 @@ body {
   min-width: 0;
   height: 2.2rem;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--palette-preview-text) 22%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--palette-preview-text) 22%, transparent);
   border-radius: 0.32rem;
   background: var(--palette-preview-surface);
 }
@@ -3057,9 +3058,17 @@ body {
   min-width: 0;
   margin: 0 0 0.65rem;
   padding: 0.7rem 0.75rem;
-  border-color: color-mix(in srgb, var(--retail-danger) 42%, var(--retail-line));
+  border-color: color-mix(
+    in srgb,
+    var(--retail-danger) 42%,
+    var(--retail-line)
+  );
   border-radius: var(--radius-medium);
-  background: color-mix(in srgb, var(--retail-danger) 8%, var(--retail-surface));
+  background: color-mix(
+    in srgb,
+    var(--retail-danger) 8%,
+    var(--retail-surface)
+  );
   color: var(--retail-ink-soft);
 }
 

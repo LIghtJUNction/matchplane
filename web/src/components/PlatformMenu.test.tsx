@@ -26,6 +26,7 @@ describe("PlatformMenu", () => {
 
     const trigger = await screen.findByRole("button", { name: "店铺" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveStyle({ minHeight: "44px", minWidth: "44px" });
     await user.click(trigger);
 
     expect(screen.getByRole("navigation", { name: "店铺" })).toBeInTheDocument();

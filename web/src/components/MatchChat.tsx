@@ -987,6 +987,8 @@ export function MatchChat({
       if ((!text && !conversationAttachments.length) || sending) return;
 
       setSending(true);
+      const failedUserMessageId = chatError?.failedUserMessageId;
+      setChatError(null);
       setMessage("");
       const submittedAttachments = conversationAttachments;
       setConversationAttachments([]);
@@ -994,36 +996,42 @@ export function MatchChat({
       const conversationId =
         conversationIdRef.current ??
         (conversationIdRef.current = crypto.randomUUID());
+      const retryBaseMessages = failedUserMessageId
+        ? messages.filter(
+            (messageItem) => messageItem.id !== failedUserMessageId,
+          )
+        : messages;
       const narrative = buildConversationNarrative(
-        messages
+        retryBaseMessages
           .filter((item) => item.role === "user")
           .map((item) => item.text),
         text,
       );
-      setMessages((current) => [
-        ...current,
-        {
-          id: `${requestId}-user`,
-          role: "user",
-          text,
-          ...(submittedAttachments.length
-            ? { attachments: submittedAttachments }
-            : {}),
-        },
-      ]);
+      const userMessage: ChatMessage = {
+        id: `${requestId}-user`,
+        role: "user",
+        text,
+        ...(submittedAttachments.length
+          ? { attachments: submittedAttachments }
+          : {}),
+      };
+      setMessages([...retryBaseMessages, userMessage]);
 
       try {
         const live = isLiveMarketplaceEnabled();
         if (!live) {
-          const message = isSeller
+          const detail = isSeller
             ? runtime.unavailableSupply
             : runtime.unavailableDemand;
-          setMessages((current) => [
-            ...current,
-            { id: `${requestId}-assistant`, role: "assistant", text: message },
-          ]);
+          setChatError({
+            detail,
+            failedUserMessageId: userMessage.id,
+            prompt: text,
+          });
           setMessage(text);
-          onNotice(message);
+          setConversationAttachments(submittedAttachments);
+          focusInputAfterErrorRef.current = true;
+          onNotice(detail);
           return;
         }
         const route = live
@@ -1095,6 +1103,8 @@ export function MatchChat({
         }
         const routedRecommendations: RecommendedBackendListing[] = [];
         let retrievalDegraded = false;
+        let successfulTargetCount = 0;
+        let firstTargetError: unknown = null;
         if (live) {
           // The root and every child use the same generic marketplace transport. A route plan is
           // an allow-listed set of target nodes chosen by the platform Agent; send the request
@@ -1485,10 +1495,12 @@ export function MatchChat({
                   );
                 }
               }
-            } catch {
+              successfulTargetCount += 1;
+            } catch (error) {
               // One child being offline must not erase matches already returned by other active
               // nodes. Keep the partial result and make the degraded state visible below.
               retrievalDegraded = true;
+              firstTargetError ??= error;
             }
           };
           await runWithConcurrency(
@@ -1496,6 +1508,8 @@ export function MatchChat({
             CHAT_TARGET_CONCURRENCY,
             processTarget,
           );
+          if (isSeller && successfulTargetCount === 0 && firstTargetError)
+            throw firstTargetError;
           // A successful request with no candidates is still a new result. Clear
           // the previous cards instead of leaving stale offers on screen and
           // making them look like matches for the latest message.
@@ -1547,21 +1561,25 @@ export function MatchChat({
             0,
           );
       } catch (error) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: `${requestId}-assistant`,
-            role: "assistant",
-            text: error instanceof Error ? error.message : runtime.sendFailed,
-          },
-        ]);
+        const detail =
+          error instanceof Error ? error.message : runtime.sendFailed;
+        setChatError({
+          detail,
+          failedUserMessageId: userMessage.id,
+          prompt: text,
+          ...(error instanceof MarketplaceApiError && error.retryAfterMs
+            ? { retryAfterMs: error.retryAfterMs }
+            : {}),
+        });
         setMessage(text);
+        setConversationAttachments(submittedAttachments);
         focusInputAfterErrorRef.current = true;
       } finally {
         setSending(false);
       }
     },
     [
+      chatError,
       conversationAttachments,
       copy.buyerSuccess,
       copy.sellerSuccess,

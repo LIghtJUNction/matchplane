@@ -31,16 +31,29 @@ const askMallShoppingAssistant = vi.hoisted(() =>
     }),
   ),
 );
+const createMarketplaceIntent = vi.hoisted(() => vi.fn());
+const routePlatformIntent = vi.hoisted(() => vi.fn());
+const uploadMarketplaceAttachment = vi.hoisted(() => vi.fn());
+const upsertMarketplaceProfile = vi.hoisted(() => vi.fn());
+const getMarketplaceSession = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/auth-client", () => ({
   authClient: { getSession },
   authFetchOptions: () => ({}),
 }));
 
+vi.mock("../lib/marketplace-session", () => ({
+  getMarketplaceSession,
+}));
+
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
   isLiveMarketplaceEnabled: () => true,
   askMallShoppingAssistant,
+  createMarketplaceIntent,
+  routePlatformIntent,
+  uploadMarketplaceAttachment,
+  upsertMarketplaceProfile,
 }));
 
 import { MarketplaceApiError } from "../api";
@@ -59,6 +72,11 @@ afterEach(() => {
   routePromise.current = null;
   resolveRoute.current = null;
   askMallShoppingAssistant.mockReset();
+  createMarketplaceIntent.mockReset();
+  routePlatformIntent.mockReset();
+  uploadMarketplaceAttachment.mockReset();
+  upsertMarketplaceProfile.mockReset();
+  getMarketplaceSession.mockReset();
 });
 
 beforeEach(() => {
@@ -72,6 +90,43 @@ beforeEach(() => {
     recommendations: [],
     uiActions: [],
   });
+  getMarketplaceSession.mockResolvedValue({
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    partyId: "22222222-2222-4222-8222-222222222222",
+    role: "seller",
+    accessToken: "seller-session",
+    accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+  routePlatformIntent.mockResolvedValue({
+    requestId: "33333333-3333-4333-8333-333333333333",
+    platformPath: "/tools",
+    status: "accepted",
+    routePlan: [],
+    routing: {
+      selectedSlugs: [],
+      source: "policy_fallback",
+      model: null,
+      rationale: "No child route required",
+      confidence: null,
+      degraded: false,
+      costBearer: "platform",
+      budget: { maxInputCharacters: 10_000, maxOutputTokens: 512 },
+      usage: null,
+    },
+  });
+  uploadMarketplaceAttachment.mockResolvedValue({
+    attachment_ref: "media://tools/offer.pdf",
+    kind: "document",
+    file_name: "offer.pdf",
+    media_type: "application/pdf",
+    size_bytes: 7,
+    sha256: "a".repeat(64),
+  });
+  createMarketplaceIntent.mockResolvedValue({
+    intent_id: "44444444-4444-4444-8444-444444444444",
+    version: 1,
+  });
+  upsertMarketplaceProfile.mockResolvedValue({});
 });
 
 describe("MatchChat sending state", () => {
@@ -200,6 +255,88 @@ describe("MatchChat sending state", () => {
     expect(askMallShoppingAssistant.mock.calls[1]?.[0]).toEqual([
       { role: "user", content: "帮我找啊" },
     ]);
+  });
+
+  it("keeps a seller 504 retryable with its prompt and attachment intact", async () => {
+    const user = userEvent.setup();
+    const onSellerDraft = vi.fn();
+    const sellerSubplatform = {
+      slug: "tools",
+      path: "/tools",
+      label: "工具平台",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      domainId: "55555555-5555-4555-8555-555555555555",
+      pricing: { mode: "none" },
+      marketplaceContract: "generic-v1",
+      agentMcpTools: ["media.upload"],
+      ui: {},
+    } as SubplatformConfig;
+    createMarketplaceIntent.mockRejectedValueOnce(
+      new MarketplaceApiError(504, "下游平台响应超时，请稍后重试。", {
+        code: "gateway_timeout",
+        retryable: true,
+        retryAfterMs: 5_000,
+      }),
+    );
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        onSellerDraft={onSellerDraft}
+        role="seller"
+        subplatform={sellerSubplatform}
+      />,
+    );
+    const input = screen.getByRole("textbox");
+    const attachmentInput = screen.getByLabelText("添加附件");
+
+    await user.upload(
+      attachmentInput,
+      new File(["details"], "offer.pdf", { type: "application/pdf" }),
+    );
+    await screen.findByText("offer.pdf");
+    await user.type(input, "我可以提供耐用的专业工具");
+    await user.click(screen.getByRole("button", { name: "发送供给" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("下游平台响应超时，请稍后重试。");
+    expect(alert).toHaveTextContent("建议约 5 秒后重试。");
+    expect(input).toHaveValue("我可以提供耐用的专业工具");
+    expect(
+      document.querySelector(".match-chat-compose-attachments"),
+    ).toHaveTextContent("offer.pdf");
+    expect(
+      document.querySelectorAll(".match-chat-message.is-user"),
+    ).toHaveLength(1);
+    expect(
+      document.querySelector(".match-chat-message.is-assistant"),
+    ).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "重试回答" }));
+
+    expect(
+      await screen.findByText(
+        "供给描述已整理；请在下方提交资料，提交后才会写入系统",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(input).toHaveValue("");
+    expect(
+      document.querySelector(".match-chat-compose-attachments"),
+    ).toBeNull();
+    expect(
+      document.querySelectorAll(".match-chat-message.is-user"),
+    ).toHaveLength(1);
+    expect(createMarketplaceIntent).toHaveBeenCalledTimes(2);
+    expect(onSellerDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            attachment_ref: "media://tools/offer.pdf",
+            file_name: "offer.pdf",
+          }),
+        ],
+      }),
+    );
   });
 
   it("restores visible conversation history for the same signed-in owner", async () => {
@@ -346,6 +483,43 @@ describe("MatchChat sending state", () => {
 
     expect(screen.getByText("上周的通勤电脑需求")).toBeInTheDocument();
     expect(screen.getByText("这里是上周保存的建议")).toBeInTheDocument();
+  });
+
+  it("does not expose a history action when that panel is unavailable", () => {
+    const sellerView = render(
+      <MatchChat
+        onNotice={vi.fn()}
+        role="seller"
+        subplatform={subplatform}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "历史" }),
+    ).not.toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(new Event("matchplane:open-shopping-history"));
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "历史对话" }),
+    ).not.toBeInTheDocument();
+
+    sellerView.unmount();
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        subplatform={{ ...subplatform, slug: "tools", path: "/tools" }}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "历史" }),
+    ).not.toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(new Event("matchplane:open-shopping-history"));
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "历史对话" }),
+    ).not.toBeInTheDocument();
   });
 
   it("sends an open-ended question straight to the configured Agent", async () => {
