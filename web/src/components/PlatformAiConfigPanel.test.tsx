@@ -63,6 +63,20 @@ beforeEach(() => {
 });
 
 describe("PlatformAiConfigPanel staged cutover", () => {
+  it("keeps read-only controls accessible and performs no mutations", async () => {
+    const user = userEvent.setup();
+    render(<PlatformAiConfigPanel rootRole="rootViewer" onNotice={vi.fn()} />);
+    const save = await screen.findByRole("button", { name: "保存待测配置" });
+    const activate = screen.getByRole("button", { name: "启用已测试配置" });
+    expect(save).toBeDisabled();
+    expect(activate).toBeDisabled();
+    await user.click(save);
+    await user.click(activate);
+    expect(api.saveManagedPlatformRouterConfig).not.toHaveBeenCalled();
+    expect(api.activateManagedPlatformRouterConfig).not.toHaveBeenCalled();
+    expect(api.testPlatformAi).not.toHaveBeenCalled();
+  });
+
   it("reports a slow candidate honestly and keeps the active config available", async () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();
@@ -151,9 +165,7 @@ describe("PlatformAiConfigPanel staged cutover", () => {
     expect(api.activateManagedPlatformRouterConfig).not.toHaveBeenCalled();
 
     failProbe();
-    await waitFor(() =>
-      expect(onNotice).toHaveBeenCalledWith("模拟测试失败"),
-    );
+    await waitFor(() => expect(onNotice).toHaveBeenCalledWith("模拟测试失败"));
     expect(endpoint).toBeEnabled();
     expect(saveButton).toBeEnabled();
     expect(testButton).toBeEnabled();

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { auth } from "../../../../../src/lib/auth";
-import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
+import { hasTrustedCookieOrigin } from "../../../../../src/lib/request-origin";
 import {
   appendPlatformRouterAudit,
   getManagedPlatformRouterDraftConfig,
@@ -77,7 +77,7 @@ export async function POST(request: Request): Promise<Response> {
 async function authorize(
   request: Request,
 ): Promise<AuthorizedAdmin | Response> {
-  if (!hasTrustedBrowserOrigin(request))
+  if (!hasTrustedCookieOrigin(request))
     return response({ error: "请求来源未被平台信任" }, 403);
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session)

@@ -486,17 +486,15 @@ export function PlatformAiConfigPanel({
             </small>
           ) : null}
           <div className="root-email-action-buttons">
-            {canEdit ? (
-              <button
-                className="root-email-save"
-                type="button"
-                disabled={interactionLocked}
-                onClick={() => void save()}
-              >
-                <Save size={16} aria-hidden="true" />
-                {saving ? "保存中…" : "保存待测配置"}
-              </button>
-            ) : null}
+            <button
+              className="root-email-save"
+              type="button"
+              disabled={!canEdit || interactionLocked}
+              onClick={() => void save()}
+            >
+              <Save size={16} aria-hidden="true" />
+              {saving ? "保存中…" : "保存待测配置"}
+            </button>
             <button
               className="root-email-test"
               type="button"
@@ -511,17 +509,15 @@ export function PlatformAiConfigPanel({
               <Send size={16} aria-hidden="true" />
               {testing ? "测试中…" : "测试待测配置"}
             </button>
-            {canEdit ? (
-              <button
-                className="root-email-save"
-                type="button"
-                disabled={interactionLocked || !draft?.testedReady}
-                onClick={() => void activate()}
-              >
-                <Power size={16} aria-hidden="true" />
-                {activating ? "启用中…" : "启用已测试配置"}
-              </button>
-            ) : null}
+            <button
+              className="root-email-save"
+              type="button"
+              disabled={!canEdit || interactionLocked || !draft?.testedReady}
+              onClick={() => void activate()}
+            >
+              <Power size={16} aria-hidden="true" />
+              {activating ? "启用中…" : "启用已测试配置"}
+            </button>
           </div>
         </div>
       </div>

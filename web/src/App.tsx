@@ -110,7 +110,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     currentManagedStore,
     canManageStoreConsole,
     openStoreConsoleFor,
-    publishProduct,
   } = useOwnedStores({
     authUser,
     authResolved,
@@ -486,7 +485,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     onDescribeNeed={openMarketplaceDemand}
                     onOpenListing={openMarketplaceListing}
                     onLikeListing={likeListing}
-                    onPublishProduct={publishProduct}
                   />
                 ) : subplatform.pluginArtifact &&
                   (role === "platform" || role === "buyer") ? (

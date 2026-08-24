@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   getManagedPlatformRouterDraftConfig: vi.fn(),
   getManagedPlatformRouterState: vi.fn(),
   getSession: vi.fn(),
-  hasTrustedBrowserOrigin: vi.fn(),
+  hasTrustedCookieOrigin: vi.fn(),
   stageManagedPlatformRouterConfig: vi.fn(),
 }));
 
@@ -14,7 +14,7 @@ vi.mock("./lib/auth", () => ({
   auth: { api: { getSession: mocks.getSession } },
 }));
 vi.mock("./lib/request-origin", () => ({
-  hasTrustedBrowserOrigin: mocks.hasTrustedBrowserOrigin,
+  hasTrustedCookieOrigin: mocks.hasTrustedCookieOrigin,
 }));
 vi.mock("./lib/platform-router-config", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./lib/platform-router-config")>()),
@@ -74,7 +74,7 @@ const state = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.hasTrustedBrowserOrigin.mockReturnValue(true);
+  mocks.hasTrustedCookieOrigin.mockReturnValue(true);
   mocks.getSession.mockResolvedValue({
     user: {
       id: "11111111-1111-4111-8111-111111111111",
@@ -196,7 +196,7 @@ describe("platform AI managed config route", () => {
   });
 
   it("rejects writes from untrusted origins before touching config", async () => {
-    mocks.hasTrustedBrowserOrigin.mockReturnValue(false);
+    mocks.hasTrustedCookieOrigin.mockReturnValue(false);
     const response = await PATCH(
       new Request("http://localhost/api/platform/ai/config", {
         method: "PATCH",

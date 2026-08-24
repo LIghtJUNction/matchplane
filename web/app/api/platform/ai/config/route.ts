@@ -7,7 +7,7 @@ import {
   readJsonBody,
   RequestBodyTooLargeError,
 } from "../../../../../src/lib/body-limit";
-import { hasTrustedBrowserOrigin } from "../../../../../src/lib/request-origin";
+import { hasTrustedCookieOrigin } from "../../../../../src/lib/request-origin";
 import {
   activateManagedPlatformRouterDraft,
   appendPlatformRouterAudit,
@@ -108,7 +108,7 @@ async function requireAdmin(
   request: Request,
   write: boolean,
 ): Promise<AuthorizedAdmin | Response> {
-  if (!hasTrustedBrowserOrigin(request))
+  if (!hasTrustedCookieOrigin(request))
     return error("请求来源未被平台信任", 403);
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return error("需要登录", 401);
