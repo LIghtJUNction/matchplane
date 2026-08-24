@@ -144,6 +144,7 @@ export interface PlatformAssistantReply {
   recommendations: RecommendedBackendListing[];
   toolCalls: string[];
   uiActions: PlatformAssistantUiAction[];
+  outcome?: "empty_catalog" | "no_matching_products";
 }
 
 export interface ShoppingMemoryAiRevision {
@@ -155,16 +156,70 @@ export interface ShoppingMemoryAiRevision {
 
 /** Raised when the platform's own model-call budget has no remaining admission. */
 export class PlatformRouterQuotaExceededError extends Error {
+  readonly kind = "quota" as const;
+  readonly phase = "admission" as const;
+  readonly retryable = true;
+
   constructor() {
     super("商城 AI 导购额度暂时用尽，请稍后再试。");
     this.name = "PlatformRouterQuotaExceededError";
   }
 }
 
+export type PlatformProviderFailureKind =
+  | "unconfigured"
+  | "connect_timeout"
+  | "first_byte_timeout"
+  | "total_timeout"
+  | "upstream_http"
+  | "quota"
+  | "malformed_response"
+  | "no_final_text"
+  | "aborted"
+  | "unreachable";
+
+export type PlatformProviderPhase =
+  | "configuration"
+  | "admission"
+  | "connect"
+  | "first_byte"
+  | "response"
+  | "tool"
+  | "total";
+
+export interface PlatformProviderFailureMetadata {
+  kind: PlatformProviderFailureKind;
+  phase: PlatformProviderPhase;
+  responseStatus?: number | null;
+  finishReason?: string | null;
+  stepCount?: number;
+  toolNames?: string[];
+  retryable?: boolean;
+}
+
+/** A provider failure carrying only bounded, non-secret metadata. */
 export class PlatformAssistantUnavailableError extends Error {
-  constructor(message: string) {
+  readonly kind: PlatformProviderFailureKind;
+  readonly phase: PlatformProviderPhase;
+  readonly responseStatus: number | null;
+  readonly finishReason: string | null;
+  readonly stepCount: number;
+  readonly toolNames: string[];
+  readonly retryable: boolean;
+
+  constructor(
+    message: string,
+    metadata: Partial<PlatformProviderFailureMetadata> = {},
+  ) {
     super(message);
     this.name = "PlatformAssistantUnavailableError";
+    this.kind = metadata.kind ?? "unreachable";
+    this.phase = metadata.phase ?? "connect";
+    this.responseStatus = boundedHttpStatus(metadata.responseStatus);
+    this.finishReason = boundedLogToken(metadata.finishReason, 48);
+    this.stepCount = boundedCount(metadata.stepCount, 16);
+    this.toolNames = boundedToolNames(metadata.toolNames ?? []);
+    this.retryable = metadata.retryable ?? true;
   }
 }
 
@@ -173,6 +228,7 @@ const MAX_RATIONALE_LENGTH = 1_000;
 const DEFAULT_TIMEOUT_MS = 4_000;
 const MAX_PROVIDER_TIMEOUT_MS = 20_000;
 const DEFAULT_TOTAL_TIMEOUT_MS = 20_000;
+const MAX_ASSISTANT_TOOL_NAMES = 8;
 const MAX_TOTAL_TIMEOUT_MS = 60_000;
 const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
 const MAX_ROUTER_RESPONSE_BYTES = 256 * 1024;
@@ -779,12 +835,9 @@ export async function reviseShoppingMemoryWithAi(input: {
     };
   } catch (error) {
     if (error instanceof PlatformRouterQuotaExceededError) throw error;
-    const reason =
-      error instanceof Error
-        ? error.message.slice(0, 160)
-        : "模型服务暂时不可用";
     throw new PlatformAssistantUnavailableError(
-      `购物记忆暂时无法更新：${reason}`,
+      "购物记忆暂时无法更新，请稍后重试。",
+      { kind: "unreachable", phase: "connect" },
     );
   }
 }
@@ -804,6 +857,8 @@ export async function answerPlatformShoppingQuestion(input: {
     facts: ShoppingMemoryFact[],
   ) => Promise<ShoppingMemorySnapshot>;
   admitCall?: () => Promise<void>;
+  requestId?: string;
+  signal?: AbortSignal;
 }): Promise<PlatformAssistantReply> {
   const router = configuredPlatformRouter();
   if (!router)
@@ -816,14 +871,31 @@ export async function answerPlatformShoppingQuestion(input: {
   if (router.protocol !== "openai-compatible") {
     throw new PlatformAssistantUnavailableError(
       "当前导购 Agent 需要选择 OpenAI Compatible 协议。",
+      { kind: "unconfigured", phase: "configuration", retryable: false },
     );
   }
+  const startedAt = Date.now();
+  const deadline = createProviderDeadline(input.signal, router.assistantTimeoutMs);
+  const attempt: ProviderAttemptState = { phase: "connect" };
+  let admitted = false;
+  let emptyCatalogOutcome:
+    | "empty_catalog"
+    | "no_matching_products"
+    | null = null;
+  const admitProviderCall = async () => {
+    if (admitted) return;
+    await awaitWithSignal(
+      () => Promise.resolve(input.admitCall?.()),
+      deadline.signal,
+    );
+    admitted = true;
+  };
   try {
-    await input.admitCall?.();
     const provider = createOpenAICompatible({
       name: "matchplane",
       baseURL: openAiCompatibleBaseUrl(router.endpoint),
       apiKey: router.apiKey,
+      fetch: createObservedProviderFetch(attempt, deadline.signal),
     });
     const visibleStores = input.stores.map((store) => ({
       id: store.id,
@@ -862,17 +934,48 @@ export async function answerPlatformShoppingQuestion(input: {
         inferredIntent.requirements.length ||
         isBroadShoppingQuery,
     );
-    let recommendations: RecommendedBackendListing[] = initialSearchCompleted
-      ? await searchPublicStoreOffers({
-          stores: input.stores,
-          narrative: question,
-          intent: inferredIntent,
-          limit: 6,
-        })
-      : [];
     const explicitStoreHandoff = Boolean(
       input.storeContext && explicitlyRequestsStoreHandoff(question),
     );
+    const isMemoryMaintenanceRequest = Boolean(
+      input.memory?.enabled &&
+        /记住|忘记|长期|以后|保存|更新.{0,8}(?:预算|用途|偏好|排除)|(?:预算|用途|偏好|排除).{0,8}(?:改成|改为|删除)|remember|forget/i.test(
+          question,
+        ),
+    );
+    let recommendations: RecommendedBackendListing[] = initialSearchCompleted
+      ? await awaitWithSignal(
+          () =>
+            searchPublicStoreOffers({
+              stores: input.stores,
+              narrative: question,
+              intent: inferredIntent,
+              limit: 6,
+            }),
+          deadline.signal,
+        )
+      : [];
+    if (
+      initialSearchCompleted &&
+      recommendations.length === 0 &&
+      !explicitStoreHandoff &&
+      !isMemoryMaintenanceRequest
+    ) {
+      const outcome = input.stores.length
+        ? "no_matching_products"
+        : "empty_catalog";
+      writeProviderOutcomeLog({
+        requestId: input.requestId,
+        endpoint: router.endpoint,
+        model: router.model,
+        elapsedMs: Date.now() - startedAt,
+        phase: "tool",
+        status: outcome,
+        stepCount: 0,
+        toolNames: ["search_public_products"],
+      });
+      return emptyCatalogAssistantReply(router.model, outcome);
+    }
     const rememberOffers = (offers: RecommendedBackendListing[]) =>
       offers.map((offer) => {
         const item = {
@@ -900,14 +1003,18 @@ export async function answerPlatformShoppingQuestion(input: {
       });
     if (explicitStoreHandoff) {
       if (!recommendations.length) {
-        recommendations = await searchPublicStoreOffers({
-          stores: input.stores,
-          narrative: conversation.olderUserContext
-            ? `${conversation.olderUserContext}\n${question}`
-            : question,
-          intent: inferredIntent,
-          limit: 6,
-        });
+        recommendations = await awaitWithSignal(
+          () =>
+            searchPublicStoreOffers({
+              stores: input.stores,
+              narrative: conversation.olderUserContext
+                ? `${conversation.olderUserContext}\n${question}`
+                : question,
+              intent: inferredIntent,
+              limit: 6,
+            }),
+          deadline.signal,
+        );
       }
       const products = rememberOffers(recommendations);
       const productIds = products.slice(0, 6).map((product) => product.id);
@@ -1005,6 +1112,7 @@ export async function answerPlatformShoppingQuestion(input: {
       },
     });
     if (forceChoiceTool) {
+      await admitProviderCall();
       const choiceResult = await generateText({
         model: provider.chatModel(router.model),
         system:
@@ -1019,18 +1127,35 @@ export async function answerPlatformShoppingQuestion(input: {
         stopWhen: stepCountIs(1),
         maxOutputTokens: router.assistantMaxOutputTokens,
         temperature: Math.min(router.assistantTemperature, 0.2),
-        timeout: router.assistantTimeoutMs,
+        timeout: remainingProviderBudgetMs(deadline),
+        abortSignal: deadline.signal,
         maxRetries: 0,
       });
       const modelChoice = choiceActions.at(-1);
       if (!modelChoice) {
-        process.stderr.write(
-          `[mall-assistant] model omitted required ask_user tool; finish=${String(choiceResult.finishReason ?? "unknown")}\n`,
-        );
         throw new PlatformAssistantUnavailableError(
           "AI 模型未返回有效的澄清选项，请重试。",
+          {
+            kind: "malformed_response",
+            phase: "response",
+            finishReason: choiceResult.finishReason,
+            stepCount: choiceResult.steps?.length,
+            toolNames: ["ask_user"],
+          },
         );
       }
+      writeProviderOutcomeLog({
+        requestId: input.requestId,
+        endpoint: router.endpoint,
+        model: router.model,
+        elapsedMs: Date.now() - startedAt,
+        phase: "response",
+        status: "ok",
+        stepCount: choiceResult.steps?.length ?? 1,
+        toolNames: ["ask_user"],
+        finishReason: choiceResult.finishReason,
+        responseStatus: attempt.responseStatus,
+      });
       return {
         text: sanitizeAssistantReply(choiceResult.text) || modelChoice.question,
         model: router.model,
@@ -1049,6 +1174,7 @@ export async function answerPlatformShoppingQuestion(input: {
       };
     }
     if (forceConfirmationTool) {
+      await admitProviderCall();
       const confirmationResult = await generateText({
         model: provider.chatModel(router.model),
         system:
@@ -1058,18 +1184,35 @@ export async function answerPlatformShoppingQuestion(input: {
         stopWhen: stepCountIs(1),
         maxOutputTokens: router.assistantMaxOutputTokens,
         temperature: Math.min(router.assistantTemperature, 0.2),
-        timeout: router.assistantTimeoutMs,
+        timeout: remainingProviderBudgetMs(deadline),
+        abortSignal: deadline.signal,
         maxRetries: 0,
       });
       const modelConfirmation = choiceActions.at(-1);
       if (!modelConfirmation || modelConfirmation.kind !== "confirmation") {
-        process.stderr.write(
-          `[mall-assistant] model omitted required confirm_action tool; finish=${String(confirmationResult.finishReason ?? "unknown")}\n`,
-        );
         throw new PlatformAssistantUnavailableError(
           "AI 模型未返回有效的确认选项，请重试。",
+          {
+            kind: "malformed_response",
+            phase: "response",
+            finishReason: confirmationResult.finishReason,
+            stepCount: confirmationResult.steps?.length,
+            toolNames: ["confirm_action"],
+          },
         );
       }
+      writeProviderOutcomeLog({
+        requestId: input.requestId,
+        endpoint: router.endpoint,
+        model: router.model,
+        elapsedMs: Date.now() - startedAt,
+        phase: "response",
+        status: "ok",
+        stepCount: confirmationResult.steps?.length ?? 1,
+        toolNames: ["confirm_action"],
+        finishReason: confirmationResult.finishReason,
+        responseStatus: attempt.responseStatus,
+      });
       return {
         text:
           sanitizeAssistantReply(confirmationResult.text) ||
@@ -1089,6 +1232,7 @@ export async function answerPlatformShoppingQuestion(input: {
         uiActions: choiceActions,
       };
     }
+    await admitProviderCall();
     const result = await generateText({
       model: provider.chatModel(router.model),
       system: [
@@ -1191,7 +1335,10 @@ export async function answerPlatformShoppingQuestion(input: {
                         facts: z.array(shoppingMemoryFactSchema).max(4),
                       }),
                       execute: async ({ facts }) => {
-                        activeMemory = await input.updateMemory!(facts);
+                        activeMemory = await awaitWithSignal(
+                          () => input.updateMemory!(facts),
+                          deadline.signal,
+                        );
                         return {
                           updated: true,
                           facts: memoryFactsForModel(activeMemory),
@@ -1206,8 +1353,11 @@ export async function answerPlatformShoppingQuestion(input: {
           description:
             "仅当用户明确询问商品、价格、店铺或购物比较时，读取当前商城中可公开浏览的店铺摘要；普通问答和闲聊不要调用。",
           inputSchema: z.object({}),
-          execute: async () =>
-            visibleStores.map(({ id: _id, ...store }) => store),
+          execute: async () => {
+            deadline.signal.throwIfAborted();
+            if (!visibleStores.length) emptyCatalogOutcome = "empty_catalog";
+            return visibleStores.map(({ id: _id, ...store }) => store);
+          },
         }),
         search_public_products: tool({
           description:
@@ -1263,19 +1413,28 @@ export async function answerPlatformShoppingQuestion(input: {
             offset,
             limit,
           }) => {
-            const page = await searchPublicStoreOfferPage({
-              stores: input.stores,
-              narrative: query,
-              intent: mergeShoppingIntent(inferredIntent, {
-                ...(budget ? { budget } : {}),
-                requirements,
-              }),
-              storePaths,
-              sort,
-              offset,
-              limit,
-            });
+            const page = await awaitWithSignal(
+              () =>
+                searchPublicStoreOfferPage({
+                  stores: input.stores,
+                  narrative: query,
+                  intent: mergeShoppingIntent(inferredIntent, {
+                    ...(budget ? { budget } : {}),
+                    requirements,
+                  }),
+                  storePaths,
+                  sort,
+                  offset,
+                  limit,
+                }),
+              deadline.signal,
+            );
             recommendations = page.items;
+            if (page.total === 0) {
+              emptyCatalogOutcome = input.stores.length
+                ? "no_matching_products"
+                : "empty_catalog";
+            }
             productPresentation = "grid";
             productTitle = undefined;
             productComparisonAction = undefined;
@@ -1466,10 +1625,14 @@ export async function answerPlatformShoppingQuestion(input: {
         // `tool_choice: required`; normal shopping steps remain on auto.
         return { toolChoice: "auto" as const };
       },
-      stopWhen: stepCountIs(router.assistantMaxSteps),
+      stopWhen: [
+        stepCountIs(router.assistantMaxSteps),
+        () => emptyCatalogOutcome !== null,
+      ],
       maxOutputTokens: router.assistantMaxOutputTokens,
       temperature: router.assistantTemperature,
-      timeout: router.assistantTimeoutMs,
+      timeout: remainingProviderBudgetMs(deadline),
+      abortSignal: deadline.signal,
       maxRetries: 0,
       ...(router.assistantReasoningEffort === "none"
         ? {}
@@ -1482,6 +1645,32 @@ export async function answerPlatformShoppingQuestion(input: {
     const modelToolCalls = (result.steps ?? [])
       .flatMap((step) => (step.toolCalls ?? []).map((call) => call?.toolName))
       .filter((name): name is string => typeof name === "string");
+    if (emptyCatalogOutcome) {
+      writeProviderOutcomeLog({
+        requestId: input.requestId,
+        endpoint: router.endpoint,
+        model: router.model,
+        elapsedMs: Date.now() - startedAt,
+        phase: "tool",
+        status: emptyCatalogOutcome,
+        stepCount: result.steps?.length ?? 0,
+        toolNames: modelToolCalls,
+        finishReason: result.finishReason,
+        responseStatus: attempt.responseStatus,
+      });
+      return emptyCatalogAssistantReply(router.model, emptyCatalogOutcome, {
+        modelCalls: Math.max(1, result.steps?.length ?? 1),
+        toolCalls: modelToolCalls,
+        usage: {
+          promptTokens: result.usage.inputTokens ?? 0,
+          completionTokens: result.usage.outputTokens ?? 0,
+          totalTokens:
+            result.usage.totalTokens ??
+            (result.usage.inputTokens ?? 0) +
+              (result.usage.outputTokens ?? 0),
+        },
+      });
+    }
     const requiredDeterministicTools = [
       ...(/比较|对比/.test(question) && recommendations.length >= 2
         ? ["compare_products", "show_product_comparison"]
@@ -1497,11 +1686,15 @@ export async function answerPlatformShoppingQuestion(input: {
       (name) => !modelToolCalls.includes(name),
     );
     if (missingRequiredTools.length) {
-      process.stderr.write(
-        `[mall-assistant] model omitted required deterministic tools; missing=${missingRequiredTools.join(",")}\n`,
-      );
       throw new PlatformAssistantUnavailableError(
         "AI 模型未按协议完成必要的检索与工具调用，请重试。",
+        {
+          kind: "malformed_response",
+          phase: "response",
+          finishReason: result.finishReason,
+          stepCount: result.steps?.length,
+          toolNames: modelToolCalls,
+        },
       );
     }
     const modelText =
@@ -1509,11 +1702,15 @@ export async function answerPlatformShoppingQuestion(input: {
       choiceActions.at(-1)?.question.trim() ||
       "";
     if (!modelText) {
-      process.stderr.write(
-        `[mall-assistant] model returned no final text; finish=${String(result.finishReason ?? "unknown")} steps=${String(result.steps?.length ?? 0)} tools=${modelToolCalls.join(",") || "none"}\n`,
-      );
       throw new PlatformAssistantUnavailableError(
         "AI 模型未返回有效回答，请重试。",
+        {
+          kind: "no_final_text",
+          phase: "response",
+          finishReason: result.finishReason,
+          stepCount: result.steps?.length,
+          toolNames: modelToolCalls,
+        },
       );
     }
     const shouldShowSearchResults =
@@ -1539,6 +1736,18 @@ export async function answerPlatformShoppingQuestion(input: {
           recommendationCatalog.has(id) ? [recommendationCatalog.get(id)!] : [],
         )
       : [];
+    writeProviderOutcomeLog({
+      requestId: input.requestId,
+      endpoint: router.endpoint,
+      model: router.model,
+      elapsedMs: Date.now() - startedAt,
+      phase: "response",
+      status: "ok",
+      stepCount: result.steps?.length ?? 1,
+      toolNames: modelToolCalls,
+      finishReason: result.finishReason,
+      responseStatus: attempt.responseStatus,
+    });
     return {
       text: modelText,
       model: router.model,
@@ -1575,18 +1784,43 @@ export async function answerPlatformShoppingQuestion(input: {
       ],
     };
   } catch (error) {
-    if (
-      error instanceof PlatformRouterQuotaExceededError ||
-      error instanceof PlatformAssistantUnavailableError
-    )
+    if (error instanceof PlatformRouterQuotaExceededError) {
+      writeProviderOutcomeLog({
+        requestId: input.requestId,
+        endpoint: router.endpoint,
+        model: router.model,
+        elapsedMs: Date.now() - startedAt,
+        phase: "admission",
+        status: "quota",
+        stepCount: 0,
+        toolNames: [],
+      });
       throw error;
-    const reason =
-      error instanceof Error
-        ? error.message.slice(0, 160)
-        : "模型服务暂时不可用";
-    throw new PlatformAssistantUnavailableError(
-      `商城 AI 导购暂时不可用：${reason}`,
-    );
+    }
+    const failure =
+      error instanceof PlatformAssistantUnavailableError
+        ? error
+        : classifyPlatformProviderFailure(
+            error,
+            attempt,
+            deadline,
+            input.signal,
+          );
+    writeProviderOutcomeLog({
+      requestId: input.requestId,
+      endpoint: router.endpoint,
+      model: router.model,
+      elapsedMs: Date.now() - startedAt,
+      phase: failure.phase,
+      status: failure.kind,
+      stepCount: failure.stepCount,
+      toolNames: failure.toolNames,
+      finishReason: failure.finishReason,
+      responseStatus: failure.responseStatus ?? attempt.responseStatus,
+    });
+    throw failure;
+  } finally {
+    deadline.dispose();
   }
 }
 
@@ -1736,27 +1970,351 @@ export function compactShoppingConversation(
   };
 }
 
+interface ProviderAttemptState {
+  phase: PlatformProviderPhase;
+  firstByteAt?: number;
+  responseStatus?: number;
+}
+
+interface ProviderDeadline {
+  signal: AbortSignal;
+  deadlineAt: number;
+  timedOut: () => boolean;
+  dispose: () => void;
+}
+
+interface ProviderOutcomeLog {
+  requestId?: string;
+  endpoint: string;
+  model: string;
+  elapsedMs: number;
+  phase: PlatformProviderPhase;
+  status: string;
+  stepCount: number;
+  toolNames: string[];
+  finishReason?: string | null;
+  responseStatus?: number | null;
+}
+
+function createProviderDeadline(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): ProviderDeadline {
+  const controller = new AbortController();
+  let timedOut = false;
+  const boundedTimeoutMs = Math.max(1, Math.floor(timeoutMs));
+  const deadlineAt = Date.now() + boundedTimeoutMs;
+  const onParentAbort = () =>
+    controller.abort(
+      parentSignal?.reason ?? new DOMException("Request aborted", "AbortError"),
+    );
+  if (parentSignal?.aborted) onParentAbort();
+  else parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new DOMException("Provider deadline exceeded", "TimeoutError"));
+  }, boundedTimeoutMs);
+  timer.unref?.();
+  return {
+    signal: controller.signal,
+    deadlineAt,
+    timedOut: () => timedOut,
+    dispose: () => {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", onParentAbort);
+    },
+  };
+}
+
+function remainingProviderBudgetMs(deadline: ProviderDeadline): number {
+  return Math.max(1, deadline.deadlineAt - Date.now());
+}
+
+function awaitWithSignal<T>(
+  operation: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    let promise: Promise<T>;
+    try {
+      promise = operation();
+    } catch (error) {
+      signal.removeEventListener("abort", onAbort);
+      reject(error);
+      return;
+    }
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
+
+function createObservedProviderFetch(
+  attempt: ProviderAttemptState,
+  deadlineSignal: AbortSignal,
+): typeof fetch {
+  const fetcher = globalThis.fetch.bind(globalThis);
+  return (async (resource: RequestInfo | URL, init?: RequestInit) => {
+    attempt.phase = "first_byte";
+    const signals = [deadlineSignal, init?.signal].filter(
+      (signal): signal is AbortSignal => Boolean(signal),
+    );
+    const signal =
+      signals.length > 1 ? AbortSignal.any(signals) : signals.at(0);
+    const response = await fetcher(resource, { ...init, signal });
+    attempt.firstByteAt = Date.now();
+    attempt.responseStatus = response.status;
+    attempt.phase = "response";
+    return response;
+  }) as typeof fetch;
+}
+
+function classifyPlatformProviderFailure(
+  error: unknown,
+  attempt: ProviderAttemptState,
+  deadline: ProviderDeadline,
+  parentSignal?: AbortSignal,
+): PlatformAssistantUnavailableError {
+  const responseStatus =
+    attempt.responseStatus ?? providerErrorHttpStatus(error);
+  if (parentSignal?.aborted) {
+    return providerFailure("aborted", "total", responseStatus);
+  }
+  if (responseStatus === 429) {
+    return providerFailure("quota", "response", responseStatus);
+  }
+  if (responseStatus !== null && responseStatus >= 400) {
+    return providerFailure("upstream_http", "response", responseStatus);
+  }
+  if (providerErrorHasCode(error, CONNECT_TIMEOUT_CODES)) {
+    return providerFailure("connect_timeout", "connect", responseStatus);
+  }
+  if (deadline.timedOut() || providerErrorIsTimeout(error)) {
+    return providerFailure(
+      attempt.phase === "first_byte" ? "first_byte_timeout" : "total_timeout",
+      attempt.phase === "first_byte" ? "first_byte" : "total",
+      responseStatus,
+    );
+  }
+  if (providerErrorIsAbort(error)) {
+    return providerFailure("aborted", attempt.phase, responseStatus);
+  }
+  if (
+    responseStatus !== null &&
+    responseStatus >= 200 &&
+    responseStatus < 300
+  ) {
+    return providerFailure("malformed_response", "response", responseStatus);
+  }
+  return providerFailure("unreachable", "connect", responseStatus);
+}
+
+const CONNECT_TIMEOUT_CODES = new Set([
+  "ETIMEDOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+]);
+
+function providerFailure(
+  kind: PlatformProviderFailureKind,
+  phase: PlatformProviderPhase,
+  responseStatus: number | null,
+): PlatformAssistantUnavailableError {
+  const messages: Record<PlatformProviderFailureKind, string> = {
+    unconfigured: "商城 AI 导购尚未配置完整，请稍后再试。",
+    connect_timeout: "商城 AI 导购连接上游超时，请稍后重试。",
+    first_byte_timeout: "商城 AI 导购等待上游响应超时，请稍后重试。",
+    total_timeout: "商城 AI 导购响应超时，请稍后重试。",
+    upstream_http: "商城 AI 导购上游暂时不可用，请稍后重试。",
+    quota: "商城 AI 导购上游额度暂时不可用，请稍后重试。",
+    malformed_response: "AI 模型返回了无法解析的响应，请重试。",
+    no_final_text: "AI 模型未返回有效回答，请重试。",
+    aborted: "请求已取消。",
+    unreachable: "商城 AI 导购暂时无法连接模型服务，请稍后重试。",
+  };
+  return new PlatformAssistantUnavailableError(messages[kind], {
+    kind,
+    phase,
+    responseStatus,
+    retryable: kind !== "aborted" && kind !== "unconfigured",
+  });
+}
+
+function providerErrorHttpStatus(error: unknown): number | null {
+  for (const candidate of providerErrorChain(error)) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const status =
+      (candidate as { statusCode?: unknown }).statusCode ??
+      (candidate as { status?: unknown }).status;
+    if (
+      typeof status === "number" &&
+      Number.isInteger(status) &&
+      status >= 100 &&
+      status <= 599
+    )
+      return status;
+  }
+  return null;
+}
+
+function providerErrorHasCode(
+  error: unknown,
+  expected: ReadonlySet<string>,
+): boolean {
+  return providerErrorChain(error).some((candidate) => {
+    if (!candidate || typeof candidate !== "object") return false;
+    const code = (candidate as { code?: unknown }).code;
+    return typeof code === "string" && expected.has(code);
+  });
+}
+
+function providerErrorIsTimeout(error: unknown): boolean {
+  return providerErrorChain(error).some((candidate) => {
+    if (!(candidate instanceof Error)) return false;
+    return (
+      candidate.name === "TimeoutError" ||
+      /(?:^|\b)(?:timeout|timed out)(?:\b|$)/i.test(candidate.message)
+    );
+  });
+}
+
+function providerErrorIsAbort(error: unknown): boolean {
+  return providerErrorChain(error).some(
+    (candidate) => candidate instanceof Error && candidate.name === "AbortError",
+  );
+}
+
+function providerErrorChain(error: unknown): unknown[] {
+  const chain: unknown[] = [];
+  let current = error;
+  for (let depth = 0; current && depth < 6; depth += 1) {
+    chain.push(current);
+    current =
+      typeof current === "object" && "cause" in current
+        ? (current as { cause?: unknown }).cause
+        : undefined;
+  }
+  return chain;
+}
+
+function boundedHttpStatus(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 100 &&
+    value <= 599
+    ? value
+    : null;
+}
+
+function boundedCount(value: unknown, maximum: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(maximum, Math.floor(value)))
+    : 0;
+}
+
+function boundedLogToken(value: unknown, maximum: number): string | null {
+  if (typeof value !== "string") return null;
+  const bounded = value.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, maximum);
+  return bounded || null;
+}
+
+function boundedToolNames(toolNames: string[]): string[] {
+  return [
+    ...new Set(
+      toolNames.flatMap((name) => {
+        const bounded = boundedLogToken(name, 64);
+        return bounded ? [bounded] : [];
+      }),
+    ),
+  ].slice(0, MAX_ASSISTANT_TOOL_NAMES);
+}
+
+function endpointOrigin(endpoint: string): string {
+  try {
+    return new URL(endpoint).origin;
+  } catch {
+    return "invalid";
+  }
+}
+
+function writeProviderOutcomeLog(outcome: ProviderOutcomeLog): void {
+  process.stderr.write(
+    `[platform-provider] ${JSON.stringify({
+      requestId: boundedLogToken(outcome.requestId, 96) ?? "untracked",
+      origin: endpointOrigin(outcome.endpoint),
+      model: boundedLogToken(outcome.model, 128) ?? "unknown",
+      elapsedMs: boundedCount(outcome.elapsedMs, 600_000),
+      phase: outcome.phase,
+      status: boundedLogToken(outcome.status, 48) ?? "unknown",
+      stepCount: boundedCount(outcome.stepCount, 16),
+      toolNames: boundedToolNames(outcome.toolNames),
+      finishReason: boundedLogToken(outcome.finishReason, 48),
+      responseStatus: boundedHttpStatus(outcome.responseStatus),
+    })}\n`,
+  );
+}
+
+function emptyCatalogAssistantReply(
+  model: string,
+  outcome: "empty_catalog" | "no_matching_products",
+  metadata: {
+    modelCalls?: number;
+    toolCalls?: string[];
+    usage?: PlatformRouteUsage | null;
+  } = {},
+): PlatformAssistantReply {
+  return {
+    text:
+      outcome === "empty_catalog"
+        ? "当前商城还没有可公开浏览的店铺或已审核在售商品，请稍后再来看看。"
+        : "当前没有找到符合这些条件的已审核在售商品。你可以调整关键词、预算或条件后再试。",
+    model,
+    usage: metadata.usage ?? null,
+    modelCalls: metadata.modelCalls ?? 0,
+    recommendations: [],
+    toolCalls: boundedToolNames(metadata.toolCalls ?? []),
+    uiActions: [],
+    outcome,
+  };
+}
+
 export function configuredPlatformRouterProtocol(): PlatformRouterProtocol {
   return configuredPlatformRouter()?.protocol ?? DEFAULT_ROUTER_PROTOCOL;
 }
 
 export interface PlatformRouterProbeResult {
-  status: "ready" | "unconfigured" | "failed";
+  status: "ready" | "slow" | "unconfigured" | "failed";
+  outcome:
+    | "ready"
+    | "slow"
+    | "unconfigured"
+    | PlatformProviderFailureKind;
+  phase: PlatformProviderPhase;
   model: string | null;
   responseStatus: number | null;
   latencyMs: number;
+  firstByteLatencyMs: number | null;
+  performanceBudgetMs: number;
+  hardTimeoutMs: number;
   message: string;
 }
 
 /**
  * Perform a bounded, credential-safe connectivity check for the configured router.
- *
- * This is intentionally separate from `decidePlatformRoutes`: an administrator may verify a
- * provider without spending a normal routing admission or sending user data. The request has a
- * fixed prompt and one output token, and the result never includes provider response content.
+ * The performance budget reports a slow-but-reachable provider; the separate hard deadline
+ * remains aligned with the assistant's configured wall-clock budget.
  */
 export async function probePlatformRouter(
-  options: { fetcher?: typeof fetch; timeoutMs?: number } = {},
+  options: {
+    fetcher?: typeof fetch;
+    timeoutMs?: number;
+    performanceBudgetMs?: number;
+    requestId?: string;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<PlatformRouterProbeResult> {
   const router = configuredPlatformRouter();
   const endpoint = router?.endpoint;
@@ -1767,17 +2325,30 @@ export async function probePlatformRouter(
   if (!router || !endpoint || !apiKey || !model) {
     return {
       status: "unconfigured",
+      outcome: "unconfigured",
+      phase: "configuration",
       model,
       responseStatus: null,
       latencyMs: 0,
+      firstByteLatencyMs: null,
+      performanceBudgetMs: 0,
+      hardTimeoutMs: 0,
       message: "模型网关尚未配置完整，或生产环境端点不是 HTTPS。",
     };
   }
 
-  const timeoutMs = Number.isSafeInteger(options.timeoutMs)
-    ? Math.max(1_000, Math.min(8_000, options.timeoutMs as number))
-    : 4_000;
+  const hardTimeoutMs = Number.isSafeInteger(options.timeoutMs)
+    ? Math.max(1_000, Math.min(MAX_TOTAL_TIMEOUT_MS, options.timeoutMs as number))
+    : Math.max(1_000, Math.min(MAX_TOTAL_TIMEOUT_MS, router.assistantTimeoutMs));
+  const performanceBudgetMs = Number.isSafeInteger(options.performanceBudgetMs)
+    ? Math.max(
+        250,
+        Math.min(hardTimeoutMs, options.performanceBudgetMs as number),
+      )
+    : Math.min(hardTimeoutMs, configuredProviderTimeoutMs());
   const fetcher = options.fetcher ?? fetch;
+  const deadline = createProviderDeadline(options.signal, hardTimeoutMs);
+  const attempt: ProviderAttemptState = { phase: "connect" };
   try {
     const providerRequest = buildTextProviderRequest({
       endpoint,
@@ -1790,51 +2361,133 @@ export async function probePlatformRouter(
       maxOutputTokens: 8,
       temperature: 0,
     });
+    attempt.phase = "first_byte";
     const response = await fetcher(providerRequest.url, {
       method: "POST",
       headers: providerRequest.headers,
       body: JSON.stringify(providerRequest.body),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: deadline.signal,
       cache: "no-store",
     });
+    attempt.firstByteAt = Date.now();
+    attempt.responseStatus = response.status;
+    attempt.phase = "response";
     const payload = await readJsonResponseBody<unknown>(response, 64 * 1024);
-    const hasOutput = hasProviderOutput(payload, protocol);
     const latencyMs = Math.max(0, Date.now() - startedAt);
-    if (!response.ok || !hasOutput) {
-      return {
+    const firstByteLatencyMs = Math.max(
+      0,
+      (attempt.firstByteAt ?? Date.now()) - startedAt,
+    );
+    let result: PlatformRouterProbeResult;
+    if (!response.ok) {
+      const outcome = response.status === 429 ? "quota" : "upstream_http";
+      result = {
         status: "failed",
+        outcome,
+        phase: "response",
         model,
         responseStatus: response.status,
         latencyMs,
-        message: response.ok
-          ? "模型网关响应缺少可读内容。"
-          : `模型网关返回 HTTP ${response.status}。`,
+        firstByteLatencyMs,
+        performanceBudgetMs,
+        hardTimeoutMs,
+        message:
+          response.status === 429
+            ? "模型网关已响应，但上游额度暂时不可用。"
+            : `模型网关返回 HTTP ${response.status}。`,
+      };
+    } else if (!hasProviderOutput(payload, protocol)) {
+      result = {
+        status: "failed",
+        outcome: "malformed_response",
+        phase: "response",
+        model,
+        responseStatus: response.status,
+        latencyMs,
+        firstByteLatencyMs,
+        performanceBudgetMs,
+        hardTimeoutMs,
+        message: "模型网关已响应，但响应缺少可读内容。",
+      };
+    } else if (
+      firstByteLatencyMs > performanceBudgetMs ||
+      latencyMs > performanceBudgetMs
+    ) {
+      result = {
+        status: "slow",
+        outcome: "slow",
+        phase:
+          firstByteLatencyMs > performanceBudgetMs ? "first_byte" : "total",
+        model,
+        responseStatus: response.status,
+        latencyMs,
+        firstByteLatencyMs,
+        performanceBudgetMs,
+        hardTimeoutMs,
+        message: `模型网关可达，但响应耗时 ${latencyMs}ms，超过 ${performanceBudgetMs}ms 性能预算。`,
+      };
+    } else {
+      result = {
+        status: "ready",
+        outcome: "ready",
+        phase: "response",
+        model,
+        responseStatus: response.status,
+        latencyMs,
+        firstByteLatencyMs,
+        performanceBudgetMs,
+        hardTimeoutMs,
+        message: "模型网关连接正常。",
       };
     }
-    return {
-      status: "ready",
+    writeProviderOutcomeLog({
+      requestId: options.requestId,
+      endpoint,
       model,
-      responseStatus: response.status,
-      latencyMs,
-      message: "模型网关连接正常。",
-    };
+      elapsedMs: latencyMs,
+      phase: result.phase,
+      status: result.outcome,
+      stepCount: 1,
+      toolNames: [],
+      responseStatus: result.responseStatus,
+    });
+    return result;
   } catch (error) {
+    const failure = classifyPlatformProviderFailure(
+      error,
+      attempt,
+      deadline,
+      options.signal,
+    );
+    const latencyMs = Math.max(0, Date.now() - startedAt);
+    writeProviderOutcomeLog({
+      requestId: options.requestId,
+      endpoint,
+      model,
+      elapsedMs: latencyMs,
+      phase: failure.phase,
+      status: failure.kind,
+      stepCount: 0,
+      toolNames: [],
+      responseStatus: failure.responseStatus,
+    });
     return {
       status: "failed",
+      outcome: failure.kind,
+      phase: failure.phase,
       model,
-      responseStatus: null,
-      latencyMs: Math.max(0, Date.now() - startedAt),
-      message: `模型网关连接失败：${safeProbeError(error)}`,
+      responseStatus: failure.responseStatus,
+      latencyMs,
+      firstByteLatencyMs: attempt.firstByteAt
+        ? Math.max(0, attempt.firstByteAt - startedAt)
+        : null,
+      performanceBudgetMs,
+      hardTimeoutMs,
+      message: failure.message,
     };
+  } finally {
+    deadline.dispose();
   }
-}
-
-function safeProbeError(error: unknown): string {
-  if (error instanceof Error && error.name === "TimeoutError")
-    return "请求超时";
-  if (error instanceof Error && error.message)
-    return error.message.slice(0, 160);
-  return "网络或上游服务不可用";
 }
 
 /** Total wall-clock budget for one recursive platform routing request. */

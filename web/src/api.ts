@@ -227,10 +227,34 @@ export interface PlatformAiStatus {
 }
 
 export interface PlatformAiProbeResult {
-  status: "ready" | "unconfigured" | "failed";
+  status: "ready" | "slow" | "unconfigured" | "failed";
+  outcome:
+    | "ready"
+    | "slow"
+    | "unconfigured"
+    | "connect_timeout"
+    | "first_byte_timeout"
+    | "total_timeout"
+    | "upstream_http"
+    | "quota"
+    | "malformed_response"
+    | "no_final_text"
+    | "aborted"
+    | "unreachable";
+  phase:
+    | "configuration"
+    | "admission"
+    | "connect"
+    | "first_byte"
+    | "response"
+    | "tool"
+    | "total";
   model: string | null;
   responseStatus: number | null;
   latencyMs: number;
+  firstByteLatencyMs: number | null;
+  performanceBudgetMs: number;
+  hardTimeoutMs: number;
   message: string;
 }
 
@@ -1917,6 +1941,7 @@ export async function askMallShoppingAssistant(
   answer: string;
   recommendations: RecommendedBackendListing[];
   uiActions: MallAssistantUiAction[];
+  outcome?: "empty_catalog" | "no_matching_products";
 }> {
   const response = await fetch("/api/mall/assistant", {
     method: "POST",
