@@ -77,21 +77,12 @@ describe("PlatformAiConfigPanel staged cutover", () => {
     expect(api.testPlatformAi).not.toHaveBeenCalled();
   });
 
-  it("reports a slow candidate honestly and keeps the active config available", async () => {
+  it("reports a rejected slow candidate honestly without applying uncommitted state", async () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();
-    api.testPlatformAi.mockResolvedValue({
-      status: "slow",
-      outcome: "slow",
-      phase: "first_byte",
-      model: "test-model",
-      responseStatus: 200,
-      latencyMs: 9_200,
-      firstByteLatencyMs: 9_100,
-      performanceBudgetMs: 4_000,
-      hardTimeoutMs: 20_000,
-      message: "模型网关可达，但响应较慢。",
-    });
+    api.testPlatformAi.mockRejectedValue(
+      new Error("模型网关可达，但响应较慢。"),
+    );
 
     const { container } = render(
       <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
@@ -325,6 +316,7 @@ describe("PlatformAiConfigPanel staged cutover", () => {
       screen.getByRole("button", { name: "启用已测试配置" }),
     ).toBeEnabled();
     expect(onNotice).not.toHaveBeenCalledWith(expect.stringContaining("失败"));
+    expect(api.testPlatformAi).toHaveBeenCalledWith({ candidate: true });
     expect(api.getManagedPlatformRouterState).toHaveBeenCalledTimes(1);
   });
 

@@ -131,18 +131,11 @@ export function PlatformAiConfigPanel({
     setTesting(true);
     try {
       const result = await testPlatformAi({ candidate: true });
-      if (
-        result.committed &&
-        "config" in result &&
-        "draft" in result &&
-        result.effective
-      ) {
-        applyState({
-          config: result.config ?? null,
-          draft: result.draft ?? null,
-          effective: result.effective,
-        });
-      }
+      applyState({
+        config: result.config,
+        draft: result.draft,
+        effective: result.effective,
+      });
       onNotice(
         result.status === "ready"
           ? committedNotice(

@@ -289,13 +289,14 @@ describe("platform AI transactional probe route", () => {
       { body: "{", status: 400 },
       { body: "true", status: 400 },
       { body: "[]", status: 400 },
-      { body: JSON.stringify({ candidate: false }), status: 400 },
+      { body: JSON.stringify({ candidate: "true" }), status: 400 },
+      { body: JSON.stringify({ unknown: true }), status: 400 },
       {
         body: JSON.stringify({ candidate: true, extra: true }),
         status: 400,
       },
       {
-        body: JSON.stringify({ payload: "x".repeat(33 * 1024) }),
+        body: JSON.stringify({ payload: "x".repeat(4 * 1024) }),
         status: 413,
       },
     ];
@@ -322,8 +323,8 @@ describe("platform AI transactional probe route", () => {
     expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
   });
 
-  it("accepts an empty body or empty object only as an active read-only probe", async () => {
-    for (const body of [undefined, "{}"] as const) {
+  it("accepts an empty body, empty object, or explicit candidate false as an active read-only probe", async () => {
+    for (const body of [undefined, "{}", '{"candidate":false}'] as const) {
       const response = await POST(
         new Request("http://localhost/api/platform/ai/test", {
           method: "POST",
@@ -333,7 +334,7 @@ describe("platform AI transactional probe route", () => {
       );
       expect(response.status).toBe(200);
     }
-    expect(mocks.probePlatformRouter).toHaveBeenCalledTimes(2);
+    expect(mocks.probePlatformRouter).toHaveBeenCalledTimes(3);
     expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
     expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
   });

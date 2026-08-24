@@ -20,6 +20,12 @@ const config = {
   assistantReasoningEffort: "none",
   modelReasoningEfforts: [],
 };
+const testedDraft = {
+  ...config,
+  testedReady: true,
+  testedAt: "2026-08-25T00:00:00.000Z",
+  keyChanged: true,
+};
 const effective = {
   ready: true,
   code: "ready" as const,
@@ -105,27 +111,34 @@ describe("platform AI mutation client", () => {
     });
   });
 
-  it("accepts a committed candidate-test 202 and preserves mutation metadata", async () => {
+  const readyProbe = {
+    status: "ready",
+    outcome: "ready",
+    phase: "response",
+    model: "gpt-5.6-sol",
+    responseStatus: 200,
+    latencyMs: 800,
+    firstByteLatencyMs: 700,
+    performanceBudgetMs: 4_000,
+    hardTimeoutMs: 20_000,
+    message: "模型网关连接正常。",
+    requestId: "request-test",
+  };
+
+  it("accepts a committed candidate-test 202 with exact state and pending metadata", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
         jsonResponse(
           {
-            status: "ready",
-            outcome: "ready",
-            phase: "response",
-            model: "gpt-5.6-sol",
-            responseStatus: 200,
-            latencyMs: 800,
-            firstByteLatencyMs: 700,
-            performanceBudgetMs: 4_000,
-            hardTimeoutMs: 20_000,
-            message: "模型网关连接正常。",
-            requestId: "request-test",
+            ...readyProbe,
             committed: true,
             auditPending: true,
             maintenancePending: false,
             generationId: "generation-test",
+            config,
+            draft: testedDraft,
+            effective,
           },
           202,
         ),
@@ -137,6 +150,55 @@ describe("platform AI mutation client", () => {
       committed: true,
       auditPending: true,
       generationId: "generation-test",
+      config,
+      draft: testedDraft,
+      effective,
+    });
+  });
+
+  it("rejects candidate responses shaped as active probes or missing committed state", async () => {
+    const invalidCandidates = [
+      readyProbe,
+      {
+        ...readyProbe,
+        committed: true,
+        config,
+        draft: testedDraft,
+        effective,
+      },
+      {
+        ...readyProbe,
+        committed: true,
+        generationId: "generation-test",
+      },
+      {
+        ...readyProbe,
+        committed: true,
+        generationId: "generation-test",
+        config,
+        draft: { ...testedDraft, testedReady: false },
+        effective,
+      },
+    ];
+
+    for (const body of invalidCandidates) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body, 200)));
+      await expect(testPlatformAi({ candidate: true })).rejects.toThrow();
+    }
+  });
+
+  it("continues to accept active probes without mutation fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(readyProbe, 200))
+        .mockResolvedValueOnce(jsonResponse(readyProbe, 200)),
+    );
+
+    await expect(testPlatformAi()).resolves.toMatchObject({ status: "ready" });
+    await expect(testPlatformAi({ candidate: false })).resolves.toMatchObject({
+      status: "ready",
     });
   });
 });

@@ -283,6 +283,14 @@ export interface PlatformAiProbeResult {
   effective?: PlatformRouterEffectiveStatus;
 }
 
+export interface PlatformAiCandidateProbeResult extends PlatformAiProbeResult {
+  committed: true;
+  generationId: string;
+  config: ManagedPlatformRouterConfig | null;
+  draft: ManagedPlatformRouterDraftConfig;
+  effective: PlatformRouterEffectiveStatus;
+}
+
 export interface PlatformSiteSettings {
   organization_id: string;
   tenant_id: string;
@@ -2531,6 +2539,15 @@ export async function getPlatformAiStatus(): Promise<PlatformAiStatus> {
 }
 
 /** Test the server-side hosted Agent without sending browser or user content. */
+export function testPlatformAi(
+  input: { candidate: true },
+): Promise<PlatformAiCandidateProbeResult>;
+export function testPlatformAi(
+  input?: { candidate?: false },
+): Promise<PlatformAiProbeResult>;
+export function testPlatformAi(
+  input: { candidate: boolean },
+): Promise<PlatformAiProbeResult | PlatformAiCandidateProbeResult>;
 export async function testPlatformAi(
   input: { candidate?: boolean } = {},
 ): Promise<PlatformAiProbeResult> {
@@ -2547,6 +2564,29 @@ export async function testPlatformAi(
     throw new MarketplaceApiError(
       response.status,
       body?.message || body?.error || "AI 连接测试失败",
+    );
+  }
+  if (
+    input.candidate === true &&
+    (body.committed !== true ||
+      typeof body.generationId !== "string" ||
+      !body.generationId.trim() ||
+      !Object.prototype.hasOwnProperty.call(body, "config") ||
+      (body.config !== null &&
+        (typeof body.config !== "object" || Array.isArray(body.config))) ||
+      !Object.prototype.hasOwnProperty.call(body, "draft") ||
+      !body.draft ||
+      typeof body.draft !== "object" ||
+      Array.isArray(body.draft) ||
+      body.draft.testedReady !== true ||
+      !Object.prototype.hasOwnProperty.call(body, "effective") ||
+      !body.effective ||
+      typeof body.effective !== "object" ||
+      Array.isArray(body.effective))
+  ) {
+    throw new MarketplaceApiError(
+      response.status,
+      body.message || "AI 待测配置测试结果未提交",
     );
   }
   return body;

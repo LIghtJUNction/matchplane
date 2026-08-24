@@ -136,7 +136,10 @@ describe("platform AI transactional config route", () => {
   it("keeps GET read-only, bounded, and credential-free", async () => {
     const response = await GET(
       new Request("http://localhost/api/platform/ai/config", {
-        headers: { origin: "http://localhost" },
+        headers: {
+          origin: "http://localhost",
+          "x-request-id": "request-get-1",
+        },
       }),
     );
 
@@ -144,6 +147,7 @@ describe("platform AI transactional config route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     const text = await response.text();
     expect(text).toContain('"source":"managed"');
+    expect(text).toContain('"requestId":"request-get-1"');
     expect(text).not.toContain("apiKey");
     expect(text).not.toContain("fingerprint");
     expect(mocks.stageTransactionalManagedPlatformRouterConfig).not.toHaveBeenCalled();

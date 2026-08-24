@@ -185,13 +185,14 @@ async function candidateRequested(
 ): Promise<boolean | Response> {
   if (!request.body) return false;
   try {
-    const value = await readJsonBody<unknown>(request, 32 * 1024);
+    const value = await readJsonBody<unknown>(request, 4 * 1024);
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return response({ error: "AI 测试请求必须是对象", requestId }, 400);
     }
     const body = value as Record<string, unknown>;
     const keys = Object.keys(body);
     if (keys.length === 0) return false;
+    if (keys.length === 1 && body.candidate === false) return false;
     if (keys.length === 1 && body.candidate === true) return true;
     return response({ error: "AI 测试请求字段无效", requestId }, 400);
   } catch (cause) {

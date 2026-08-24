@@ -32,9 +32,10 @@ export async function GET(request: Request): Promise<Response> {
   const requestId = safeRequestId(request.headers.get("x-request-id"));
   const guard = await requireAdmin(request, false, requestId);
   if (guard instanceof Response) return guard;
-  return NextResponse.json(getManagedPlatformRouterState(), {
-    headers: { "cache-control": "no-store" },
-  });
+  return NextResponse.json(
+    { ...getManagedPlatformRouterState(), requestId },
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 export async function PATCH(request: Request): Promise<Response> {
