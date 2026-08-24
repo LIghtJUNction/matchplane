@@ -156,6 +156,8 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+      - name: Test HTTP JSON probe handling
+        run: ./tests/integration/http-json-test.sh
       - name: Run complete Compose smoke test
         run: ./tests/integration/compose-smoke.sh
       - name: Collect service logs
