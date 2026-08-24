@@ -961,9 +961,16 @@ function releasePlatformRouterLock(
   syncRoot: boolean,
 ): void {
   const capability = lockCapabilities.get(handle);
-  assertPlatformRouterLockOwned(handle, environment);
   if (capability === undefined) {
     throw new PlatformRouterLockOwnershipError("AI 配置事务锁能力无效");
+  }
+  try {
+    assertPlatformRouterLockOwned(handle, environment);
+  } catch (cause) {
+    // A handle that can no longer prove ownership must become terminal. Keeping its pinned
+    // directory descriptor open cannot make a later release safe and leaks one FD per incident.
+    finishLockCapability(handle, capability);
+    throw cause;
   }
   const lockPath = path.join(
     environment.root,

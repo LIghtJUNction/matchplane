@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   renameSync,
   rmSync,
   statSync,
@@ -377,9 +378,19 @@ describe("lock-scoped generation commits", () => {
     rmSync(path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY), { recursive: true, force: true });
   });
 
-  it("rejects owner-byte changes even when the decoded nonce is unchanged", async () => {
+  it("rejects owner-byte changes and closes the terminal capability descriptor", async () => {
     const root = caseRoot("capability-owner-bytes");
+    const openRootDescriptors = () =>
+      readdirSync("/proc/self/fd").filter((entry) => {
+        try {
+          return readlinkSync(path.join("/proc/self/fd", entry)).startsWith(root);
+        } catch {
+          return false;
+        }
+      }).length;
+    const baselineDescriptors = openRootDescriptors();
     const handle = await acquirePlatformRouterLock({ root });
+    expect(openRootDescriptors()).toBe(baselineDescriptors + 1);
     const ownerPath = path.join(
       root,
       PLATFORM_ROUTER_LOCK_DIRECTORY,
@@ -395,6 +406,9 @@ describe("lock-scoped generation commits", () => {
         transactionOptions(root, 105),
       )
     ).toThrow(PlatformRouterLockOwnershipError);
+    expect(() => handle.release()).toThrow(PlatformRouterLockOwnershipError);
+    expect(openRootDescriptors()).toBe(baselineDescriptors);
+    handle.release();
     rmSync(path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY), {
       recursive: true,
       force: true,
