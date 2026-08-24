@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{
     MarketplaceConversionRecoveryAction, MarketplaceConversionRecoveryOutcome, PgStore,
-    StorageError,
+    StorageError, bounded_operator_text,
 };
 
 const SUPPORTED_SCHEMA_VERSION: i16 = 1;
@@ -298,19 +298,9 @@ async fn canonical_recovery_scope(
         .transpose()
 }
 
-fn bounded_operator_text(value: &str, maximum: usize, label: &str) -> Result<String, StorageError> {
-    let value = value.trim();
-    if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
-        return Err(StorageError::InvalidData(format!(
-            "{label} must contain 1..={maximum} printable bytes"
-        )));
-    }
-    Ok(value.to_owned())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::bounded_operator_text;
+    use crate::bounded_operator_text;
 
     #[test]
     fn recovery_reason_must_be_bounded_and_printable() {

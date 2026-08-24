@@ -134,6 +134,20 @@ pub enum StorageError {
     Json(#[from] serde_json::Error),
 }
 
+pub(crate) fn bounded_operator_text(
+    value: &str,
+    maximum: usize,
+    label: &str,
+) -> Result<String, StorageError> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
+        return Err(StorageError::InvalidData(format!(
+            "{label} must contain 1..={maximum} printable bytes"
+        )));
+    }
+    Ok(value.to_owned())
+}
+
 impl PgStore {
     /// Opens a bounded PostgreSQL pool.
     ///

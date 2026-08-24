@@ -303,18 +303,26 @@ mod tests {
     }
 
     impl MockStore {
-        fn success() -> Self {
+        fn new(
+            project_results: Vec<Result<MarketplaceConversionProjectionOutcome, StorageError>>,
+            fail_results: Vec<Result<MarketplaceConversionFailureOutcome, StorageError>>,
+        ) -> Self {
             Self {
-                project_results: Mutex::new(VecDeque::from([Ok(
-                    MarketplaceConversionProjectionOutcome {
-                        opportunity_id: Some(Uuid::now_v7()),
-                        notifications_written: 1,
-                    },
-                )])),
-                fail_results: Mutex::new(VecDeque::new()),
+                project_results: Mutex::new(project_results.into()),
+                fail_results: Mutex::new(fail_results.into()),
                 projected_jobs: AtomicUsize::new(0),
                 shutdown_after_first: None,
             }
+        }
+
+        fn success() -> Self {
+            Self::new(
+                vec![Ok(MarketplaceConversionProjectionOutcome {
+                    opportunity_id: Some(Uuid::now_v7()),
+                    notifications_written: 1,
+                })],
+                Vec::new(),
+            )
         }
     }
 
@@ -337,9 +345,11 @@ mod tests {
             let result = self
                 .project_results
                 .lock()
-                .expect("project result lock poisoned")
+                .map_err(|_| StorageError::InvalidData("mock project lock poisoned".to_owned()))?
                 .pop_front()
-                .expect("missing project result");
+                .ok_or_else(|| {
+                    StorageError::InvalidData("missing mock project result".to_owned())
+                })?;
             if index == 0
                 && let Some(sender) = &self.shutdown_after_first
             {
@@ -355,9 +365,11 @@ mod tests {
         ) -> Result<MarketplaceConversionFailureOutcome, StorageError> {
             self.fail_results
                 .lock()
-                .expect("failure result lock poisoned")
+                .map_err(|_| StorageError::InvalidData("mock failure lock poisoned".to_owned()))?
                 .pop_front()
-                .expect("missing failure result")
+                .ok_or_else(|| {
+                    StorageError::InvalidData("missing mock failure result".to_owned())
+                })?
         }
 
         async fn backlog(&self) -> Result<MarketplaceConversionBacklog, StorageError> {
@@ -387,22 +399,29 @@ mod tests {
         }
     }
 
+    async fn run_uninterrupted_batch(
+        store: &MockStore,
+        metrics: &WorkerMetrics,
+        jobs: Vec<MarketplaceConversionJob>,
+    ) {
+        let (_shutdown_tx, shutdown) = watch::channel(false);
+        handle_claim_batch(
+            store,
+            MarketplaceConversionClaimBatch {
+                jobs,
+                expired_dead: 0,
+            },
+            metrics,
+            &shutdown,
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn successful_batch_should_record_claim_and_projection_metrics() {
         let store = MockStore::success();
         let metrics = WorkerMetrics::default();
-        let (_shutdown_tx, shutdown) = watch::channel(false);
-
-        handle_claim_batch(
-            &store,
-            MarketplaceConversionClaimBatch {
-                jobs: vec![job()],
-                expired_dead: 0,
-            },
-            &metrics,
-            &shutdown,
-        )
-        .await;
+        run_uninterrupted_batch(&store, &metrics, vec![job()]).await;
 
         let snapshot = metrics.snapshot();
         assert_eq!(snapshot.claimed, 1);
@@ -415,30 +434,17 @@ mod tests {
 
     #[tokio::test]
     async fn failed_batch_should_record_retry_metrics() {
-        let store = MockStore {
-            project_results: Mutex::new(VecDeque::from([Err(StorageError::InvalidData(
+        let store = MockStore::new(
+            vec![Err(StorageError::InvalidData(
                 "deterministic failure".to_owned(),
-            ))])),
-            fail_results: Mutex::new(VecDeque::from([Ok(MarketplaceConversionFailureOutcome {
+            ))],
+            vec![Ok(MarketplaceConversionFailureOutcome {
                 disposition: MarketplaceConversionFailureDisposition::Retry,
                 retry_delay_ms: Some(2_000),
-            })])),
-            projected_jobs: AtomicUsize::new(0),
-            shutdown_after_first: None,
-        };
+            })],
+        );
         let metrics = WorkerMetrics::default();
-        let (_shutdown_tx, shutdown) = watch::channel(false);
-
-        handle_claim_batch(
-            &store,
-            MarketplaceConversionClaimBatch {
-                jobs: vec![job()],
-                expired_dead: 0,
-            },
-            &metrics,
-            &shutdown,
-        )
-        .await;
+        run_uninterrupted_batch(&store, &metrics, vec![job()]).await;
 
         let snapshot = metrics.snapshot();
         assert_eq!(snapshot.claimed, 1);
@@ -450,27 +456,12 @@ mod tests {
 
     #[tokio::test]
     async fn claim_conflict_should_not_schedule_failure_transition() {
-        let store = MockStore {
-            project_results: Mutex::new(VecDeque::from([Err(StorageError::Conflict(
-                "claim lost".to_owned(),
-            ))])),
-            fail_results: Mutex::new(VecDeque::new()),
-            projected_jobs: AtomicUsize::new(0),
-            shutdown_after_first: None,
-        };
+        let store = MockStore::new(
+            vec![Err(StorageError::Conflict("claim lost".to_owned()))],
+            Vec::new(),
+        );
         let metrics = WorkerMetrics::default();
-        let (_shutdown_tx, shutdown) = watch::channel(false);
-
-        handle_claim_batch(
-            &store,
-            MarketplaceConversionClaimBatch {
-                jobs: vec![job()],
-                expired_dead: 0,
-            },
-            &metrics,
-            &shutdown,
-        )
-        .await;
+        run_uninterrupted_batch(&store, &metrics, vec![job()]).await;
 
         let snapshot = metrics.snapshot();
         assert_eq!(snapshot.claim_conflicts, 1);
@@ -481,8 +472,8 @@ mod tests {
     #[tokio::test]
     async fn shutdown_should_finish_current_job_and_leave_remaining_claims_for_lease_recovery() {
         let (shutdown_tx, shutdown) = watch::channel(false);
-        let store = MockStore {
-            project_results: Mutex::new(VecDeque::from([
+        let mut store = MockStore::new(
+            vec![
                 Ok(MarketplaceConversionProjectionOutcome {
                     opportunity_id: Some(Uuid::now_v7()),
                     notifications_written: 0,
@@ -491,11 +482,10 @@ mod tests {
                     opportunity_id: Some(Uuid::now_v7()),
                     notifications_written: 0,
                 }),
-            ])),
-            fail_results: Mutex::new(VecDeque::new()),
-            projected_jobs: AtomicUsize::new(0),
-            shutdown_after_first: Some(shutdown_tx),
-        };
+            ],
+            Vec::new(),
+        );
+        store.shutdown_after_first = Some(shutdown_tx);
         let metrics = WorkerMetrics::default();
 
         handle_claim_batch(
