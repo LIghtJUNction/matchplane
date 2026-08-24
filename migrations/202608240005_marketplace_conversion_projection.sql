@@ -166,6 +166,12 @@ CREATE TABLE IF NOT EXISTS marketplace_store_customers (
 CREATE INDEX IF NOT EXISTS marketplace_store_customers_activity_idx
     ON marketplace_store_customers (tenant_id, store_id, last_activity_at DESC, id);
 
+-- The 180002 handoff table predates the tenant-scoped foreign-key convention and only has a
+-- globally unique `id` primary key. Add the composite key before opportunities reference it so
+-- fresh installs and upgraded databases both preserve tenant isolation.
+CREATE UNIQUE INDEX IF NOT EXISTS marketplace_sales_handoffs_tenant_id_id_idx
+    ON marketplace_sales_handoffs (tenant_id, id);
+
 CREATE TABLE IF NOT EXISTS marketplace_sales_opportunities (
     id uuid PRIMARY KEY,
     tenant_id uuid NOT NULL,

@@ -1177,7 +1177,6 @@ async fn create_source_schema(pool: &PgPool) -> Result<(), StorageError> {
              contact_consent_status text NOT NULL DEFAULT 'not_requested',
              created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
              updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-             UNIQUE (tenant_id, id),
              FOREIGN KEY (tenant_id, domain_id) REFERENCES domains(tenant_id, id),
              FOREIGN KEY (tenant_id, participant_id) REFERENCES marketplace_parties(tenant_id, id)
          );

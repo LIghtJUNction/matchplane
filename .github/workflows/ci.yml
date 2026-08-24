@@ -139,6 +139,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Run tests
         run: cargo test --workspace --locked
+      - name: Apply every migration to a fresh PostgreSQL database
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test migration_fresh_install -- --ignored
       - name: Test ordered outbox claims against PostgreSQL
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
