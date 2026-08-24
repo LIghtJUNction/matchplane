@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   fsyncSync,
@@ -256,6 +257,42 @@ describe("transactional managed platform router lifecycle", () => {
       }),
     ).rejects.toBeInstanceOf(PlatformRouterStateIndeterminateError);
     expect(readCurrentSnapshot({ root: invisible.root }).draft).toBeNull();
+  });
+
+  it("does not acknowledge a later descendant or colliding sibling after uncertain publication", async () => {
+    for (const relationship of ["descendant", "sibling"] as const) {
+      const root = caseRoot(`uncertain-${relationship}`);
+      const io = pointerReconciliationMismatch(root, relationship);
+      const lifecycle = createTransactionalManagedPlatformRouterLifecycle({
+        storage: createProtectedPlatformRouterStorage(root),
+        transactionOptions: { root, io },
+      });
+
+      await expect(
+        lifecycle.stage(input(`uncertain-${relationship}`, "uncertain-key"), {
+          actor: "admin",
+          requestId: `uncertain-${relationship}`,
+        }),
+      ).rejects.toBeInstanceOf(PlatformRouterStateIndeterminateError);
+
+      const visible = readCurrentSnapshot({ root });
+      expect(visible.draft?.config.model).toBe(`uncertain-${relationship}`);
+      expect(visible.pendingAudit).toHaveLength(1);
+      expect(visible.parentGenerationId).not.toBeNull();
+      const visibleParent = JSON.parse(
+        readFileSync(
+          path.join(
+            root,
+            PLATFORM_ROUTER_GENERATION_DIRECTORY,
+            `${visible.parentGenerationId}.json`,
+          ),
+          "utf8",
+        ),
+      ) as { pendingAudit: unknown[] };
+      expect(visibleParent.pendingAudit).toHaveLength(
+        relationship === "descendant" ? 1 : 0,
+      );
+    }
   });
 
   it("does not publish state after lock replacement or generation durability failure", async () => {
@@ -564,38 +601,52 @@ describe("transactional managed platform router lifecycle", () => {
     ]);
     await Promise.all([waitForExit(activate), waitForExit(stage)]);
 
-    const stageOutput = readFileSync(stageResult, "utf8");
-    expect(stageOutput).not.toContain(SENTINEL);
-    expect(JSON.parse(stageOutput)).toMatchObject({ status: "committed" });
+    const activateOutputText = readFileSync(activateResult, "utf8");
+    const stageOutputText = readFileSync(stageResult, "utf8");
+    expect(activateOutputText).not.toContain(SENTINEL);
+    expect(stageOutputText).not.toContain(SENTINEL);
+    const activateOutput = JSON.parse(activateOutputText) as LifecycleChildResult;
+    const stageOutput = JSON.parse(stageOutputText) as LifecycleChildResult;
+    expect(stageOutput).toMatchObject({
+      status: "committed",
+      result: { value: { model: "draft-e" } },
+    });
+
     const current = readCurrentSnapshot({ root });
-    for (const credentialFile of [
-      current.active?.credentialFile,
-      current.draft?.config.credentialFile,
-    ]) {
-      if (credentialFile) expect(existsSync(path.join(root, credentialFile))).toBe(true);
-    }
-    const retainedGenerations = readdirSync(
+    const activateThenStage =
+      activateOutput.status === "committed" &&
+      activateOutput.result?.value?.model === "draft-d" &&
+      current.active?.model === "draft-d" &&
+      current.draft?.config.model === "draft-e";
+    const stageThenRejectedActivate =
+      activateOutput.status === "error" &&
+      activateOutput.errorName === "PlatformRouterConfigValidationError" &&
+      current.active?.model === "active-a" &&
+      current.draft?.config.model === "draft-e";
+    expect([activateThenStage, stageThenRejectedActivate].filter(Boolean))
+      .toHaveLength(1);
+
+    const retained = readdirSync(
       path.join(root, PLATFORM_ROUTER_GENERATION_DIRECTORY),
-    );
-    for (const generationFile of retainedGenerations) {
-      const generation = JSON.parse(
+    ).map((generationFile) =>
+      JSON.parse(
         readFileSync(
           path.join(root, PLATFORM_ROUTER_GENERATION_DIRECTORY, generationFile),
           "utf8",
         ),
-      ) as {
-        active?: { credentialFile?: string } | null;
-        draft?: { config?: { credentialFile?: string } } | null;
-      };
-      for (const credentialFile of [
+      ) as CredentialReferences,
+    );
+    const referencedCredentials = [current, ...retained].flatMap((generation) =>
+      [
         generation.active?.credentialFile,
         generation.draft?.config?.credentialFile,
-      ]) {
-        if (credentialFile && existsSync(path.join(root, credentialFile))) {
-          expect(readFileSync(path.join(root, credentialFile), "utf8").trim())
-            .not.toBe("");
-        }
-      }
+      ].filter((value): value is string => typeof value === "string"),
+    );
+    expect(referencedCredentials.length).toBeGreaterThan(0);
+    for (const credentialFile of referencedCredentials) {
+      const credentialPath = path.join(root, credentialFile);
+      expect(existsSync(credentialPath)).toBe(true);
+      expect(readFileSync(credentialPath, "utf8").trim()).not.toBe("");
     }
   });
 
@@ -652,6 +703,81 @@ describe("transactional managed platform router lifecycle", () => {
     expect(readCurrentSnapshot({ root }).draft).toBeNull();
   });
 });
+
+interface LifecycleChildResult {
+  status: "committed" | "error";
+  errorName?: string;
+  result?: { value?: { model?: string } };
+}
+
+interface CredentialReferences {
+  active?: { credentialFile?: string } | null;
+  draft?: { config?: { credentialFile?: string } } | null;
+}
+
+function pointerReconciliationMismatch(
+  root: string,
+  relationship: "descendant" | "sibling",
+): PlatformRouterIoOverrides {
+  let publications = 0;
+  let replaceOnRootSync = false;
+  return {
+    rename: ((source: string, destination: string) => {
+      renameSync(source, destination);
+      if (destination === path.join(root, PLATFORM_ROUTER_POINTER_FILE)) {
+        publications += 1;
+        replaceOnRootSync = publications === 2;
+      }
+    }) as typeof renameSync,
+    fsync: ((descriptor: number) => {
+      if (replaceOnRootSync && readFileDescriptorPath(descriptor) === root) {
+        replaceOnRootSync = false;
+        const pointerPath = path.join(root, PLATFORM_ROUTER_POINTER_FILE);
+        const attemptedPointer = JSON.parse(
+          readFileSync(pointerPath, "utf8"),
+        ) as { generationId: string };
+        const generationDirectory = path.join(
+          root,
+          PLATFORM_ROUTER_GENERATION_DIRECTORY,
+        );
+        const attempted = JSON.parse(
+          readFileSync(
+            path.join(generationDirectory, `${attemptedPointer.generationId}.json`),
+            "utf8",
+          ),
+        ) as { parentGenerationId: string | null } & Record<string, unknown>;
+        const replacementId = randomUuid(
+          relationship === "descendant" ? 901 : 902,
+        );
+        const replacement = {
+          ...attempted,
+          generationId: replacementId,
+          parentGenerationId:
+            relationship === "descendant"
+              ? attemptedPointer.generationId
+              : attempted.parentGenerationId,
+        };
+        const generationBytes = Buffer.from(`${JSON.stringify(replacement)}\n`);
+        writeFileSync(
+          path.join(generationDirectory, `${replacementId}.json`),
+          generationBytes,
+          { mode: 0o640 },
+        );
+        writeFileSync(
+          pointerPath,
+          `${JSON.stringify({
+            schemaVersion: 1,
+            generationId: replacementId,
+            sha256: createHash("sha256").update(generationBytes).digest("hex"),
+          })}\n`,
+          { mode: 0o640 },
+        );
+        throw nodeFailure("EIO", "pointer directory fsync");
+      }
+      fsyncSync(descriptor);
+    }) as typeof fsyncSync,
+  };
+}
 
 function pointerPublicationFault(
   publicationToFail: number,

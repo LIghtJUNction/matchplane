@@ -442,10 +442,15 @@ export interface PlatformRouterProbeConfiguration {
 function configuredPlatformRouter(): PlatformRouterProbeConfiguration | null {
   const effective = getPlatformRouterEffectiveStatus();
   if (effective.source === "managed") {
-    const managed = readManagedPlatformRouterConfig();
-    return managed?.enabled && isAllowedEndpoint(managed.endpoint)
-      ? { ...managed, managed: true }
-      : null;
+    if (!effective.ready) return null;
+    try {
+      const managed = readManagedPlatformRouterConfig();
+      return managed?.enabled && isAllowedEndpoint(managed.endpoint)
+        ? { ...managed, managed: true }
+        : null;
+    } catch {
+      return null;
+    }
   }
   const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();

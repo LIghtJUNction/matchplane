@@ -30,37 +30,46 @@ interface SelectedProviderStatus {
 }
 
 export function getPlatformRouterEffectiveStatus(): PlatformRouterEffectiveStatus {
-  const environment = readEnvironmentProviderStatus();
+  return platformRouterEffectiveStatusFromReader(
+    getManagedPlatformRouterConfig,
+    readEnvironmentProviderStatus(),
+  );
+}
+
+export function platformRouterEffectiveStatusFromReader(
+  readManaged: () => ManagedPlatformRouterConfig | null,
+  environment: EnvironmentProviderStatus,
+): PlatformRouterEffectiveStatus {
   try {
-    return platformRouterEffectiveStatusFrom(
-      getManagedPlatformRouterConfig(),
-      environment,
-    );
+    return platformRouterEffectiveStatusFrom(readManaged(), environment);
   } catch {
     // A present but unreadable/corrupt managed generation must block the
-    // environment fallback. Keep the failure scoped to AI readiness instead
-    // of turning unrelated platform routes into configuration readers.
-    return platformRouterEffectiveStatusFrom(
-      unavailableManagedConfiguration(),
-      environment,
-    );
+    // environment fallback without inventing endpoint or model values.
+    return unreadableManagedPlatformRouterEffectiveStatus(environment);
   }
 }
 
-function unavailableManagedConfiguration(): ManagedPlatformRouterConfig {
+function unreadableManagedPlatformRouterEffectiveStatus(
+  environment: EnvironmentProviderStatus,
+): PlatformRouterEffectiveStatus {
   return {
-    endpoint: M0_REQUIRED_ROUTER_ENDPOINT,
-    model: M0_REQUIRED_ROUTER_MODEL,
-    protocol: M0_REQUIRED_ROUTER_PROTOCOL,
+    ready: false,
+    code: "upstream_configuration",
+    preferredHttpStatus: 451,
+    source: "managed",
+    managedOverridesEnvironment: environment.present,
+    conflicts: { endpoint: false, model: false, protocol: false },
+    endpointOrigin: null,
+    model: null,
+    protocol: null,
     enabled: false,
     credentialConfigured: false,
-    assistantInstructions: "",
-    assistantMaxOutputTokens: 320,
-    assistantTemperature: 0.2,
-    assistantMaxSteps: 5,
-    assistantTimeoutMs: 20_000,
-    assistantReasoningEffort: "none",
-    modelReasoningEfforts: [],
+    endpointMatchesRequired: false,
+    modelMatchesRequired: false,
+    protocolMatchesRequired: false,
+    requiredEndpoint: M0_REQUIRED_ROUTER_ENDPOINT,
+    requiredModel: M0_REQUIRED_ROUTER_MODEL,
+    issues: ["managed_configuration_unreadable"],
   };
 }
 

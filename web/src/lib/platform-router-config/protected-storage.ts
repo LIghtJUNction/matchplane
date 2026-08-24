@@ -147,6 +147,12 @@ export function createProtectedPlatformRouterStorage(
           }
         }
         const cleanupError = removeTemporaryFile(temporary, unlink);
+        // B2a cannot safely sweep credential-shaped temporary files left by a
+        // failed unlink: legacy writers still create the same names without
+        // the transaction lock. B2b must add the bounded post-cutover sweep
+        // only after every legacy producer is disabled. Keep the failed
+        // unlink in the cause chain; neither this error nor its metadata
+        // includes the secret bytes written to the temporary file.
         const failure = cleanupError
           ? new AggregateError([asError(cause), cleanupError])
           : cause;

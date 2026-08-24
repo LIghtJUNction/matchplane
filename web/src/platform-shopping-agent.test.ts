@@ -36,7 +36,7 @@ vi.mock("ai", () => ({
 vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible }));
 
 vi.mock("./lib/platform-router-config", () => ({
-  getPlatformRouterEffectiveStatus: () => ({ source: "managed" }),
+  getPlatformRouterEffectiveStatus: () => ({ source: "managed", ready: true }),
   readManagedPlatformRouterConfig: () => ({
     endpoint: "https://router.example.com/v1/chat/completions",
     apiKey: "server-only-key",

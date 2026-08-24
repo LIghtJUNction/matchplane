@@ -172,7 +172,8 @@ async function runLifecycleActivateChild(): Promise<void> {
       resultBarrier,
       JSON.stringify({
         status: "error",
-        errorName: cause instanceof Error ? cause.name : "unknown",
+        errorName:
+          cause instanceof Error ? cause.constructor.name : "unknown",
       }),
     );
   }

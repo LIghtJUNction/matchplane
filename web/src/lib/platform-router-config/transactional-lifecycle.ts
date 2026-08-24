@@ -478,6 +478,8 @@ function commitSemanticGeneration(
     }
     if (
       visible.source === "generation" &&
+      visible.generationId === generationId &&
+      visible.parentGenerationId === current.generationId &&
       visible.pendingAudit.some((record) => record.eventId === auditEventId) &&
       sameState(visible, expected)
     ) {
