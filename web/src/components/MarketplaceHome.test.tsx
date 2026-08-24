@@ -114,6 +114,44 @@ describe("MarketplaceHome actions", () => {
     expect(onPublishProduct).toHaveBeenCalledTimes(1);
   });
 
+  it("opens the shopping clerk with a hero need prompt", async () => {
+    const user = userEvent.setup();
+    render(
+      <MarketplaceHome
+        catalogResolved
+        listings={[listing]}
+        locale="zh"
+        theme="light"
+        onLocaleChange={vi.fn()}
+        onThemeChange={vi.fn()}
+        onLikeListing={vi.fn(async () => undefined)}
+        onNotice={vi.fn()}
+        onOpenListing={vi.fn()}
+        onPublishProduct={vi.fn()}
+        onRetryCatalog={vi.fn()}
+        onRecommendations={vi.fn()}
+        subplatform={
+          {
+            slug: "root",
+            path: "/",
+            label: "MatchPlane",
+            ui: {},
+          } as SubplatformConfig
+        }
+      />,
+    );
+
+    await user.type(
+      screen.getByRole("textbox", { name: "描述想买的东西和预算" }),
+      "预算 15 万以内的 SUV",
+    );
+    await user.click(screen.getByRole("button", { name: "帮我找" }));
+    expect(screen.getByRole("button", { name: "问选货员" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
   it("uses a keyboard-navigable toggle group for category filtering", async () => {
     const user = userEvent.setup();
     const homeListing: AssetListing = {
@@ -200,13 +238,15 @@ describe("MarketplaceHome actions", () => {
       />,
     );
 
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "描述想买的东西和预算" }),
+    ).toBeInTheDocument();
     const toggle = screen.getByRole("button", { name: "问选货员" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    expect(screen.getAllByRole("textbox").length).toBeGreaterThanOrEqual(2);
     expect(container.querySelector(".root-marketplace-page")).toHaveClass(
       "is-clerk-open",
     );

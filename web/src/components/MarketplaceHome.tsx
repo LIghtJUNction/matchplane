@@ -8,6 +8,7 @@ import {
     AlertTitle,
 } from "@appica/ui-react/alert";
 import { Button } from "@appica/ui-react/button";
+import { Input } from "@appica/ui-react/input";
 import { Skeleton } from "@appica/ui-react/skeleton";
 import { Toggle } from "@appica/ui-react/toggle";
 import { ToggleGroup } from "@appica/ui-react/toggle-group";
@@ -92,6 +93,8 @@ function MarketplaceLoading({ locale }: { locale: InterfaceLocale }) {
 
 interface MarketplaceSearchPanelProps {
     locale: InterfaceLocale;
+    draftMessage?: string;
+    onDraftMessageApplied?: () => void;
     onLikeListing: (listing: AssetListing) => Promise<void>;
     onNotice: (message: string) => void;
     onOpenListing: (listing: AssetListing) => void;
@@ -101,6 +104,8 @@ interface MarketplaceSearchPanelProps {
 
 function MarketplaceSearchPanel({
     locale,
+    draftMessage,
+    onDraftMessageApplied,
     onLikeListing,
     onNotice,
     onOpenListing,
@@ -118,6 +123,8 @@ function MarketplaceSearchPanel({
                     compact
                     role="buyer"
                     locale={locale}
+                    draftMessage={draftMessage}
+                    onDraftMessageApplied={onDraftMessageApplied}
                     onLikeListing={onLikeListing}
                     onNotice={onNotice}
                     onOpenListing={onOpenListing}
@@ -250,6 +257,51 @@ function MarketplaceProducts({
     );
 }
 
+function MarketplaceNeedPrompt({
+    locale,
+    onSubmit,
+}: {
+    locale: InterfaceLocale;
+    onSubmit: (text: string) => void;
+}) {
+    const [value, setValue] = useState("");
+    const english = locale === "en";
+
+    return (
+        <form
+            className="root-marketplace-need-prompt"
+            aria-label={english ? "Describe what you need" : "描述你的需求"}
+            onSubmit={(event) => {
+                event.preventDefault();
+                const text = value.trim();
+                if (!text) return;
+                onSubmit(text);
+                setValue("");
+            }}
+        >
+            <Input
+                className="root-marketplace-need-input"
+                value={value}
+                maxLength={240}
+                placeholder={
+                    english
+                        ? "For example: a family SUV under 150,000"
+                        : "例如：预算 15 万以内的家用 SUV"
+                }
+                aria-label={
+                    english
+                        ? "Describe what you want and your budget"
+                        : "描述想买的东西和预算"
+                }
+                onChange={(event) => setValue(event.target.value)}
+            />
+            <Button type="submit" disabled={!value.trim()}>
+                {english ? "Find matches" : "帮我找"}
+            </Button>
+        </form>
+    );
+}
+
 export function MarketplaceHome({
     catalogResolved,
     catalogError = false,
@@ -266,6 +318,7 @@ export function MarketplaceHome({
     const allLabel = locale === "en" ? "All" : "全部";
     const [category, setCategory] = useState(allLabel);
     const [clerkOpen, setClerkOpen] = useState(false);
+    const [clerkDraft, setClerkDraft] = useState<string | undefined>();
     const categories = useMemo(
         () => [
             allLabel,
@@ -311,6 +364,13 @@ export function MarketplaceHome({
                                     ? "Browse real listings. The shopping assistant can help narrow the choice when needed."
                                     : "浏览真实在售商品；需要帮助时，选货员会帮你缩小范围。"}
                             </span>
+                            <MarketplaceNeedPrompt
+                                locale={locale}
+                                onSubmit={(text) => {
+                                    setClerkDraft(text);
+                                    setClerkOpen(true);
+                                }}
+                            />
                         </div>
                         <div className="root-marketplace-catalog-actions">
                             <Button
@@ -385,6 +445,8 @@ export function MarketplaceHome({
             >
                 <MarketplaceSearchPanel
                     locale={locale}
+                    draftMessage={clerkDraft}
+                    onDraftMessageApplied={() => setClerkDraft(undefined)}
                     onLikeListing={onLikeListing}
                     onNotice={onNotice}
                     onOpenListing={onOpenListing}

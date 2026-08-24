@@ -559,6 +559,9 @@ interface MatchChatProps {
   }) => void;
   /** Move a seller into the selected terminal platform before showing its supply form. */
   onSellerPlatformSelected?: (hop: PlatformRouteHop) => void | Promise<void>;
+  /** Prefill the composer when opened from another entry point on the same page. */
+  draftMessage?: string;
+  onDraftMessageApplied?: () => void;
 }
 
 export function MatchChat({
@@ -575,6 +578,8 @@ export function MatchChat({
   onContactConsent,
   onSellerDraft,
   onSellerPlatformSelected,
+  draftMessage,
+  onDraftMessageApplied,
 }: MatchChatProps) {
   const copy = resolveChatCopy(subplatform, locale);
   const runtime = runtimeChatCopy(locale);
@@ -611,6 +616,15 @@ export function MatchChat({
   const submitMessageRef = useRef<
     ((rawText: string, session?: PartySession) => Promise<void>) | null
   >(null);
+
+  useEffect(() => {
+    const next = draftMessage?.trim();
+    if (!next) return;
+    setMessage(next);
+    onDraftMessageApplied?.();
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, [draftMessage, onDraftMessageApplied]);
+
   const [sellerRouteChoices, setSellerRouteChoices] = useState<
     PlatformRouteHop[]
   >([]);
