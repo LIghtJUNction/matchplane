@@ -8,7 +8,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@appica/ui-react/dropdown-menu";
-import { LogIn, LogOut, Store, UserRound } from "lucide-react";
+import {
+  LayoutDashboard,
+  LogIn,
+  LogOut,
+  Store,
+  UserRound,
+} from "lucide-react";
 import { motion } from "motion/react";
 
 import { Brand, spring } from "../Primitives";
@@ -19,6 +25,7 @@ import type { SubplatformConfig } from "../../subplatform";
 import type {
   InterfaceLocale,
   InterfacePalette,
+  InterfaceTextSize,
   InterfaceTheme,
 } from "../../lib/preferences";
 import type { WorkspaceRole } from "../../types";
@@ -32,9 +39,11 @@ interface PlatformHeaderProps {
   theme: InterfaceTheme;
   locale: InterfaceLocale;
   palette: InterfacePalette;
+  textSize: InterfaceTextSize;
   onThemeChange: (theme: InterfaceTheme) => void;
   onLocaleChange: (locale: InterfaceLocale) => void;
   onPaletteChange: (palette: InterfacePalette) => void;
+  onTextSizeChange: (textSize: InterfaceTextSize) => void;
   authUser: AuthenticatedUser | null;
   authResolved: boolean;
   ownedStoresCount: number;
@@ -64,9 +73,11 @@ export function PlatformHeader({
   theme,
   locale,
   palette,
+  textSize,
   onThemeChange,
   onLocaleChange,
   onPaletteChange,
+  onTextSizeChange,
   authUser,
   authResolved,
   ownedStoresCount,
@@ -105,28 +116,24 @@ export function PlatformHeader({
             theme={theme}
             locale={locale}
             palette={palette}
+            textSize={textSize}
             onThemeChange={onThemeChange}
             onLocaleChange={onLocaleChange}
             onPaletteChange={onPaletteChange}
+            onTextSizeChange={onTextSizeChange}
           />
-          <motion.button
-            className="header-store-action"
-            type="button"
-            onClick={onOpenStoreCenter}
-            whileTap={{ scale: 0.97 }}
-            transition={spring}
-          >
-            <Store size={17} aria-hidden="true" />
-            <span>{authUser ? ui.myStores : ui.openStore}</span>
-            {authUser && ownedStoresResolved ? (
-              <strong
-                className="header-store-count"
-                aria-label={`${ui.myStores}: ${ownedStoresCount}`}
-              >
-                {ownedStoresCount}
-              </strong>
-            ) : null}
-          </motion.button>
+          {!authUser ? (
+            <motion.button
+              className="header-store-action"
+              type="button"
+              onClick={onOpenStoreCenter}
+              whileTap={{ scale: 0.97 }}
+              transition={spring}
+            >
+              <Store size={17} aria-hidden="true" />
+              <span>{ui.openStore}</span>
+            </motion.button>
+          ) : null}
           {!authUser && authResolved ? (
             <motion.button
               className="header-signin-action"
@@ -204,7 +211,7 @@ export function PlatformHeader({
                   </DropdownMenuItem>
                   {canOpenPlatformConsole ? (
                     <DropdownMenuLinkItem render={<a href="/?role=platform" />}>
-                      <UserRound size={16} aria-hidden="true" />
+                      <LayoutDashboard size={16} aria-hidden="true" />
                       <span>{ui.platformAdmin}</span>
                     </DropdownMenuLinkItem>
                   ) : null}

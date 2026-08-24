@@ -1,16 +1,7 @@
 "use client";
 
-import { Button } from "@appica/ui-react/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverDescription,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@appica/ui-react/popover";
-import { Radio } from "@appica/ui-react/radio";
-import { RadioGroup } from "@appica/ui-react/radio-group";
-import { Check, Palette } from "lucide-react";
+import { useId } from "react";
+import { Check } from "lucide-react";
 
 import {
   INTERFACE_PALETTES,
@@ -24,88 +15,60 @@ interface PalettePickerProps {
   onPaletteChange: (palette: InterfacePalette) => void;
 }
 
-const PALETTE_PREVIEWS: Record<InterfacePalette, readonly string[]> = {
-  ink: ["#f2efe7", "#fffdf8", "#171715", "#72736d"],
-  moss: ["#e5ede7", "#fbfcf9", "#315c47", "#203329"],
-  clay: ["#f2e2da", "#fffaf6", "#a34a2b", "#43251b"],
-  plum: ["#ece2ea", "#fcf9fc", "#6f506b", "#342832"],
-  amber: ["#f0e6d5", "#fffaf2", "#8a5a10", "#382b16"],
-};
-
+/** A compact, real-role preview of the marketplace color palettes. */
 export function PalettePicker({
   palette,
   locale,
   onPaletteChange,
 }: PalettePickerProps) {
-  const selected =
-    INTERFACE_PALETTES.find((option) => option.id === palette) ??
-    INTERFACE_PALETTES[0];
+  const groupName = useId();
   const isZh = locale === "zh";
 
   return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <Button
-            className="preference-icon preference-palette-trigger"
-            variant="ghost"
-            size="icon-sm"
-            type="button"
-            aria-label={
-              isZh
-                ? `选择配色：${selected.label.zh}`
-                : `Choose palette: ${selected.label.en}`
-            }
-            title={isZh ? "配色" : "Palette"}
-          >
-            <Palette size={15} aria-hidden="true" />
-            <span
-              className="preference-palette-indicator"
-              style={{ background: selected.swatch }}
-              aria-hidden="true"
-            />
-          </Button>
-        }
-      />
-      <PopoverContent
-        className="palette-popover"
-        side="bottom"
-        align="end"
-        sideOffset={10}
-        arrow={false}
-      >
-        <PopoverTitle className="palette-popover-title">
-          {isZh ? "选择配色" : "Choose a palette"}
-        </PopoverTitle>
-        <PopoverDescription className="palette-popover-description">
-          {isZh
-            ? "预览背景、表面、强调色和文字；选择会保存在这台设备上。"
-            : "Preview background, surface, accent, and text. Your choice stays on this device."}
-        </PopoverDescription>
-        <RadioGroup
-          className="palette-radio-group"
-          value={palette}
-          onValueChange={(value) => onPaletteChange(value as InterfacePalette)}
-          aria-label={isZh ? "配色方案" : "Color palettes"}
-        >
-          {INTERFACE_PALETTES.map((option) => (
-            <label className="palette-radio-card" key={option.id}>
-              <span className="palette-radio-preview" aria-hidden="true">
-                {PALETTE_PREVIEWS[option.id].map((color) => (
-                  <span key={color} style={{ backgroundColor: color }} />
-                ))}
+    <fieldset className="palette-picker">
+      <legend>{isZh ? "界面配色" : "Interface palette"}</legend>
+      <div className="palette-options">
+        {INTERFACE_PALETTES.map((option) => {
+          const selected = option.id === palette;
+          const label = option.label[locale];
+          return (
+            <label
+              className="palette-option"
+              data-palette-preview={option.id}
+              key={option.id}
+            >
+              <input
+                type="radio"
+                name={groupName}
+                value={option.id}
+                checked={selected}
+                onChange={() => onPaletteChange(option.id)}
+                aria-label={
+                  selected
+                    ? `${label}${isZh ? "，当前配色" : ", current palette"}`
+                    : label
+                }
+              />
+              <span className="palette-option-preview" aria-hidden="true">
+                <span className="palette-preview-surface" />
+                <span className="palette-preview-background" />
+                <span className="palette-preview-accent" />
+                <span className="palette-preview-text">
+                  <i />
+                  <i />
+                </span>
               </span>
-              <span className="palette-radio-label">
-                <span>{option.label[locale]}</span>
-                {option.id === palette ? (
-                  <Check size={14} aria-hidden="true" />
-                ) : null}
-              </span>
-              <Radio className="palette-radio-control" value={option.id} />
+              <span className="palette-option-name">{label}</span>
+              <Check
+                className="palette-option-check"
+                size={15}
+                strokeWidth={2}
+                aria-hidden="true"
+              />
             </label>
-          ))}
-        </RadioGroup>
-      </PopoverContent>
-    </Popover>
+          );
+        })}
+      </div>
+    </fieldset>
   );
 }

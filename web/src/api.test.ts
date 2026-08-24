@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  askMallShoppingAssistant,
   clearPartySessionCache,
+  MarketplaceApiError,
   readPartySession,
   savePartySession,
 } from "./api";
@@ -125,5 +127,46 @@ describe("marketplace capability cache", () => {
 
     expect(window.localStorage.length).toBe(0);
     expect(window.sessionStorage.length).toBe(0);
+  });
+});
+
+describe("shopping assistant retry metadata", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("preserves a rate-limit detail and Retry-After timing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "请求过于频繁，请稍后再试。",
+              code: "rate_limited",
+              retryable: true,
+            },
+          }),
+          {
+            status: 429,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "90",
+            },
+          },
+        ),
+      ),
+    );
+
+    const error = await askMallShoppingAssistant([
+      { role: "user", content: "帮我找一台电脑" },
+    ]).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(MarketplaceApiError);
+    expect(error).toMatchObject({
+      status: 429,
+      code: "rate_limited",
+      message: "请求过于频繁，请稍后再试。",
+      retryable: true,
+      retryAfterMs: 90_000,
+    });
   });
 });

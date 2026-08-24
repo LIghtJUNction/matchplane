@@ -34,8 +34,16 @@ import {
 } from "./pending-conversion";
 
 export function App({ initialPath = "/" }: { initialPath?: string }) {
-  const { theme, locale, palette, setTheme, setLocale, setPalette } =
-    useInterfacePreferences();
+  const {
+    theme,
+    locale,
+    palette,
+    textSize,
+    setTheme,
+    setLocale,
+    setPalette,
+    setTextSize,
+  } = useInterfacePreferences();
   const ui = appCopy(locale);
   const [notice, setNotice] = useState<string | null>(null);
   const [pluginFailed, setPluginFailed] = useState(false);
@@ -365,9 +373,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
             theme={theme}
             locale={locale}
             palette={palette}
+            textSize={textSize}
             onThemeChange={setTheme}
             onLocaleChange={setLocale}
             onPaletteChange={setPalette}
+            onTextSizeChange={setTextSize}
             authUser={authUser}
             authResolved={authResolved}
             ownedStoresCount={ownedStores.length}
@@ -435,9 +445,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           locale={locale}
           theme={theme}
           palette={palette}
+          textSize={textSize}
           onThemeChange={setTheme}
           onLocaleChange={setLocale}
           onPaletteChange={setPalette}
+          onTextSizeChange={setTextSize}
           subplatform={subplatform}
           fullscreenPlugin={fullscreenPlugin}
           storeConsoleOpen={storeConsoleOpen}

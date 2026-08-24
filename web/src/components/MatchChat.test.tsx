@@ -43,6 +43,7 @@ vi.mock("../api", async (importOriginal) => ({
   askMallShoppingAssistant,
 }));
 
+import { MarketplaceApiError } from "../api";
 import { MatchChat } from "./MatchChat";
 import type { SubplatformConfig } from "../subplatform";
 
@@ -155,7 +156,11 @@ describe("MatchChat sending state", () => {
   it("keeps a failed request retryable without turning the error into an assistant message", async () => {
     const user = userEvent.setup();
     askMallShoppingAssistant.mockRejectedValueOnce(
-      new Error("商城 AI 暂时没有完成回复"),
+      new MarketplaceApiError(429, "请求过于频繁，请稍后再试。", {
+        code: "rate_limited",
+        retryable: true,
+        retryAfterMs: 90_000,
+      }),
     );
     render(<MatchChat home onNotice={vi.fn()} subplatform={subplatform} />);
     const input = screen.getByRole("textbox", {
@@ -166,8 +171,12 @@ describe("MatchChat sending state", () => {
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("商城 AI 暂时没有完成回复");
+    expect(alert).toHaveTextContent("请求过于频繁，请稍后再试。");
+    expect(alert).toHaveTextContent("建议约 2 分钟后重试。");
     expect(input).toHaveValue("帮我找啊");
+    expect(
+      document.querySelectorAll(".match-chat-message.is-user"),
+    ).toHaveLength(1);
     expect(
       document.querySelector(".match-chat-message.is-assistant"),
     ).toBeNull();
@@ -184,6 +193,13 @@ describe("MatchChat sending state", () => {
       await screen.findByText("可以。你具体想找什么？"),
     ).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      document.querySelectorAll(".match-chat-message.is-user"),
+    ).toHaveLength(1);
+    expect(input).toHaveValue("");
+    expect(askMallShoppingAssistant.mock.calls[1]?.[0]).toEqual([
+      { role: "user", content: "帮我找啊" },
+    ]);
   });
 
   it("restores visible conversation history for the same signed-in owner", async () => {

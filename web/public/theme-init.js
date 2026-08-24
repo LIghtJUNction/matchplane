@@ -15,6 +15,12 @@ try {
   ].includes(palette)
     ? palette
     : "ink";
+  const textSize = localStorage.getItem("matchplane.text-size");
+  document.documentElement.dataset.textSize = ["small", "default", "large"].includes(
+    textSize,
+  )
+    ? textSize
+    : "default";
   const locale = localStorage.getItem("matchplane.locale");
   if (locale === "en") document.documentElement.lang = "en";
 } catch {

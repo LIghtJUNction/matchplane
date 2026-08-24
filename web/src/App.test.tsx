@@ -121,16 +121,9 @@ afterEach(() => {
 
 describe("MatchPlane workspaces", () => {
   it("keeps the root entry focused on one public buyer chat and a visible sign-in entry", async () => {
-    const user = userEvent.setup();
     render(<App />);
 
-    const assistantToggle = screen.getByRole("button", { name: "问选货员" });
-    expect(assistantToggle).toHaveAttribute("aria-expanded", "false");
-    expect(
-      screen.queryByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
-    ).not.toBeInTheDocument();
-
-    await user.click(assistantToggle);
+    expect(screen.queryByRole("button", { name: "问选货员" })).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "想找什么？" }),
     ).toBeInTheDocument();
@@ -143,15 +136,13 @@ describe("MatchPlane workspaces", () => {
     expect(
       screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭选货员" }));
-    expect(assistantToggle).toHaveAttribute("aria-expanded", "false");
 
     expect(screen.queryByText("其他入口")).not.toBeInTheDocument();
     expect(
       await screen.findByRole("button", { name: "登录" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "切换到暗色" }),
+      screen.getByRole("button", { name: "显示与语言" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "设置" }),
@@ -654,7 +645,6 @@ describe("MatchPlane workspaces", () => {
     );
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "问选货员" }));
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -690,7 +680,6 @@ describe("MatchPlane workspaces", () => {
     );
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "问选货员" }));
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -725,7 +714,6 @@ describe("MatchPlane workspaces", () => {
     );
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "问选货员" }));
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -763,7 +751,6 @@ describe("MatchPlane workspaces", () => {
       screen.getByRole("dialog", { name: /^我的店铺/ }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭我的店铺" }));
-    await user.click(screen.getByRole("button", { name: "问选货员" }));
 
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
@@ -821,9 +808,10 @@ describe("MatchPlane workspaces", () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "切换到暗色" }));
+    await user.click(screen.getByRole("button", { name: "显示与语言" }));
+    await user.click(screen.getByRole("button", { name: "深色" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
-    await user.click(screen.getByRole("button", { name: "EN" }));
+    await user.click(screen.getByRole("button", { name: "English" }));
     expect(document.documentElement.lang).toBe("en");
     expect(
       screen.getByRole("button", { name: "Account menu" }),
@@ -834,7 +822,7 @@ describe("MatchPlane workspaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "选择配色：墨色" }));
+    await user.click(screen.getByRole("button", { name: "显示与语言" }));
     await user.click(screen.getByRole("radio", { name: "苔绿" }));
 
     await waitFor(() =>
@@ -842,8 +830,8 @@ describe("MatchPlane workspaces", () => {
     );
     expect(window.localStorage.getItem("matchplane.palette")).toBe("moss");
     expect(
-      screen.getByRole("button", { name: "选择配色：苔绿" }),
-    ).toBeInTheDocument();
+      screen.getByRole("radio", { name: "苔绿，当前配色" }),
+    ).toBeChecked();
   });
 
   it("keeps a persisted dark preference during the initial hydration", async () => {
@@ -861,7 +849,8 @@ describe("MatchPlane workspaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "EN" }));
+    await user.click(screen.getByRole("button", { name: "显示与语言" }));
+    await user.click(screen.getByRole("button", { name: "English" }));
 
     expect(
       screen.getByRole("heading", {

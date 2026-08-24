@@ -17,6 +17,7 @@ import {
   History,
   LoaderCircle,
   MoreHorizontal,
+  RefreshCw,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -38,6 +39,7 @@ import {
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
+  MarketplaceApiError,
   uploadMarketplaceAttachment,
   querySubplatformRetrieval,
   updateMarketplaceIntent,
@@ -102,6 +104,36 @@ function useHomePlaceholder(
       ? HOME_PLACEHOLDER_EXAMPLES.en
       : HOME_PLACEHOLDER_EXAMPLES.zh;
   return phrases[0];
+}
+
+interface RecoverableChatError {
+  detail: string;
+  failedUserMessageId: string;
+  prompt: string;
+  retryAfterMs?: number;
+}
+
+function formatRetryTiming(
+  retryAfterMs: number | undefined,
+  locale: InterfaceLocale,
+): string | null {
+  if (!retryAfterMs || retryAfterMs <= 0) return null;
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1_000));
+  if (seconds < 60) {
+    return locale === "en"
+      ? `Try again in about ${seconds} seconds.`
+      : `建议约 ${seconds} 秒后重试。`;
+  }
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) {
+    return locale === "en"
+      ? `Try again in about ${minutes} minutes.`
+      : `建议约 ${minutes} 分钟后重试。`;
+  }
+  const hours = Math.ceil(minutes / 60);
+  return locale === "en"
+    ? `Try again in about ${hours} hours.`
+    : `建议约 ${hours} 小时后重试。`;
 }
 
 interface ChatMessage {
@@ -615,7 +647,9 @@ export function MatchChat({
     null,
   );
   const [sending, setSending] = useState(false);
-  const [chatError, setChatError] = useState("");
+  const [chatError, setChatError] = useState<RecoverableChatError | null>(
+    null,
+  );
   const [signedIn, setSignedIn] = useState(false);
   const [shoppingMemoryOpen, setShoppingMemoryOpen] = useState(false);
   const [conversationAttachments, setConversationAttachments] = useState<
@@ -829,6 +863,7 @@ export function MatchChat({
     // A platform path and a buyer/seller side define the matching scope. Do not carry a
     // conversation identifier or transcript into another node or role by accident.
     if (!isRoot || isSeller) setMessages([]);
+    setChatError(null);
     setSellerRouteChoices([]);
     setConversationAttachments([]);
     setSupplyDiscoveryEnabled(copy.buyerDiscoveryDefault);
@@ -1562,7 +1597,8 @@ export function MatchChat({
       const text = rawText.trim();
       if (!text || sending) return;
       setSending(true);
-      setChatError("");
+      const failedUserMessageId = chatError?.failedUserMessageId;
+      setChatError(null);
       setMessage("");
       const requestId = crypto.randomUUID();
       const userMessage: ChatMessage = {
@@ -1570,8 +1606,13 @@ export function MatchChat({
         role: "user",
         text,
       };
+      const retryBaseMessages = failedUserMessageId
+        ? messages.filter(
+            (messageItem) => messageItem.id !== failedUserMessageId,
+          )
+        : messages;
       const priorMessages = answeredChoice
-        ? messages.map((messageItem) =>
+        ? retryBaseMessages.map((messageItem) =>
             messageItem.id === answeredChoice.messageId
               ? {
                   ...messageItem,
@@ -1586,7 +1627,7 @@ export function MatchChat({
                 }
               : messageItem,
           )
-        : messages;
+        : retryBaseMessages;
       const conversation = [...priorMessages, userMessage].slice(
         -MAX_CONVERSATION_MESSAGES,
       );
@@ -1645,7 +1686,14 @@ export function MatchChat({
       } catch (error) {
         const detail =
           error instanceof Error ? error.message : runtime.sendFailed;
-        setChatError(detail);
+        setChatError({
+          detail,
+          failedUserMessageId: userMessage.id,
+          prompt: text,
+          ...(error instanceof MarketplaceApiError && error.retryAfterMs
+            ? { retryAfterMs: error.retryAfterMs }
+            : {}),
+        });
         setMessage(text);
         focusInputAfterErrorRef.current = true;
       } finally {
@@ -1653,6 +1701,7 @@ export function MatchChat({
       }
     },
     [
+      chatError,
       locale,
       messages,
       onNotice,
@@ -1917,7 +1966,7 @@ export function MatchChat({
     if (sending) return;
     window.sessionStorage.removeItem(conversationStorageKey);
     setActiveHistoryId(crypto.randomUUID());
-    setChatError("");
+    setChatError(null);
     setMessage("");
     setMessages([]);
     setConversationAttachments([]);
@@ -1947,7 +1996,7 @@ export function MatchChat({
   ) => {
     if (sending) return;
     setActiveHistoryId(conversation.id);
-    setChatError("");
+    setChatError(null);
     setMessages(conversation.messages);
     setConversationAttachments([]);
     setConversationHistoryOpen(false);
@@ -1973,7 +2022,7 @@ export function MatchChat({
     if (id !== activeHistoryId) return;
     window.sessionStorage.removeItem(conversationStorageKey);
     setActiveHistoryId(crypto.randomUUID());
-    setChatError("");
+    setChatError(null);
     setMessages([]);
     setConversationAttachments([]);
     conversationIdRef.current = null;
@@ -2410,24 +2459,29 @@ export function MatchChat({
       ) : null}
       {chatError ? (
         <div className="home-chat-error" role="alert">
-          <div>
+          <span className="home-chat-error-copy">
             <strong>
               {locale === "en"
-                ? "The assistant could not finish this request"
-                : "选货员暂时未能完成这次回复"}
+                ? "That reply did not complete"
+                : "这次没有完成回复"}
             </strong>
-            <span>{chatError}</span>
+            <span>
+              {chatError.detail}{" "}
+              {formatRetryTiming(chatError.retryAfterMs, locale)}
+            </span>
             <small>
               {locale === "en"
-                ? "Your message is still in the input. Retry without retyping it."
-                : "原输入仍在下方，可直接再次发送，无需重填。"}
+                ? "Your message and attachments are kept for retry."
+                : "原输入和附件仍会保留，可直接重试。"}
             </small>
-          </div>
+          </span>
           <button
             type="button"
             onClick={() => inputRef.current?.form?.requestSubmit()}
+            disabled={sending || mediaUploading}
           >
-            {locale === "en" ? "Send again" : "再次发送"}
+            <RefreshCw size={15} aria-hidden="true" />
+            {locale === "en" ? "Retry answer" : "重试回答"}
           </button>
         </div>
       ) : null}
@@ -2497,9 +2551,6 @@ export function MatchChat({
           readOnly={sending}
           aria-disabled={sending}
         />
-        {home ? (
-          <div className="home-chat-inline-actions">{chatActions}</div>
-        ) : null}
         <Button
           className={
             home ? "home-chat-send size-14 shrink-0" : "match-chat-send"
@@ -2527,6 +2578,52 @@ export function MatchChat({
           )}
         </Button>
       </form>
+      {home ? <div className="home-chat-toolbar">{chatActions}</div> : null}
+      {isRoot && !isSeller && !messages.length ? (
+        <div
+          className="match-chat-suggestions"
+          aria-label={
+            locale === "en" ? "Example shopping requests" : "购物需求示例"
+          }
+        >
+          <div className="match-chat-starter-title-row">
+            <Compass size={14} aria-hidden="true" />
+            <span>{locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}</span>
+          </div>
+
+          <div className="match-chat-starter-grid">
+            {starterPromptCards.map((card) => (
+              <button
+                key={card.id}
+                type="button"
+                className="match-chat-starter-card"
+                onClick={() => {
+                  if (isRoot && !isSeller) {
+                    void submitGuestMessage(card.prompt);
+                  } else {
+                    applyQuickPrompt(card.prompt);
+                  }
+                }}
+              >
+                <div className="match-chat-starter-card-top">
+                  <span className="match-chat-starter-badge">{card.badge}</span>
+                  <ArrowUpRight
+                    size={13}
+                    className="match-chat-starter-arrow"
+                    aria-hidden="true"
+                  />
+                </div>
+                <strong className="match-chat-starter-title">
+                  {card.title}
+                </strong>
+                <span className="match-chat-starter-desc">
+                  {card.desc}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {!isSeller && signedIn && !isRoot ? (
         <label className="match-chat-discovery">
           <input
