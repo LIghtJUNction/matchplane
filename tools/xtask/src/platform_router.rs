@@ -1328,52 +1328,54 @@ fn valid_timestamp(value: &str) -> bool {
 
 pub(crate) fn private_or_reserved_ip(address: IpAddr) -> bool {
     match address {
-        IpAddr::V4(address) => {
-            let value = u32::from(address);
-            [
-                (u32::from_be_bytes([0, 0, 0, 0]), 8),
-                (u32::from_be_bytes([10, 0, 0, 0]), 8),
-                (u32::from_be_bytes([100, 64, 0, 0]), 10),
-                (u32::from_be_bytes([127, 0, 0, 0]), 8),
-                (u32::from_be_bytes([169, 254, 0, 0]), 16),
-                (u32::from_be_bytes([172, 16, 0, 0]), 12),
-                (u32::from_be_bytes([192, 0, 0, 0]), 24),
-                (u32::from_be_bytes([192, 0, 2, 0]), 24),
-                (u32::from_be_bytes([192, 88, 99, 0]), 24),
-                (u32::from_be_bytes([192, 168, 0, 0]), 16),
-                (u32::from_be_bytes([198, 18, 0, 0]), 15),
-                (u32::from_be_bytes([198, 51, 100, 0]), 24),
-                (u32::from_be_bytes([203, 0, 113, 0]), 24),
-                // Multicast and the former Class E / limited-broadcast space are never valid
-                // credential-bearing provider destinations.
-                (u32::from_be_bytes([224, 0, 0, 0]), 3),
-            ]
-            .into_iter()
-            .any(|(network, prefix)| cidr_contains_u32(value, network, prefix))
-        }
+        IpAddr::V4(address) => private_or_reserved_ipv4(address),
         IpAddr::V6(address) => {
+            if let Some(mapped) = address.to_ipv4_mapped() {
+                return private_or_reserved_ipv4(mapped);
+            }
             let value = u128::from(address);
+            // Non-mapped IPv6 is allowed only in the currently delegated global-unicast space.
+            if !cidr_contains_u128(value, 0x2000_0000_0000_0000_0000_0000_0000_0000_u128, 3) {
+                return true;
+            }
             [
-                // Unspecified, loopback, IPv4-compatible, and IPv4-mapped addresses.
-                (0_u128, 96),
-                (1_u128, 128),
-                // Well-known and local-use NAT64 prefixes can encode forbidden IPv4 targets.
-                (0x0064_ff9b_0000_0000_0000_0000_0000_0000_u128, 96),
-                (0x0064_ff9b_0001_0000_0000_0000_0000_0000_u128, 48),
-                // Discard-only, IETF protocol assignments, and documentation ranges.
-                (0x0100_0000_0000_0000_0000_0000_0000_0000_u128, 64),
+                // IETF protocol assignments (including Teredo, benchmarking, and ORCHID).
                 (0x2001_0000_0000_0000_0000_0000_0000_0000_u128, 23),
+                // Documentation and 6to4.
+                (0x2001_0db8_0000_0000_0000_0000_0000_0000_u128, 32),
+                (0x2002_0000_0000_0000_0000_0000_0000_0000_u128, 16),
+                // Direct Delegation AS112 and the second documentation allocation.
+                (0x2620_004f_8000_0000_0000_0000_0000_0000_u128, 48),
                 (0x3fff_0000_0000_0000_0000_0000_0000_0000_u128, 20),
-                // Unique-local, link-local, deprecated site-local, and multicast ranges.
-                (0xfc00_0000_0000_0000_0000_0000_0000_0000_u128, 7),
-                (0xfe80_0000_0000_0000_0000_0000_0000_0000_u128, 10),
-                (0xfec0_0000_0000_0000_0000_0000_0000_0000_u128, 10),
-                (0xff00_0000_0000_0000_0000_0000_0000_0000_u128, 8),
             ]
             .into_iter()
             .any(|(network, prefix)| cidr_contains_u128(value, network, prefix))
         }
     }
+}
+
+fn private_or_reserved_ipv4(address: std::net::Ipv4Addr) -> bool {
+    let value = u32::from(address);
+    [
+        (u32::from_be_bytes([0, 0, 0, 0]), 8),
+        (u32::from_be_bytes([10, 0, 0, 0]), 8),
+        (u32::from_be_bytes([100, 64, 0, 0]), 10),
+        (u32::from_be_bytes([127, 0, 0, 0]), 8),
+        (u32::from_be_bytes([169, 254, 0, 0]), 16),
+        (u32::from_be_bytes([172, 16, 0, 0]), 12),
+        (u32::from_be_bytes([192, 0, 0, 0]), 24),
+        (u32::from_be_bytes([192, 0, 2, 0]), 24),
+        (u32::from_be_bytes([192, 88, 99, 0]), 24),
+        (u32::from_be_bytes([192, 168, 0, 0]), 16),
+        (u32::from_be_bytes([198, 18, 0, 0]), 15),
+        (u32::from_be_bytes([198, 51, 100, 0]), 24),
+        (u32::from_be_bytes([203, 0, 113, 0]), 24),
+        // Multicast and the former Class E / limited-broadcast space are never valid
+        // credential-bearing provider destinations.
+        (u32::from_be_bytes([224, 0, 0, 0]), 3),
+    ]
+    .into_iter()
+    .any(|(network, prefix)| cidr_contains_u32(value, network, prefix))
 }
 
 fn cidr_contains_u32(value: u32, network: u32, prefix: u32) -> bool {
@@ -1913,6 +1915,75 @@ mod tests {
     }
 
     #[test]
+    fn ipv6_policy_is_global_unicast_allowlist_with_explicit_special_range_carveouts() {
+        let cases = [
+            ("::", true),
+            ("::1", true),
+            ("::8.8.8.8", true),
+            ("64:ff9b::808:808", true),
+            ("100::1", true),
+            ("2000:ffff:ffff:ffff:ffff:ffff:ffff:ffff", false),
+            ("2001::", true),
+            ("2001:0:ffff::", true),
+            ("2001:2::", true),
+            ("2001:20::", true),
+            ("2001:1ff:ffff:ffff:ffff:ffff:ffff:ffff", true),
+            ("2001:200::", false),
+            ("2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", false),
+            ("2001:db8::", true),
+            ("2001:db8:ffff:ffff:ffff:ffff:ffff:ffff", true),
+            ("2001:db9::", false),
+            ("2001:ffff:ffff:ffff:ffff:ffff:ffff:ffff", false),
+            ("2002::", true),
+            ("2002:ffff:ffff:ffff:ffff:ffff:ffff:ffff", true),
+            ("2003::", false),
+            ("2606:4700:4700::1111", false),
+            ("2620:4f:7fff:ffff:ffff:ffff:ffff:ffff", false),
+            ("2620:4f:8000::", true),
+            ("2620:4f:8000:ffff:ffff:ffff:ffff:ffff", true),
+            ("2620:4f:8001::", false),
+            ("3ffe:ffff:ffff:ffff:ffff:ffff:ffff:ffff", false),
+            ("3fff::", true),
+            ("3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff", true),
+            ("3fff:1000::", false),
+            ("4000::", true),
+            ("8000::", true),
+            ("fc00::1", true),
+            ("fe80::1", true),
+            ("fec0::1", true),
+            ("ff00::1", true),
+        ];
+        for (address, rejected) in cases {
+            let address = address.parse::<IpAddr>().expect("valid IP policy fixture");
+            assert_eq!(
+                private_or_reserved_ip(address),
+                rejected,
+                "unexpected policy for {address}"
+            );
+        }
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_uses_the_ipv4_classifier() {
+        let cases = [
+            ("::ffff:10.0.0.1", true),
+            ("::ffff:169.254.169.254", true),
+            ("::ffff:8.8.8.8", false),
+            ("::ffff:1.1.1.1", false),
+        ];
+        for (address, rejected) in cases {
+            let address = address
+                .parse::<IpAddr>()
+                .expect("valid mapped IPv6 fixture");
+            assert_eq!(
+                private_or_reserved_ip(address),
+                rejected,
+                "unexpected mapped policy for {address}"
+            );
+        }
+    }
+
+    #[test]
     fn mount_report_counts_only_exact_regular_orphan_temp_names_and_is_secret_safe() {
         let root = TestRoot::new();
         let credential = TestRoot::credential_name();
@@ -1933,6 +2004,7 @@ mod tests {
         symlink(root.path.join(&exact), root.path.join(linked)).expect("link orphan fixture");
 
         let report = root.reader().read().mount_report();
+        assert!(report.ok, "orphan credentials remain report-only");
         assert_eq!(report.orphan_temps.count, 1);
         assert!(report.orphan_temps.oldest_age_seconds.is_some());
         let output = serde_json::to_string(&report).expect("serialize mount report");

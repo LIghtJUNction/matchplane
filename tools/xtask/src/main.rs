@@ -18,7 +18,7 @@ use matchplane_storage::{
     CatalogProjectionStatus, PgStore, ProvisionRootDomain, ProvisionRootPlatform,
     ProvisionedRootPlatform,
 };
-use reqwest::Client;
+use reqwest::{Client, ClientBuilder};
 use rpassword::prompt_password;
 use scrypt::{Params as ScryptParams, scrypt as derive_scrypt};
 use secrecy::{ExposeSecret, SecretString};
@@ -2124,8 +2124,6 @@ struct ProviderProbePlan {
     endpoint: String,
     #[cfg(test)]
     resolved_addresses: Vec<SocketAddr>,
-    #[cfg(test)]
-    proxy_disabled: bool,
 }
 
 async fn execute_provider_probe_with_resolver<R, F>(
@@ -2181,21 +2179,30 @@ where
     {
         return Err("provider_dns_untrusted");
     }
-    let client = Client::builder()
-        .timeout(timeout)
-        .no_proxy()
-        .resolve_to_addrs(&host, &addresses)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| "client_configuration")?;
+    let client = build_provider_probe_client(Client::builder(), timeout, &host, &addresses)
+        .map_err(|()| "client_configuration")?;
     Ok(ProviderProbePlan {
         client,
         endpoint: completion_endpoint(&config.endpoint),
         #[cfg(test)]
         resolved_addresses: addresses,
-        #[cfg(test)]
-        proxy_disabled: true,
     })
+}
+
+fn build_provider_probe_client(
+    builder: ClientBuilder,
+    timeout: Duration,
+    host: &str,
+    addresses: &[SocketAddr],
+) -> Result<Client, ()> {
+    builder
+        .timeout(timeout)
+        // Clear both configured and environment/system proxies before attaching credentials.
+        .no_proxy()
+        .resolve_to_addrs(host, addresses)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| ())
 }
 
 async fn execute_provider_probe_request(
@@ -2540,10 +2547,11 @@ mod tests {
         AdminInviteRole, AuthCommand, Cli, Command, EffectiveProviderConfig,
         EnvironmentProviderValues, ManagedRouterRead, PlatformRouterReader, ProcessCommand,
         ProviderConfigConflicts, ProviderResolution, SecretCommand, Service,
-        admin_invite_role_value, better_auth_derived_key, completion_endpoint, dotenv_value,
-        execute_provider_probe_request, execute_provider_probe_with_resolver,
-        hosted_agent_report_from_managed, hosted_agent_report_from_values,
-        normalize_admin_base_url, preflight_report_from_resolution, prepare_provider_probe_plan,
+        admin_invite_role_value, better_auth_derived_key, build_provider_probe_client,
+        completion_endpoint, dotenv_value, execute_provider_probe_request,
+        execute_provider_probe_with_resolver, hosted_agent_report_from_managed,
+        hosted_agent_report_from_values, normalize_admin_base_url,
+        preflight_report_from_resolution, prepare_provider_probe_plan,
         provider_preflight_report_from_managed, put_root_email_secret,
         resolve_effective_provider_with_environment, resolve_web_node_with,
         run_workload_with_detached_preflight, safe_endpoint_origin, select_root_admin_email,
@@ -3099,9 +3107,20 @@ mod tests {
             vec!["10.0.0.1:443".parse().expect("private fixture")],
             vec!["[::1]:443".parse().expect("IPv6 loopback fixture")],
             vec!["[fc00::1]:443".parse().expect("IPv6 private fixture")],
+            vec!["[4000::1]:443".parse().expect("outside-global fixture")],
             vec![
                 "8.8.8.8:443".parse().expect("public fixture"),
                 "169.254.169.254:443".parse().expect("metadata fixture"),
+            ],
+            vec![
+                "8.8.8.8:443".parse().expect("public fixture"),
+                "[::ffff:10.0.0.1]:443"
+                    .parse()
+                    .expect("mapped-private fixture"),
+            ],
+            vec![
+                "8.8.8.8:443".parse().expect("public fixture"),
+                "[4000::1]:443".parse().expect("outside-global fixture"),
             ],
             vec!["8.8.8.8:444".parse().expect("wrong-port fixture")],
         ];
@@ -3125,6 +3144,9 @@ mod tests {
         );
         let public: Vec<SocketAddr> = vec![
             "8.8.8.8:443".parse().expect("public IPv4 fixture"),
+            "[::ffff:8.8.8.8]:443"
+                .parse()
+                .expect("mapped-public fixture"),
             "[2606:4700:4700::1111]:443"
                 .parse()
                 .expect("public IPv6 fixture"),
@@ -3145,7 +3167,57 @@ mod tests {
 
         assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
         assert_eq!(plan.resolved_addresses, public);
-        assert!(plan.proxy_disabled);
+    }
+
+    #[tokio::test]
+    async fn provider_transport_uses_exact_pin_without_dns_or_configured_proxy()
+    -> anyhow::Result<()> {
+        let origin = TcpListener::bind("127.0.0.1:0").await?;
+        let origin_address = origin.local_addr()?;
+        let proxy_trap = TcpListener::bind("127.0.0.1:0").await?;
+        let proxy_address = proxy_trap.local_addr()?;
+        let hostname = "provider-resolution-override.invalid";
+        let endpoint = Url::parse(&format!("http://{hostname}:{}/v1", origin_address.port()))?;
+        let origin_task = tokio::spawn(async move {
+            let (mut stream, _) = origin.accept().await?;
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await?;
+            let body = r#"{"choices":[{"message":{"content":"OK"}}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await
+        });
+        let proxy = reqwest::Proxy::all(format!("http://{proxy_address}"))?;
+        let client = build_provider_probe_client(
+            super::Client::builder().proxy(proxy),
+            Duration::from_secs(1),
+            hostname,
+            &[origin_address],
+        )
+        .map_err(|()| anyhow::anyhow!("build pinned no-proxy test client"))?;
+        let outcome = execute_provider_probe_request(
+            &test_provider_config(endpoint.clone()),
+            client,
+            completion_endpoint(&endpoint),
+            Duration::from_secs(1),
+            Instant::now(),
+        )
+        .await;
+
+        assert_eq!(outcome.status, "ready");
+        tokio::time::timeout(Duration::from_secs(2), origin_task)
+            .await
+            .context("pinned origin was not contacted")?
+            .context("pinned origin task failed")??;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), proxy_trap.accept())
+                .await
+                .is_err(),
+            "configured proxy trap must not receive a connection"
+        );
+        Ok(())
     }
 
     #[tokio::test]
