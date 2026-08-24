@@ -25,7 +25,6 @@ import {
 } from "./protected-storage";
 import {
   checkpointDeliveredAudit,
-  cleanupRecognizedOrphanTemps,
   commitGeneration,
   flushAuditOutbox,
   garbageCollectPlatformRouterArtifacts,
@@ -536,7 +535,8 @@ function finalizeCommittedGeneration(
   }
 
   try {
-    cleanupRecognizedOrphanTemps(handle, options);
+    // B2b-ops post-drain owns recognized temp-orphan cleanup. A pre-cutover
+    // Web process may still be writing those files, so B2b-web must not delete them.
     garbageCollectPlatformRouterArtifacts(handle, options);
   } catch {
     maintenancePending = true;

@@ -9,13 +9,15 @@ import {
 } from "../../../../../src/lib/body-limit";
 import { hasTrustedCookieOrigin } from "../../../../../src/lib/request-origin";
 import {
-  activateManagedPlatformRouterDraft,
-  appendPlatformRouterAudit,
-  getManagedPlatformRouterDraftConfig,
+  activateTransactionalManagedPlatformRouterDraft,
   getManagedPlatformRouterState,
-  stageManagedPlatformRouterConfig,
+  stageTransactionalManagedPlatformRouterConfig,
   type ManagedRouterProtocol,
 } from "../../../../../src/lib/platform-router-config";
+import {
+  committedMutationResponse,
+  platformRouterMutationErrorResponse,
+} from "../mutation-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,55 +54,53 @@ export async function PATCH(request: Request): Promise<Response> {
   }
 
   const requestId = safeRequestId(request.headers.get("x-request-id"));
-  try {
-    if (body.action === "activate") {
-      const draft = getManagedPlatformRouterDraftConfig();
-      if (!draft) return error("没有可激活的 AI 待测配置", 409, requestId);
-      const config = activateManagedPlatformRouterDraft();
-      appendPlatformRouterAudit({
-        action: "activate",
+  if (body.action === "activate") {
+    try {
+      const mutation = await activateTransactionalManagedPlatformRouterDraft({
         actor: guard.id,
         requestId,
-        endpoint: config.endpoint,
-        model: config.model,
-        enabled: config.enabled,
-        keyChanged: draft.keyChanged,
       });
-      return stateResponse(requestId);
+      return committedMutationResponse(
+        getManagedPlatformRouterState(),
+        mutation,
+        requestId,
+      );
+    } catch (cause) {
+      return platformRouterMutationErrorResponse(
+        cause,
+        "precondition",
+        requestId,
+      );
     }
+  }
 
-    const draft = stageManagedPlatformRouterConfig({
-      endpoint: text(body.endpoint),
-      model: text(body.model),
-      protocol: body.protocol as ManagedRouterProtocol,
-      enabled: body.enabled === true,
-      apiKey: optionalText(body.apiKey),
-      assistantInstructions: optionalText(body.assistantInstructions),
-      assistantMaxOutputTokens: numberValue(body.assistantMaxOutputTokens),
-      assistantTemperature: numberValue(body.assistantTemperature),
-      assistantMaxSteps: numberValue(body.assistantMaxSteps),
-      assistantTimeoutMs: numberValue(body.assistantTimeoutMs),
-      assistantReasoningEffort: optionalText(body.assistantReasoningEffort),
-      modelReasoningEfforts: Array.isArray(body.modelReasoningEfforts)
-        ? body.modelReasoningEfforts
-        : undefined,
-    });
-    appendPlatformRouterAudit({
-      action: "stage",
-      actor: guard.id,
-      requestId,
-      endpoint: draft.endpoint,
-      model: draft.model,
-      enabled: draft.enabled,
-      keyChanged: draft.keyChanged,
-    });
-    return stateResponse(requestId);
-  } catch (cause) {
-    return error(
-      cause instanceof Error ? cause.message : "AI 配置保存失败",
-      400,
+  try {
+    const mutation = await stageTransactionalManagedPlatformRouterConfig(
+      {
+        endpoint: text(body.endpoint),
+        model: text(body.model),
+        protocol: body.protocol as ManagedRouterProtocol,
+        enabled: body.enabled === true,
+        apiKey: optionalText(body.apiKey),
+        assistantInstructions: optionalText(body.assistantInstructions),
+        assistantMaxOutputTokens: numberValue(body.assistantMaxOutputTokens),
+        assistantTemperature: numberValue(body.assistantTemperature),
+        assistantMaxSteps: numberValue(body.assistantMaxSteps),
+        assistantTimeoutMs: numberValue(body.assistantTimeoutMs),
+        assistantReasoningEffort: optionalText(body.assistantReasoningEffort),
+        modelReasoningEfforts: Array.isArray(body.modelReasoningEfforts)
+          ? body.modelReasoningEfforts
+          : undefined,
+      },
+      { actor: guard.id, requestId },
+    );
+    return committedMutationResponse(
+      getManagedPlatformRouterState(),
+      mutation,
       requestId,
     );
+  } catch (cause) {
+    return platformRouterMutationErrorResponse(cause, "stage", requestId);
   }
 }
 
@@ -124,13 +124,6 @@ async function requireAdmin(
     id: String((session.user as { id?: string }).id ?? "unknown"),
     role,
   };
-}
-
-function stateResponse(requestId: string): Response {
-  return NextResponse.json(
-    { ...getManagedPlatformRouterState(), requestId },
-    { headers: { "cache-control": "no-store" } },
-  );
 }
 
 function safeRequestId(value: string | null): string {

@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PlatformRouterConfigValidationError } from "./lib/platform-router-config/contract";
+import { PlatformRouterConflictError } from "./lib/platform-router-config/transaction";
+
 const mocks = vi.hoisted(() => ({
-  appendPlatformRouterAudit: vi.fn(),
-  getManagedPlatformRouterDraftConfig: vi.fn(),
   getPlatformRouterEffectiveStatus: vi.fn(),
   getSession: vi.fn(),
   hasTrustedCookieOrigin: vi.fn(),
-  markManagedPlatformRouterDraftTested: vi.fn(),
+  markTransactionalManagedPlatformRouterDraftTested: vi.fn(),
   platformRouterPolicyIssues: vi.fn(),
+  prepareTransactionalManagedPlatformRouterDraftProbe: vi.fn(),
   probePlatformRouter: vi.fn(),
-  readManagedPlatformRouterDraftConfig: vi.fn(),
 }));
 
 vi.mock("./lib/auth", () => ({
@@ -23,44 +24,104 @@ vi.mock("./platform-router", () => ({
 }));
 vi.mock("./lib/platform-router-config", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./lib/platform-router-config")>()),
-  appendPlatformRouterAudit: mocks.appendPlatformRouterAudit,
-  getManagedPlatformRouterDraftConfig:
-    mocks.getManagedPlatformRouterDraftConfig,
   getPlatformRouterEffectiveStatus: mocks.getPlatformRouterEffectiveStatus,
-  markManagedPlatformRouterDraftTested:
-    mocks.markManagedPlatformRouterDraftTested,
+  markTransactionalManagedPlatformRouterDraftTested:
+    mocks.markTransactionalManagedPlatformRouterDraftTested,
   platformRouterPolicyIssues: mocks.platformRouterPolicyIssues,
-  readManagedPlatformRouterDraftConfig:
-    mocks.readManagedPlatformRouterDraftConfig,
+  prepareTransactionalManagedPlatformRouterDraftProbe:
+    mocks.prepareTransactionalManagedPlatformRouterDraftProbe,
 }));
 
 import { POST } from "../app/api/platform/ai/test/route";
+
+const draft = {
+  endpoint: "https://api.lmm.best/v1",
+  model: "gpt-5.6-sol",
+  protocol: "openai-compatible" as const,
+  enabled: true,
+  credentialConfigured: true,
+  assistantInstructions: "",
+  assistantMaxOutputTokens: 320,
+  assistantTemperature: 0.2,
+  assistantMaxSteps: 3,
+  assistantTimeoutMs: 20_000,
+  assistantReasoningEffort: "none",
+  modelReasoningEfforts: [],
+  testedReady: false,
+  testedAt: null,
+  keyChanged: true,
+};
+const prepared = {
+  draft,
+  secret: {
+    ...draft,
+    apiKey: "test-only-secret",
+    credentialFile: "platform-router-key-test.key",
+  },
+  expectedGenerationId: "generation-before-probe",
+  expectedDraftDigest: "a".repeat(64),
+};
+const readyProbe = {
+  status: "ready" as const,
+  outcome: "ready" as const,
+  phase: "response" as const,
+  model: "gpt-5.6-sol",
+  responseStatus: 200,
+  latencyMs: 800,
+  firstByteLatencyMs: 700,
+  performanceBudgetMs: 4_000,
+  hardTimeoutMs: 20_000,
+  message: "模型网关连接正常。",
+};
+
+function candidateRequest(): Request {
+  return new Request("http://localhost/api/platform/ai/test", {
+    method: "POST",
+    headers: {
+      origin: "http://localhost",
+      "content-type": "application/json",
+      "x-request-id": "request-test-1",
+    },
+    body: JSON.stringify({ candidate: true }),
+  });
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.hasTrustedCookieOrigin.mockReturnValue(true);
   mocks.getSession.mockResolvedValue({
-    user: { id: "11111111-1111-4111-8111-111111111111", role: "rootAdmin" },
+    user: {
+      id: "11111111-1111-4111-8111-111111111111",
+      role: "rootAdmin",
+    },
   });
   mocks.platformRouterPolicyIssues.mockReturnValue([]);
   mocks.getPlatformRouterEffectiveStatus.mockReturnValue({
     ready: true,
     issues: [],
   });
+  mocks.prepareTransactionalManagedPlatformRouterDraftProbe.mockReturnValue(
+    prepared,
+  );
+  mocks.probePlatformRouter.mockResolvedValue(readyProbe);
+  mocks.markTransactionalManagedPlatformRouterDraftTested.mockResolvedValue({
+    value: { ...draft, testedReady: true },
+    committed: true,
+    auditPending: false,
+    maintenancePending: false,
+    generationId: "generation-after-probe",
+  });
 });
 
-describe("platform AI admin probe route", () => {
-  it("returns a structured slow active-provider result as reachable", async () => {
+describe("platform AI transactional probe route", () => {
+  it("keeps active rootAdmin probes read-only and reports slow as reachable", async () => {
     mocks.probePlatformRouter.mockResolvedValue({
+      ...readyProbe,
       status: "slow",
       outcome: "slow",
       phase: "first_byte",
-      model: "router-test",
-      responseStatus: 200,
       latencyMs: 9_200,
       firstByteLatencyMs: 9_100,
-      performanceBudgetMs: 4_000,
-      hardTimeoutMs: 20_000,
       message: "模型网关可达，但响应较慢。",
     });
     const request = new Request("http://localhost/api/platform/ai/test", {
@@ -71,143 +132,151 @@ describe("platform AI admin probe route", () => {
     const response = await POST(request);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toMatchObject({
       status: "slow",
-      latencyMs: 9_200,
-      performanceBudgetMs: 4_000,
-      hardTimeoutMs: 20_000,
+      requestId: expect.any(String),
     });
-    expect(mocks.probePlatformRouter).toHaveBeenCalledWith(
-      expect.objectContaining({
-        signal: request.signal,
-        requestId: expect.any(String),
-      }),
-    );
+    expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
+    expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
   });
 
-  it("tests a compliant staged config without returning its write-only key", async () => {
+  it("prepares once, probes the opaque snapshot, and transactionally records ready", async () => {
     mocks.getSession.mockResolvedValue({
       user: {
         id: "11111111-1111-4111-8111-111111111111",
         role: "rootSuperAdmin",
       },
     });
-    const draft = {
-      endpoint: "https://api.lmm.best/v1",
-      apiKey: "test-only-secret",
-      model: "gpt-5.6-sol",
-      protocol: "openai-compatible",
-      enabled: true,
-      credentialConfigured: true,
-      assistantInstructions: "",
-      assistantMaxOutputTokens: 320,
-      assistantTemperature: 0.2,
-      assistantMaxSteps: 3,
-      assistantTimeoutMs: 20_000,
-      assistantReasoningEffort: "none",
-      modelReasoningEfforts: [],
-      testedReady: false,
-      testedAt: null,
-      keyChanged: true,
-      credentialFile: "server-only.key",
-    };
-    mocks.readManagedPlatformRouterDraftConfig.mockReturnValue(draft);
-    mocks.getManagedPlatformRouterDraftConfig.mockReturnValue(draft);
-    mocks.probePlatformRouter.mockResolvedValue({
-      status: "ready",
-      outcome: "ready",
-      phase: "response",
-      model: "gpt-5.6-sol",
-      responseStatus: 200,
-      latencyMs: 800,
-      firstByteLatencyMs: 700,
-      performanceBudgetMs: 4_000,
-      hardTimeoutMs: 20_000,
-      message: "模型网关连接正常。",
-    });
 
-    const response = await POST(
-      new Request("http://localhost/api/platform/ai/test", {
-        method: "POST",
-        headers: {
-          origin: "http://localhost",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ candidate: true }),
-      }),
-    );
+    const response = await POST(candidateRequest());
 
     expect(response.status).toBe(200);
+    expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).toHaveBeenCalledTimes(1);
     expect(mocks.probePlatformRouter).toHaveBeenCalledWith(
       expect.objectContaining({
+        requestId: "request-test-1",
         configuration: expect.objectContaining({ apiKey: "test-only-secret" }),
       }),
     );
-    expect(mocks.markManagedPlatformRouterDraftTested).toHaveBeenCalled();
+    expect(mocks.markTransactionalManagedPlatformRouterDraftTested).toHaveBeenCalledWith({
+      actor: "11111111-1111-4111-8111-111111111111",
+      requestId: "request-test-1",
+      expectedGenerationId: "generation-before-probe",
+      expectedDraftDigest: "a".repeat(64),
+      status: "ready",
+    });
     const text = await response.text();
+    expect(text).toContain('"committed":true');
     expect(text).not.toContain("test-only-secret");
-    expect(text).not.toContain("fingerprint");
+    expect(text).not.toContain("expectedDraftDigest");
+    expect(text).not.toContain("credentialFile");
   });
 
-  it("blocks the old effective model before contacting the provider", async () => {
+  it("returns committed 202 metadata when ready attestation finalization is pending", async () => {
+    mocks.getSession.mockResolvedValue({
+      user: { id: "super", role: "rootSuperAdmin" },
+    });
+    mocks.markTransactionalManagedPlatformRouterDraftTested.mockResolvedValue({
+      value: { ...draft, testedReady: true },
+      committed: true,
+      auditPending: true,
+      maintenancePending: true,
+      generationId: "generation-after-probe",
+    });
+
+    const response = await POST(candidateRequest());
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "ready",
+      committed: true,
+      auditPending: true,
+      maintenancePending: true,
+      generationId: "generation-after-probe",
+    });
+  });
+
+  it("makes no mutation when a candidate provider probe is not ready", async () => {
+    mocks.getSession.mockResolvedValue({
+      user: { id: "super", role: "rootSuperAdmin" },
+    });
+    mocks.probePlatformRouter.mockResolvedValue({
+      ...readyProbe,
+      status: "failed",
+      outcome: "upstream_http",
+      responseStatus: 503,
+      message: "安全状态说明",
+    });
+
+    const response = await POST(candidateRequest());
+
+    expect(response.status).toBe(451);
+    expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
+    const text = await response.text();
+    expect(text).not.toContain("test-only-secret");
+  });
+
+  it("maps a concurrent restage during probe to 409 with no stale attestation", async () => {
+    mocks.getSession.mockResolvedValue({
+      user: { id: "super", role: "rootSuperAdmin" },
+    });
+    mocks.markTransactionalManagedPlatformRouterDraftTested.mockRejectedValue(
+      new PlatformRouterConflictError("raw stale digest"),
+    );
+
+    const response = await POST(candidateRequest());
+
+    expect(response.status).toBe(409);
+    const text = await response.text();
+    expect(text).not.toContain("raw stale digest");
+    expect(text).not.toContain("a".repeat(64));
+  });
+
+  it("maps missing candidate to 409 and policy-invalid candidate to bounded 451", async () => {
+    mocks.getSession.mockResolvedValue({
+      user: { id: "super", role: "rootSuperAdmin" },
+    });
+    mocks.prepareTransactionalManagedPlatformRouterDraftProbe.mockImplementationOnce(
+      () => {
+        throw new PlatformRouterConfigValidationError("raw missing candidate");
+      },
+    );
+    expect((await POST(candidateRequest())).status).toBe(409);
+    expect(mocks.probePlatformRouter).not.toHaveBeenCalled();
+
+    mocks.platformRouterPolicyIssues.mockReturnValue(["model_mismatch"]);
+    const invalid = await POST(candidateRequest());
+    expect(invalid.status).toBe(451);
+    await expect(invalid.json()).resolves.toMatchObject({
+      code: "upstream_configuration",
+      issues: ["model_mismatch"],
+    });
+    expect(mocks.probePlatformRouter).not.toHaveBeenCalled();
+    expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
+  });
+
+  it("preserves active policy blocking without touching candidate state", async () => {
     mocks.getPlatformRouterEffectiveStatus.mockReturnValue({
       ready: false,
       issues: ["model_mismatch"],
     });
-
     const response = await POST(
       new Request("http://localhost/api/platform/ai/test", {
         method: "POST",
         headers: { origin: "http://localhost" },
       }),
     );
-
     expect(response.status).toBe(451);
-    await expect(response.json()).resolves.toMatchObject({
-      code: "upstream_configuration",
-      issues: ["model_mismatch"],
-    });
     expect(mocks.probePlatformRouter).not.toHaveBeenCalled();
+    expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["unconfigured", "unconfigured", null],
-    ["failed", "total_timeout", null],
-    ["failed", "upstream_http", 503],
-  ])(
-    "classifies %s/%s as redacted upstream configuration",
-    async (status, outcome, responseStatus) => {
-      mocks.probePlatformRouter.mockResolvedValue({
-        status,
-        outcome,
-        phase: outcome === "unconfigured" ? "configuration" : "total",
-        model: null,
-        responseStatus,
-        latencyMs: 100,
-        firstByteLatencyMs: null,
-        performanceBudgetMs: 4_000,
-        hardTimeoutMs: 20_000,
-        message: "安全状态说明",
-      });
-      const response = await POST(
-        new Request("http://localhost/api/platform/ai/test", {
-          method: "POST",
-          headers: { origin: "http://localhost" },
-        }),
-      );
+  it("keeps candidate role and trusted-origin boundaries before preparation", async () => {
+    expect((await POST(candidateRequest())).status).toBe(403);
+    expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
 
-      expect(response.status).toBe(451);
-      expect(response.headers.get("cache-control")).toBe("no-store");
-      const body = await response.json();
-      expect(body).toMatchObject({
-        status,
-        outcome,
-        code: "upstream_configuration",
-        preferredHttpStatus: 451,
-      });
-      expect(JSON.stringify(body)).not.toContain("response body");
-      expect(JSON.stringify(body)).not.toContain("apiKey");
-    },
-  );
+    mocks.hasTrustedCookieOrigin.mockReturnValue(false);
+    expect((await POST(candidateRequest())).status).toBe(403);
+    expect(mocks.prepareTransactionalManagedPlatformRouterDraftProbe).not.toHaveBeenCalled();
+  });
 });

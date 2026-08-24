@@ -240,6 +240,118 @@ describe("PlatformAiConfigPanel staged cutover", () => {
     },
   );
 
+  it("treats committed 202 save metadata as success and applies returned state", async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    const committedDraft = {
+      ...config,
+      endpoint: "https://api.lmm.best/v1",
+      testedReady: false,
+      testedAt: null,
+      keyChanged: true,
+    };
+    api.saveManagedPlatformRouterConfig.mockResolvedValue({
+      config,
+      draft: committedDraft,
+      effective,
+      requestId: "request-stage-pending",
+      committed: true,
+      auditPending: true,
+      maintenancePending: false,
+      generationId: "generation-stage-pending",
+    });
+
+    render(
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
+    );
+    await screen.findByDisplayValue(longEndpoint);
+    await user.click(screen.getByRole("button", { name: "保存待测配置" }));
+
+    await waitFor(() =>
+      expect(onNotice).toHaveBeenCalledWith("已提交，审计待重放"),
+    );
+    expect(screen.getByDisplayValue("https://api.lmm.best/v1")).toBeEnabled();
+    expect(onNotice).not.toHaveBeenCalledWith(expect.stringContaining("失败"));
+  });
+
+  it("treats committed 202 candidate testing as success and refreshes attested state", async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    const testedDraft = {
+      ...config,
+      testedReady: true,
+      testedAt: "2026-08-25T00:00:00.000Z",
+      keyChanged: true,
+    };
+    api.testPlatformAi.mockResolvedValue({
+      status: "ready",
+      outcome: "ready",
+      phase: "response",
+      model: "test-model",
+      responseStatus: 200,
+      latencyMs: 800,
+      firstByteLatencyMs: 700,
+      performanceBudgetMs: 4_000,
+      hardTimeoutMs: 20_000,
+      message: "模型网关连接正常。",
+      requestId: "request-test-pending",
+      committed: true,
+      auditPending: false,
+      maintenancePending: true,
+      generationId: "generation-test-pending",
+    });
+    api.getManagedPlatformRouterState
+      .mockResolvedValueOnce({
+        config,
+        draft: { ...config, testedReady: false, testedAt: null, keyChanged: true },
+        effective,
+      })
+      .mockResolvedValueOnce({ config, draft: testedDraft, effective });
+
+    render(
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
+    );
+    const testButton = await screen.findByRole("button", {
+      name: "测试待测配置",
+    });
+    await waitFor(() => expect(testButton).toBeEnabled());
+    await user.click(testButton);
+
+    await waitFor(() =>
+      expect(onNotice).toHaveBeenCalledWith("已提交，后台清理待完成"),
+    );
+    expect(
+      screen.getByRole("button", { name: "启用已测试配置" }),
+    ).toBeEnabled();
+    expect(onNotice).not.toHaveBeenCalledWith(expect.stringContaining("失败"));
+  });
+
+  it("does not fabricate a managed conflict from unreadable null fields", async () => {
+    api.getManagedPlatformRouterState.mockResolvedValue({
+      config: null,
+      draft: null,
+      effective: {
+        ...effective,
+        ready: false,
+        source: "managed",
+        conflicts: { endpoint: null, model: null, protocol: null },
+        endpointOrigin: null,
+        model: null,
+        protocol: null,
+        endpointMatchesRequired: null,
+        modelMatchesRequired: null,
+        protocolMatchesRequired: null,
+        issues: ["managed_configuration_unreadable"],
+      },
+    });
+
+    render(
+      <PlatformAiConfigPanel rootRole="rootAdmin" onNotice={vi.fn()} />,
+    );
+    await screen.findByText(/AI 流量已阻塞/);
+    expect(screen.queryByText(/非秘密配置存在冲突/)).not.toBeInTheDocument();
+  });
+
   it("stages without replacing active config and enables only an attested draft", async () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();

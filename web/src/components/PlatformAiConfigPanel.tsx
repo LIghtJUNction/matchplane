@@ -114,7 +114,12 @@ export function PlatformAiConfigPanel({
       applyState(state);
       if (state.draft) apply(state.draft);
       setApiKey("");
-      onNotice("待测配置已保存；当前生效配置未改变，请继续测试连接");
+      onNotice(
+        committedNotice(
+          "待测配置已保存；当前生效配置未改变，请继续测试连接",
+          state,
+        ),
+      );
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "AI 配置保存失败");
     } finally {
@@ -130,7 +135,10 @@ export function PlatformAiConfigPanel({
       applyState(state);
       onNotice(
         result.status === "ready"
-          ? "待测配置连接成功，现在可以显式启用"
+          ? committedNotice(
+              "待测配置连接成功，现在可以显式启用",
+              result,
+            )
           : result.message,
       );
     } catch (error) {
@@ -147,7 +155,9 @@ export function PlatformAiConfigPanel({
       const state = await activateManagedPlatformRouterConfig();
       applyState(state);
       if (state.config) apply(state.config);
-      onNotice("待测配置已原子启用；AI-ready 状态已更新");
+      onNotice(
+        committedNotice("待测配置已原子启用；AI-ready 状态已更新", state),
+      );
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "AI 配置启用失败");
     } finally {
@@ -249,7 +259,9 @@ export function PlatformAiConfigPanel({
             {effective.managedOverridesEnvironment ? (
               <span>
                 WebUI managed 配置正在覆盖 env
-                {Object.values(effective.conflicts).some(Boolean)
+                {Object.values(effective.conflicts).some(
+                  (conflict) => conflict === true,
+                )
                   ? "，且两处非秘密配置存在冲突"
                   : ""}
                 。
@@ -529,6 +541,20 @@ export function PlatformAiConfigPanel({
       ) : null}
     </section>
   );
+}
+
+function committedNotice(
+  normal: string,
+  mutation: {
+    auditPending?: boolean;
+    maintenancePending?: boolean;
+  },
+): string {
+  const pending = [
+    mutation.auditPending ? "审计待重放" : null,
+    mutation.maintenancePending ? "后台清理待完成" : null,
+  ].filter((item): item is string => item !== null);
+  return pending.length ? `已提交，${pending.join("；")}` : normal;
 }
 
 function sourceLabel(source: PlatformRouterEffectiveStatus["source"]): string {

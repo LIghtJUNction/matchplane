@@ -274,6 +274,10 @@ export interface PlatformAiProbeResult {
   preferredHttpStatus?: 451;
   issues?: string[];
   requestId?: string;
+  committed?: true;
+  auditPending?: boolean;
+  maintenancePending?: boolean;
+  generationId?: string;
 }
 
 export interface PlatformSiteSettings {
@@ -1527,6 +1531,15 @@ export interface ManagedPlatformRouterState {
   requestId?: string;
 }
 
+export interface ManagedPlatformRouterMutationState
+  extends ManagedPlatformRouterState {
+  requestId: string;
+  committed: true;
+  auditPending: boolean;
+  maintenancePending: boolean;
+  generationId: string;
+}
+
 export interface ManagedPlatformRouterModel {
   id: string;
   reasoningEfforts: string[];
@@ -2561,7 +2574,7 @@ export async function saveManagedPlatformRouterConfig(
   input: Omit<ManagedPlatformRouterConfig, "credentialConfigured"> & {
     apiKey?: string;
   },
-): Promise<ManagedPlatformRouterState> {
+): Promise<ManagedPlatformRouterMutationState> {
   const response = await fetch("/api/platform/ai/config", {
     method: "PATCH",
     credentials: "include",
@@ -2569,9 +2582,9 @@ export async function saveManagedPlatformRouterConfig(
     body: JSON.stringify({ ...input, action: "stage" }),
   });
   const body = (await response.json().catch(() => null)) as
-    | (ManagedPlatformRouterState & { error?: string })
+    | (ManagedPlatformRouterMutationState & { error?: string })
     | null;
-  if (!response.ok || !body?.draft)
+  if (!response.ok || !body?.draft || !body.committed)
     throw new MarketplaceApiError(
       response.status,
       body?.error || "AI 待测配置保存失败",
@@ -2579,7 +2592,7 @@ export async function saveManagedPlatformRouterConfig(
   return body;
 }
 
-export async function activateManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterState> {
+export async function activateManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterMutationState> {
   const response = await fetch("/api/platform/ai/config", {
     method: "PATCH",
     credentials: "include",
@@ -2587,9 +2600,9 @@ export async function activateManagedPlatformRouterConfig(): Promise<ManagedPlat
     body: JSON.stringify({ action: "activate" }),
   });
   const body = (await response.json().catch(() => null)) as
-    | (ManagedPlatformRouterState & { error?: string })
+    | (ManagedPlatformRouterMutationState & { error?: string })
     | null;
-  if (!response.ok || !body?.config)
+  if (!response.ok || !body?.config || !body.committed)
     throw new MarketplaceApiError(
       response.status,
       body?.error || "AI 待测配置激活失败",

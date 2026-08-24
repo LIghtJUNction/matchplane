@@ -1,13 +1,25 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PlatformRouterConfigValidationError } from "./lib/platform-router-config/contract";
+import {
+  PlatformRouterAuditPendingError,
+  PlatformRouterConflictError,
+  PlatformRouterLockTimeoutError,
+} from "./lib/platform-router-config/transaction";
+import {
+  PlatformRouterStateIndeterminateError,
+  PlatformRouterStorageUncertainError,
+} from "./lib/platform-router-config/transactional-lifecycle";
+
 const mocks = vi.hoisted(() => ({
-  activateManagedPlatformRouterDraft: vi.fn(),
-  appendPlatformRouterAudit: vi.fn(),
-  getManagedPlatformRouterDraftConfig: vi.fn(),
+  activateTransactionalManagedPlatformRouterDraft: vi.fn(),
   getManagedPlatformRouterState: vi.fn(),
   getSession: vi.fn(),
   hasTrustedCookieOrigin: vi.fn(),
-  stageManagedPlatformRouterConfig: vi.fn(),
+  stageTransactionalManagedPlatformRouterConfig: vi.fn(),
 }));
 
 vi.mock("./lib/auth", () => ({
@@ -18,12 +30,11 @@ vi.mock("./lib/request-origin", () => ({
 }));
 vi.mock("./lib/platform-router-config", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./lib/platform-router-config")>()),
-  activateManagedPlatformRouterDraft: mocks.activateManagedPlatformRouterDraft,
-  appendPlatformRouterAudit: mocks.appendPlatformRouterAudit,
-  getManagedPlatformRouterDraftConfig:
-    mocks.getManagedPlatformRouterDraftConfig,
+  activateTransactionalManagedPlatformRouterDraft:
+    mocks.activateTransactionalManagedPlatformRouterDraft,
   getManagedPlatformRouterState: mocks.getManagedPlatformRouterState,
-  stageManagedPlatformRouterConfig: mocks.stageManagedPlatformRouterConfig,
+  stageTransactionalManagedPlatformRouterConfig:
+    mocks.stageTransactionalManagedPlatformRouterConfig,
 }));
 
 import { GET, PATCH } from "../app/api/platform/ai/config/route";
@@ -72,6 +83,33 @@ const state = {
   },
 };
 
+function mutation(
+  value: typeof config | typeof draft,
+  pending: { auditPending?: boolean; maintenancePending?: boolean } = {},
+) {
+  return {
+    value,
+    committed: true as const,
+    auditPending: pending.auditPending ?? false,
+    maintenancePending: pending.maintenancePending ?? false,
+    generationId: "generation-2",
+  };
+}
+
+function patch(body: unknown, requestId = "request-stage-1"): Promise<Response> {
+  return PATCH(
+    new Request("http://localhost/api/platform/ai/config", {
+      method: "PATCH",
+      headers: {
+        origin: "http://localhost",
+        "content-type": "application/json",
+        "x-request-id": requestId,
+      },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.hasTrustedCookieOrigin.mockReturnValue(true);
@@ -82,13 +120,16 @@ beforeEach(() => {
     },
   });
   mocks.getManagedPlatformRouterState.mockReturnValue(state);
-  mocks.getManagedPlatformRouterDraftConfig.mockReturnValue(draft);
-  mocks.stageManagedPlatformRouterConfig.mockReturnValue(draft);
-  mocks.activateManagedPlatformRouterDraft.mockReturnValue(config);
+  mocks.stageTransactionalManagedPlatformRouterConfig.mockResolvedValue(
+    mutation(draft),
+  );
+  mocks.activateTransactionalManagedPlatformRouterDraft.mockResolvedValue(
+    mutation(config),
+  );
 });
 
-describe("platform AI managed config route", () => {
-  it("returns source and conflicts without any credential material", async () => {
+describe("platform AI transactional config route", () => {
+  it("keeps GET read-only, bounded, and credential-free", async () => {
     const response = await GET(
       new Request("http://localhost/api/platform/ai/config", {
         headers: { origin: "http://localhost" },
@@ -99,113 +140,175 @@ describe("platform AI managed config route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     const text = await response.text();
     expect(text).toContain('"source":"managed"');
-    expect(text).toContain('"managedOverridesEnvironment":true');
     expect(text).not.toContain("apiKey");
     expect(text).not.toContain("fingerprint");
+    expect(mocks.stageTransactionalManagedPlatformRouterConfig).not.toHaveBeenCalled();
+    expect(mocks.activateTransactionalManagedPlatformRouterDraft).not.toHaveBeenCalled();
   });
 
-  it("stages a write-only key and appends a bounded non-secret audit", async () => {
-    const response = await PATCH(
-      new Request("http://localhost/api/platform/ai/config", {
-        method: "PATCH",
-        headers: {
-          origin: "http://localhost",
-          "content-type": "application/json",
-          "x-request-id": "request-stage-1",
-        },
-        body: JSON.stringify({
-          ...config,
-          action: "stage",
-          apiKey: "test-only-secret",
-        }),
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.stageManagedPlatformRouterConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ apiKey: "test-only-secret" }),
-    );
-    expect(mocks.appendPlatformRouterAudit).toHaveBeenCalledWith({
+  it("stages once with actor/request identity and returns committed public state", async () => {
+    const response = await patch({
+      ...config,
       action: "stage",
-      actor: "11111111-1111-4111-8111-111111111111",
-      requestId: "request-stage-1",
-      endpoint: "https://api.lmm.best/v1",
-      model: "gpt-5.6-sol",
-      enabled: true,
-      keyChanged: true,
+      apiKey: "test-only-secret",
     });
-    const text = await response.text();
-    expect(text).not.toContain("test-only-secret");
-    expect(text).not.toContain("apiKey");
-    expect(text).not.toContain("fingerprint");
+
+    expect(response.status).toBe(200);
+    expect(mocks.stageTransactionalManagedPlatformRouterConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: "test-only-secret" }),
+      {
+        actor: "11111111-1111-4111-8111-111111111111",
+        requestId: "request-stage-1",
+      },
+    );
+    const body = await response.json();
+    expect(body).toMatchObject({
+      config,
+      draft,
+      requestId: "request-stage-1",
+      committed: true,
+      auditPending: false,
+      maintenancePending: false,
+      generationId: "generation-2",
+    });
+    expect(JSON.stringify(body)).not.toContain("test-only-secret");
+    expect(JSON.stringify(body)).not.toContain("credentialFile");
   });
 
-  it("activates only through the explicit action and audits the actor", async () => {
-    const response = await PATCH(
-      new Request("http://localhost/api/platform/ai/config", {
-        method: "PATCH",
-        headers: {
-          origin: "http://localhost",
-          "content-type": "application/json",
-          "x-request-id": "request-activate-1",
-        },
-        body: JSON.stringify({ action: "activate" }),
-      }),
+  it("activates without a pre-read and returns committed public state", async () => {
+    const response = await patch(
+      { action: "activate" },
+      "request-activate-1",
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.activateManagedPlatformRouterDraft).toHaveBeenCalledTimes(1);
-    expect(mocks.appendPlatformRouterAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "activate",
-        actor: "11111111-1111-4111-8111-111111111111",
-        requestId: "request-activate-1",
-      }),
-    );
+    expect(mocks.activateTransactionalManagedPlatformRouterDraft).toHaveBeenCalledWith({
+      actor: "11111111-1111-4111-8111-111111111111",
+      requestId: "request-activate-1",
+    });
+    expect(mocks.getManagedPlatformRouterState).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps rootAdmin read-only and reserves audited writes for rootSuperAdmin", async () => {
+  it.each([
+    ["audit", { auditPending: true, maintenancePending: false }],
+    ["maintenance", { auditPending: false, maintenancePending: true }],
+  ])("returns committed 202 when %s finalization is pending", async (_name, pending) => {
+    mocks.stageTransactionalManagedPlatformRouterConfig.mockResolvedValue(
+      mutation(draft, pending),
+    );
+
+    const response = await patch({ ...config, action: "stage" });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      committed: true,
+      auditPending: pending.auditPending ?? false,
+      maintenancePending: pending.maintenancePending ?? false,
+      generationId: "generation-2",
+    });
+  });
+
+  it("maps lock and safe pre-commit audit-tail contention to retryable 503", async () => {
+    for (const cause of [
+      new PlatformRouterLockTimeoutError("raw lock detail"),
+      new PlatformRouterAuditPendingError("raw audit tail detail"),
+    ]) {
+      mocks.stageTransactionalManagedPlatformRouterConfig.mockRejectedValueOnce(cause);
+      const response = await patch({ ...config, action: "stage" });
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("1");
+      expect(await response.text()).not.toContain(cause.message);
+    }
+  });
+
+  it("maps conflicts and validation to action-specific bounded statuses", async () => {
+    mocks.stageTransactionalManagedPlatformRouterConfig.mockRejectedValueOnce(
+      new PlatformRouterConfigValidationError("raw invalid secret=value"),
+    );
+    expect((await patch({ ...config, action: "stage" })).status).toBe(400);
+
+    mocks.activateTransactionalManagedPlatformRouterDraft.mockRejectedValueOnce(
+      new PlatformRouterConfigValidationError("raw precondition"),
+    );
+    expect((await patch({ action: "activate" })).status).toBe(409);
+
+    mocks.activateTransactionalManagedPlatformRouterDraft.mockRejectedValueOnce(
+      new PlatformRouterConflictError("raw conflict"),
+    );
+    expect((await patch({ action: "activate" })).status).toBe(409);
+  });
+
+  it.each([
+    new PlatformRouterStateIndeterminateError("raw secret state cause"),
+    new PlatformRouterStorageUncertainError("raw secret storage cause"),
+    Object.assign(new Error("raw filesystem secret cause"), { code: "EIO" }),
+  ])("bounds indeterminate and I/O failures as 500", async (cause) => {
+    mocks.stageTransactionalManagedPlatformRouterConfig.mockRejectedValueOnce(cause);
+    const response = await patch({ ...config, action: "stage" });
+    expect(response.status).toBe(500);
+    const text = await response.text();
+    expect(text).not.toContain(cause.message);
+    expect(text).not.toContain("secret");
+  });
+
+  it("keeps rootAdmin read-only and rejects untrusted writes before body or mutation", async () => {
     mocks.getSession.mockResolvedValue({
       user: {
         id: "22222222-2222-4222-8222-222222222222",
         role: "rootAdmin",
       },
     });
+    expect(
+      (
+        await GET(
+          new Request("http://localhost/api/platform/ai/config", {
+            headers: { origin: "http://localhost" },
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    expect((await patch({ action: "activate" })).status).toBe(403);
 
-    const readResponse = await GET(
-      new Request("http://localhost/api/platform/ai/config", {
-        headers: { origin: "http://localhost" },
-      }),
-    );
-    const writeResponse = await PATCH(
-      new Request("http://localhost/api/platform/ai/config", {
-        method: "PATCH",
-        headers: {
-          origin: "http://localhost",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ action: "activate" }),
-      }),
-    );
-
-    expect(readResponse.status).toBe(200);
-    expect(writeResponse.status).toBe(403);
-    expect(mocks.activateManagedPlatformRouterDraft).not.toHaveBeenCalled();
-    expect(mocks.stageManagedPlatformRouterConfig).not.toHaveBeenCalled();
-    expect(mocks.appendPlatformRouterAudit).not.toHaveBeenCalled();
+    mocks.hasTrustedCookieOrigin.mockReturnValue(false);
+    expect((await patch({ action: "activate" })).status).toBe(403);
+    expect(mocks.stageTransactionalManagedPlatformRouterConfig).not.toHaveBeenCalled();
+    expect(mocks.activateTransactionalManagedPlatformRouterDraft).not.toHaveBeenCalled();
   });
 
-  it("rejects writes from untrusted origins before touching config", async () => {
-    mocks.hasTrustedCookieOrigin.mockReturnValue(false);
-    const response = await PATCH(
+  it("retains bounded malformed and oversized request handling", async () => {
+    const malformed = await PATCH(
       new Request("http://localhost/api/platform/ai/config", {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "activate" }),
+        headers: { origin: "http://localhost", "content-type": "application/json" },
+        body: "{",
       }),
     );
+    expect(malformed.status).toBe(400);
 
-    expect(response.status).toBe(403);
-    expect(mocks.activateManagedPlatformRouterDraft).not.toHaveBeenCalled();
+    const oversized = await patch({ payload: "x".repeat(33 * 1024) });
+    expect(oversized.status).toBe(413);
+    expect(mocks.stageTransactionalManagedPlatformRouterConfig).not.toHaveBeenCalled();
+  });
+
+  it("keeps both production mutation routes free of legacy producers", () => {
+    const sources = [
+      readFileSync(
+        join(process.cwd(), "app/api/platform/ai/config/route.ts"),
+        "utf8",
+      ),
+      readFileSync(
+        join(process.cwd(), "app/api/platform/ai/test/route.ts"),
+        "utf8",
+      ),
+    ].join("\n");
+    const legacyIdentifiers = [
+      "stage" + "ManagedPlatformRouterConfig",
+      "activate" + "ManagedPlatformRouterDraft",
+      "mark" + "ManagedPlatformRouterDraftTested",
+      "append" + "PlatformRouterAudit",
+    ];
+    for (const identifier of legacyIdentifiers) {
+      expect(sources).not.toContain(identifier);
+    }
   });
 });

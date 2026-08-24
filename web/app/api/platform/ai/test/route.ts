@@ -5,18 +5,20 @@ import { NextResponse } from "next/server";
 import { auth } from "../../../../../src/lib/auth";
 import { hasTrustedCookieOrigin } from "../../../../../src/lib/request-origin";
 import {
-  appendPlatformRouterAudit,
-  getManagedPlatformRouterDraftConfig,
   getPlatformRouterEffectiveStatus,
-  markManagedPlatformRouterDraftTested,
+  markTransactionalManagedPlatformRouterDraftTested,
   platformRouterPolicyIssues,
-  readManagedPlatformRouterDraftConfig,
-  type ManagedPlatformRouterDraftConfig,
+  prepareTransactionalManagedPlatformRouterDraftProbe,
+  type PlatformRouterDraftProbe,
 } from "../../../../../src/lib/platform-router-config";
 import {
   probePlatformRouter,
   type PlatformRouterProbeConfiguration,
 } from "../../../../../src/platform-router";
+import {
+  committedMutationResponse,
+  platformRouterMutationErrorResponse,
+} from "../mutation-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,10 +27,6 @@ interface AuthorizedAdmin {
   id: string;
   role: "rootSuperAdmin" | "rootAdmin";
 }
-
-type DraftSecret = NonNullable<
-  ReturnType<typeof readManagedPlatformRouterDraftConfig>
->;
 
 /** Run a bounded server-side probe without returning credentials or provider response bodies. */
 export async function POST(request: Request): Promise<Response> {
@@ -39,39 +37,109 @@ export async function POST(request: Request): Promise<Response> {
     return response({ error: "只有超级管理员可以测试待测 AI 配置" }, 403);
 
   const requestId = safeRequestId(request.headers.get("x-request-id"));
-  const prepared = prepareProbe(candidate, requestId);
-  if (prepared instanceof Response) return prepared;
-  const probe = await probePlatformRouter({
-    requestId,
-    signal: request.signal,
-    ...(prepared.secret
-      ? { configuration: configurationForDraft(prepared.secret) }
-      : {}),
-  });
+  if (!candidate) return activeProbe(request, requestId);
 
-  const recordingFailure = recordCandidateProbe(
-    prepared.draft,
-    probe.status,
-    requestId,
-    authorized.id,
-  );
-  if (recordingFailure) return recordingFailure;
-
-  const ready =
-    probe.status === "ready" || (!candidate && probe.status === "slow");
-  return response(
-    {
-      ...probe,
+  let prepared: PlatformRouterDraftProbe;
+  try {
+    prepared = prepareTransactionalManagedPlatformRouterDraftProbe();
+  } catch (cause) {
+    return platformRouterMutationErrorResponse(
+      cause,
+      "precondition",
       requestId,
-      ...(ready
-        ? {}
-        : {
-            code: "upstream_configuration",
-            preferredHttpStatus: 451,
-          }),
-    },
-    ready ? 200 : 451,
-  );
+    );
+  }
+
+  const issues = platformRouterPolicyIssues(prepared.draft);
+  if (issues.length)
+    return blocked(
+      "待测配置不符合 M0 AI 生效要求",
+      requestId,
+      issues,
+    );
+
+  let probe: Awaited<ReturnType<typeof probePlatformRouter>>;
+  try {
+    probe = await probePlatformRouter({
+      requestId,
+      signal: request.signal,
+      configuration: configurationForDraft(prepared.secret),
+    });
+  } catch (cause) {
+    return platformRouterMutationErrorResponse(
+      cause,
+      "precondition",
+      requestId,
+    );
+  }
+
+  if (probe.status !== "ready") {
+    return response(
+      {
+        ...probe,
+        requestId,
+        code: "upstream_configuration",
+        preferredHttpStatus: 451,
+      },
+      451,
+    );
+  }
+
+  try {
+    const mutation = await markTransactionalManagedPlatformRouterDraftTested({
+      actor: authorized.id,
+      requestId,
+      expectedGenerationId: prepared.expectedGenerationId,
+      expectedDraftDigest: prepared.expectedDraftDigest,
+      status: "ready",
+    });
+    return committedMutationResponse(probe, mutation, requestId);
+  } catch (cause) {
+    return platformRouterMutationErrorResponse(
+      cause,
+      "precondition",
+      requestId,
+    );
+  }
+}
+
+async function activeProbe(
+  request: Request,
+  requestId: string,
+): Promise<Response> {
+  const effective = getPlatformRouterEffectiveStatus();
+  if (!effective.ready)
+    return blocked(
+      "当前生效配置不符合 M0 AI 要求",
+      requestId,
+      effective.issues,
+    );
+  try {
+    const probe = await probePlatformRouter({
+      requestId,
+      signal: request.signal,
+    });
+    const ready = probe.status === "ready" || probe.status === "slow";
+    return response(
+      {
+        ...probe,
+        requestId,
+        ...(ready
+          ? {}
+          : {
+              code: "upstream_configuration",
+              preferredHttpStatus: 451,
+            }),
+      },
+      ready ? 200 : 451,
+    );
+  } catch (cause) {
+    return platformRouterMutationErrorResponse(
+      cause,
+      "precondition",
+      requestId,
+    );
+  }
 }
 
 async function authorize(
@@ -97,36 +165,8 @@ async function candidateRequested(request: Request): Promise<boolean> {
   }
 }
 
-function prepareProbe(
-  candidate: boolean,
-  requestId: string,
-):
-  | {
-      secret: DraftSecret | null;
-      draft: ManagedPlatformRouterDraftConfig | null;
-    }
-  | Response {
-  if (!candidate) {
-    const effective = getPlatformRouterEffectiveStatus();
-    return effective.ready
-      ? { secret: null, draft: null }
-      : blocked("当前生效配置不符合 M0 AI 要求", requestId, effective.issues);
-  }
-
-  const secret = readManagedPlatformRouterDraftConfig();
-  const draft = getManagedPlatformRouterDraftConfig();
-  if (!secret || !draft)
-    return blocked("没有可测试的 AI 待测配置", requestId, [
-      "candidate_not_configured",
-    ]);
-  const issues = platformRouterPolicyIssues(draft);
-  return issues.length
-    ? blocked("待测配置不符合 M0 AI 生效要求", requestId, issues)
-    : { secret, draft };
-}
-
 function configurationForDraft(
-  draft: DraftSecret,
+  draft: PlatformRouterDraftProbe["secret"],
 ): PlatformRouterProbeConfiguration {
   return {
     endpoint: draft.endpoint,
@@ -141,31 +181,6 @@ function configurationForDraft(
     assistantTimeoutMs: draft.assistantTimeoutMs,
     assistantReasoningEffort: draft.assistantReasoningEffort,
   };
-}
-
-function recordCandidateProbe(
-  draft: ManagedPlatformRouterDraftConfig | null,
-  probeStatus: string,
-  requestId: string,
-  actor: string,
-): Response | null {
-  if (!draft) return null;
-  try {
-    if (probeStatus === "ready")
-      markManagedPlatformRouterDraftTested(requestId);
-    appendPlatformRouterAudit({
-      action: "test",
-      actor,
-      requestId,
-      endpoint: draft.endpoint,
-      model: draft.model,
-      enabled: draft.enabled,
-      keyChanged: draft.keyChanged,
-    });
-    return null;
-  } catch {
-    return response({ error: "AI 测试状态无法安全记录", requestId }, 500);
-  }
 }
 
 function blocked(

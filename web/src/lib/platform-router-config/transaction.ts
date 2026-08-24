@@ -646,7 +646,8 @@ export async function recoverPlatformRouterTransactions(
       options,
     );
     validateReferencedCredentials(snapshot, options);
-    cleanupRecognizedOrphanTemps(handle, options);
+    // B2b-ops post-drain owns recognized temp-orphan cleanup. Until every
+    // pre-cutover Web writer is drained, recovery must leave those files alone.
     const garbageCollection = garbageCollectPlatformRouterArtifacts(handle, options);
     return { importedLegacy, snapshot, audit, garbageCollection };
   }, options);

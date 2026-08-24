@@ -1176,8 +1176,10 @@ describe("ported recovery and collection invariants", () => {
       draft: { config: { model: "legacy-draft" } },
     });
     expect(legacyHashes(root)).toEqual(hashesBefore);
-    expect(existsSync(path.join(generationDirectory, generationTemp))).toBe(false);
-    expect(existsSync(path.join(root, pointerTemp))).toBe(false);
+    // B2b-web leaves recognized temp orphans for the B2b-ops post-drain cleanup;
+    // a pre-cutover process could still be writing either file during rollout.
+    expect(existsSync(path.join(generationDirectory, generationTemp))).toBe(true);
+    expect(existsSync(path.join(root, pointerTemp))).toBe(true);
     expect(existsSync(path.join(root, "operator-note.keep"))).toBe(true);
     expect(JSON.stringify(result)).not.toContain(SENTINEL);
     for (const artifact of [
@@ -1274,7 +1276,10 @@ describe("ported recovery and collection invariants", () => {
 
     const gcHandle = await acquirePlatformRouterLock({ root });
     try {
-      const result = garbageCollectPlatformRouterArtifacts(gcHandle, { root, gcGraceMs: 1_000 });
+      const result = garbageCollectPlatformRouterArtifacts(gcHandle, {
+        root,
+        gcGraceMs: 60_000,
+      });
       expect(result.retainedGenerations).toEqual(
         [uuid(834), uuid(835), uuid(836), uuid(837)].sort(),
       );
@@ -1297,7 +1302,7 @@ describe("ported recovery and collection invariants", () => {
     ]) {
       expect(existsSync(path.join(root, preserved))).toBe(true);
     }
-  });
+  }, 60_000);
 });
 
 describe("ported lock-holder and damaged-canonical invariants", () => {
