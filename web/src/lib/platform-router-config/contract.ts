@@ -126,6 +126,8 @@ export interface DraftTestAttestation {
 }
 
 export interface PlatformRouterAuditEvent {
+  /** Stable identity used to replay the durable audit outbox exactly once. */
+  eventId?: string;
   action: "stage" | "test" | "activate";
   actor: string;
   requestId: string;
@@ -133,6 +135,12 @@ export interface PlatformRouterAuditEvent {
   model: string;
   enabled: boolean;
   keyChanged: boolean;
+}
+
+export interface StoredRouterDraft {
+  config: NormalizedStoredRouterConfig;
+  metadata: DraftMetadata;
+  attestation: DraftTestAttestation | null;
 }
 
 export interface ManagedPlatformRouterInput {
@@ -273,7 +281,12 @@ export function normalizeCredentialFile(value: unknown): string {
 export function normalizeEndpoint(value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
   if (!URL.canParse(candidate)) throw invalidEndpoint();
-  const url = new URL(candidate);
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw invalidEndpoint();
+  }
   if (
     url.protocol !== "https:" ||
     url.username ||

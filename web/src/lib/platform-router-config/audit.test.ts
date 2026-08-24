@@ -14,10 +14,12 @@ describe("platform router audit", () => {
         keyChanged: true,
       },
       new Date("2026-08-25T00:00:00.000Z"),
+      () => "00000000-0000-4000-8000-000000000010",
     );
     const encoded = JSON.stringify(record);
 
     expect(record).toEqual({
+      eventId: "00000000-0000-4000-8000-000000000010",
       at: "2026-08-25T00:00:00.000Z",
       action: "activate",
       actor: "root-super-admin-id",

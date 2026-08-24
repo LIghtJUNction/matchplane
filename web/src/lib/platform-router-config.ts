@@ -15,7 +15,39 @@ export type {
   PlatformRouterAuditEvent,
   PlatformRouterEffectiveStatus,
 } from "./platform-router-config/contract";
-export { appendPlatformRouterAudit } from "./platform-router-config/audit";
+export {
+  appendPlatformRouterAudit,
+  buildPlatformRouterAuditRecord,
+} from "./platform-router-config/audit";
+export type { PlatformRouterAuditRecord } from "./platform-router-config/audit";
+export {
+  acquirePlatformRouterLock,
+  checkpointDeliveredAudit,
+  cleanupRecognizedOrphanTemps,
+  commitGeneration,
+  flushAuditOutbox,
+  garbageCollectPlatformRouterArtifacts,
+  PlatformRouterCommitUncertainError,
+  PlatformRouterConflictError,
+  PlatformRouterCorruptionError,
+  PlatformRouterLockOwnershipError,
+  PlatformRouterLockTimeoutError,
+  PlatformRouterTransactionError,
+  PlatformRouterValidationError,
+  readCurrentSnapshot,
+  recoverPlatformRouterTransactions,
+  validateReferencedCredentials,
+  withPlatformRouterLock,
+} from "./platform-router-config/transaction";
+export type {
+  PlatformRouterGeneration,
+  PlatformRouterGenerationInput,
+  PlatformRouterLockHandle,
+  PlatformRouterPointer,
+  PlatformRouterRecoveryResult,
+  PlatformRouterSnapshot,
+  PlatformRouterTransactionOptions,
+} from "./platform-router-config/transaction";
 export {
   getPlatformRouterEffectiveStatus,
   platformRouterPolicyIssues,

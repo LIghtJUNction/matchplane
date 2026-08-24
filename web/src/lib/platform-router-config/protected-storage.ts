@@ -1,18 +1,22 @@
+import { randomUUID } from "node:crypto";
 import {
-  chmodSync,
   closeSync,
+  constants as fsConstants,
+  fchmodSync,
+  fstatSync,
   fsyncSync,
+  lstatSync,
   openSync,
   readFileSync,
   renameSync,
   unlinkSync,
-  writeFileSync,
+  writeSync,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { normalizeCredentialFile } from "./contract";
 
-const SECRET_ROOT = "/etc/matchplane/secrets/root-email";
+export const PLATFORM_ROUTER_SECRET_ROOT =
+  "/etc/matchplane/secrets/root-email";
 
 export type PlatformRouterStorageEntry =
   | "active-config"
@@ -23,12 +27,17 @@ export type PlatformRouterStorageEntry =
 
 export interface ProtectedPlatformRouterStorage {
   read(entry: PlatformRouterStorageEntry): string | null;
-  write(
-    entry: PlatformRouterStorageEntry,
-    value: string,
-    label: string,
-  ): void;
+  write(entry: PlatformRouterStorageEntry, value: string, label: string): void;
   remove(entry: PlatformRouterStorageEntry): void;
+}
+
+export interface ProtectedStorageIo {
+  open?: typeof openSync;
+  write?: typeof writeSync;
+  fsync?: typeof fsyncSync;
+  rename?: typeof renameSync;
+  unlink?: typeof unlinkSync;
+  nextId?: () => string;
 }
 
 export function credentialStorageEntry(
@@ -38,8 +47,16 @@ export function credentialStorageEntry(
 }
 
 export function createProtectedPlatformRouterStorage(
-  root = SECRET_ROOT,
+  root = PLATFORM_ROUTER_SECRET_ROOT,
+  io: ProtectedStorageIo = {},
 ): ProtectedPlatformRouterStorage {
+  const opener = io.open ?? openSync;
+  const writer = io.write ?? writeSync;
+  const sync = io.fsync ?? fsyncSync;
+  const rename = io.rename ?? renameSync;
+  const unlink = io.unlink ?? unlinkSync;
+  const nextId = io.nextId ?? randomUUID;
+
   function entryPath(entry: PlatformRouterStorageEntry): string {
     switch (entry) {
       case "active-config":
@@ -60,12 +77,24 @@ export function createProtectedPlatformRouterStorage(
 
   return {
     read(entry) {
+      const source = entryPath(entry);
+      let descriptor: number | null = null;
       try {
-        const value = readFileSync(entryPath(entry), "utf8").trim();
+        assertRegularPathIfPresent(source);
+        descriptor = opener(
+          source,
+          fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+        );
+        if (!fstatSync(descriptor).isFile()) {
+          throw new Error("AI 受保护存储条目不是普通文件");
+        }
+        const value = readFileSync(descriptor, "utf8").trim();
         return value || null;
       } catch (cause) {
         if (isNodeErrorCode(cause, "ENOENT")) return null;
         throw new Error("AI 受保护存储无法读取", { cause });
+      } finally {
+        if (descriptor !== null) closeSync(descriptor);
       }
     },
     write(entry, value, label) {
@@ -76,20 +105,39 @@ export function createProtectedPlatformRouterStorage(
       const destination = entryPath(entry);
       const temporary = path.join(
         root,
-        `.${path.basename(destination)}.${randomUUID()}.tmp`,
+        `.${path.basename(destination)}.${nextId()}.tmp`,
       );
+      let descriptor: number | null = null;
       try {
-        const descriptor = openSync(temporary, "wx", 0o640);
-        try {
-          writeFileSync(descriptor, `${content}\n`, "utf8");
-          fsyncSync(descriptor);
-        } finally {
-          closeSync(descriptor);
+        assertTrustedDirectory(root);
+        assertRegularPathIfPresent(destination);
+        descriptor = opener(
+          temporary,
+          fsConstants.O_CREAT |
+            fsConstants.O_EXCL |
+            fsConstants.O_WRONLY |
+            fsConstants.O_NOFOLLOW,
+          0o640,
+        );
+        if (!fstatSync(descriptor).isFile()) {
+          throw new Error("AI 受保护存储临时条目不是普通文件");
         }
-        renameSync(temporary, destination);
-        chmodSync(destination, 0o640);
+        fchmodSync(descriptor, 0o640);
+        writeAll(descriptor, Buffer.from(`${content}\n`), writer);
+        sync(descriptor);
+        closeSync(descriptor);
+        descriptor = null;
+        rename(temporary, destination);
+        fsyncDirectory(root, opener, sync);
       } catch (cause) {
-        const cleanupError = removeTemporaryFile(temporary);
+        if (descriptor !== null) {
+          try {
+            closeSync(descriptor);
+          } catch {
+            // The operation error remains primary; cleanup errors are aggregated below.
+          }
+        }
+        const cleanupError = removeTemporaryFile(temporary, unlink);
         const failure = cleanupError
           ? new AggregateError([asError(cause), cleanupError])
           : cause;
@@ -97,8 +145,11 @@ export function createProtectedPlatformRouterStorage(
       }
     },
     remove(entry) {
+      const target = entryPath(entry);
       try {
-        unlinkSync(entryPath(entry));
+        assertRegularPathIfPresent(target);
+        unlink(target);
+        fsyncDirectory(root, opener, sync);
       } catch (cause) {
         if (isNodeErrorCode(cause, "ENOENT")) return;
         throw new Error("AI 受保护存储条目无法删除", { cause });
@@ -110,9 +161,65 @@ export function createProtectedPlatformRouterStorage(
 export const protectedPlatformRouterStorage =
   createProtectedPlatformRouterStorage();
 
-function removeTemporaryFile(temporary: string): Error | null {
+function writeAll(
+  descriptor: number,
+  bytes: Buffer,
+  writer: typeof writeSync,
+): void {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writer(
+      descriptor,
+      bytes,
+      offset,
+      bytes.length - offset,
+      null,
+    );
+    if (written <= 0) throw new Error("AI 受保护存储写入返回零字节");
+    offset += written;
+  }
+}
+
+function assertTrustedDirectory(directory: string): void {
+  const stat = lstatSync(directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error("AI 受保护存储根目录无效");
+  }
+}
+
+function assertRegularPathIfPresent(target: string): void {
   try {
-    unlinkSync(temporary);
+    const stat = lstatSync(target);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error("AI 受保护存储条目不是普通文件");
+    }
+  } catch (cause) {
+    if (!isNodeErrorCode(cause, "ENOENT")) throw cause;
+  }
+}
+
+function fsyncDirectory(
+  directory: string,
+  opener: typeof openSync,
+  sync: typeof fsyncSync,
+): void {
+  const descriptor = opener(
+    directory,
+    fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
+  );
+  try {
+    sync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function removeTemporaryFile(
+  temporary: string,
+  unlink: typeof unlinkSync,
+): Error | null {
+  try {
+    unlink(temporary);
     return null;
   } catch (cause) {
     if (isNodeErrorCode(cause, "ENOENT")) return null;
