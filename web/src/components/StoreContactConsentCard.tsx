@@ -10,10 +10,17 @@ import { useEffect, useState } from "react";
 
 import {
   getVerifiedContactChannels,
+  MarketplaceApiError,
   type MallAssistantContactConsentAction,
   type VerifiedContactChannel,
 } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
+
+function currentLocation(): { pathname: string; search: string } {
+  return typeof window === "undefined"
+    ? { pathname: "/", search: "" }
+    : { pathname: window.location.pathname, search: window.location.search };
+}
 
 export function StoreContactConsentCard({
   action,
@@ -30,14 +37,19 @@ export function StoreContactConsentCard({
     "loading" | "ready" | "agreeing" | "accepted" | "declined" | "failed"
   >("loading");
   const [error, setError] = useState<string | null>(null);
+  const [signInRequired, setSignInRequired] = useState(false);
 
   const load = async () => {
     setStatus("loading");
     setError(null);
+    setSignInRequired(false);
     try {
       setChannels(await getVerifiedContactChannels());
       setStatus("ready");
     } catch (cause) {
+      if (cause instanceof MarketplaceApiError && cause.status === 401) {
+        setSignInRequired(true);
+      }
       setError(cause instanceof Error ? cause.message : english ? "Unable to load verified contact details." : "无法读取已验证联系方式。");
       setStatus("failed");
     }
@@ -99,9 +111,20 @@ export function StoreContactConsentCard({
       ) : status === "failed" ? (
         <div className="store-contact-consent-error" role="alert">
           <span>{error}</span>
-          <button type="button" onClick={() => void load()}>
-            {english ? "Retry" : "重试"}
-          </button>
+          {signInRequired ? (
+            <a
+              href={(() => {
+                const { pathname, search } = currentLocation();
+                return `/login?next=${encodeURIComponent(`${pathname}${search}`)}`;
+              })()}
+            >
+              {english ? "Sign in" : "前往登录"}
+            </a>
+          ) : (
+            <button type="button" onClick={() => void load()}>
+              {english ? "Retry" : "重试"}
+            </button>
+          )}
         </div>
       ) : channels.length ? (
         <>
@@ -163,9 +186,26 @@ export function StoreContactConsentCard({
               ? "Bind and verify a contact method in Account before agreeing. Manual entry is not supported."
               : "请先在账号中绑定并验证联系方式；平台不支持手填。"}
           </span>
-          <a href="/?accountSection=account">
-            {english ? "Open account bindings" : "前往账号绑定"}
-          </a>
+          <div className="store-contact-consent-empty-actions">
+            <a
+              href={`${currentLocation().pathname}?account=identity`}
+              onClick={(event) => {
+                // The app shell opens the account dialog in place (and cancels this
+                // event) so the ongoing store chat is not lost to a full navigation.
+                const handledInApp = !window.dispatchEvent(
+                  new CustomEvent("matchplane.account.bindings", {
+                    cancelable: true,
+                  }),
+                );
+                if (handledInApp) event.preventDefault();
+              }}
+            >
+              {english ? "Open account bindings" : "前往账号绑定"}
+            </a>
+            <button type="button" onClick={() => void load()}>
+              {english ? "I bound one — check again" : "我已完成绑定，重新检测"}
+            </button>
+          </div>
         </div>
       )}
     </section>
