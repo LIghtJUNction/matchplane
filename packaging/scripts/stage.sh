@@ -10,6 +10,7 @@ root=$1
 binary_directory=$2
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 binaries=(
+  matchplane-conversion-projector
   matchplane-event-relay
   matchplane-federation-hub
   matchplane-gateway

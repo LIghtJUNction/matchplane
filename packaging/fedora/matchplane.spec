@@ -59,14 +59,15 @@ packaging/scripts/stage.sh %{buildroot} target/release
 echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.env before enabling services.'
 
 %preun
-%systemd_preun matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
+%systemd_preun matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-conversion-projector.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
 
 %postun
-%systemd_postun_with_restart matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
+%systemd_postun_with_restart matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-conversion-projector.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
 
 %files
 %config(noreplace) %attr(0640,root,matchplane) /etc/matchplane/matchplane.env
 %dir %attr(0750,root,matchplane) /etc/matchplane/services
+%{_bindir}/matchplane-conversion-projector
 %{_bindir}/matchplane-event-relay
 %{_bindir}/matchplane-federation-hub
 %{_bindir}/matchplane-gateway

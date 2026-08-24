@@ -72,7 +72,7 @@ impl PgStore {
             ));
         }
 
-        let (domain_id, platform_path) = canonical_recovery_scope(
+        let canonical_scope = canonical_recovery_scope(
             &mut transaction,
             tenant_id,
             &source_type,
@@ -80,6 +80,15 @@ impl PgStore {
             aggregate_id,
         )
         .await?;
+        let (domain_id, platform_path) = match (action, canonical_scope) {
+            (_, Some((domain_id, platform_path))) => (Some(domain_id), platform_path),
+            (MarketplaceConversionRecoveryAction::Replay, None) => {
+                return Err(StorageError::Conflict(
+                    "marketplace conversion canonical source is unavailable for replay".to_owned(),
+                ));
+            }
+            (MarketplaceConversionRecoveryAction::Resolve, None) => (None, "/".to_owned()),
+        };
         let active_successors: i64 = sqlx::query_scalar(
             "SELECT count(*) \
                FROM marketplace_conversion_outbox \
@@ -236,7 +245,7 @@ async fn canonical_recovery_scope(
     source_type: &str,
     source_id: Uuid,
     aggregate_id: Uuid,
-) -> Result<(Uuid, String), StorageError> {
+) -> Result<Option<(Uuid, String)>, StorageError> {
     let scope = match source_type {
         "introduction_contact_event" => {
             sqlx::query(
@@ -283,13 +292,10 @@ async fn canonical_recovery_scope(
                 "unsupported marketplace conversion recovery source type".to_owned(),
             ));
         }
-    }
-    .ok_or_else(|| {
-        StorageError::Conflict(
-            "marketplace conversion canonical source is unavailable for recovery".to_owned(),
-        )
-    })?;
-    Ok((scope.try_get("domain_id")?, scope.try_get("platform_path")?))
+    };
+    scope
+        .map(|scope| Ok((scope.try_get("domain_id")?, scope.try_get("platform_path")?)))
+        .transpose()
 }
 
 fn bounded_operator_text(value: &str, maximum: usize, label: &str) -> Result<String, StorageError> {

@@ -126,6 +126,7 @@ runtime:
     gateway: ''
     payment-service: ''
     event-relay: ''
+    conversion-projector: ''
     matcher: ''
     projector: ''
     vector-worker: ''
@@ -187,6 +188,19 @@ federationHub:
   service:
     type: ClusterIP
     port: 50051
+
+conversionProjector:
+  # The chart ships the workload declaration disabled. Production must opt in explicitly only
+  # after the database migration, service-scoped secret, and operator runbook are ready.
+  enabled: false
+  replicas: 2
+  batchSize: 100
+  pollMs: 1000
+  poolSize: 5
+  degradedAfterSeconds: 300
+  service:
+    type: ClusterIP
+    port: 8080
 
 workers:
   eventRelayReplicas: 2

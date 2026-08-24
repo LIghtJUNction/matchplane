@@ -570,6 +570,10 @@ async fn resolve_recovery_should_audit_and_unlock_successor(
     let fixture = setup(&pool).await?;
     let store = PgStore::from_pool(pool.clone());
     let (head, successor_id) = dead_contact_head_with_successor(&pool, fixture, &store).await?;
+    sqlx::query("DELETE FROM marketplace_introduction_contact_events WHERE id = $1")
+        .bind(head.source_id)
+        .execute(&pool)
+        .await?;
 
     let applied = store
         .recover_marketplace_conversion(
@@ -589,6 +593,13 @@ async fn resolve_recovery_should_audit_and_unlock_successor(
         "event intentionally skipped by root operator",
     )
     .await?;
+    let audit_scope = sqlx::query(
+        "SELECT domain_id IS NULL AS root_domain, platform_path FROM platform_audit_events",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert!(audit_scope.get::<bool, _>("root_domain"));
+    assert_eq!(audit_scope.get::<String, _>("platform_path"), "/");
 
     let successor = store.claim_marketplace_conversions(1).await?.remove(0);
     assert_eq!(successor.source_id, successor_id);

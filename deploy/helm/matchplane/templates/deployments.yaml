@@ -7,6 +7,9 @@
   (dict "name" "vector-worker" "binary" "matchplane-vector-worker" "replicas" .Values.workers.vectorWorkerReplicas)
   (dict "name" "federation-hub" "binary" "matchplane-federation-hub" "replicas" .Values.federationHub.replicas "port" 50051)
 -}}
+{{- if .Values.conversionProjector.enabled -}}
+{{- $services = append $services (dict "name" "conversion-projector" "binary" "matchplane-conversion-projector" "replicas" .Values.conversionProjector.replicas "port" 8080) -}}
+{{- end -}}
 {{- range $index, $service := $services }}
 {{- if $index }}
 ---
@@ -49,7 +52,7 @@ spec:
               containerPort: {{ . }}
               protocol: TCP
           {{- end }}
-          {{- if or (eq $service.name "gateway") (eq $service.name "payment-service") }}
+          {{- if or (eq $service.name "gateway") (eq $service.name "payment-service") (eq $service.name "conversion-projector") }}
           readinessProbe:
             httpGet:
               path: /health/ready

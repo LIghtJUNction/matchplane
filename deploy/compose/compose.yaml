@@ -372,6 +372,21 @@ services:
     <<: *matchplane-service
     entrypoint: ["/usr/local/bin/matchplane", "serve", "event-relay"]
 
+  # Deliberately excluded from the default Compose graph. Operators must select this profile,
+  # which also supplies the exact workload role and explicit enable gate.
+  conversion-projector:
+    <<: *matchplane-service
+    profiles: ["conversion-projector"]
+    entrypoint:
+      - /usr/bin/env
+      - MATCHPLANE_SERVICE_ROLE=conversion-projector
+      - MATCHPLANE_CONVERSION_PROJECTOR_ENABLED=true
+      - /usr/local/bin/matchplane
+      - serve
+      - conversion-projector
+    ports:
+      - "127.0.0.1:${MATCHPLANE_CONVERSION_PROJECTOR_HOST_PORT:-8082}:8080"
+
   matcher:
     <<: *matchplane-service
     entrypoint: ["/usr/local/bin/matchplane", "serve", "matcher"]

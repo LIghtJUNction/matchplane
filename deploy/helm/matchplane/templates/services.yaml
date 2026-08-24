@@ -29,6 +29,24 @@ spec:
     - name: http
       port: {{ .Values.paymentService.service.port }}
       targetPort: http
+{{- if .Values.conversionProjector.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "matchplane.fullname" . }}-conversion-projector
+  labels:
+    {{- include "matchplane.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.conversionProjector.service.type }}
+  selector:
+    {{- include "matchplane.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: conversion-projector
+  ports:
+    - name: http
+      port: {{ .Values.conversionProjector.service.port }}
+      targetPort: http
+{{- end }}
 ---
 apiVersion: v1
 kind: Service

@@ -139,4 +139,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ $root.Values.runtime.gatewayAdminTokenPath | quote }}
 - name: MATCHPLANE_PAYMENT_CALLBACK_ORIGIN
   value: {{ $root.Values.runtime.paymentCallbackOrigin | quote }}
+{{- if eq $service "conversion-projector" }}
+- name: MATCHPLANE_CONVERSION_PROJECTOR_ENABLED
+  value: "true"
+- name: MATCHPLANE_CONVERSION_PROJECTOR_BATCH_SIZE
+  value: {{ $root.Values.conversionProjector.batchSize | quote }}
+- name: MATCHPLANE_CONVERSION_PROJECTOR_POLL_MS
+  value: {{ $root.Values.conversionProjector.pollMs | quote }}
+- name: MATCHPLANE_CONVERSION_PROJECTOR_POOL_SIZE
+  value: {{ $root.Values.conversionProjector.poolSize | quote }}
+- name: MATCHPLANE_CONVERSION_PROJECTOR_DEGRADED_AFTER_SECONDS
+  value: {{ $root.Values.conversionProjector.degradedAfterSeconds | quote }}
+{{- end }}
 {{- end }}

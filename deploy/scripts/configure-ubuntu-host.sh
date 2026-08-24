@@ -160,6 +160,16 @@ write_service_environment() {
     printf 'MATCHPLANE_DATABASE_URL=postgres://matchplane:%s@127.0.0.1:5432/matchplane\n' \
       "$database_password"
     printf '%s\n' 'MATCHPLANE_VALKEY_URL=redis://127.0.0.1:6379/'
+    if [[ $service == conversion-projector ]]; then
+      # Ship the workload declared but disabled. The root operator must explicitly flip this
+      # after migrations, alerting, and recovery access have been verified.
+      printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_ENABLED=false'
+      printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_BATCH_SIZE=100'
+      printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_POLL_MS=1000'
+      printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_POOL_SIZE=5'
+      printf '%s\n' 'MATCHPLANE_CONVERSION_PROJECTOR_DEGRADED_AFTER_SECONDS=300'
+      printf '%s\n' 'MATCHPLANE_HTTP_ADDR=127.0.0.1:8082'
+    fi
     if [[ $service == web ]]; then
       # EnvironmentFile entries are applied after Environment= by systemd. Keep the web
       # workload on its least-privilege token copies instead of the service-owned files.
@@ -176,6 +186,7 @@ write_service_environment web matchplane-web
 write_service_environment gateway matchplane-gateway
 write_service_environment payment-service matchplane-payment
 write_service_environment event-relay matchplane-relay
+write_service_environment conversion-projector matchplane-conversion
 write_service_environment matcher matchplane-matcher
 write_service_environment projector matchplane-projector
 write_service_environment vector-worker matchplane-vector
