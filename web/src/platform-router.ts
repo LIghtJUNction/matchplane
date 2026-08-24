@@ -10,7 +10,10 @@
 import { isProductionEnvironment } from "./lib/runtime";
 import { readJsonResponseBody } from "./lib/body-limit";
 import { hasOnlyPublicAddresses } from "./lib/public-endpoint";
-import { readManagedPlatformRouterConfig } from "./lib/platform-router-config";
+import {
+  getPlatformRouterEffectiveStatus,
+  readManagedPlatformRouterConfig,
+} from "./lib/platform-router-config";
 import {
   generateText,
   pruneMessages,
@@ -437,9 +440,12 @@ export interface PlatformRouterProbeConfiguration {
 }
 
 function configuredPlatformRouter(): PlatformRouterProbeConfiguration | null {
-  const managed = readManagedPlatformRouterConfig();
-  if (managed?.enabled && isAllowedEndpoint(managed.endpoint)) {
-    return { ...managed, managed: true };
+  const effective = getPlatformRouterEffectiveStatus();
+  if (effective.source === "managed") {
+    const managed = readManagedPlatformRouterConfig();
+    return managed?.enabled && isAllowedEndpoint(managed.endpoint)
+      ? { ...managed, managed: true }
+      : null;
   }
   const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();

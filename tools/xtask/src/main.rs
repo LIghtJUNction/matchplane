@@ -1,5 +1,6 @@
 use std::{
     env, fs,
+    future::Future,
     io::{self, IsTerminal, Write},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
@@ -1347,17 +1348,8 @@ async fn replay_catalog_projection_job_command(job_id: Uuid, reason: &str) -> Re
 }
 
 async fn serve(service: Service, args: &[String]) -> Result<()> {
-    if matches!(service, Service::Web) {
-        // Never hold the administrative web process behind an upstream model call. The detached
-        // report gates AI readiness while rootSuperAdmin remains able to repair managed config.
-        tokio::spawn(async {
-            let report = provider_preflight_report().await;
-            if let Ok(encoded) = serde_json::to_string(&report) {
-                eprintln!("[provider-preflight] {encoded}");
-            }
-        });
-    }
-    let mut command = if matches!(service, Service::Web) {
+    let is_web = matches!(service, Service::Web);
+    let mut command = if is_web {
         ProcessCommand::new(resolve_web_node())
     } else {
         let (program, default_args) = service_command(service);
@@ -1365,11 +1357,35 @@ async fn serve(service: Service, args: &[String]) -> Result<()> {
         command.args(default_args);
         command
     };
-    if matches!(service, Service::Web) {
+    if is_web {
         command.arg(env_or(
             "MATCHPLANE_WEB_SERVER",
             "/usr/share/matchplane/web/server.js",
         ));
+    }
+    run_workload_with_detached_preflight(service, args, command, is_web, async {
+        let report = provider_preflight_report().await;
+        if let Ok(encoded) = serde_json::to_string(&report) {
+            eprintln!("[provider-preflight] {encoded}");
+        }
+    })
+    .await
+}
+
+async fn run_workload_with_detached_preflight<F>(
+    service: Service,
+    args: &[String],
+    mut command: ProcessCommand,
+    detach_preflight: bool,
+    preflight: F,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    if detach_preflight {
+        // AI readiness may block public AI traffic, never the administrative WebUI process that
+        // rootSuperAdmin needs in order to repair managed configuration.
+        tokio::spawn(preflight);
     }
     command.args(args);
     let status = command
@@ -2331,17 +2347,19 @@ impl JsonRpcResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        AdminInviteRole, AuthCommand, Cli, Command, EffectiveProviderConfig,
+        AdminInviteRole, AuthCommand, Cli, Command, EffectiveProviderConfig, ProcessCommand,
         ProviderConfigConflicts, ProviderResolution, SecretCommand, Service,
         admin_invite_role_value, better_auth_derived_key, dotenv_value,
         execute_provider_probe_with, hosted_agent_report_from_managed_values,
         hosted_agent_report_from_values, normalize_admin_base_url,
-        preflight_report_from_resolution, resolve_web_node_with, safe_endpoint_origin,
-        select_root_admin_email, service_command, sha256, valid_root_email_secret_slot,
-        validate_operator_email, validate_operator_uuid,
+        preflight_report_from_resolution, resolve_web_node_with,
+        run_workload_with_detached_preflight, safe_endpoint_origin, select_root_admin_email,
+        service_command, sha256, valid_root_email_secret_slot, validate_operator_email,
+        validate_operator_uuid,
     };
     use std::time::Duration;
 
+    use anyhow::Context as _;
     use clap::Parser;
     use secrecy::SecretString;
     use tokio::{
@@ -2351,6 +2369,24 @@ mod tests {
     };
     use url::Url;
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn blocked_provider_preflight_does_not_block_web_startup() -> anyhow::Result<()> {
+        let command = ProcessCommand::new("true");
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            run_workload_with_detached_preflight(
+                Service::Web,
+                &[],
+                command,
+                true,
+                std::future::pending(),
+            ),
+        )
+        .await
+        .context("detached provider preflight blocked WebUI startup")??;
+        Ok(())
+    }
 
     #[test]
     fn service_command_maps_gateway_to_the_packaged_binary() {

@@ -164,6 +164,37 @@ describe("platform AI managed config route", () => {
     );
   });
 
+  it("keeps rootAdmin read-only and reserves audited writes for rootSuperAdmin", async () => {
+    mocks.getSession.mockResolvedValue({
+      user: {
+        id: "22222222-2222-4222-8222-222222222222",
+        role: "rootAdmin",
+      },
+    });
+
+    const readResponse = await GET(
+      new Request("http://localhost/api/platform/ai/config", {
+        headers: { origin: "http://localhost" },
+      }),
+    );
+    const writeResponse = await PATCH(
+      new Request("http://localhost/api/platform/ai/config", {
+        method: "PATCH",
+        headers: {
+          origin: "http://localhost",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "activate" }),
+      }),
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(writeResponse.status).toBe(403);
+    expect(mocks.activateManagedPlatformRouterDraft).not.toHaveBeenCalled();
+    expect(mocks.stageManagedPlatformRouterConfig).not.toHaveBeenCalled();
+    expect(mocks.appendPlatformRouterAudit).not.toHaveBeenCalled();
+  });
+
   it("rejects writes from untrusted origins before touching config", async () => {
     mocks.hasTrustedBrowserOrigin.mockReturnValue(false);
     const response = await PATCH(
