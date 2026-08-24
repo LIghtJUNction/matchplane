@@ -154,42 +154,69 @@ describe("platform Agent router", () => {
     });
   });
 
-  it("classifies a deadline while reading a response body as a total timeout", async () => {
-    vi.useFakeTimers();
+  it.each([200, 429, 503])(
+    "classifies a deadline while reading an HTTP %i body as a total timeout",
+    async (responseStatus) => {
+      vi.useFakeTimers();
+      process.env.MATCHPLANE_ROUTER_AI_URL =
+        "https://router.example.com/v1/chat/completions";
+      process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
+      process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener(
+              "abort",
+              () => controller.error(init.signal?.reason),
+              { once: true },
+            );
+          },
+        });
+        return new Response(body, {
+          status: responseStatus,
+          headers: { "content-type": "application/json" },
+        });
+      });
+
+      const pending = probePlatformRouter({
+        fetcher: fetchMock as unknown as typeof fetch,
+        timeoutMs: 1_000,
+        performanceBudgetMs: 500,
+      });
+      await vi.advanceTimersByTimeAsync(1_001);
+      const result = await pending;
+
+      expect(result).toMatchObject({
+        status: "failed",
+        outcome: "total_timeout",
+        phase: "total",
+        responseStatus,
+      });
+    },
+  );
+
+  it("classifies Undici's headers timeout as a first-byte timeout", async () => {
     process.env.MATCHPLANE_ROUTER_AI_URL =
       "https://router.example.com/v1/chat/completions";
     process.env.MATCHPLANE_ROUTER_AI_KEY = "server-only-key";
     process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      const body = new ReadableStream({
-        start(controller) {
-          init?.signal?.addEventListener(
-            "abort",
-            () => controller.error(init.signal?.reason),
-            { once: true },
-          );
-        },
-      });
-      return new Response(body, {
-        status: 200,
-        headers: { "content-type": "application/json" },
+    const fetchMock = vi.fn(async () => {
+      throw Object.assign(new Error("unsafe upstream detail"), {
+        code: "UND_ERR_HEADERS_TIMEOUT",
       });
     });
 
-    const pending = probePlatformRouter({
+    const result = await probePlatformRouter({
       fetcher: fetchMock as unknown as typeof fetch,
-      timeoutMs: 1_000,
-      performanceBudgetMs: 500,
     });
-    await vi.advanceTimersByTimeAsync(1_001);
-    const result = await pending;
 
     expect(result).toMatchObject({
       status: "failed",
-      outcome: "total_timeout",
-      phase: "total",
-      responseStatus: 200,
+      outcome: "first_byte_timeout",
+      phase: "first_byte",
+      responseStatus: null,
     });
+    expect(result.message).not.toContain("unsafe upstream detail");
   });
 
   it("logs only bounded provider metadata", async () => {

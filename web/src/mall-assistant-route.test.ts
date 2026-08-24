@@ -138,6 +138,47 @@ describe("mall assistant provider failure mapping", () => {
     });
   });
 
+  it("maps a retryable internal tool failure to 503 without exposing its cause", async () => {
+    mocks.answerPlatformShoppingQuestion.mockRejectedValue(
+      new mocks.PlatformAssistantUnavailableError(
+        "商城 AI 导购的内部工具暂时不可用，请稍后重试。",
+        { kind: "tool_failure", phase: "tool" },
+      ),
+    );
+
+    const response = await POST(assistantRequest());
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("5");
+    await expect(response.json()).resolves.toMatchObject({
+      error: "商城 AI 导购的内部工具暂时不可用，请稍后重试。",
+      code: "provider_tool_failure",
+      retryable: true,
+    });
+  });
+
+  it("does not add Retry-After for non-retryable upstream client errors", async () => {
+    mocks.answerPlatformShoppingQuestion.mockRejectedValue(
+      new mocks.PlatformAssistantUnavailableError(
+        "商城 AI 导购上游拒绝了请求，请联系管理员检查服务配置。",
+        {
+          kind: "upstream_http",
+          phase: "response",
+          retryable: false,
+        },
+      ),
+    );
+
+    const response = await POST(assistantRequest());
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get("retry-after")).toBeNull();
+    await expect(response.json()).resolves.toMatchObject({
+      code: "provider_upstream_http",
+      retryable: false,
+    });
+  });
+
   it("keeps malformed output separate from an unreachable provider", async () => {
     mocks.answerPlatformShoppingQuestion.mockRejectedValue(
       new mocks.PlatformAssistantUnavailableError(

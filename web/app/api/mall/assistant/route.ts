@@ -348,6 +348,8 @@ function providerErrorResponse(
     if (cause.retryable) headers["retry-after"] = "5";
   } else if (cause.kind === "quota") {
     headers["retry-after"] = "60";
+  } else if (cause.kind === "tool_failure") {
+    if (cause.retryable) headers["retry-after"] = "5";
   } else if (cause.kind === "aborted") {
     status = 499;
     code = "request_aborted";
