@@ -58,6 +58,21 @@ jobs:
           test -s subplatforms/auto/dist/index.html
           bun run --cwd subplatforms/auto agent:test
 
+  packaging:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Install shell validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck shfmt
+      - name: Validate packaging and PostgreSQL backup gate
+        run: ./packaging/scripts/check.sh
+
   rust:
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -7,14 +7,14 @@ pkgdesc='Federated AI matching infrastructure (development version)'
 arch=('x86_64')
 url='https://github.com/LIghtJUNction/matchplane'
 license=('MIT')
-depends=('bubblewrap' 'ca-certificates' 'gcc-libs' 'git' 'glibc' 'nodejs>=22.12.0' 'openssl' 'zlib')
+depends=('bash' 'bubblewrap' 'ca-certificates' 'coreutils' 'gcc-libs' 'git' 'glibc' 'nodejs>=22.12.0' 'openssl' 'postgresql-libs' 'util-linux' 'zlib')
 makedepends=('bun' 'cargo' 'cmake' 'curl' 'git' 'nodejs' 'protobuf' 'rust')
 provides=('matchplane')
 conflicts=('matchplane' 'matchplane-bin')
 # makepkg's cross-language LTO drops native crypto symbols from SQLx's
 # proc-macro shared object. Cargo still applies its safe per-crate optimizations.
 options=('!lto')
-backup=('etc/matchplane/matchplane.env')
+backup=('etc/matchplane/matchplane.env' 'etc/matchplane/postgres-backup.conf')
 install=matchplane.install
 # The release workflow replaces __COMMIT__ with the exact GitHub commit being
 # published. Keeping the VCS source immutable prevents a moving main branch from

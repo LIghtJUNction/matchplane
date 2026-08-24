@@ -1,0 +1,52 @@
+[Unit]
+Description=Create and verify a local MatchPlane PostgreSQL backup
+Documentation=file:///usr/share/doc/matchplane/postgresql-backup-gate.md
+After=postgresql.service
+RequiresMountsFor=/var/backups/matchplane/postgres /run/postgresql
+ConditionPathIsDirectory=/var/backups/matchplane/postgres
+ConditionPathIsDirectory=/run/postgresql
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+UMask=0077
+Environment=PATH=/usr/bin:/bin
+Environment=MATCHPLANE_POSTGRES_BACKUP_RETENTION_DAYS=14
+EnvironmentFile=-/etc/matchplane/postgres-backup.conf
+UnsetEnvironment=BASH_ENV ENV DATABASE_URL MATCHPLANE_DATABASE_URL PGPASSWORD PGPASSFILE PGSERVICE PGSERVICEFILE PGHOST PGPORT PGUSER PGDATABASE MATCHPLANE_POSTGRES_BACKUP_DIRECTORY MATCHPLANE_POSTGRES_BACKUP_EXPECTED_DIRECTORY MATCHPLANE_POSTGRES_BACKUP_OWNER_UID MATCHPLANE_POSTGRES_BACKUP_OWNER_GID
+ExecStart=/usr/libexec/matchplane-postgres-backup
+
+# The dump must only reach the local PostgreSQL Unix socket and may only write
+# the dedicated backup directory.
+RestrictAddressFamilies=AF_UNIX
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/run/postgresql
+ReadWritePaths=/var/backups/matchplane/postgres
+InaccessiblePaths=-/etc/matchplane -/var/lib/postgresql -/var/lib/pgsql -/var/lib/postgres
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+DevicePolicy=closed
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=2h

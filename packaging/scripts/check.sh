@@ -4,7 +4,15 @@ set -euo pipefail
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$repository_root"
 
+backup_gate_shell_sources=(
+  packaging/scripts/postgres-backup.sh
+  packaging/scripts/postgres-backup-prepare.sh
+  packaging/scripts/postgres-backup-verify.sh
+  tests/operations/postgres-backup-gate.sh
+)
+
 bash -n packaging/scripts/stage.sh packaging/scripts/archive.sh
+bash -n "${backup_gate_shell_sources[@]}"
 bash -n packaging/ubuntu/build-deb.sh packaging/ubuntu/postinst packaging/ubuntu/prerm
 bash -n packaging/fedora/build-rpm.sh
 bash -n deploy/scripts/configure-ubuntu-host.sh
@@ -15,6 +23,13 @@ bash -n packaging/aur/matchplane-git/PKGBUILD.in
 bash -n packaging/aur/matchplane-git/matchplane.install
 bash -n packaging/aur/matchplane-bin/PKGBUILD.in
 bash -n packaging/aur/matchplane-bin/matchplane.install
+
+if command -v shellcheck >/dev/null 2>&1; then
+  shellcheck "${backup_gate_shell_sources[@]}"
+fi
+if command -v shfmt >/dev/null 2>&1; then
+  shfmt -d -i 2 -ci "${backup_gate_shell_sources[@]}"
+fi
 
 for service in web gateway payment-service event-relay matcher projector subplatform-builder vector-worker federation-hub; do
   unit="packaging/systemd/matchplane-${service}.service"
@@ -75,6 +90,52 @@ if ! rg -q '^d /var/lib/matchplane/media 0750 matchplane-web matchplane-web -$' 
   exit 1
 fi
 
+backup_unit=packaging/systemd/matchplane-postgres-backup.service
+backup_timer=packaging/systemd/matchplane-postgres-backup.timer
+for directive in \
+  '^User=postgres$' '^Group=postgres$' '^UMask=0077$' \
+  '^RestrictAddressFamilies=AF_UNIX$' '^ProtectSystem=strict$' \
+  '^PrivateTmp=true$' '^PrivateNetwork=true$' '^NoNewPrivileges=true$' \
+  '^ReadOnlyPaths=/run/postgresql$' \
+  '^ReadWritePaths=/var/backups/matchplane/postgres$'; do
+  if ! rg -q "$directive" "$backup_unit"; then
+    echo "PostgreSQL backup service is missing hardening directive $directive" >&2
+    exit 1
+  fi
+done
+if ! rg -q '^Persistent=true$' "$backup_timer" \
+  || ! rg -q '^RandomizedDelaySec=45m$' "$backup_timer"; then
+  echo 'PostgreSQL backup timer must be persistent and randomized' >&2
+  exit 1
+fi
+if ! rg -q '^d /var/backups/matchplane/postgres 0700 - - -$' \
+  packaging/tmpfiles/matchplane.conf; then
+  echo 'PostgreSQL backup directory must be staged with mode 0700' >&2
+  exit 1
+fi
+backup_config_entries=$(grep -Ev '^[[:space:]]*(#|$)' packaging/config/postgres-backup.conf)
+if [[ $backup_config_entries != MATCHPLANE_POSTGRES_BACKUP_RETENTION_DAYS=14 ]]; then
+  echo 'PostgreSQL backup config may contain only the retention window' >&2
+  exit 1
+fi
+if rg -q 'systemctl (enable|preset).*matchplane-postgres-backup' \
+  deploy/scripts/configure-ubuntu-host.sh packaging/ubuntu/postinst \
+  packaging/aur/*/matchplane.install packaging/fedora/matchplane.spec; then
+  echo 'package and development installation must not enable the PostgreSQL backup timer' >&2
+  exit 1
+fi
+for staged_path in \
+  '/usr/libexec/matchplane-postgres-backup' \
+  '/usr/sbin/matchplane-postgres-backup-prepare' \
+  '/usr/bin/matchplane-postgres-backup-verify' \
+  'packaging/systemd/\*\.timer' \
+  'postgres-backup.conf'; do
+  if ! rg -q "$staged_path" packaging/scripts/stage.sh; then
+    echo "packaging stage is missing $staged_path" >&2
+    exit 1
+  fi
+done
+
 if rg -n --glob '*.Dockerfile' --glob 'Dockerfile*' \
   '^FROM [^$@[:space:]]+:[^@[:space:]]+( |$)' deploy packaging; then
   echo 'container build bases must be pinned by digest' >&2
@@ -88,14 +149,31 @@ if ! rg -q '^ARG TIMESCALE_IMAGE=[^@[:space:]]+@sha256:[0-9a-f]{64}$' \
 fi
 
 if command -v systemd-analyze >/dev/null 2>&1; then
-  verify_output=$(systemd-analyze verify packaging/systemd/*.service 2>&1 || true)
+  verify_output=$(systemd-analyze verify packaging/systemd/*.service packaging/systemd/*.timer 2>&1 || true)
   unexpected=$(printf '%s\n' "$verify_output" \
-    | grep -Ev 'Command (/usr/bin/node|/usr/bin/(matchplane|matchplane-[a-z-]+)) is not executable: No such file or directory' \
+    | grep -Ev 'Command (/usr/bin/node|/usr/bin/(matchplane|matchplane-[a-z-]+)|/usr/libexec/matchplane-postgres-backup) is not executable:' \
     || true)
   if [[ -n $unexpected ]]; then
     printf '%s\n' "$unexpected" >&2
     exit 1
   fi
+
+  # Verify the new unit/timer as installed. The repository cannot populate the
+  # absolute packaged ExecStart path, so a test-only drop-in substitutes true;
+  # stage assertions above separately pin that packaged path.
+  systemd_verify_directory=$(mktemp -d)
+  cp packaging/systemd/matchplane-postgres-backup.service \
+    packaging/systemd/matchplane-postgres-backup.timer "$systemd_verify_directory/"
+  install -d "$systemd_verify_directory/matchplane-postgres-backup.service.d"
+  printf '[Service]\nExecStart=\nExecStart=/usr/bin/true\n' \
+    >"$systemd_verify_directory/matchplane-postgres-backup.service.d/verify.conf"
+  if ! SYSTEMD_UNIT_PATH="$systemd_verify_directory:/usr/lib/systemd/system" \
+    systemd-analyze verify matchplane-postgres-backup.service \
+    matchplane-postgres-backup.timer; then
+    rm -rf "$systemd_verify_directory"
+    exit 1
+  fi
+  rm -rf "$systemd_verify_directory"
 fi
 
 if rg -q 'MATCHPLANE_NODE_ID=00000000-0000-7000-8000-00000000000a' \
@@ -108,6 +186,8 @@ if rg -n '^MATCHPLANE_(DATABASE|VALKEY)_URL=' packaging/config/matchplane.env; t
   echo 'shared package environment must not contain workload database or Valkey URLs' >&2
   exit 1
 fi
+
+tests/operations/postgres-backup-gate.sh
 
 if [[ ${MATCHPLANE_BUILD_PACKAGES:-0} == 1 ]]; then
   package_version=$(awk -F'"' '$1 == "version = " { print $2; exit }' Cargo.toml)

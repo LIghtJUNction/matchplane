@@ -23,7 +23,9 @@ sed \
   "$repository_root/packaging/ubuntu/control.in" >"$package_root/DEBIAN/control"
 install -Dm0755 "$repository_root/packaging/ubuntu/postinst" "$package_root/DEBIAN/postinst"
 install -Dm0755 "$repository_root/packaging/ubuntu/prerm" "$package_root/DEBIAN/prerm"
-printf '%s\n' '/etc/matchplane/matchplane.env' >"$package_root/DEBIAN/conffiles"
+printf '%s\n' \
+  '/etc/matchplane/matchplane.env' \
+  '/etc/matchplane/postgres-backup.conf' >"$package_root/DEBIAN/conffiles"
 mkdir -p "$output_directory"
 dpkg-deb --root-owner-group --build "$package_root" \
   "$output_directory/matchplane_${version}_amd64.deb"
