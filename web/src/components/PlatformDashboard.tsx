@@ -57,6 +57,7 @@ import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
 import { NationalIdentityConfigPanel } from "./NationalIdentityConfigPanel";
+import { WeChatLoginConfigPanel } from "./WeChatLoginConfigPanel";
 import { PhoneLoginConfigPanel } from "./PhoneLoginConfigPanel";
 import { MallCatalogModeration } from "./MallCatalogModeration";
 import { MallBrandPanel } from "./MallBrandPanel";
@@ -898,6 +899,10 @@ export function PlatformDashboard({
                 <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
               </section>
               <NationalIdentityConfigPanel
+                rootRole={rootRole}
+                onNotice={onNotice}
+              />
+              <WeChatLoginConfigPanel
                 rootRole={rootRole}
                 onNotice={onNotice}
               />

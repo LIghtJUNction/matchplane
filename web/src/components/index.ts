@@ -56,4 +56,5 @@ export * from "./MallBrandPanel";
 export * from "./MallCatalogModeration";
 export * from "./RootEmailConfigPanel";
 export * from "./NationalIdentityConfigPanel";
+export * from "./WeChatLoginConfigPanel";
 export * from "./PhoneLoginConfigPanel";

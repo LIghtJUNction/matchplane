@@ -2102,6 +2102,65 @@ export async function testSmsGatewayConfig(phoneNumber: string): Promise<void> {
     );
 }
 
+export interface WeChatOAuthConfig {
+  enabled: boolean;
+  appId: string;
+  scopes: string[];
+  authorizationUrl: string;
+  tokenUrl: string;
+  userInfoUrl: string;
+  credentialConfigured: boolean;
+}
+
+export async function getWeChatOAuthConfig(): Promise<WeChatOAuthConfig | null> {
+  const response = await fetch("/api/platform/wechat-oauth/config", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: WeChatOAuthConfig | null;
+    error?: string;
+  } | null;
+  if (!response.ok || !body)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "微信扫码登录配置读取失败",
+    );
+  return body.config ?? null;
+}
+
+export async function saveWeChatOAuthConfig(input: {
+  enabled: boolean;
+  appId: string;
+  appSecret?: string;
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  userInfoUrl?: string;
+  scopes: string[];
+}): Promise<{ config: WeChatOAuthConfig; restartRequired: boolean }> {
+  const response = await fetch("/api/platform/wechat-oauth/config", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: WeChatOAuthConfig;
+    restartRequired?: boolean;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.config)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "微信扫码登录配置保存失败",
+    );
+  return {
+    config: body.config,
+    restartRequired: body.restartRequired === true,
+  };
+}
+
 export interface ContactResponse {
   counterpart: {
     party_id: string;

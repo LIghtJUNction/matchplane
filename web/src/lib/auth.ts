@@ -29,6 +29,12 @@ import { isRootEmailAuthConfigured, sendConfiguredAuthEmail } from "./mail";
 import { sendConfiguredPhoneOtp } from "./sms";
 import { isProductionEnvironment } from "./runtime";
 import { readManagedNationalIdentityConfig } from "./national-identity-config";
+import {
+  createWeChatTokenExchange,
+  createWeChatUserInfoLoader,
+  isWeChatNativeEndpoint,
+  readManagedWeChatOAuthConfig,
+} from "./wechat-oauth-config";
 import { isUuid } from "./uuid";
 
 const database = new Pool({
@@ -716,7 +722,8 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
     {
       providerId: "wechat",
       envKey: "WECHAT",
-      defaultScopes: ["openid", "profile", "email"],
+      // WeChat Open Platform website QR login only understands its own scope.
+      defaultScopes: ["snsapi_login"],
     },
     {
       providerId: "qq",
@@ -736,15 +743,20 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
       providerId === "national_identity"
         ? readManagedNationalIdentityConfig()
         : null;
-    // A saved but disabled national-identity record intentionally wins over
-    // deployment variables so an operator can turn the integration off from
-    // the mall settings without deleting credentials from the host.
+    const managedWeChat =
+      providerId === "wechat" ? readManagedWeChatOAuthConfig() : null;
+    // A saved but disabled managed record intentionally wins over deployment
+    // variables so an operator can turn the integration off from the mall
+    // settings without deleting credentials from the host.
     if (managedNationalIdentity && !managedNationalIdentity.enabled) return [];
+    if (managedWeChat && !managedWeChat.enabled) return [];
     const clientId =
       managedNationalIdentity?.clientId ??
+      managedWeChat?.appId ??
       process.env[`${prefix}CLIENT_ID`]?.trim();
     const clientSecret =
       managedNationalIdentity?.clientSecret ??
+      managedWeChat?.appSecret ??
       process.env[`${prefix}CLIENT_SECRET`]?.trim();
     // Some approved identity gateways publish OIDC discovery, while others
     // provide a fixed authorization/token/userinfo contract.  Never invent a
@@ -756,13 +768,17 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
     );
     const authorizationUrl = safeOAuthUrl(
       managedNationalIdentity?.authorizationUrl ??
+        managedWeChat?.authorizationUrl ??
         process.env[`${prefix}AUTHORIZATION_URL`],
     );
     const tokenUrl = safeOAuthUrl(
-      managedNationalIdentity?.tokenUrl ?? process.env[`${prefix}TOKEN_URL`],
+      managedNationalIdentity?.tokenUrl ??
+        managedWeChat?.tokenUrl ??
+        process.env[`${prefix}TOKEN_URL`],
     );
     const userInfoUrl = safeOAuthUrl(
       managedNationalIdentity?.userInfoUrl ??
+        managedWeChat?.userInfoUrl ??
         process.env[`${prefix}USERINFO_URL`],
     );
     const hasEndpointContract = Boolean(
@@ -783,6 +799,14 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
         );
       return [];
     }
+
+    // WeChat's own sns endpoints do not implement standard OAuth2. Apply the
+    // native-protocol adapter only for WeChat-hosted endpoints so a
+    // standards-compliant proxy or mock gateway keeps the default flow.
+    const wechatNativeProtocol =
+      providerId === "wechat" &&
+      !discoveryUrl &&
+      isWeChatNativeEndpoint(tokenUrl);
 
     return [
       {
@@ -826,7 +850,22 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
         },
         scopes:
           managedNationalIdentity?.scopes ??
+          managedWeChat?.scopes ??
           parseOAuthScopes(process.env[`${prefix}SCOPES`], defaultScopes),
+        ...(wechatNativeProtocol && clientId && clientSecret && tokenUrl && userInfoUrl
+          ? {
+              // The qrconnect page reads appid (client_id is ignored) and the
+              // sns token endpoint does not understand PKCE parameters.
+              pkce: false,
+              authorizationUrlParams: { appid: clientId },
+              getToken: createWeChatTokenExchange({
+                tokenUrl,
+                appId: clientId,
+                appSecret: clientSecret,
+              }),
+              getUserInfo: createWeChatUserInfoLoader({ userInfoUrl }),
+            }
+          : {}),
         mapProfileToUser: (profile: Record<string, unknown>) => {
           const subject = firstProfileString(
             profile,
