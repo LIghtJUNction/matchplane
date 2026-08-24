@@ -14,20 +14,21 @@
 
 ---
 
-## 推送命令（需先 Fork）
+## 推送命令（pashippercode fork）
+
+Fork 账号：**pashippercode**（https://github.com/pashippercode/matchplane ，需先从上游 Fork）
 
 ```sh
-# 1. 在 GitHub 网页 Fork LIghtJUNction/matchplane 到你的账号
-# 2. 本地：
+gh auth login   # 账号 pashippercode
 cd matchplane
-git remote add fork https://github.com/<你的用户名>/matchplane.git
-git push -u fork cursor/challenge-11-participation-897f
+git push -u origin cursor/challenge-11-participation-897f
 
-# 3. 开 PR（把下面 --body-file 换成上面正文）：
 gh pr create \
   --repo LIghtJUNction/matchplane \
   --base main \
-  --head <你的用户名>:cursor/challenge-11-participation-897f \
+  --head pashippercode:matchplane:cursor/challenge-11-participation-897f \
   --title "挑战11：首页改成「帮我找」、卡片抄了瓜子的作业、后台能配微信和短信登录了" \
   --body-file docs/challenge-11-pr-selected-body.md
 ```
+
+一键脚本（含 bundle）：`ChunchunOwO/api.lmm.best` 分支 `cursor/matchplane-challenge-11-897f` 下 `challenge-11/push-to-fork.sh`
