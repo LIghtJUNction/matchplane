@@ -48,8 +48,8 @@ export function FloatingMarketplaceClerk({
         const description = isZh
                 ? "描述需求，比较真实在售商品。"
                 : "Describe your needs and compare real listings.";
-        const launcherText = launcherLabel ??
-                (isZh ? "问选货员" : "Ask assistant");
+        const launcherText =
+                launcherLabel ?? (isZh ? "问选货员" : "Ask assistant");
 
         useEffect(() => {
                 setPortalNode(document.body);

@@ -22,7 +22,11 @@ import {
   ensurePendingConversion,
   updatePendingConversion,
 } from "../pending-conversion";
-import { loadSubplatform, subplatformCopy, type SubplatformConfig } from "../subplatform";
+import {
+  loadSubplatform,
+  subplatformCopy,
+  type SubplatformConfig,
+} from "../subplatform";
 import type { AssetListing } from "../types";
 
 const CANONICAL_ID =
@@ -64,9 +68,12 @@ function activeIntentIdempotencyKey(
     (offerId !== null && !CANONICAL_ID.test(offerId))
   )
     throw new Error("active intent idempotency scope is invalid");
-  return ["active-intent", session.partyId, domainId, offerId ?? "general"].join(
-    ":",
-  );
+  return [
+    "active-intent",
+    session.partyId,
+    domainId,
+    offerId ?? "general",
+  ].join(":");
 }
 
 interface UseStoreHandoffOptions {
@@ -391,13 +398,9 @@ export function useStoreHandoff({
         throw new Error("当前环境未连接真实撮合 API，未发送联系申请");
       }
       const isGenericOffer = Boolean(selected.offerId);
-      const listingId = isGenericOffer
-        ? null
-        : listingIdFromBackend(selected);
+      const listingId = isGenericOffer ? null : listingIdFromBackend(selected);
       if (!isGenericOffer && !listingId) {
-        throw new Error(
-          "商品必须来自已接入店铺的真实目录；当前未发送申请",
-        );
+        throw new Error("商品必须来自已接入店铺的真实目录；当前未发送申请");
       }
       if (
         !selectedDomainId ||
@@ -544,9 +547,7 @@ export function useStoreHandoff({
         );
       } catch (error) {
         const message =
-          error instanceof Error
-            ? error.message
-            : "联系申请未发送，请稍后重试";
+          error instanceof Error ? error.message : "联系申请未发送，请稍后重试";
         onNotice(message);
         throw error instanceof Error ? error : new Error(message);
       }

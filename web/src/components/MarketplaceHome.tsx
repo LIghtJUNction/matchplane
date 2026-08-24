@@ -142,7 +142,9 @@ function MarketplaceDemandEntry({
                                 onClick={() => onDescribeNeed(platformPath)}
                         >
                                 <MessageSquareMore aria-hidden="true" />
-                                {locale === "en" ? "Describe your need" : "说需求"}
+                                {locale === "en"
+                                        ? "Describe your need"
+                                        : "说需求"}
                         </Button>
                 </section>
         );

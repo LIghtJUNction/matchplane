@@ -26,8 +26,7 @@ vi.mock("./lib/platform-router-config", async (importOriginal) => ({
   appendPlatformRouterAudit: mocks.appendPlatformRouterAudit,
   getManagedPlatformRouterDraftConfig:
     mocks.getManagedPlatformRouterDraftConfig,
-  getPlatformRouterEffectiveStatus:
-    mocks.getPlatformRouterEffectiveStatus,
+  getPlatformRouterEffectiveStatus: mocks.getPlatformRouterEffectiveStatus,
   markManagedPlatformRouterDraftTested:
     mocks.markManagedPlatformRouterDraftTested,
   platformRouterPolicyIssues: mocks.platformRouterPolicyIssues,
@@ -176,39 +175,36 @@ describe("platform AI admin probe route", () => {
     ["unconfigured", "unconfigured", null],
     ["failed", "total_timeout", null],
     ["failed", "upstream_http", 503],
-  ])(
-    "classifies %s/%s as redacted upstream configuration",
-    async (status, outcome, responseStatus) => {
-      mocks.probePlatformRouter.mockResolvedValue({
-        status,
-        outcome,
-        phase: outcome === "unconfigured" ? "configuration" : "total",
-        model: null,
-        responseStatus,
-        latencyMs: 100,
-        firstByteLatencyMs: null,
-        performanceBudgetMs: 4_000,
-        hardTimeoutMs: 20_000,
-        message: "安全状态说明",
-      });
-      const response = await POST(
-        new Request("http://localhost/api/platform/ai/test", {
-          method: "POST",
-          headers: { origin: "http://localhost" },
-        }),
-      );
+  ])("classifies %s/%s as redacted upstream configuration", async (status, outcome, responseStatus) => {
+    mocks.probePlatformRouter.mockResolvedValue({
+      status,
+      outcome,
+      phase: outcome === "unconfigured" ? "configuration" : "total",
+      model: null,
+      responseStatus,
+      latencyMs: 100,
+      firstByteLatencyMs: null,
+      performanceBudgetMs: 4_000,
+      hardTimeoutMs: 20_000,
+      message: "安全状态说明",
+    });
+    const response = await POST(
+      new Request("http://localhost/api/platform/ai/test", {
+        method: "POST",
+        headers: { origin: "http://localhost" },
+      }),
+    );
 
-      expect(response.status).toBe(451);
-      expect(response.headers.get("cache-control")).toBe("no-store");
-      const body = await response.json();
-      expect(body).toMatchObject({
-        status,
-        outcome,
-        code: "upstream_configuration",
-        preferredHttpStatus: 451,
-      });
-      expect(JSON.stringify(body)).not.toContain("response body");
-      expect(JSON.stringify(body)).not.toContain("apiKey");
-    },
-  );
+    expect(response.status).toBe(451);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(body).toMatchObject({
+      status,
+      outcome,
+      code: "upstream_configuration",
+      preferredHttpStatus: 451,
+    });
+    expect(JSON.stringify(body)).not.toContain("response body");
+    expect(JSON.stringify(body)).not.toContain("apiKey");
+  });
 });

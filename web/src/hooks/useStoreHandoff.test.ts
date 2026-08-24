@@ -137,7 +137,9 @@ describe("buyer contact retrieval", () => {
       }),
     );
 
-    let contact: Awaited<ReturnType<typeof result.current.retrieveStoreContact>>;
+    let contact: Awaited<
+      ReturnType<typeof result.current.retrieveStoreContact>
+    >;
     await act(async () => {
       contact = await result.current.retrieveStoreContact({
         type: "contact_consent",
@@ -156,6 +158,9 @@ describe("buyer contact retrieval", () => {
       }),
     );
     expect(notification).toHaveBeenCalledTimes(1);
-    window.removeEventListener("matchplane:notifications-updated", notification);
+    window.removeEventListener(
+      "matchplane:notifications-updated",
+      notification,
+    );
   });
 });

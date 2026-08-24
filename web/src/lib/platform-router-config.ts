@@ -22,15 +22,20 @@ const SECRET_ROOT = "/etc/matchplane/secrets/root-email";
 const CONFIG_PATH = path.join(SECRET_ROOT, "platform-router.json");
 const LEGACY_KEY_FILE = "platform-router.key";
 const DRAFT_CONFIG_PATH = path.join(SECRET_ROOT, "platform-router.draft.json");
-const DRAFT_META_PATH = path.join(SECRET_ROOT, "platform-router.draft-meta.json");
-const DRAFT_TEST_PATH = path.join(SECRET_ROOT, "platform-router.draft-test.json");
+const DRAFT_META_PATH = path.join(
+  SECRET_ROOT,
+  "platform-router.draft-meta.json",
+);
+const DRAFT_TEST_PATH = path.join(
+  SECRET_ROOT,
+  "platform-router.draft-test.json",
+);
 const AUDIT_PATH = path.join(SECRET_ROOT, "platform-router.audit.jsonl");
 const MANAGED_KEY_FILE = /^platform-router-key-[0-9a-f-]{36}\.key$/;
 
 const M0_REQUIRED_ROUTER_ENDPOINT = "https://api.lmm.best/v1";
 const M0_REQUIRED_ROUTER_MODEL = "gpt-5.6-sol";
-const M0_REQUIRED_ROUTER_PROTOCOL: ManagedRouterProtocol =
-  "openai-compatible";
+const M0_REQUIRED_ROUTER_PROTOCOL: ManagedRouterProtocol = "openai-compatible";
 
 export type ManagedRouterProtocol =
   | "openai-compatible"
@@ -182,7 +187,7 @@ export function getManagedPlatformRouterDraftConfig(): ManagedPlatformRouterDraf
   return {
     ...presentManagedConfig(stored, Boolean(apiKey)),
     testedReady,
-    testedAt: testedReady ? attestation?.testedAt ?? null : null,
+    testedAt: testedReady ? (attestation?.testedAt ?? null) : null,
     keyChanged: metadata?.keyChanged === true,
   };
 }
@@ -207,12 +212,15 @@ export function stageManagedPlatformRouterConfig(
     credentialFile = `platform-router-key-${randomUUID()}.key`;
   } else {
     credentialFile =
-      previousDraft?.credentialFile ?? active?.credentialFile ?? LEGACY_KEY_FILE;
+      previousDraft?.credentialFile ??
+      active?.credentialFile ??
+      LEGACY_KEY_FILE;
     if (!readOptional(credentialPath(credentialFile)))
       throw new Error("请输入 API Key 后再保存待测配置");
   }
   const keyChanged = Boolean(
-    suppliedKey || credentialFile !== (active?.credentialFile ?? LEGACY_KEY_FILE),
+    suppliedKey ||
+      credentialFile !== (active?.credentialFile ?? LEGACY_KEY_FILE),
   );
   const config = normalizedInputConfig(input, credentialFile);
   try {
@@ -445,7 +453,11 @@ export function getPlatformRouterEffectiveStatus(): PlatformRouterEffectiveStatu
     source: selected.source,
     managedOverridesEnvironment:
       selected.source === "managed" && environment.present,
-    conflicts: managedEnvironmentConflicts(managed, environment, selected.source),
+    conflicts: managedEnvironmentConflicts(
+      managed,
+      environment,
+      selected.source,
+    ),
     endpointOrigin: selected.endpoint
       ? safeEndpointOrigin(selected.endpoint)
       : null,

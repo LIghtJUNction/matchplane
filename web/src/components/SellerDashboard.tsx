@@ -1865,10 +1865,9 @@ function formatMinorUnits(
       .toString()
       .padStart(scale + 1, "0");
     const splitAt = absolute.length - scale;
-    const integer = (scale === 0 ? absolute : absolute.slice(0, splitAt)).replace(
-      /\B(?=(\d{3})+(?!\d))/g,
-      ",",
-    );
+    const integer = (
+      scale === 0 ? absolute : absolute.slice(0, splitAt)
+    ).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     if (scale === 0) return `${currency} ${negative ? "-" : ""}${integer}`;
     return `${currency} ${negative ? "-" : ""}${integer}.${absolute.slice(splitAt)}`;
   } catch {

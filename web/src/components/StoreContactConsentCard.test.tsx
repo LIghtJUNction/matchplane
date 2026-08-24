@@ -58,9 +58,7 @@ describe("StoreContactConsentCard", () => {
     expect(screen.getByText("联系申请已发送")).toBeVisible();
     expect(onRetrieve).not.toHaveBeenCalled();
 
-    await user.click(
-      screen.getByRole("button", { name: "检查店员是否同意" }),
-    );
+    await user.click(screen.getByRole("button", { name: "检查店员是否同意" }));
     await waitFor(() => expect(onRetrieve).toHaveBeenCalledWith(action));
     expect(screen.getByText("seller@example.com")).toBeVisible();
   });
@@ -72,11 +70,7 @@ describe("StoreContactConsentCard", () => {
       { type: "email", value: "buyer@example.com" },
     ]);
     render(
-      <StoreContactConsentCard
-        action={action}
-        locale="zh"
-        onAgree={onAgree}
-      />,
+      <StoreContactConsentCard action={action} locale="zh" onAgree={onAgree} />,
     );
 
     await screen.findByText("buyer@example.com");

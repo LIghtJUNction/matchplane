@@ -119,12 +119,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function openUsedCarConversation(user: ReturnType<typeof userEvent.setup>) {
+async function openUsedCarConversation(
+  user: ReturnType<typeof userEvent.setup>,
+) {
   window.history.replaceState(null, "", "/used-car");
   render(<App initialPath="/used-car" />);
-  await user.click(
-    await screen.findByRole("button", { name: "与店长对话" }),
-  );
+  await user.click(await screen.findByRole("button", { name: "与店长对话" }));
   return screen.findByRole("textbox", {
     name: "告诉 MatchPlane 你的需求",
   });

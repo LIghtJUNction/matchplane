@@ -824,7 +824,9 @@ describe("platform shopping agent", () => {
   });
 
   it("types no-final-text after tools and logs no prompt, key, or endpoint path", async () => {
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     searchPublicStoreOffers.mockResolvedValue([
       {
         offer_id: "offer-a",
@@ -984,41 +986,41 @@ describe("platform shopping agent", () => {
     expect((failure as Error).message).not.toContain("unsafe");
   });
 
-  it.each([400, 401, 403, 404, 422])(
-    "keeps upstream HTTP %i bounded and non-retryable",
-    async (statusCode) => {
-      generateText.mockRejectedValueOnce(
-        Object.assign(new Error("unsafe provider body with credential"), {
-          statusCode,
-        }),
-      );
+  it.each([
+    400, 401, 403, 404, 422,
+  ])("keeps upstream HTTP %i bounded and non-retryable", async (statusCode) => {
+    generateText.mockRejectedValueOnce(
+      Object.assign(new Error("unsafe provider body with credential"), {
+        statusCode,
+      }),
+    );
 
-      const failure = await answerPlatformShoppingQuestion({
-        question: "你好",
-        messages: [{ role: "user", content: "你好" }],
-        stores: [],
-      }).catch((error: unknown) => error);
+    const failure = await answerPlatformShoppingQuestion({
+      question: "你好",
+      messages: [{ role: "user", content: "你好" }],
+      stores: [],
+    }).catch((error: unknown) => error);
 
-      expect(failure).toMatchObject({
-        kind: "upstream_http",
-        phase: "response",
-        responseStatus: statusCode,
-        retryable: false,
-      });
-      expect((failure as Error).message).toContain("联系管理员");
-      expect((failure as Error).message).not.toContain("credential");
-      expect((failure as Error).message).not.toContain("重试");
-    },
-  );
+    expect(failure).toMatchObject({
+      kind: "upstream_http",
+      phase: "response",
+      responseStatus: statusCode,
+      retryable: false,
+    });
+    expect((failure as Error).message).toContain("联系管理员");
+    expect((failure as Error).message).not.toContain("credential");
+    expect((failure as Error).message).not.toContain("重试");
+  });
 
   it("classifies a nested catalog exception after a provider 200 as a tool failure", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response("{}", {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
+      vi.fn(
+        async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
       ),
     );
     searchPublicStoreOfferPage.mockRejectedValueOnce(
@@ -1184,10 +1186,7 @@ describe("platform shopping agent", () => {
         calculate_numbers: expect.anything(),
       }),
     );
-    expect(options.stopWhen).toEqual([
-      { count: 4 },
-      expect.any(Function),
-    ]);
+    expect(options.stopWhen).toEqual([{ count: 4 }, expect.any(Function)]);
     expect(options.messages).toEqual([
       { role: "user", content: "记住我偏好轻薄" },
       { role: "assistant", content: "记住了。" },

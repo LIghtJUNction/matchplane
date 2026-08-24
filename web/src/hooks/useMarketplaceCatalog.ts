@@ -15,7 +15,8 @@ import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 
 const CATALOG_TIMEOUT_MS = 10_000;
-export const PENDING_MARKETPLACE_LIKE_KEY = "matchplane.marketplace.pending-like";
+export const PENDING_MARKETPLACE_LIKE_KEY =
+  "matchplane.marketplace.pending-like";
 
 interface PendingMarketplaceLike {
   version: 1;
@@ -229,11 +230,7 @@ export function useMarketplaceCatalog({
           count: pending.expectedCount + 1,
           expectedCount: pending.expectedCount,
         });
-        applyLikeState(
-          pending.offerId,
-          state.likeTotal,
-          state.viewerLikeCount,
-        );
+        applyLikeState(pending.offerId, state.likeTotal, state.viewerLikeCount);
       } catch (error) {
         if (error instanceof MarketplaceApiError && error.status === 401) {
           applyLikeState(

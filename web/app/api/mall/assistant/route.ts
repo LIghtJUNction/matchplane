@@ -317,7 +317,6 @@ function normalizeStorePath(value: unknown): string | null {
   return /^\/[a-z0-9][a-z0-9-]{1,62}$/.test(normalized) ? normalized : null;
 }
 
-
 function minimizeQuestion(value: string): string {
   return value
     .slice(0, 2_000)

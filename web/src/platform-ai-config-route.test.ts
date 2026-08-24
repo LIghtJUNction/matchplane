@@ -18,8 +18,7 @@ vi.mock("./lib/request-origin", () => ({
 }));
 vi.mock("./lib/platform-router-config", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./lib/platform-router-config")>()),
-  activateManagedPlatformRouterDraft:
-    mocks.activateManagedPlatformRouterDraft,
+  activateManagedPlatformRouterDraft: mocks.activateManagedPlatformRouterDraft,
   appendPlatformRouterAudit: mocks.appendPlatformRouterAudit,
   getManagedPlatformRouterDraftConfig:
     mocks.getManagedPlatformRouterDraftConfig,
@@ -77,7 +76,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.hasTrustedBrowserOrigin.mockReturnValue(true);
   mocks.getSession.mockResolvedValue({
-    user: { id: "11111111-1111-4111-8111-111111111111", role: "rootSuperAdmin" },
+    user: {
+      id: "11111111-1111-4111-8111-111111111111",
+      role: "rootSuperAdmin",
+    },
   });
   mocks.getManagedPlatformRouterState.mockReturnValue(state);
   mocks.getManagedPlatformRouterDraftConfig.mockReturnValue(draft);

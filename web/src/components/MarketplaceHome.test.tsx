@@ -195,7 +195,12 @@ describe("MarketplaceHome actions", () => {
                 render(
                         <MarketplaceHome
                                 catalogResolved
-                                listings={[{ ...listing, platformPath: "/used-car" }]}
+                                listings={[
+                                        {
+                                                ...listing,
+                                                platformPath: "/used-car",
+                                        },
+                                ]}
                                 locale="zh"
                                 onDescribeNeed={onDescribeNeed}
                                 onLikeListing={vi.fn(async () => undefined)}
@@ -206,7 +211,9 @@ describe("MarketplaceHome actions", () => {
                 );
 
                 expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-                await user.click(screen.getByRole("button", { name: "说需求" }));
+                await user.click(
+                        screen.getByRole("button", { name: "说需求" }),
+                );
                 expect(onDescribeNeed).toHaveBeenCalledWith("/used-car");
         });
 
@@ -226,7 +233,9 @@ describe("MarketplaceHome actions", () => {
                         />,
                 );
 
-                await user.click(screen.getByRole("button", { name: "说需求" }));
+                await user.click(
+                        screen.getByRole("button", { name: "说需求" }),
+                );
                 expect(onDescribeNeed).toHaveBeenCalledWith(undefined);
         });
 

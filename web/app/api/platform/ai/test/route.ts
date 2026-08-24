@@ -74,7 +74,9 @@ export async function POST(request: Request): Promise<Response> {
   );
 }
 
-async function authorize(request: Request): Promise<AuthorizedAdmin | Response> {
+async function authorize(
+  request: Request,
+): Promise<AuthorizedAdmin | Response> {
   if (!hasTrustedBrowserOrigin(request))
     return response({ error: "请求来源未被平台信任" }, 403);
   const session = await auth.api.getSession({ headers: request.headers });
@@ -108,11 +110,7 @@ function prepareProbe(
     const effective = getPlatformRouterEffectiveStatus();
     return effective.ready
       ? { secret: null, draft: null }
-      : blocked(
-          "当前生效配置不符合 M0 AI 要求",
-          requestId,
-          effective.issues,
-        );
+      : blocked("当前生效配置不符合 M0 AI 要求", requestId, effective.issues);
   }
 
   const secret = readManagedPlatformRouterDraftConfig();
@@ -166,10 +164,7 @@ function recordCandidateProbe(
     });
     return null;
   } catch {
-    return response(
-      { error: "AI 测试状态无法安全记录", requestId },
-      500,
-    );
+    return response({ error: "AI 测试状态无法安全记录", requestId }, 500);
   }
 }
 

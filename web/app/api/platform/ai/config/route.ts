@@ -113,10 +113,7 @@ async function requireAdmin(
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return error("需要登录", 401);
   const role = (session.user as { role?: string | null }).role;
-  if (
-    role !== "rootSuperAdmin" &&
-    (write || role !== "rootAdmin")
-  )
+  if (role !== "rootSuperAdmin" && (write || role !== "rootAdmin"))
     return error(
       write
         ? "只有超级管理员可以保存 AI 配置"

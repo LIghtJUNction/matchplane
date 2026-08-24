@@ -36,8 +36,9 @@ export function PlatformAiConfigPanel({
   const [config, setConfig] = useState<ManagedPlatformRouterConfig | null>(
     null,
   );
-  const [draft, setDraft] =
-    useState<ManagedPlatformRouterDraftConfig | null>(null);
+  const [draft, setDraft] = useState<ManagedPlatformRouterDraftConfig | null>(
+    null,
+  );
   const [effective, setEffective] =
     useState<PlatformRouterEffectiveStatus | null>(null);
   const [endpoint, setEndpoint] = useState("");
@@ -218,7 +219,8 @@ export function PlatformAiConfigPanel({
     >
       <SectionHeading title="AI" titleId="platform-ai-config-title" />
       <p className="subplatform-intro">
-        WebUI 托管配置是正式生产路径。API Key 仅写入服务器受保护存储，读取接口、响应和日志都不会返回密钥或指纹。
+        WebUI 托管配置是正式生产路径。API Key
+        仅写入服务器受保护存储，读取接口、响应和日志都不会返回密钥或指纹。
       </p>
       {effective ? (
         <div
@@ -532,9 +534,7 @@ export function PlatformAiConfigPanel({
   );
 }
 
-function sourceLabel(
-  source: PlatformRouterEffectiveStatus["source"],
-): string {
+function sourceLabel(source: PlatformRouterEffectiveStatus["source"]): string {
   if (source === "managed") return "WebUI managed";
   if (source === "environment") return "env fallback";
   return "未配置";

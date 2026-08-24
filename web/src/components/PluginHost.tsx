@@ -197,10 +197,7 @@ export function PluginHost({
           event.data,
           pluginActionInput(),
           "auth.open.result",
-        )(
-          Boolean(onAuthRequired),
-          onAuthRequired ? undefined : "unavailable",
-        );
+        )(Boolean(onAuthRequired), onAuthRequired ? undefined : "unavailable");
       } else if (
         event.data.type === "listing.open" ||
         event.data.type === "listing.like"
@@ -427,9 +424,7 @@ function listingForPluginAction(
 ): AssetListing | null {
   const payload = isRecord(message.payload) ? message.payload : null;
   const listingId =
-    payload && typeof payload.listingId === "string"
-      ? payload.listingId
-      : null;
+    payload && typeof payload.listingId === "string" ? payload.listingId : null;
   if (!listingId) return null;
   return (
     listings.find(

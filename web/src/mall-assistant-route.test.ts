@@ -40,8 +40,7 @@ vi.mock("./platform-ai-admission", () => ({
 vi.mock("./platform-router", () => ({
   answerPlatformShoppingQuestion: mocks.answerPlatformShoppingQuestion,
   isPlatformRouterConfigured: mocks.isPlatformRouterConfigured,
-  PlatformAssistantUnavailableError:
-    mocks.PlatformAssistantUnavailableError,
+  PlatformAssistantUnavailableError: mocks.PlatformAssistantUnavailableError,
   PlatformRouterQuotaExceededError: mocks.PlatformRouterQuotaExceededError,
 }));
 vi.mock("./store-directory", () => ({
@@ -55,8 +54,7 @@ vi.mock("./lib/request-origin", () => ({
   hasTrustedBrowserOrigin: mocks.hasTrustedBrowserOrigin,
 }));
 vi.mock("./lib/platform-router-config", () => ({
-  getPlatformRouterEffectiveStatus:
-    mocks.getPlatformRouterEffectiveStatus,
+  getPlatformRouterEffectiveStatus: mocks.getPlatformRouterEffectiveStatus,
 }));
 vi.mock("./lib/store-access", () => ({
   configuredTenantId: mocks.configuredTenantId,
@@ -141,9 +139,7 @@ describe("mall assistant provider failure mapping", () => {
     expect(response.status).toBe(504);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("retry-after")).toBe("5");
-    expect(response.headers.get("x-request-id")).toMatch(
-      /^[0-9a-f-]{36}$/,
-    );
+    expect(response.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
     await expect(response.json()).resolves.toMatchObject({
       error: "响应超时，请稍后重试。",
       code: "provider_first_byte_timeout",
@@ -151,7 +147,10 @@ describe("mall assistant provider failure mapping", () => {
       requestId: expect.any(String),
     });
     expect(mocks.answerPlatformShoppingQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({ signal: request.signal, requestId: expect.any(String) }),
+      expect.objectContaining({
+        signal: request.signal,
+        requestId: expect.any(String),
+      }),
     );
   });
 

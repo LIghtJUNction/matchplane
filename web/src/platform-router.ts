@@ -881,17 +881,18 @@ export async function answerPlatformShoppingQuestion(input: {
     );
   }
   const startedAt = Date.now();
-  const deadline = createProviderDeadline(input.signal, router.assistantTimeoutMs);
+  const deadline = createProviderDeadline(
+    input.signal,
+    router.assistantTimeoutMs,
+  );
   const attempt: ProviderAttemptState = { phase: "connect" };
   const awaitToolOperation = <T>(operation: () => Promise<T>) => {
     attempt.phase = "tool";
     return awaitWithSignal(operation, deadline.signal);
   };
   let admitted = false;
-  let emptyCatalogOutcome:
-    | "empty_catalog"
-    | "no_matching_products"
-    | null = null;
+  let emptyCatalogOutcome: "empty_catalog" | "no_matching_products" | null =
+    null;
   const admitProviderCall = async () => {
     if (admitted) return;
     await awaitWithSignal(
@@ -954,14 +955,13 @@ export async function answerPlatformShoppingQuestion(input: {
         ),
     );
     let recommendations: RecommendedBackendListing[] = initialSearchCompleted
-      ? await awaitToolOperation(
-          () =>
-            searchPublicStoreOffers({
-              stores: input.stores,
-              narrative: question,
-              intent: inferredIntent,
-              limit: 6,
-            }),
+      ? await awaitToolOperation(() =>
+          searchPublicStoreOffers({
+            stores: input.stores,
+            narrative: question,
+            intent: inferredIntent,
+            limit: 6,
+          }),
         )
       : [];
     if (
@@ -1012,16 +1012,15 @@ export async function answerPlatformShoppingQuestion(input: {
       });
     if (explicitStoreHandoff) {
       if (!recommendations.length) {
-        recommendations = await awaitToolOperation(
-          () =>
-            searchPublicStoreOffers({
-              stores: input.stores,
-              narrative: conversation.olderUserContext
-                ? `${conversation.olderUserContext}\n${question}`
-                : question,
-              intent: inferredIntent,
-              limit: 6,
-            }),
+        recommendations = await awaitToolOperation(() =>
+          searchPublicStoreOffers({
+            stores: input.stores,
+            narrative: conversation.olderUserContext
+              ? `${conversation.olderUserContext}\n${question}`
+              : question,
+            intent: inferredIntent,
+            limit: 6,
+          }),
         );
       }
       const products = rememberOffers(recommendations);
@@ -1420,20 +1419,19 @@ export async function answerPlatformShoppingQuestion(input: {
             offset,
             limit,
           }) => {
-            const page = await awaitToolOperation(
-              () =>
-                searchPublicStoreOfferPage({
-                  stores: input.stores,
-                  narrative: query,
-                  intent: mergeShoppingIntent(inferredIntent, {
-                    ...(budget ? { budget } : {}),
-                    requirements,
-                  }),
-                  storePaths,
-                  sort,
-                  offset,
-                  limit,
+            const page = await awaitToolOperation(() =>
+              searchPublicStoreOfferPage({
+                stores: input.stores,
+                narrative: query,
+                intent: mergeShoppingIntent(inferredIntent, {
+                  ...(budget ? { budget } : {}),
+                  requirements,
                 }),
+                storePaths,
+                sort,
+                offset,
+                limit,
+              }),
             );
             recommendations = page.items;
             if (page.total === 0) {
@@ -1672,8 +1670,7 @@ export async function answerPlatformShoppingQuestion(input: {
           completionTokens: result.usage.outputTokens ?? 0,
           totalTokens:
             result.usage.totalTokens ??
-            (result.usage.inputTokens ?? 0) +
-              (result.usage.outputTokens ?? 0),
+            (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0),
         },
       });
     }
@@ -2018,7 +2015,9 @@ function createProviderDeadline(
   else parentSignal?.addEventListener("abort", onParentAbort, { once: true });
   const timer = setTimeout(() => {
     timedOut = true;
-    controller.abort(new DOMException("Provider deadline exceeded", "TimeoutError"));
+    controller.abort(
+      new DOMException("Provider deadline exceeded", "TimeoutError"),
+    );
   }, boundedTimeoutMs);
   timer.unref?.();
   return {
@@ -2146,10 +2145,7 @@ function isUpstreamSuccessStatus(status: number | null): status is number {
   return status !== null && status >= 200 && status < 300;
 }
 
-const CONNECT_TIMEOUT_CODES = new Set([
-  "ETIMEDOUT",
-  "UND_ERR_CONNECT_TIMEOUT",
-]);
+const CONNECT_TIMEOUT_CODES = new Set(["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT"]);
 const HEADER_TIMEOUT_CODES = new Set(["UND_ERR_HEADERS_TIMEOUT"]);
 
 function providerFailure(
@@ -2233,7 +2229,8 @@ function providerErrorIsTimeout(error: unknown): boolean {
 
 function providerErrorIsAbort(error: unknown): boolean {
   return providerErrorChain(error).some(
-    (candidate) => candidate instanceof Error && candidate.name === "AbortError",
+    (candidate) =>
+      candidate instanceof Error && candidate.name === "AbortError",
   );
 }
 
@@ -2337,11 +2334,7 @@ export function configuredPlatformRouterProtocol(): PlatformRouterProtocol {
 
 export interface PlatformRouterProbeResult {
   status: "ready" | "slow" | "unconfigured" | "failed";
-  outcome:
-    | "ready"
-    | "slow"
-    | "unconfigured"
-    | PlatformProviderFailureKind;
+  outcome: "ready" | "slow" | "unconfigured" | PlatformProviderFailureKind;
   phase: PlatformProviderPhase;
   model: string | null;
   responseStatus: number | null;
@@ -2389,8 +2382,14 @@ export async function probePlatformRouter(
   }
 
   const hardTimeoutMs = Number.isSafeInteger(options.timeoutMs)
-    ? Math.max(1_000, Math.min(MAX_TOTAL_TIMEOUT_MS, options.timeoutMs as number))
-    : Math.max(1_000, Math.min(MAX_TOTAL_TIMEOUT_MS, router.assistantTimeoutMs));
+    ? Math.max(
+        1_000,
+        Math.min(MAX_TOTAL_TIMEOUT_MS, options.timeoutMs as number),
+      )
+    : Math.max(
+        1_000,
+        Math.min(MAX_TOTAL_TIMEOUT_MS, router.assistantTimeoutMs),
+      );
   const performanceBudgetMs = Number.isSafeInteger(options.performanceBudgetMs)
     ? Math.max(
         250,

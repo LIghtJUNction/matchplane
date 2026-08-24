@@ -153,17 +153,17 @@ Rust网关暴露了一个小型、与垂直关联的持久化契约。它是平�
 
 | 资源 | 接口 | 权限与用途 |
 | --- | --- | --- |
-|参与者（参与者） | `POST /v1/marketplace/participants` | 在`marketplace_sides`中注册一个或双侧内核能力的带域参与方；不要求垂直角色标签。
-|意图（意向） | `POST /v1/marketplace/intents` | 认证参与方创建`demand`或`supply`意向，并可携带不透明JSON`attributes`和`terms`。
-|意图（意向） | `GET /v1/marketplace/intents/{id}?tenant_id=&participant_id=` | 参与方读取自己的意向。
-|报价（募集资金） | `POST /v1/marketplace/offers` | 已认证募集方创建草稿募集意向；对于服务或其他垂直`asset_id`任选。
-|报价（募集资金） | `PATCH /v1/marketplace/offers/{id}` | 创建者或同域修改的`admin/both`能力以`expected_version`替换可编辑字段；active/withdrawn后回到草稿，必须重新审核。
-|报价（募集资金） | `POST /v1/marketplace/offers/{id}/withdraw` | 创建者或同域的 `admin/both` 能力以 `expected_version` 下架草稿/活动消耗，保留版本和审计历史。
-|报价（募集资金） | `POST /v1/marketplace/intents/{id}/matches` | 持有方（需求方）获取活跃投票候选。若未配置检索提供者，可走确定性属性回退。
-|需求（需求发现） | `POST /v1/marketplace/offers/{offer_id}/demand-matches` | 持有方（募集方）只能搜寻已明确允许募集方发现的需求摘要；结果明确需求参与者ID或联系方式。需求方可通过`PATCH /v1/marketplace/intents/{intent_id}/discovery`随时撤回后续发现。
-|报价（募集资金） | `POST /v1/admin/marketplace/offers/{id}/activate` | 运营者或垂直审核流程发布草稿。
-|介绍（引入） | `POST /v1/marketplace/introductions` | 持有方（需求方）记录单个代理勾选的股东意向、份额与确定原因。不会释放股票信息。
-|介绍（引入） | `GET /v1/marketplace/introductions?tenant_id=&participant_id=` | 双方可读取引入投影，但交易所价值。
+| 参与者（参与者） | `POST /v1/marketplace/participants` | 在`marketplace_sides`中注册一个或双侧内核能力的带域参与方；不要求垂直角色标签。
+| 意图（意向） | `POST /v1/marketplace/intents` | 认证参与方创建`demand`或`supply`意向，并可携带不透明JSON`attributes`和`terms`。
+| 意图（意向） | `GET /v1/marketplace/intents/{id}?tenant_id=&participant_id=` | 参与方读取自己的意向。
+| 报价（募集资金） | `POST /v1/marketplace/offers` | 已认证募集方创建草稿募集意向；对于服务或其他垂直`asset_id`任选。
+| 报价（募集资金） | `PATCH /v1/marketplace/offers/{id}` | 创建者或同域修改的`admin/both`能力以`expected_version`替换可编辑字段；active/withdrawn后回到草稿，必须重新审核。
+| 报价（募集资金） | `POST /v1/marketplace/offers/{id}/withdraw` | 创建者或同域的 `admin/both` 能力以 `expected_version` 下架草稿/活动消耗，保留版本和审计历史。
+| 报价（募集资金） | `POST /v1/marketplace/intents/{id}/matches` | 持有方（需求方）获取活跃投票候选。若未配置检索提供者，可走确定性属性回退。
+| 需求（需求发现） | `POST /v1/marketplace/offers/{offer_id}/demand-matches` | 持有方（募集方）只能搜寻已明确允许募集方发现的需求摘要；结果明确需求参与者ID或联系方式。需求方可通过`PATCH /v1/marketplace/intents/{intent_id}/discovery`随时撤回后续发现。
+| 报价（募集资金） | `POST /v1/admin/marketplace/offers/{id}/activate` | 运营者或垂直审核流程发布草稿。
+| 介绍（引入） | `POST /v1/marketplace/introductions` | 持有方（需求方）记录单个代理勾选的股东意向、份额与确定原因。不会释放股票信息。
+| 介绍（引入） | `GET /v1/marketplace/introductions?tenant_id=&participant_id=` | 双方可读取引入投影，但交易所价值。
 
 所有读取接受主叫生成的 id 和幂等键。每个 party-auth 请求还必须携带 `x-matchplane-platform-path`（由能力交换返回的规范路径）。网关会验证短期方承载令牌、精确梯度节点路径、租户/域作用域、需求/过渡角色、激活生命周期、过渡以及跨方不变。`attributes` 与 `terms` 必须是时间 JSON对象，不会被根解释为车辆字段。分数和理由是 AI 建议输出，股市释放仍是独立的、需要一致的状态转换，受现有 `introduction/contact` 契约约束。
 

@@ -152,11 +152,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     requestStoreAiHandoff,
     contactListing,
   } = useStoreHandoff({
-      subplatform,
-      listings,
-      locale,
-      onNotice: setNotice,
-    });
+    subplatform,
+    listings,
+    locale,
+    onNotice: setNotice,
+  });
 
   useEffect(() => {
     if (!authResolved || !authUser || !catalogResolved || listing) return;
@@ -290,7 +290,13 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       }
       setListing(selected);
     },
-    [listings, navigateToSubplatform, setListing, subplatform.path, subplatform.slug],
+    [
+      listings,
+      navigateToSubplatform,
+      setListing,
+      subplatform.path,
+      subplatform.slug,
+    ],
   );
 
   const openMarketplaceDemand = useCallback(
@@ -387,11 +393,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       onOpenDemand={() => setBuyerAssistantOpen(true)}
       onAuthRequired={() => openSignIn(role)}
       authStatus={
-        !authResolved
-          ? "pending"
-          : authUser
-            ? "authenticated"
-            : "anonymous"
+        !authResolved ? "pending" : authUser ? "authenticated" : "anonymous"
       }
       fallback={genericWorkspace}
     />

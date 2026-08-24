@@ -89,7 +89,9 @@ describe("useMarketplaceCatalog pending likes", () => {
         expectedCount: 0,
       }),
     );
-    expect(window.sessionStorage.getItem(PENDING_MARKETPLACE_LIKE_KEY)).toBeNull();
+    expect(
+      window.sessionStorage.getItem(PENDING_MARKETPLACE_LIKE_KEY),
+    ).toBeNull();
     expect(window.location.pathname).toBe("/used-car");
     expect(onNotice).not.toHaveBeenCalled();
   });
