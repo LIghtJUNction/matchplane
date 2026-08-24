@@ -11,6 +11,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -51,6 +52,8 @@ const DEFAULT_LOCK_TIMEOUT_MS = 2_000;
 const DEFAULT_OWNER_CREATION_GRACE_MS = 250;
 const DEFAULT_GC_GRACE_MS = 5 * 60_000;
 const MAX_STATE_BYTES = 1024 * 1024;
+const AUDIT_SCAN_CHUNK_BYTES = 64 * 1024;
+const MAX_AUDIT_RECORD_BYTES = 64 * 1024;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -136,6 +139,7 @@ export interface PlatformRouterIoOverrides {
   write?: typeof writeSync;
   fsync?: typeof fsyncSync;
   ftruncate?: typeof ftruncateSync;
+  lstat?: typeof lstatSync;
   rename?: typeof renameSync;
   unlink?: typeof unlinkSync;
 }
@@ -243,6 +247,9 @@ export async function acquirePlatformRouterLock(
       creationGraceMs,
       environment,
     );
+    // The holder can release between our EEXIST and the first lock lstat.
+    // Only that exact top-level disappearance returns null and is retried.
+    if (stale === null) continue;
     if (stale) {
       const recovered = quarantineStaleLock(lockPath, environment);
       if (recovered) continue;
@@ -382,9 +389,14 @@ export function flushAuditOutbox(
   const environment = resolveEnvironment(options);
   assertTrustedDirectory(environment.root, "AI 事务根目录无效");
   const auditPath = path.join(environment.root, PLATFORM_ROUTER_AUDIT_FILE);
-  const scan = scanAndRepairAuditJournal(auditPath, environment);
   const pending = snapshot.pendingAudit.map((record) =>
     decodePlatformRouterAuditRecord(record),
+  );
+  const wantedEventIds = new Set(pending.map((record) => record.eventId));
+  const scan = scanAndRepairAuditJournal(
+    auditPath,
+    wantedEventIds,
+    environment,
   );
   const appendedEventIds: string[] = [];
   const missing = pending.filter((record) => {
@@ -713,8 +725,14 @@ function inspectLockStaleness(
   lockPath: string,
   creationGraceMs: number,
   environment: ResolvedEnvironment,
-): boolean {
-  const stat = lstatSync(lockPath);
+): boolean | null {
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = environment.io.lstat(lockPath);
+  } catch (cause) {
+    if (isNodeErrorCode(cause, "ENOENT")) return null;
+    throw cause;
+  }
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new PlatformRouterCorruptionError("AI 配置事务锁路径无效");
   }
@@ -1020,6 +1038,7 @@ function snapshotFromGeneration(
 
 function scanAndRepairAuditJournal(
   auditPath: string,
+  wantedEventIds: ReadonlySet<string>,
   environment: ResolvedEnvironment,
 ): { records: Map<string, PlatformRouterAuditRecord>; repairedTail: boolean } {
   if (!pathExists(auditPath)) return { records: new Map(), repairedTail: false };
@@ -1033,43 +1052,70 @@ function scanAndRepairAuditJournal(
     if (!fstatSync(descriptor).isFile()) {
       throw new PlatformRouterCorruptionError("AI 配置审计路径无效");
     }
-    const bytes = readFileSync(descriptor);
-    if (bytes.length > MAX_STATE_BYTES) {
-      throw new PlatformRouterCorruptionError("AI 配置审计文件过大");
+    const records = new Map<string, PlatformRouterAuditRecord>();
+    const chunk = Buffer.allocUnsafe(AUDIT_SCAN_CHUNK_BYTES);
+    let carry = Buffer.alloc(0);
+    let completeLength = 0;
+
+    for (;;) {
+      const bytesRead = readSync(descriptor, chunk, 0, chunk.length, null);
+      if (bytesRead === 0) break;
+      const available = Buffer.concat([carry, chunk.subarray(0, bytesRead)]);
+      let lineStart = 0;
+      for (;;) {
+        const newline = available.indexOf(0x0a, lineStart);
+        if (newline < 0) break;
+        const line = available.subarray(lineStart, newline);
+        decodeAuditJournalLine(line, wantedEventIds, records);
+        completeLength += line.length + 1;
+        lineStart = newline + 1;
+      }
+      carry = Buffer.from(available.subarray(lineStart));
+      if (carry.length > MAX_AUDIT_RECORD_BYTES) {
+        throw new PlatformRouterCorruptionError(
+          "AI 配置审计单条记录过大",
+        );
+      }
     }
-    const lastNewline = bytes.lastIndexOf(0x0a);
-    const completeLength =
-      bytes.length === 0 || lastNewline === bytes.length - 1
-        ? bytes.length
-        : lastNewline + 1;
-    const repairedTail = completeLength !== bytes.length;
+
+    const repairedTail = carry.length > 0;
     if (repairedTail) {
       environment.io.ftruncate(descriptor, completeLength);
       environment.io.fsync(descriptor);
-    }
-    const records = new Map<string, PlatformRouterAuditRecord>();
-    const complete = bytes.subarray(0, completeLength).toString("utf8");
-    for (const line of complete.split("\n")) {
-      if (!line) continue;
-      let record: PlatformRouterAuditRecord;
-      try {
-        record = decodePlatformRouterAuditRecord(JSON.parse(line));
-      } catch (cause) {
-        throw new PlatformRouterCorruptionError(
-          "AI 配置审计包含完整的无效记录",
-          { cause },
-        );
-      }
-      const existing = records.get(record.eventId);
-      if (existing && JSON.stringify(existing) !== JSON.stringify(record)) {
-        throw new PlatformRouterCorruptionError("AI 配置审计事件 ID 内容冲突");
-      }
-      records.set(record.eventId, record);
     }
     return { records, repairedTail };
   } finally {
     if (descriptor !== null) closeSync(descriptor);
   }
+}
+
+function decodeAuditJournalLine(
+  line: Buffer,
+  wantedEventIds: ReadonlySet<string>,
+  records: Map<string, PlatformRouterAuditRecord>,
+): void {
+  if (line.length === 0 || line.length > MAX_AUDIT_RECORD_BYTES) {
+    throw new PlatformRouterCorruptionError(
+      line.length > MAX_AUDIT_RECORD_BYTES
+        ? "AI 配置审计单条记录过大"
+        : "AI 配置审计包含完整的无效记录",
+    );
+  }
+  let record: PlatformRouterAuditRecord;
+  try {
+    record = decodePlatformRouterAuditRecord(JSON.parse(line.toString("utf8")));
+  } catch (cause) {
+    throw new PlatformRouterCorruptionError(
+      "AI 配置审计包含完整的无效记录",
+      { cause },
+    );
+  }
+  if (!wantedEventIds.has(record.eventId)) return;
+  const existing = records.get(record.eventId);
+  if (existing && JSON.stringify(existing) !== JSON.stringify(record)) {
+    throw new PlatformRouterCorruptionError("AI 配置审计事件 ID 内容冲突");
+  }
+  records.set(record.eventId, record);
 }
 
 function readGenerationWithoutPointer(
@@ -1379,6 +1425,7 @@ function resolveEnvironment(
       write: options.io?.write ?? writeSync,
       fsync: options.io?.fsync ?? fsyncSync,
       ftruncate: options.io?.ftruncate ?? ftruncateSync,
+      lstat: options.io?.lstat ?? lstatSync,
       rename: options.io?.rename ?? renameSync,
       unlink: options.io?.unlink ?? unlinkSync,
     },

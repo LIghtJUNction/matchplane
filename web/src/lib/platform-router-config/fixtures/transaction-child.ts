@@ -22,7 +22,7 @@ async function runLockChild(): Promise<void> {
   const releaseBarrier = requiredArgument(6);
   const timeoutMs = Number(requiredArgument(7));
   const hold = requiredArgument(8) === "hold";
-  await waitForFile(startBarrier, 5_000);
+  await waitForFile(startBarrier, 8_000);
   try {
     const handle = await acquirePlatformRouterLock({ root, timeoutMs });
     writeFileSync(resultBarrier, JSON.stringify({ status: "acquired" }));
@@ -46,10 +46,10 @@ async function runRaceReader(): Promise<void> {
   const startBarrier = requiredArgument(4);
   const stopBarrier = requiredArgument(5);
   const resultBarrier = requiredArgument(6);
-  await waitForFile(startBarrier, 5_000);
+  await waitForFile(startBarrier, 8_000);
   const models = new Set<string>();
   const errors: string[] = [];
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 12_000;
   while (!existsSync(stopBarrier) && Date.now() < deadline) {
     try {
       const snapshot = readCurrentSnapshot({ root });

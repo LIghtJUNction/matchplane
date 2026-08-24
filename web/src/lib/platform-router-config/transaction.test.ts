@@ -4,6 +4,7 @@ import {
   chmodSync,
   existsSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -19,7 +20,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   buildPlatformRouterAuditRecord,
   PLATFORM_ROUTER_AUDIT_FILE,
@@ -58,10 +59,22 @@ const CHILD_FIXTURE = path.join(
 );
 const SENTINEL = "SENTINEL_PRIVATE_VALUE_DO_NOT_LEAK";
 const OLD_TIME = new Date("2020-01-01T00:00:00.000Z");
+const CHILD_OUTPUT_LIMIT = 8 * 1024;
+const trackedChildren = new Map<ChildProcess, TrackedChild>();
+
+interface TrackedChild {
+  stdout: string;
+  stderr: string;
+  spawnError: Error | null;
+}
 
 beforeAll(() => {
   rmSync(TEST_ROOT, { recursive: true, force: true });
   mkdirSync(TEST_ROOT, { recursive: true, mode: 0o750 });
+});
+
+afterEach(async () => {
+  await cleanupTrackedChildren();
 });
 
 afterAll(() => {
@@ -86,7 +99,7 @@ describe("cross-process platform router transaction lock", () => {
       2_000,
       true,
     );
-    await waitForFile(holderResult);
+    await waitForFile(holderResult, holder);
     expect(readJson(holderResult)).toEqual({ status: "acquired" });
 
     writeFileSync(contenderStart, "go");
@@ -98,6 +111,7 @@ describe("cross-process platform router transaction lock", () => {
       180,
       false,
     );
+    await waitForFile(contenderResult, contender);
     await waitForExit(contender);
     expect(readJson(contenderResult)).toEqual({
       status: "timeout",
@@ -118,6 +132,7 @@ describe("cross-process platform router transaction lock", () => {
       2_000,
       false,
     );
+    await waitForFile(recoveryResult, recovery);
     await waitForExit(recovery);
     expect(readJson(recoveryResult)).toEqual({ status: "acquired" });
     expect(existsSync(path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY))).toBe(
@@ -126,7 +141,64 @@ describe("cross-process platform router transaction lock", () => {
     expect(
       readdirSync(root).some((entry) => entry.includes(".quarantine-")),
     ).toBe(false);
-  }, 15_000);
+  }, 20_000);
+
+  it("retries when the holder disappears between EEXIST and lock inspection", async () => {
+    const root = caseRoot("release-before-inspection");
+    const lock = path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY);
+    mkdirSync(lock, { mode: 0o700 });
+    let releasedDuringRace = false;
+    const raceLstat = ((target: string) => {
+      if (target === lock && !releasedDuringRace) {
+        releasedDuringRace = true;
+        rmSync(lock, { recursive: true, force: true });
+        throw nodeFailure("ENOENT", "holder released before inspection");
+      }
+      return lstatSync(target);
+    }) as typeof lstatSync;
+
+    const handle = await acquirePlatformRouterLock({
+      root,
+      timeoutMs: 500,
+      io: { lstat: raceLstat },
+      nextId: idSequence(190),
+    });
+
+    expect(releasedDuringRace).toBe(true);
+    expect(handle.owner.nonce).toBe(uuid(190));
+    handle.release();
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it("does not reinterpret unrelated ENOENT failures as a released lock", async () => {
+    const root = caseRoot("non-lock-enoent");
+    const lock = path.join(root, PLATFORM_ROUTER_LOCK_DIRECTORY);
+    mkdirSync(lock, { mode: 0o700 });
+    writeFileSync(
+      path.join(lock, PLATFORM_ROUTER_LOCK_OWNER_FILE),
+      JSON.stringify({
+        pid: process.pid,
+        bootId: readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(),
+        startTicks: "0",
+        nonce: uuid(191),
+        acquiredAt: new Date().toISOString(),
+      }),
+      { mode: 0o600 },
+    );
+    const unrelatedMissing = nodeFailure("ENOENT", "boot identity unavailable");
+
+    await expect(
+      acquirePlatformRouterLock({
+        root,
+        timeoutMs: 500,
+        readBootId: () => {
+          throw unrelatedMissing;
+        },
+      }),
+    ).rejects.toBe(unrelatedMissing);
+    expect(existsSync(lock)).toBe(true);
+    rmSync(lock, { recursive: true, force: true });
+  });
 
   it("treats a PID start-ticks mismatch as stale immediately and quarantines safely", async () => {
     const root = caseRoot("pid-reuse");
@@ -404,7 +476,7 @@ describe("immutable generation and atomic pointer", () => {
     const start = barrier(root, "reader.start");
     const stop = barrier(root, "reader.stop");
     const result = barrier(root, "reader.result");
-    const reader = spawn("bun", [
+    const reader = spawnTrackedChild([
       CHILD_FIXTURE,
       "race-read",
       root,
@@ -423,13 +495,14 @@ describe("immutable generation and atomic pointer", () => {
       await delay(2);
     }
     writeFileSync(stop, "stop");
+    await waitForFile(result, reader);
     await waitForExit(reader);
     const observed = readJson(result) as { models: string[]; errors: string[] };
     expect(observed.errors).toEqual([]);
     expect(observed.models.every((model) => /^race-model-\d+$/.test(model))).toBe(
       true,
     );
-  }, 15_000);
+  }, 20_000);
 });
 
 describe("durable audit projection and checkpoint", () => {
@@ -497,6 +570,56 @@ describe("durable audit projection and checkpoint", () => {
     expect(() => flushAuditOutbox(malformedSnapshot, { root: malformedRoot })).toThrow(
       "完整的无效记录",
     );
+  });
+
+  it("streams a valid journal larger than 1 MiB and retains only wanted eventIds for dedupe", () => {
+    const root = caseRoot("audit-large-stream");
+    const existing = auditRecord(420);
+    const missing = auditRecord(421);
+    const snapshot = commitState(root, 422, null, null, [existing, missing]);
+    const historicalLines = Array.from({ length: 5_000 }, (_, index) =>
+      JSON.stringify(auditRecord(10_000 + index)),
+    );
+    const auditPath = path.join(root, PLATFORM_ROUTER_AUDIT_FILE);
+    const initialJournal = `${historicalLines.join("\n")}\n${JSON.stringify(existing)}\n`;
+    expect(Buffer.byteLength(initialJournal)).toBeGreaterThan(1024 * 1024);
+    writeFileSync(auditPath, initialJournal, { mode: 0o640 });
+
+    const replay = flushAuditOutbox(snapshot, { root });
+
+    expect(replay.repairedTail).toBe(false);
+    expect(replay.appendedEventIds).toEqual([missing.eventId]);
+    const matchingEventIds = readFileSync(auditPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).eventId)
+      .filter(
+        (eventId) => eventId === existing.eventId || eventId === missing.eventId,
+      );
+    expect(matchingEventIds).toEqual([existing.eventId, missing.eventId]);
+    const checkpoint = checkpointDeliveredAudit(
+      snapshot,
+      replay.deliveredEventIds,
+      transactionOptions(root, 423),
+    );
+    expect(checkpoint.pendingAudit).toEqual([]);
+  });
+
+  it("rejects an oversized single audit record without truncating history", () => {
+    const root = caseRoot("audit-oversized-record");
+    const event = auditRecord(430);
+    const snapshot = commitState(root, 431, null, null, [event]);
+    const oversized = `${JSON.stringify({
+      ...auditRecord(432),
+      padding: "x".repeat(70 * 1024),
+    })}\n`;
+    const auditPath = path.join(root, PLATFORM_ROUTER_AUDIT_FILE);
+    writeFileSync(auditPath, oversized, { mode: 0o640 });
+
+    expect(() => flushAuditOutbox(snapshot, { root })).toThrow(
+      "单条记录过大",
+    );
+    expect(readFileSync(auditPath, "utf8")).toBe(oversized);
   });
 
   it("dedupes journal-fsynced events when checkpoint commit fails, then checkpoints on replay", () => {
@@ -843,7 +966,7 @@ function spawnLockChild(
   timeoutMs: number,
   hold: boolean,
 ): ChildProcess {
-  return spawn("bun", [
+  return spawnTrackedChild([
     CHILD_FIXTURE,
     "lock",
     root,
@@ -855,20 +978,116 @@ function spawnLockChild(
   ]);
 }
 
-async function waitForFile(target: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
+function spawnTrackedChild(arguments_: string[]): ChildProcess {
+  const child = spawn("bun", arguments_, {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const tracked: TrackedChild = { stdout: "", stderr: "", spawnError: null };
+  trackedChildren.set(child, tracked);
+  child.stdout?.on("data", (chunk: Buffer) => {
+    tracked.stdout = appendBoundedOutput(tracked.stdout, chunk);
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    tracked.stderr = appendBoundedOutput(tracked.stderr, chunk);
+  });
+  child.once("error", (cause) => {
+    tracked.spawnError = cause;
+  });
+  return child;
+}
+
+async function waitForFile(
+  target: string,
+  child: ChildProcess,
+  timeoutMs = 8_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   while (!existsSync(target)) {
-    if (Date.now() >= deadline) throw new Error("child barrier timeout");
+    const tracked = trackedChildren.get(child);
+    if (
+      tracked?.spawnError ||
+      child.exitCode !== null ||
+      child.signalCode !== null
+    ) {
+      throw childFailure("child exited before result barrier", child);
+    }
+    if (Date.now() >= deadline) {
+      throw childFailure("child result barrier timed out", child);
+    }
     await delay(10);
   }
 }
 
-async function waitForExit(child: ChildProcess): Promise<void> {
+async function waitForExit(
+  child: ChildProcess,
+  timeoutMs = 8_000,
+): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((resolve, reject) => {
-    child.once("exit", () => resolve());
-    child.once("error", reject);
+    const timer = setTimeout(() => {
+      removeListeners();
+      reject(childFailure("child exit timed out", child));
+    }, timeoutMs);
+    const onExit = () => {
+      clearTimeout(timer);
+      removeListeners();
+      resolve();
+    };
+    const onError = () => {
+      clearTimeout(timer);
+      removeListeners();
+      reject(childFailure("child process failed", child));
+    };
+    const removeListeners = () => {
+      child.off("exit", onExit);
+      child.off("error", onError);
+    };
+    child.once("exit", onExit);
+    child.once("error", onError);
   });
+}
+
+async function cleanupTrackedChildren(): Promise<void> {
+  const children = [...trackedChildren.keys()];
+  for (const child of children) {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  }
+  const failures: Error[] = [];
+  for (const child of children) {
+    try {
+      await waitForExit(child, 3_000);
+    } catch (cause) {
+      failures.push(cause instanceof Error ? cause : new Error(String(cause)));
+    }
+  }
+  trackedChildren.clear();
+  if (failures.length > 0) throw new AggregateError(failures, "child cleanup failed");
+}
+
+function appendBoundedOutput(current: string, chunk: Buffer): string {
+  return `${current}${chunk.toString("utf8")}`.slice(-CHILD_OUTPUT_LIMIT);
+}
+
+function childFailure(message: string, child: ChildProcess): Error {
+  const tracked = trackedChildren.get(child);
+  const status = `exit=${child.exitCode ?? "running"} signal=${child.signalCode ?? "none"}`;
+  const stdout = sanitizeChildOutput(tracked?.stdout ?? "");
+  const stderr = sanitizeChildOutput(tracked?.stderr ?? "");
+  const spawnError = tracked?.spawnError
+    ? sanitizeChildOutput(
+        `${tracked.spawnError.name}: ${tracked.spawnError.message}`,
+      )
+    : "none";
+  return new Error(
+    `${message}; ${status}; spawnError=${JSON.stringify(spawnError)}; stdout=${JSON.stringify(stdout)}; stderr=${JSON.stringify(stderr)}`,
+  );
+}
+
+function sanitizeChildOutput(value: string): string {
+  return value
+    .replaceAll(SENTINEL, "[redacted]")
+    .replace(/sk-[A-Za-z0-9_-]{16,}/g, "[redacted]")
+    .replace(/(api[_-]?key\s*[=:]\s*)\S+/gi, "$1[redacted]");
 }
 
 function readJson(target: string): unknown {
