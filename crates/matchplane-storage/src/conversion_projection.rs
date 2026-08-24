@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use serde::Serialize;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row, Transaction};
 use time::OffsetDateTime;
@@ -40,6 +41,70 @@ pub struct MarketplaceConversionJob {
     pub claim_token: Uuid,
 }
 
+/// One atomically claimed conversion batch plus expired claims dead-lettered by the watchdog.
+#[derive(Debug, Clone)]
+pub struct MarketplaceConversionClaimBatch {
+    /// Aggregate-head jobs fenced to this worker claim.
+    pub jobs: Vec<MarketplaceConversionJob>,
+    /// Expired jobs moved to `dead` before this batch was claimed.
+    pub expired_dead: u64,
+}
+
+/// Durable result of returning one failed projection claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketplaceConversionFailureDisposition {
+    /// The job was scheduled for a bounded retry.
+    Retry,
+    /// The job reached a terminal or unsupported-schema dead letter.
+    Dead,
+}
+
+/// Failure transition outcome for worker metrics and safe control flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarketplaceConversionFailureOutcome {
+    /// Durable disposition written under the claim token fence.
+    pub disposition: MarketplaceConversionFailureDisposition,
+    /// Deterministic retry delay, absent for dead letters.
+    pub retry_delay_ms: Option<u64>,
+}
+
+/// Host-operator action for one dead conversion aggregate head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketplaceConversionRecoveryAction {
+    /// Re-read current canonical source state on the next worker claim.
+    Replay,
+    /// Explicitly skip this event and unblock its aggregate successor.
+    Resolve,
+}
+
+/// Secret-free result of validating or applying one host recovery action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MarketplaceConversionRecoveryOutcome {
+    /// Durable conversion job identity.
+    pub job_id: Uuid,
+    /// Tenant authority scope.
+    pub tenant_id: Uuid,
+    /// Ordering aggregate discriminator.
+    pub aggregate_type: String,
+    /// Ordering aggregate identity.
+    pub aggregate_id: Uuid,
+    /// Ordered event version.
+    pub aggregate_version: i64,
+    /// Requested operator action.
+    pub action: MarketplaceConversionRecoveryAction,
+    /// Whether durable state and audit were committed.
+    pub applied: bool,
+    /// Status observed under `FOR UPDATE`.
+    pub previous_status: String,
+    /// Status that was or would be produced.
+    pub resulting_status: String,
+    /// Number of unresolved aggregate successors currently blocked by this head.
+    pub blocked_successors: i64,
+    /// Bounded operator request identity.
+    pub operator_request_id: String,
+}
+
 /// Result of atomically applying one marketplace conversion job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarketplaceConversionProjectionOutcome {
@@ -74,13 +139,13 @@ impl PgStore {
     /// # Errors
     ///
     /// Returns [`StorageError`] when PostgreSQL cannot atomically claim the batch.
-    pub async fn claim_marketplace_conversions(
+    pub async fn claim_marketplace_conversion_batch(
         &self,
         limit: i64,
-    ) -> Result<Vec<MarketplaceConversionJob>, StorageError> {
+    ) -> Result<MarketplaceConversionClaimBatch, StorageError> {
         let claim_token = Uuid::now_v7();
         let mut transaction = self.pool().begin().await?;
-        sqlx::query(
+        let expired_dead = sqlx::query(
             "UPDATE marketplace_conversion_outbox \
                 SET status = 'dead', \
                     claimed_at = NULL, \
@@ -160,7 +225,22 @@ impl PgStore {
             })
             .collect::<Result<Vec<_>, StorageError>>()?;
         transaction.commit().await?;
-        Ok(jobs)
+        Ok(MarketplaceConversionClaimBatch {
+            jobs,
+            expired_dead: expired_dead.rows_affected(),
+        })
+    }
+
+    /// Claims only the jobs from one conversion batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] when PostgreSQL cannot atomically claim the batch.
+    pub async fn claim_marketplace_conversions(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<MarketplaceConversionJob>, StorageError> {
+        Ok(self.claim_marketplace_conversion_batch(limit).await?.jobs)
     }
 
     /// Applies one canonical conversion source, CRM projection, notifications, and acknowledgement
@@ -272,10 +352,9 @@ impl PgStore {
         &self,
         job: &MarketplaceConversionJob,
         error: &str,
-    ) -> Result<(), StorageError> {
-        let exponent = job.attempts.clamp(1, 10);
-        let delay_seconds = 2_i32.pow(u32::try_from(exponent).unwrap_or(10)).min(300);
-        let result = sqlx::query(
+    ) -> Result<MarketplaceConversionFailureOutcome, StorageError> {
+        let retry_delay_ms = deterministic_retry_delay_ms(job.id, job.attempts);
+        let status = sqlx::query_scalar::<_, String>(
             "UPDATE marketplace_conversion_outbox \
                 SET status = CASE \
                         WHEN attempts >= $4 OR schema_version <> $6 THEN 'dead' \
@@ -293,22 +372,39 @@ impl PgStore {
                         ELSE clock_timestamp() + make_interval(secs => $5) \
                     END, \
                     last_error = $3 \
-              WHERE id = $1 AND status = 'publishing' AND claim_token = $2",
+              WHERE id = $1 \
+                AND status = 'publishing' \
+                AND claim_token = $2 \
+                AND attempts = $7 \
+             RETURNING status",
         )
         .bind(job.id)
         .bind(job.claim_token)
         .bind(bounded_error(error))
         .bind(MAX_DELIVERY_ATTEMPTS)
-        .bind(f64::from(delay_seconds))
+        .bind(retry_delay_ms as f64 / 1_000.0)
         .bind(SUPPORTED_SCHEMA_VERSION)
-        .execute(self.pool())
-        .await?;
-        if result.rows_affected() != 1 {
-            return Err(StorageError::Conflict(
+        .bind(job.attempts)
+        .fetch_optional(self.pool())
+        .await?
+        .ok_or_else(|| {
+            StorageError::Conflict(
                 "marketplace conversion retry transition lost its worker claim".to_owned(),
-            ));
+            )
+        })?;
+        match status.as_str() {
+            "failed" => Ok(MarketplaceConversionFailureOutcome {
+                disposition: MarketplaceConversionFailureDisposition::Retry,
+                retry_delay_ms: Some(retry_delay_ms),
+            }),
+            "dead" => Ok(MarketplaceConversionFailureOutcome {
+                disposition: MarketplaceConversionFailureDisposition::Dead,
+                retry_delay_ms: None,
+            }),
+            _ => Err(StorageError::InvalidData(
+                "marketplace conversion failure transition returned an invalid status".to_owned(),
+            )),
         }
-        Ok(())
     }
 
     /// Returns a low-cardinality conversion backlog snapshot for readiness and alerting.
@@ -997,12 +1093,29 @@ fn bounded_error(error: &str) -> String {
     error.chars().take(2_000).collect()
 }
 
+fn deterministic_retry_delay_ms(job_id: Uuid, attempts: i32) -> u64 {
+    let exponent = u32::try_from(attempts.clamp(1, 10)).unwrap_or(10);
+    let base_delay_ms = u64::from(2_u32.pow(exponent).min(300)) * 1_000;
+    let sample = job_id
+        .as_bytes()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+    apply_retry_jitter(base_delay_ms, sample)
+}
+
+fn apply_retry_jitter(base_delay_ms: u64, sample: u64) -> u64 {
+    let spread = base_delay_ms / 5;
+    base_delay_ms - spread + sample % (spread * 2 + 1)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    use super::canonical_uuid_list;
+    use super::{apply_retry_jitter, canonical_uuid_list, deterministic_retry_delay_ms};
 
     #[test]
     fn canonical_uuid_list_rejects_invalid_and_duplicate_references() {
@@ -1011,5 +1124,23 @@ mod tests {
         let value = json!([first, "not-a-uuid", first, second]);
 
         assert_eq!(canonical_uuid_list(Some(&value)), vec![first, second]);
+    }
+
+    #[test]
+    fn retry_jitter_should_include_exact_twenty_percent_boundaries() {
+        assert_eq!(apply_retry_jitter(2_000, 0), 1_600);
+        assert_eq!(apply_retry_jitter(2_000, 800), 2_400);
+    }
+
+    #[test]
+    fn retry_jitter_should_be_deterministic_and_bounded() {
+        let job_id = Uuid::now_v7();
+        for attempts in 1..=12 {
+            let delay = deterministic_retry_delay_ms(job_id, attempts);
+            let exponent = u32::try_from(attempts.clamp(1, 10)).unwrap();
+            let base = u64::from(2_u32.pow(exponent).min(300)) * 1_000;
+            assert!((base * 4 / 5..=base * 6 / 5).contains(&delay));
+            assert_eq!(delay, deterministic_retry_delay_ms(job_id, attempts));
+        }
     }
 }

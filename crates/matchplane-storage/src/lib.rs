@@ -4,6 +4,7 @@ mod book_projection;
 mod catalog_projection;
 mod consumer_failure;
 mod conversion_projection;
+mod conversion_recovery;
 mod federation;
 mod generic_marketplace;
 mod marketplace;
@@ -26,7 +27,10 @@ pub use consumer_failure::{
     KafkaFailureClass, KafkaFailureDisposition, QuarantineKafkaRecord, QuarantinedKafkaRecord,
 };
 pub use conversion_projection::{
-    MarketplaceConversionBacklog, MarketplaceConversionJob, MarketplaceConversionProjectionOutcome,
+    MarketplaceConversionBacklog, MarketplaceConversionClaimBatch,
+    MarketplaceConversionFailureDisposition, MarketplaceConversionFailureOutcome,
+    MarketplaceConversionJob, MarketplaceConversionProjectionOutcome,
+    MarketplaceConversionRecoveryAction, MarketplaceConversionRecoveryOutcome,
 };
 pub use generic_marketplace::{
     AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,

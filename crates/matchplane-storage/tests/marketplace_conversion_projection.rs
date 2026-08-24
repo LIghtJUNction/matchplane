@@ -1,4 +1,7 @@
-use matchplane_storage::{PgStore, StorageError};
+use matchplane_storage::{
+    MarketplaceConversionFailureDisposition, MarketplaceConversionJob,
+    MarketplaceConversionRecoveryAction, PgStore, StorageError,
+};
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -49,6 +52,10 @@ async fn expired_claim_should_recover_and_projection_should_be_idempotent(
 
     let stale_result = store.project_marketplace_conversion(&stale).await;
     assert!(matches!(stale_result, Err(StorageError::Conflict(_))));
+    let stale_failure = store
+        .fail_marketplace_conversion(&stale, "stale worker failure")
+        .await;
+    assert!(matches!(stale_failure, Err(StorageError::Conflict(_))));
     let projected = store.project_marketplace_conversion(&current).await?;
     assert!(projected.opportunity_id.is_some());
     assert_eq!(projected.notifications_written, 1);
@@ -230,11 +237,12 @@ async fn dead_aggregate_head_should_block_later_versions(pool: PgPool) -> Result
     )
     .await?;
     let store = PgStore::from_pool(pool.clone());
-    let head = store.claim_marketplace_conversions(10).await?.remove(0);
+    let mut head = store.claim_marketplace_conversions(10).await?.remove(0);
     sqlx::query("UPDATE marketplace_conversion_outbox SET attempts = 12 WHERE id = $1")
         .bind(head.id)
         .execute(&pool)
         .await?;
+    head.attempts = 12;
     store
         .fail_marketplace_conversion(&head, "deterministic projection failure")
         .await?;
@@ -429,6 +437,249 @@ async fn notifications_should_remain_scoped_across_tenants(
         assert_eq!(row.get::<String, _>("platform_path"), "/used-car");
         assert!(row.get::<i64, _>("title_chars") <= 200);
     }
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn concurrent_workers_should_not_duplicate_claims(pool: PgPool) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    insert_handoff(&pool, fixture).await?;
+    let first = PgStore::from_pool(pool.clone());
+    let second = PgStore::from_pool(pool.clone());
+
+    let (first_claim, second_claim) = tokio::join!(
+        first.claim_marketplace_conversions(10),
+        second.claim_marketplace_conversions(10)
+    );
+    let first_claim = first_claim?;
+    let second_claim = second_claim?;
+    assert_eq!(first_claim.len() + second_claim.len(), 1);
+    if let (Some(first_job), Some(second_job)) = (first_claim.first(), second_claim.first()) {
+        assert_ne!(first_job.id, second_job.id);
+    }
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn retry_available_at_should_use_bounded_deterministic_jitter(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    insert_handoff(&pool, fixture).await?;
+    let store = PgStore::from_pool(pool.clone());
+    let job = store.claim_marketplace_conversions(1).await?.remove(0);
+    let before: time::OffsetDateTime = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&pool)
+        .await?;
+    let failure = store
+        .fail_marketplace_conversion(&job, "safe deterministic failure")
+        .await?;
+    let after: time::OffsetDateTime = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&pool)
+        .await?;
+
+    assert_eq!(
+        failure.disposition,
+        MarketplaceConversionFailureDisposition::Retry
+    );
+    let retry_delay_ms = failure.retry_delay_ms.expect("retry delay must be present");
+    assert!((1_600..=2_400).contains(&retry_delay_ms));
+    let within_transition_bounds: bool = sqlx::query_scalar(
+        "SELECT available_at >= $2 + make_interval(secs => $4) \
+                AND available_at <= $3 + make_interval(secs => $4) \
+           FROM marketplace_conversion_outbox WHERE id = $1",
+    )
+    .bind(job.id)
+    .bind(before)
+    .bind(after)
+    .bind(retry_delay_ms as f64 / 1_000.0)
+    .fetch_one(&pool)
+    .await?;
+    assert!(within_transition_bounds);
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn replay_recovery_should_audit_and_unlock_successor(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    let store = PgStore::from_pool(pool.clone());
+    let (head, successor_id) = dead_contact_head_with_successor(&pool, fixture, &store).await?;
+
+    let dry_run = store
+        .recover_marketplace_conversion(
+            head.id,
+            MarketplaceConversionRecoveryAction::Replay,
+            false,
+            "conversion-replay-dry-run",
+            "canonical source repaired",
+        )
+        .await?;
+    assert!(!dry_run.applied);
+    assert_eq!(dry_run.resulting_status, "pending");
+    assert_eq!(dry_run.blocked_successors, 1);
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM marketplace_conversion_outbox WHERE id = $1")
+            .bind(head.id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(status, "dead");
+    let dry_run_audits: i64 = sqlx::query_scalar("SELECT count(*) FROM platform_audit_events")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(dry_run_audits, 0);
+
+    let applied = store
+        .recover_marketplace_conversion(
+            head.id,
+            MarketplaceConversionRecoveryAction::Replay,
+            true,
+            "conversion-replay-apply",
+            "canonical source repaired",
+        )
+        .await?;
+    assert!(applied.applied);
+    assert_eq!(applied.resulting_status, "pending");
+    assert_recovery_audit(
+        &pool,
+        "marketplace.conversion.projection.replayed",
+        "conversion-replay-apply",
+        "canonical source repaired",
+    )
+    .await?;
+
+    let replay = store.claim_marketplace_conversions(1).await?.remove(0);
+    assert_eq!(replay.id, head.id);
+    store.project_marketplace_conversion(&replay).await?;
+    let successor = store.claim_marketplace_conversions(1).await?.remove(0);
+    assert_eq!(successor.source_id, successor_id);
+    assert_eq!(successor.aggregate_version, 2);
+    store.project_marketplace_conversion(&successor).await?;
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn resolve_recovery_should_audit_and_unlock_successor(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    let store = PgStore::from_pool(pool.clone());
+    let (head, successor_id) = dead_contact_head_with_successor(&pool, fixture, &store).await?;
+
+    let applied = store
+        .recover_marketplace_conversion(
+            head.id,
+            MarketplaceConversionRecoveryAction::Resolve,
+            true,
+            "conversion-resolve-apply",
+            "event intentionally skipped by root operator",
+        )
+        .await?;
+    assert!(applied.applied);
+    assert_eq!(applied.resulting_status, "resolved");
+    assert_recovery_audit(
+        &pool,
+        "marketplace.conversion.projection.resolved",
+        "conversion-resolve-apply",
+        "event intentionally skipped by root operator",
+    )
+    .await?;
+
+    let successor = store.claim_marketplace_conversions(1).await?.remove(0);
+    assert_eq!(successor.source_id, successor_id);
+    assert_eq!(successor.aggregate_version, 2);
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn active_claim_should_reject_dead_recovery(pool: PgPool) -> Result<(), StorageError> {
+    let fixture = setup(&pool).await?;
+    insert_handoff(&pool, fixture).await?;
+    let store = PgStore::from_pool(pool.clone());
+    let job = store.claim_marketplace_conversions(1).await?.remove(0);
+
+    let recovery = store
+        .recover_marketplace_conversion(
+            job.id,
+            MarketplaceConversionRecoveryAction::Resolve,
+            true,
+            "active-claim-recovery",
+            "must remain fenced",
+        )
+        .await;
+    assert!(matches!(recovery, Err(StorageError::Conflict(_))));
+    let audits: i64 = sqlx::query_scalar("SELECT count(*) FROM platform_audit_events")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(audits, 0);
+    Ok(())
+}
+
+async fn dead_contact_head_with_successor(
+    pool: &PgPool,
+    fixture: Fixture,
+    store: &PgStore,
+) -> Result<(MarketplaceConversionJob, Uuid), StorageError> {
+    let head_id = Uuid::now_v7();
+    insert_contact_event(
+        pool,
+        fixture,
+        head_id,
+        "contact_requested",
+        fixture.buyer_party_id,
+        fixture.seller_party_id,
+    )
+    .await?;
+    let successor_id = Uuid::now_v7();
+    insert_contact_event(
+        pool,
+        fixture,
+        successor_id,
+        "contact_requested",
+        fixture.buyer_party_id,
+        fixture.seller_party_id,
+    )
+    .await?;
+    let mut head = store.claim_marketplace_conversions(1).await?.remove(0);
+    assert_eq!(head.source_id, head_id);
+    sqlx::query("UPDATE marketplace_conversion_outbox SET attempts = 12 WHERE id = $1")
+        .bind(head.id)
+        .execute(pool)
+        .await?;
+    head.attempts = 12;
+    let failure = store
+        .fail_marketplace_conversion(&head, "deterministic projection failure")
+        .await?;
+    assert_eq!(
+        failure.disposition,
+        MarketplaceConversionFailureDisposition::Dead
+    );
+    Ok((head, successor_id))
+}
+
+async fn assert_recovery_audit(
+    pool: &PgPool,
+    event_type: &str,
+    request_id: &str,
+    reason: &str,
+) -> Result<(), StorageError> {
+    let row = sqlx::query(
+        "SELECT event_type, request_id, metadata->>'reason' AS reason, \
+                metadata->>'host_operator' AS host_operator \
+           FROM platform_audit_events",
+    )
+    .fetch_one(pool)
+    .await?;
+    assert_eq!(row.get::<String, _>("event_type"), event_type);
+    assert_eq!(row.get::<String, _>("request_id"), request_id);
+    assert_eq!(row.get::<String, _>("reason"), reason);
+    assert_eq!(row.get::<String, _>("host_operator"), "true");
     Ok(())
 }
 
@@ -663,6 +914,17 @@ async fn create_source_schema(pool: &PgPool) -> Result<(), StorageError> {
              UNIQUE (tenant_id, id),
              FOREIGN KEY (tenant_id, domain_id) REFERENCES domains(tenant_id, id),
              FOREIGN KEY (tenant_id, participant_id) REFERENCES marketplace_parties(tenant_id, id)
+         );
+         CREATE TABLE platform_audit_events (
+             id uuid PRIMARY KEY,
+             tenant_id uuid NOT NULL REFERENCES tenants(id),
+             domain_id uuid REFERENCES domains(id),
+             platform_path text NOT NULL,
+             event_type text NOT NULL,
+             outcome text NOT NULL,
+             request_id text,
+             metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+             occurred_at timestamptz NOT NULL DEFAULT clock_timestamp()
          );
          CREATE TABLE user_notifications (
              id uuid PRIMARY KEY,
