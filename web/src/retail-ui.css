@@ -1626,8 +1626,7 @@ select {
   box-shadow: 0 3px 12px rgba(30, 27, 22, 0.07);
 }
 
-:where(.floating-clerk-content, .mobile-clerk-drawer-body)
-  .home-chat-form {
+:where(.floating-clerk-content, .mobile-clerk-drawer-body) .home-chat-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   grid-template-areas:
@@ -1635,14 +1634,12 @@ select {
     "attach options send";
 }
 
-:where(.floating-clerk-content, .mobile-clerk-drawer-body)
-  .home-chat-input {
+:where(.floating-clerk-content, .mobile-clerk-drawer-body) .home-chat-input {
   width: 100%;
   grid-area: input;
 }
 
-:where(.floating-clerk-content, .mobile-clerk-drawer-body)
-  .home-chat-attach {
+:where(.floating-clerk-content, .mobile-clerk-drawer-body) .home-chat-attach {
   grid-area: attach;
   justify-self: start;
 }
@@ -1652,8 +1649,7 @@ select {
   grid-area: options;
 }
 
-:where(.floating-clerk-content, .mobile-clerk-drawer-body)
-  .home-chat-send {
+:where(.floating-clerk-content, .mobile-clerk-drawer-body) .home-chat-send {
   grid-area: send;
 }
 
@@ -1686,7 +1682,8 @@ select {
   color: var(--retail-ink);
 }
 
-:where(.floating-clerk-content, .mobile-clerk-drawer-body) .match-chat-starter-grid {
+:where(.floating-clerk-content, .mobile-clerk-drawer-body)
+  .match-chat-starter-grid {
   grid-template-columns: 1fr;
   max-height: 18rem;
   overflow-y: auto;
@@ -1694,7 +1691,8 @@ select {
   gap: 0.45rem;
 }
 
-:where(.floating-clerk-content, .mobile-clerk-drawer-body) .match-chat-starter-card {
+:where(.floating-clerk-content, .mobile-clerk-drawer-body)
+  .match-chat-starter-card {
   padding: 0.6rem 0.75rem;
 }
 
@@ -2390,7 +2388,6 @@ select {
     padding-top: 1.5rem;
     border-top: 1px solid var(--retail-line);
   }
-
 }
 
 @media (max-width: 42rem) {

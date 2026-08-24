@@ -746,14 +746,16 @@ export function MatchChat({
             badge: "Start",
             title: "Describe what you need",
             desc: "Share your budget, use case, and non-negotiable requirements",
-            prompt: "Help me clarify my budget, use case, and must-have requirements.",
+            prompt:
+              "Help me clarify my budget, use case, and must-have requirements.",
           },
           {
             id: "compare",
             badge: "Compare",
             title: "Compare shown offers",
             desc: "Explain trade-offs using only offers and facts already shown",
-            prompt: "Compare the offers already shown and explain the factual trade-offs.",
+            prompt:
+              "Compare the offers already shown and explain the factual trade-offs.",
           },
           {
             id: "stores",
@@ -1666,9 +1668,7 @@ export function MatchChat({
       const message = messages.find((item) => item.id === messageId);
       if (
         !message?.handoff ||
-        !["confirmation_required", "failed"].includes(
-          message.handoff.status,
-        ) ||
+        !["confirmation_required", "failed"].includes(message.handoff.status) ||
         !onHumanHandoff
       )
         return;
@@ -2011,9 +2011,7 @@ export function MatchChat({
               variant="ghost"
               size="icon-sm"
               type="button"
-              aria-label={
-                locale === "en" ? "Conversation options" : "对话选项"
-              }
+              aria-label={locale === "en" ? "Conversation options" : "对话选项"}
               title={locale === "en" ? "Conversation options" : "对话选项"}
             >
               <MoreHorizontal size={17} aria-hidden="true" />
@@ -2374,7 +2372,9 @@ export function MatchChat({
         >
           <div className="match-chat-starter-title-row">
             <Compass size={14} aria-hidden="true" />
-            <span>{locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}</span>
+            <span>
+              {locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}
+            </span>
           </div>
 
           <div className="match-chat-starter-grid">
@@ -2402,9 +2402,7 @@ export function MatchChat({
                 <strong className="match-chat-starter-title">
                   {card.title}
                 </strong>
-                <span className="match-chat-starter-desc">
-                  {card.desc}
-                </span>
+                <span className="match-chat-starter-desc">{card.desc}</span>
               </button>
             ))}
           </div>

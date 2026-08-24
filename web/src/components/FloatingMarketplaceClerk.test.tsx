@@ -14,11 +14,7 @@ import { FloatingMarketplaceClerk } from "./FloatingMarketplaceClerk";
 function Harness() {
   const [open, setOpen] = useState(false);
   return (
-    <FloatingMarketplaceClerk
-      locale="zh"
-      open={open}
-      onOpenChange={setOpen}
-    >
+    <FloatingMarketplaceClerk locale="zh" open={open} onOpenChange={setOpen}>
       <label>
         需求
         <textarea />
@@ -40,9 +36,9 @@ describe("FloatingMarketplaceClerk", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     await user.click(trigger);
 
-    expect(
-      await screen.findByRole("dialog", { name: "选货员" }),
-    ).toHaveClass("desktop-clerk-dialog");
+    expect(await screen.findByRole("dialog", { name: "选货员" })).toHaveClass(
+      "desktop-clerk-dialog",
+    );
     expect(screen.getByRole("textbox", { name: "需求" })).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /收纳|展开|缩放|拖动/ }),
@@ -50,7 +46,9 @@ describe("FloatingMarketplaceClerk", () => {
 
     await user.keyboard("{Escape}");
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "选货员" })).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("dialog", { name: "选货员" }),
+      ).not.toBeInTheDocument(),
     );
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(trigger).toHaveFocus();

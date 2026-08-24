@@ -51,9 +51,7 @@ describe("StorefrontView", () => {
     expect(onOpenListing).toHaveBeenCalledWith(listing);
     const managerTrigger = screen.getByRole("button", { name: "与店长对话" });
     await user.click(managerTrigger);
-    expect(
-      screen.getByRole("dialog", { name: "咨询山间小店" }),
-    ).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "咨询山间小店" })).toBeVisible();
     expect(screen.getByText(/未经你确认，不会交换联系方式/)).toBeVisible();
 
     await user.keyboard("{Escape}");
@@ -176,9 +174,14 @@ describe("StorefrontView", () => {
 
     expect(screen.getByText("该店铺已打烊 · 暂停营业")).toBeVisible();
     expect(screen.getByText(/店主已暂时暂停对外营业/)).toBeVisible();
-    expect(screen.getByRole("link", { name: "返回商城首页" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "返回商城首页" })).toHaveAttribute(
+      "href",
+      "/",
+    );
 
-    const reopenBtn = screen.getByRole("button", { name: "进入店铺工作台（恢复营业）" });
+    const reopenBtn = screen.getByRole("button", {
+      name: "进入店铺工作台（恢复营业）",
+    });
     expect(reopenBtn).toBeVisible();
     fireEvent.click(reopenBtn);
     expect(onOpenStoreConsole).toHaveBeenCalled();
@@ -202,6 +205,9 @@ describe("StorefrontView", () => {
 
     expect(screen.getByText("该店铺已被平台暂停服务")).toBeVisible();
     expect(screen.getByText(/该店铺已被商城管理暂停营业/)).toBeVisible();
-    expect(screen.getByRole("link", { name: "返回商城首页" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "返回商城首页" })).toHaveAttribute(
+      "href",
+      "/",
+    );
   });
 });

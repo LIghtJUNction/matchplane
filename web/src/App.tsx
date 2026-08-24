@@ -144,7 +144,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     if (!pending || pending.storePath !== subplatform.path) return;
     const selected = listings.find(
       (candidate) =>
-        candidate.offerId === pending.offerId || candidate.id === pending.offerId,
+        candidate.offerId === pending.offerId ||
+        candidate.id === pending.offerId,
     );
     if (!selected) {
       setNotice(
@@ -248,7 +249,13 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     void signOut(ui.signedOut, ui.signOutFailed);
     setAccountSettingsSection(null);
     setStoreConsoleOpen(false);
-  }, [signOut, ui.signedOut, ui.signOutFailed, setAccountSettingsSection, setStoreConsoleOpen]);
+  }, [
+    signOut,
+    ui.signedOut,
+    ui.signOutFailed,
+    setAccountSettingsSection,
+    setStoreConsoleOpen,
+  ]);
 
   const genericWorkspace: ReactNode =
     role === "platform" ? (

@@ -101,10 +101,7 @@ export function PalettePicker({
                   <Check size={14} aria-hidden="true" />
                 ) : null}
               </span>
-              <Radio
-                className="palette-radio-control"
-                value={option.id}
-              />
+              <Radio className="palette-radio-control" value={option.id} />
             </label>
           ))}
         </RadioGroup>

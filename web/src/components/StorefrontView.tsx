@@ -159,7 +159,9 @@ export function StorefrontView({
               closeLabel={english ? "Close manager chat" : "关闭店长对话"}
               frame={false}
               id="store-manager-chat"
-              viewportProps={{ className: "storefront-manager-dialog-viewport" }}
+              viewportProps={{
+                className: "storefront-manager-dialog-viewport",
+              }}
             >
               <DialogHeader className="storefront-manager-dialog-header">
                 <div>
@@ -222,7 +224,9 @@ export function StorefrontView({
           <div className="storefront-closed-badge">
             <Moon size={24} aria-hidden="true" />
           </div>
-          <h2>{english ? "Store is currently closed" : "该店铺已打烊 · 暂停营业"}</h2>
+          <h2>
+            {english ? "Store is currently closed" : "该店铺已打烊 · 暂停营业"}
+          </h2>
           <p>
             {english
               ? "The store owner has temporarily paused operations. Products and inquiries are not publicly available right now. All products and records remain safe."
@@ -240,7 +244,9 @@ export function StorefrontView({
                 onClick={onOpenStoreConsole}
               >
                 <Store size={16} aria-hidden="true" />
-                {english ? "Open store console (Reopen)" : "进入店铺工作台（恢复营业）"}
+                {english
+                  ? "Open store console (Reopen)"
+                  : "进入店铺工作台（恢复营业）"}
               </button>
             ) : null}
           </div>
@@ -252,7 +258,9 @@ export function StorefrontView({
           <div className="storefront-closed-badge is-suspended">
             <AlertTriangle size={24} aria-hidden="true" />
           </div>
-          <h2>{english ? "Store suspended by platform" : "该店铺已被平台暂停服务"}</h2>
+          <h2>
+            {english ? "Store suspended by platform" : "该店铺已被平台暂停服务"}
+          </h2>
           <p>
             {english
               ? "This store has been suspended by mall management. Please contact platform support for assistance."

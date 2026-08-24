@@ -321,9 +321,7 @@ describe("MatchChat sending state", () => {
     const user = userEvent.setup();
     render(<MatchChat home onNotice={vi.fn()} subplatform={subplatform} />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "对话选项" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "对话选项" }));
     await user.click(await screen.findByRole("menuitem", { name: "历史" }));
     expect(
       screen.getByRole("heading", { name: "历史对话" }),
@@ -428,7 +426,9 @@ describe("MatchChat sending state", () => {
     await user.click(options);
     expect(await screen.findByRole("menuitem", { name: "历史" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "记忆" })).toBeVisible();
-    expect(screen.queryByRole("menuitem", { name: "清空" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "清空" }),
+    ).not.toBeInTheDocument();
 
     await user.keyboard("{Escape}");
     await user.type(input, "给我一个真实建议");

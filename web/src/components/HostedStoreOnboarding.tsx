@@ -248,7 +248,10 @@ export function HostedStoreOnboarding({
       {!loading && !loadError && stores.length > 0 ? (
         <div className="owned-store-groups">
           {activeStores.length > 0 ? (
-            <ul className="owned-store-grid" aria-label={locale === "en" ? "Active stores" : "营业中的店铺"}>
+            <ul
+              className="owned-store-grid"
+              aria-label={locale === "en" ? "Active stores" : "营业中的店铺"}
+            >
               {activeStores.map((store) => (
                 <OwnedStoreCard
                   key={store.id}
@@ -501,9 +504,7 @@ function OwnedStoreCard({
             onClick={() => {
               if (invite?.storeId !== store.id) onGenerateInvite(store.id);
             }}
-            disabled={
-              invitingStoreId !== null || invite?.storeId === store.id
-            }
+            disabled={invitingStoreId !== null || invite?.storeId === store.id}
             aria-disabled={invite?.storeId === store.id ? true : undefined}
           >
             <UserPlus size={15} aria-hidden="true" />

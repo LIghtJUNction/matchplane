@@ -16,7 +16,11 @@ import { PlatformMenu } from "../PlatformMenu";
 import { PreferenceControls } from "../PreferenceControls";
 import { NotificationBell } from "../NotificationBell";
 import type { SubplatformConfig } from "../../subplatform";
-import type { InterfaceLocale, InterfacePalette, InterfaceTheme } from "../../lib/preferences";
+import type {
+  InterfaceLocale,
+  InterfacePalette,
+  InterfaceTheme,
+} from "../../lib/preferences";
 import type { WorkspaceRole } from "../../types";
 import type { AuthenticatedUser } from "../../hooks/useAuthSession";
 import { roleLabel } from "../../hooks/useSubplatformRoute";
@@ -83,13 +87,9 @@ export function PlatformHeader({
           <Brand
             label={subplatform.brandName}
             logoUrl={
-              subplatform.slug === "root"
-                ? subplatform.brandLogoUrl
-                : undefined
+              subplatform.slug === "root" ? subplatform.brandLogoUrl : undefined
             }
-            homeHref={
-              subplatform.slug === "root" ? "#top" : subplatform.path
-            }
+            homeHref={subplatform.slug === "root" ? "#top" : subplatform.path}
           />
           {subplatform.slug === "root" ? (
             <PlatformMenu locale={locale} />
@@ -203,9 +203,7 @@ export function PlatformHeader({
                     ) : null}
                   </DropdownMenuItem>
                   {canOpenPlatformConsole ? (
-                    <DropdownMenuLinkItem
-                      render={<a href="/?role=platform" />}
-                    >
+                    <DropdownMenuLinkItem render={<a href="/?role=platform" />}>
                       <UserRound size={16} aria-hidden="true" />
                       <span>{ui.platformAdmin}</span>
                     </DropdownMenuLinkItem>
