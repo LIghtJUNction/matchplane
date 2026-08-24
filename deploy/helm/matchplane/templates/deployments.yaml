@@ -132,7 +132,9 @@ metadata:
     {{- include "matchplane.labels" $root | nindent 4 }}
     app.kubernetes.io/component: web
 spec:
-  replicas: {{ $root.Values.web.replicas }}
+  # Literal defense-in-depth: schema validation owns the value contract, while this prevents
+  # --skip-schema-validation from ever creating more than the one supported Web writer.
+  replicas: 1
   revisionHistoryLimit: 3
   strategy:
     type: Recreate
@@ -186,16 +188,17 @@ spec:
               const committed = path.join(state, `.matchplane-mount-probe-${nonce}.committed`);
               let pendingExists = false;
               let committedExists = false;
+              let probe;
               let directory;
+              let primaryFailure;
+              let cleanupFailure;
               try {
-                const probe = fs.openSync(pending, "wx", 0o600);
+                probe = fs.openSync(pending, "wx", 0o600);
                 pendingExists = true;
-                try {
-                  fs.writeSync(probe, "mount-probe\n");
-                  fs.fsyncSync(probe);
-                } finally {
-                  fs.closeSync(probe);
-                }
+                fs.writeSync(probe, "mount-probe\n");
+                fs.fsyncSync(probe);
+                fs.closeSync(probe);
+                probe = undefined;
                 fs.renameSync(pending, committed);
                 pendingExists = false;
                 committedExists = true;
@@ -204,11 +207,22 @@ spec:
                 fs.unlinkSync(committed);
                 committedExists = false;
                 fs.fsyncSync(directory);
-              } finally {
-                if (directory !== undefined) fs.closeSync(directory);
-                if (pendingExists) fs.rmSync(pending, { force: true });
-                if (committedExists) fs.rmSync(committed, { force: true });
+              } catch (error) {
+                primaryFailure = error;
               }
+              const cleanup = (operation) => {
+                try {
+                  operation();
+                } catch (error) {
+                  cleanupFailure ??= error;
+                }
+              };
+              if (probe !== undefined) cleanup(() => fs.closeSync(probe));
+              if (directory !== undefined) cleanup(() => fs.closeSync(directory));
+              if (pendingExists) cleanup(() => fs.rmSync(pending, { force: true }));
+              if (committedExists) cleanup(() => fs.rmSync(committed, { force: true }));
+              if (primaryFailure !== undefined) throw primaryFailure;
+              if (cleanupFailure !== undefined) throw cleanupFailure;
           securityContext:
             runAsNonRoot: true
             runAsUser: {{ $root.Values.podSecurityContext.runAsUser }}

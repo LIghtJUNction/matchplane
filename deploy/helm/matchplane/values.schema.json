@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "web": {
+      "type": "object",
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "enum": [1]
+        }
+      },
+      "required": ["replicas"],
+      "additionalProperties": true
+    }
+  },
+  "required": ["web"],
+  "additionalProperties": true
+}

@@ -53,9 +53,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 */}}
 {{- define "matchplane.platformRouterClaimName" -}}
 {{- $storage := required "web.platformRouterStorage is required" .Values.web.platformRouterStorage -}}
-{{- if ne (int .Values.web.replicas) 1 -}}
-{{- fail "web.replicas must be exactly 1 while platform-router state has a Pod-local writer lock" -}}
-{{- end -}}
 {{- if not $storage.enabled -}}
 {{- fail "web.platformRouterStorage.enabled must be true while the Web deployment is enabled" -}}
 {{- end -}}

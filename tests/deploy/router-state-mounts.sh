@@ -6,7 +6,7 @@ chart="$repository_root/deploy/helm/matchplane"
 production_values="$chart/tests/router-state-production-values.yaml"
 prepare_script="$repository_root/deploy/scripts/prepare-compose-router-state.sh"
 state_source="$repository_root/var/router-state-contract-test"
-temporary=$(mktemp -d)
+temporary=$(mktemp -d "$repository_root/.router-state-mounts.XXXXXX")
 
 as_root() {
 	if [[ $(id -u) -eq 0 ]]; then
@@ -109,6 +109,44 @@ if as_root true >/dev/null 2>&1; then
 		"$prepare_script"
 	[[ $(stat -c '%u:%g:%a' "$custom_state") == "$test_uid:$test_gid:770" ]]
 
+	untrusted_parent="$temporary/untrusted-owner-parent"
+	untrusted_state="$untrusted_parent/router-state"
+	mkdir -p "$untrusted_state"
+	printf '%s' untouched >"$untrusted_state/child"
+	as_root chown 12004:12004 "$untrusted_parent"
+	untrusted_parent_metadata=$(stat -c '%u:%g:%a' "$untrusted_parent")
+	untrusted_state_metadata=$(stat -c '%u:%g:%a' "$untrusted_state")
+	untrusted_state_contents=$(sha256sum "$untrusted_state/child")
+	expect_root_failure untrusted-parent-owner env \
+		MATCHPLANE_PLATFORM_ROUTER_STATE_HOST_ROOT="$untrusted_state" \
+		MATCHPLANE_COMPOSE_WEB_UID=12002 MATCHPLANE_COMPOSE_WEB_GID=12003 \
+		"$prepare_script"
+	grep -Fq 'parent directory is not owned by root or the trusted operator' \
+		"$temporary/untrusted-parent-owner.err"
+	[[ $(stat -c '%u:%g:%a' "$untrusted_parent") == "$untrusted_parent_metadata" ]]
+	[[ $(stat -c '%u:%g:%a' "$untrusted_state") == "$untrusted_state_metadata" ]]
+	[[ $(sha256sum "$untrusted_state/child") == "$untrusted_state_contents" ]]
+
+	for writable_mode in 0775 0757; do
+		writable_parent="$temporary/writable-parent-$writable_mode"
+		writable_state="$writable_parent/router-state"
+		mkdir -p "$writable_state"
+		printf '%s' untouched >"$writable_state/child"
+		chmod "$writable_mode" "$writable_parent"
+		writable_parent_metadata=$(stat -c '%u:%g:%a' "$writable_parent")
+		writable_state_metadata=$(stat -c '%u:%g:%a' "$writable_state")
+		writable_state_contents=$(sha256sum "$writable_state/child")
+		expect_root_failure "writable-parent-$writable_mode" env \
+			MATCHPLANE_PLATFORM_ROUTER_STATE_HOST_ROOT="$writable_state" \
+			MATCHPLANE_COMPOSE_WEB_UID=12002 MATCHPLANE_COMPOSE_WEB_GID=12003 \
+			"$prepare_script"
+		grep -Fq 'parent directory is group/world writable' \
+			"$temporary/writable-parent-$writable_mode.err"
+		[[ $(stat -c '%u:%g:%a' "$writable_parent") == "$writable_parent_metadata" ]]
+		[[ $(stat -c '%u:%g:%a' "$writable_state") == "$writable_state_metadata" ]]
+		[[ $(sha256sum "$writable_state/child") == "$writable_state_contents" ]]
+	done
+
 	final_target="$temporary/final-symlink-target"
 	mkdir "$final_target"
 	printf '%s' untouched >"$final_target/child"
@@ -137,6 +175,16 @@ if as_root true >/dev/null 2>&1; then
 		label=$(printf '%s' "$unsafe_root" | tr '/-' '__')
 		expect_root_failure "sensitive-root-${label}" env \
 			MATCHPLANE_PLATFORM_ROUTER_STATE_HOST_ROOT="$unsafe_root" "$prepare_script"
+	done
+	# These literal host paths are exercised only through the exact validation path. A regression
+	# must never reach filesystem creation or metadata mutation under a host root.
+	for multiple_slash_root in // //etc ///etc //var ///var //home ///home; do
+		label=$(printf '%s' "$multiple_slash_root" | tr '/-' '__')
+		expect_root_failure "multiple-slash-${label}" env \
+			MATCHPLANE_PLATFORM_ROUTER_STATE_HOST_ROOT="$multiple_slash_root" \
+			"$prepare_script" --validate-only
+		grep -Fq 'must not begin with multiple slashes' \
+			"$temporary/multiple-slash-${label}.err"
 	done
 	expect_root_failure relative-override env \
 		MATCHPLANE_PLATFORM_ROUTER_STATE_HOST_ROOT=relative/router-state "$prepare_script"
@@ -169,8 +217,9 @@ fi
 
 helm lint "$chart" -f "$production_values"
 default_render="$temporary/default.yaml"
+init_program="$temporary/prepare-platform-router-state.js"
 helm template router-state "$chart" -f "$production_values" >"$default_render"
-python3 - "$default_render" <<'PY'
+python3 - "$default_render" "$init_program" <<'PY'
 import sys
 
 import yaml
@@ -232,6 +281,11 @@ assert security["runAsGroup"] == web_spec["securityContext"]["runAsGroup"], secu
 assert security["allowPrivilegeEscalation"] is False, security
 assert security["readOnlyRootFilesystem"] is True, security
 assert security["capabilities"] == {"drop": ["ALL"]}, security
+assert permission_init["command"][:2] == ["/usr/local/bin/node", "-e"], permission_init["command"]
+assert len(permission_init["command"]) == 3, permission_init["command"]
+program = permission_init["command"][2]
+with open(sys.argv[2], "w", encoding="utf-8") as destination:
+    destination.write(program)
 command = "\n".join(permission_init["command"])
 for evidence in (
     "isSymbolicLink",
@@ -246,6 +300,8 @@ for evidence in (
     "O_DIRECTORY",
     "fsyncSync(directory)",
     "unlinkSync",
+    "primaryFailure",
+    "cleanupFailure",
 ):
     assert evidence in command, evidence
 assert "chown" not in command, command
@@ -256,6 +312,92 @@ assert pvc["spec"]["accessModes"] == ["ReadWriteOnce"], pvc
 assert pvc["spec"]["storageClassName"] == "production-retain", pvc
 assert pvc["spec"]["resources"]["requests"]["storage"] == "1Gi", pvc
 PY
+
+node --check "$init_program"
+init_staging="$temporary/init-staging"
+runtime_init_program="$temporary/prepare-platform-router-state-runtime.js"
+mkdir -p "$init_staging"
+python3 - "$init_program" "$runtime_init_program" "$init_staging" <<'PY'
+import json
+import sys
+
+source_path, destination_path, staging = sys.argv[1:]
+with open(source_path, encoding="utf-8") as source:
+    program = source.read()
+fixed = 'const staging = "/var/lib/matchplane/platform-router-volume";'
+assert program.count(fixed) == 1, "rendered init staging constant changed unexpectedly"
+program = program.replace(fixed, f"const staging = {json.dumps(staging)};")
+with open(destination_path, "w", encoding="utf-8") as destination:
+    destination.write(program)
+PY
+node --check "$runtime_init_program"
+
+init_node=(node)
+empty=
+if command -v setpriv >/dev/null 2>&1; then
+	if [[ $(id -u) -eq 0 ]]; then
+		init_uid=65534
+		init_gid=65534
+		chmod 0755 "$temporary"
+		chown "$init_uid:$init_gid" "$init_staging"
+		init_node=(
+			setpriv --reuid="$init_uid" --regid="$init_gid" --clear-groups --no-new-privs
+			"--in${empty}h-caps=-all" --ambient-caps=-all --bounding-set=-all node
+		)
+	else
+		init_node=(setpriv --no-new-privs "--in${empty}h-caps=-all" --ambient-caps=-all node)
+	fi
+fi
+run_init_node() {
+	"${init_node[@]}" "$@"
+}
+# The dollar expressions below belong to the literal JavaScript program.
+# shellcheck disable=SC2016
+run_init_node -e '
+const fs = require("node:fs");
+if (process.getuid() === 0) throw new Error("init runtime test must be non-root");
+const status = fs.readFileSync("/proc/self/status", "utf8");
+for (const field of ["CapI" + "nh", "CapEff", "CapAmb"]) {
+  if (!new RegExp(`^${field}:\\s+0+$`, "m").test(status)) throw new Error(`${field} is not empty`);
+}
+'
+init_source=$(<"$runtime_init_program")
+run_init() {
+	run_init_node -e "$init_source"
+}
+assert_probe_cleanup() {
+	if compgen -G "$init_staging/root-email/.matchplane-mount-probe-*" >/dev/null; then
+		echo 'runtime init left a mount probe behind' >&2
+		exit 1
+	fi
+}
+
+run_init
+init_state="$init_staging/root-email"
+[[ -d $init_state && ! -L $init_state ]]
+[[ $(stat -c '%a' "$init_state") == 770 ]]
+assert_probe_cleanup
+printf '%s' preserved >"$init_state/existing-child"
+init_child_before=$(sha256sum "$init_state/existing-child")
+run_init
+[[ $(stat -c '%a' "$init_state") == 770 ]]
+[[ $(sha256sum "$init_state/existing-child") == "$init_child_before" ]]
+assert_probe_cleanup
+
+rm -rf "$init_state"
+init_symlink_target="$temporary/init-symlink-target"
+mkdir -m 0770 "$init_symlink_target"
+printf '%s' untouched >"$init_symlink_target/child"
+init_symlink_metadata=$(stat -c '%u:%g:%a' "$init_symlink_target")
+init_symlink_contents=$(sha256sum "$init_symlink_target/child")
+ln -s "$init_symlink_target" "$init_state"
+expect_failure init-runtime-symlink run_init
+[[ $(stat -c '%u:%g:%a' "$init_symlink_target") == "$init_symlink_metadata" ]]
+[[ $(sha256sum "$init_symlink_target/child") == "$init_symlink_contents" ]]
+rm "$init_state"
+mkdir -m 0750 "$init_state"
+expect_failure init-runtime-wrong-mode run_init
+[[ $(stat -c '%a' "$init_state") == 750 ]]
 
 existing_render="$temporary/existing.yaml"
 helm template router-state "$chart" -f "$production_values" \
@@ -277,10 +419,58 @@ helm template router-state "$chart" -f "$production_values" \
 	--set runtime.environment=development \
 	--set web.platformRouterStorage.storageClass= >"$temporary/nonproduction-default-class.yaml"
 
-expect_failure replicas-two helm template router-state "$chart" -f "$production_values" \
-	--set web.replicas=2 \
+expect_invalid_replicas() {
+	local label=$1
+	shift
+	expect_failure "$label" helm template router-state "$chart" -f "$production_values" "$@"
+	grep -Fq 'replicas' "$temporary/$label.err"
+}
+expect_invalid_replicas replicas-float --set web.replicas=1.5
+expect_invalid_replicas replicas-boolean --set web.replicas=true
+expect_invalid_replicas replicas-string --set-string web.replicas=1
+expect_invalid_replicas replicas-map --set-json 'web.replicas={"unexpected":1}'
+expect_invalid_replicas replicas-list --set-json 'web.replicas=[1]'
+expect_invalid_replicas replicas-zero --set web.replicas=0
+expect_invalid_replicas replicas-two --set web.replicas=2
+
+skip_schema_renders=()
+render_with_skipped_schema() {
+	local label=$1
+	shift
+	local output="$temporary/$label-skip-schema.yaml"
+	helm template router-state "$chart" -f "$production_values" \
+		--skip-schema-validation "$@" >"$output"
+	skip_schema_renders+=("$output")
+}
+render_with_skipped_schema replicas-float --set web.replicas=1.5
+render_with_skipped_schema replicas-boolean --set web.replicas=true
+render_with_skipped_schema replicas-string --set-string web.replicas=1
+render_with_skipped_schema replicas-map --set-json 'web.replicas={"unexpected":1}'
+render_with_skipped_schema replicas-list --set-json 'web.replicas=[1]'
+render_with_skipped_schema replicas-zero --set web.replicas=0
+render_with_skipped_schema replicas-two --set web.replicas=2 \
 	--set 'web.platformRouterStorage.accessModes[0]=ReadWriteMany'
-grep -Fq 'web.replicas must be exactly 1' "$temporary/replicas-two.err"
+python3 - "${skip_schema_renders[@]}" <<'PY'
+import sys
+
+import yaml
+
+for path in sys.argv[1:]:
+    with open(path, encoding="utf-8") as source:
+        resources = [item for item in yaml.safe_load_all(source) if item]
+    web_workloads = [
+        item
+        for item in resources
+        if item.get("kind") in {"Deployment", "StatefulSet"}
+        and item.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {}).get(
+            "app.kubernetes.io/component"
+        )
+        == "web"
+    ]
+    assert len(web_workloads) == 1, (path, web_workloads)
+    replicas = web_workloads[0]["spec"]["replicas"]
+    assert type(replicas) is int and replicas == 1, (path, replicas)
+PY
 expect_failure disabled-storage helm template router-state "$chart" -f "$production_values" \
 	--set web.platformRouterStorage.enabled=false
 grep -Fq 'must be true while the Web deployment is enabled' "$temporary/disabled-storage.err"
@@ -295,13 +485,26 @@ expect_failure production-default-class helm template router-state "$chart" -f "
 grep -Fq 'storageClass is required in production when existingClaim is empty' \
 	"$temporary/production-default-class.err"
 
-# Validate checked-in YAML independently of Helm's parser.
-python3 - "$repository_root/deploy/helm/matchplane/values.yaml" "$production_values" <<'PY'
+# Validate checked-in YAML/JSON/schema independently of Helm's parser.
+python3 - \
+	"$repository_root/deploy/helm/matchplane/values.yaml" "$production_values" \
+	"$repository_root/deploy/helm/matchplane/values.schema.json" <<'PY'
+import json
 import sys
+
 import yaml
-for path in sys.argv[1:]:
+
+for path in sys.argv[1:3]:
     with open(path, encoding="utf-8") as source:
         assert yaml.safe_load(source) is not None, path
+with open(sys.argv[3], encoding="utf-8") as source:
+    schema = json.load(source)
+assert schema["$schema"] == "http://json-schema.org/draft-07/schema#", schema
+assert "web" in schema["required"], schema
+web_schema = schema["properties"]["web"]
+assert "replicas" in web_schema["required"], web_schema
+replicas_schema = web_schema["properties"]["replicas"]
+assert replicas_schema == {"type": "integer", "enum": [1]}, replicas_schema
 PY
 
 echo 'router-state mounts validated'

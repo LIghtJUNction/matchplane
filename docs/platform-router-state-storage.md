@@ -34,11 +34,20 @@ sudo MATCHPLANE_COMPOSE_WEB_UID=1000 MATCHPLANE_COMPOSE_WEB_GID=1000 \
   deploy/scripts/prepare-compose-router-state.sh
 ```
 
-The helper refuses filesystem roots and every symlink in an existing path. The repository default
-may create its `var/platform-router-state` path below the physical repository root. An external
-override must be absolute and have existing, non-symlink parents; the helper creates only its final
-directory. It changes final-directory metadata through a no-follow descriptor and preserves every
-existing child byte-for-byte.
+The helper refuses filesystem roots, multiple-leading-slash paths, and every symlink in an existing
+path. Every existing parent ancestor must be owned by root or the explicitly trusted operator and
+must not be group- or world-writable. `sudo` identifies its invoking UID as that trusted operator;
+a direct root invocation may instead set `MATCHPLANE_COMPOSE_OPERATOR_UID` to the UID that owns the
+checkout or external parent. The repository default remains viable in a normal operator-owned
+mode-`0755` checkout and may create its `var/platform-router-state` path below the physical
+repository root.
+
+An external override must be absolute, its parent must already exist, and that parent ancestry must
+remain operator-owned/trusted, non-symlink, and non-group/world-writable. The operator who owns this
+ancestry remains trusted not to replace any entry between preparation and Compose lookup. Start
+Compose immediately after preparation to minimize that unavoidable bind-path interval. The helper
+creates only the final directory, changes its metadata through a no-follow descriptor, and preserves
+every existing child byte-for-byte.
 
 Back up the directory as one filesystem-consistent unit. To restore, stop Web, restore the complete
 directory (including the current pointer and all referenced generations/credentials), run the
