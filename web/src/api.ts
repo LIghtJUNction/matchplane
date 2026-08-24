@@ -1277,6 +1277,35 @@ export async function updateStoreManagement(input: {
   return body.store;
 }
 
+export async function updateStoreLifecycle(input: {
+  storeId: string;
+  action: "close" | "reopen";
+  expectedVersion: number;
+}): Promise<StoreSummary> {
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(input.storeId)}/lifecycle`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(input),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    store?: StoreSummary;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.store)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "店铺营业状态更新失败",
+    );
+  return body.store;
+}
+
 export async function getPlatformChildren(
   path = "/",
 ): Promise<PlatformChildSummary[]> {

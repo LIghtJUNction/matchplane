@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  Moon,
   Package,
   ReceiptText,
   ShieldCheck,
@@ -44,6 +45,28 @@ export function SubplatformAdminDashboard({
 
   return (
     <div className="dashboard subplatform-admin-dashboard">
+      {store.status === "closed" && (
+        <div className="store-closed-banner" role="status">
+          <div className="store-closed-banner-content">
+            <Moon size={16} aria-hidden="true" />
+            <span>
+              {english
+                ? "This store is currently closed/paused and hidden from public search."
+                : "当前店铺处于「已打烊 · 暂停营业」状态，已从商城公开搜索与推荐中隐藏。"}
+            </span>
+          </div>
+          {canManageStore && section !== "store" && (
+            <button
+              type="button"
+              className="store-closed-banner-action"
+              onClick={() => setSection("store")}
+            >
+              {english ? "Go to store details to reopen" : "前往店铺资料恢复营业"}
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="store-console-toolbar">
         <nav
           className="store-management-tabs"
@@ -144,6 +167,7 @@ export function SubplatformAdminDashboard({
               canManageStore={canManageStore}
               onNotice={onNotice}
               onUpdated={onStoreUpdated}
+              locale={locale}
             />
           </div>
         ) : null}

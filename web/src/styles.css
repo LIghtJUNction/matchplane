@@ -862,6 +862,47 @@ main.subplatform-fullscreen-main { min-height: 0; padding: 0; overflow: hidden; 
 .store-management-form input:focus, .store-management-form textarea:focus { border-color: var(--focus); box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--focus) 18%, transparent); }
 .store-management-meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; color: var(--muted); font-size: 0.67rem; }
 .store-management-readonly { margin: 0; color: var(--muted); font-size: 0.72rem; }
+
+/* Store Status Badges & Lifecycle */
+.owned-store-card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.store-status-badge { display: inline-flex; align-items: center; gap: 0.28rem; padding: 0.22rem 0.55rem; border-radius: 999px; font-size: 0.68rem; font-weight: 650; letter-spacing: -0.01em; line-height: 1; flex-shrink: 0; }
+.store-status-badge.is-active { background: color-mix(in srgb, var(--cactus) 45%, var(--paper)); color: #1e3a1f; border: 1px solid color-mix(in srgb, #2e592f 25%, transparent); }
+.store-status-badge.is-closed { background: color-mix(in srgb, #d97706 14%, var(--paper)); color: #92400e; border: 1px solid color-mix(in srgb, #d97706 30%, transparent); }
+.store-status-badge.is-pending { background: color-mix(in srgb, #3b82f6 14%, var(--paper)); color: #1d4ed8; border: 1px solid color-mix(in srgb, #3b82f6 30%, transparent); }
+.store-status-badge.is-suspended { background: color-mix(in srgb, #ef4444 14%, var(--paper)); color: #b91c1c; border: 1px solid color-mix(in srgb, #ef4444 30%, transparent); }
+
+:root[data-theme="dark"] .store-status-badge.is-active { background: rgba(120, 180, 100, 0.2); color: #86efac; border-color: rgba(120, 180, 100, 0.35); }
+:root[data-theme="dark"] .store-status-badge.is-closed { background: rgba(245, 158, 11, 0.18); color: #fcd34d; border-color: rgba(245, 158, 11, 0.35); }
+:root[data-theme="dark"] .store-status-badge.is-pending { background: rgba(59, 130, 246, 0.18); color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); }
+:root[data-theme="dark"] .store-status-badge.is-suspended { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border-color: rgba(239, 68, 68, 0.35); }
+
+.store-closed-banner { margin-bottom: 1rem; padding: 0.75rem 1rem; display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; border-radius: 0.85rem; border: 1px solid color-mix(in srgb, #d97706 35%, transparent); background: color-mix(in srgb, #d97706 10%, var(--paper)); color: var(--ink); font-size: 0.78rem; }
+.store-closed-banner-content { display: flex; align-items: center; gap: 0.55rem; color: var(--ink); }
+.store-closed-banner-content svg { color: #d97706; flex-shrink: 0; }
+.store-closed-banner-action { padding: 0.35rem 0.75rem; border: 1px solid color-mix(in srgb, #d97706 40%, var(--line)); border-radius: 0.65rem; background: var(--paper); color: var(--ink); cursor: pointer; font: inherit; font-size: 0.74rem; font-weight: 650; white-space: nowrap; }
+.store-closed-banner-action:hover { background: var(--paper-deep); }
+
+.store-lifecycle-card { margin-top: 1.1rem; padding: 1.1rem; border: 1px solid var(--line); border-radius: 0.95rem; background: var(--paper); display: grid; gap: 0.85rem; }
+.store-lifecycle-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.2rem; }
+.store-lifecycle-info { display: grid; gap: 0.4rem; min-width: 0; }
+.store-lifecycle-label { font-size: 0.68rem; font-weight: 650; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; }
+.store-lifecycle-status-row { display: flex; align-items: center; gap: 0.5rem; }
+.store-lifecycle-desc { margin: 0; color: var(--muted); font-size: 0.74rem; line-height: 1.5; max-width: 38rem; }
+.store-lifecycle-action-wrapper { flex-shrink: 0; }
+
+.store-lifecycle-confirm { padding: 0.95rem 1rem; border-radius: 0.85rem; border: 1px solid color-mix(in srgb, #ef4444 35%, transparent); background: color-mix(in srgb, #ef4444 8%, var(--paper)); display: grid; gap: 0.75rem; }
+.store-lifecycle-confirm-content strong { display: block; font-size: 0.82rem; color: #b91c1c; margin-bottom: 0.25rem; }
+:root[data-theme="dark"] .store-lifecycle-confirm-content strong { color: #fca5a5; }
+.store-lifecycle-confirm-content p { margin: 0; font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
+.store-lifecycle-confirm-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+.button-danger-subtle { border: 1px solid color-mix(in srgb, #ef4444 35%, var(--line)); background: color-mix(in srgb, #ef4444 8%, var(--paper)); color: #b91c1c; cursor: pointer; font: inherit; font-size: 0.76rem; font-weight: 650; padding: 0.55rem 0.9rem; border-radius: 0.75rem; display: inline-flex; align-items: center; gap: 0.4rem; transition: all 0.15s ease; }
+.button-danger-subtle:hover:not(:disabled) { border-color: #ef4444; background: color-mix(in srgb, #ef4444 16%, var(--paper)); color: #991b1b; }
+:root[data-theme="dark"] .button-danger-subtle { color: #fca5a5; background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.3); }
+:root[data-theme="dark"] .button-danger-subtle:hover:not(:disabled) { background: rgba(239, 68, 68, 0.22); color: #fecaca; }
+
+.button-danger { border: 1px solid #b91c1c; background: #dc2626; color: #ffffff; cursor: pointer; font: inherit; font-size: 0.76rem; font-weight: 650; padding: 0.55rem 0.9rem; border-radius: 0.75rem; display: inline-flex; align-items: center; gap: 0.4rem; }
+.button-danger:hover:not(:disabled) { background: #b91c1c; }
 .seller-submissions { grid-column: 1 / -1; }
 .submission-list { margin: 0; padding: 0; display: grid; list-style: none; }
 .submission-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.95rem 0; border-top: 1px solid var(--line); }

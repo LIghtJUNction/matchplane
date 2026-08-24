@@ -261,7 +261,29 @@ export function HostedStoreOnboarding({
               <li key={store.id} className="owned-store-card">
                 <div className="owned-store-card-main">
                   <div className="owned-store-card-copy">
-                    <strong>{store.displayName}</strong>
+                    <div className="owned-store-card-title-row">
+                      <strong>{store.displayName}</strong>
+                      {store.status === "active" && (
+                        <span className="store-status-badge is-active">
+                          {locale === "en" ? "Open" : "营业中"}
+                        </span>
+                      )}
+                      {store.status === "closed" && (
+                        <span className="store-status-badge is-closed">
+                          {locale === "en" ? "Closed" : "已打烊"}
+                        </span>
+                      )}
+                      {store.status === "pending" && (
+                        <span className="store-status-badge is-pending">
+                          {locale === "en" ? "Review" : "审核中"}
+                        </span>
+                      )}
+                      {store.status === "suspended" && (
+                        <span className="store-status-badge is-suspended">
+                          {locale === "en" ? "Suspended" : "已暂停"}
+                        </span>
+                      )}
+                    </div>
                     <p>
                       {store.description ||
                         (locale === "en" ? "Hosted store" : "托管店铺")}
