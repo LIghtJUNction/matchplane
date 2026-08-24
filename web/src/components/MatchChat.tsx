@@ -647,9 +647,7 @@ export function MatchChat({
     null,
   );
   const [sending, setSending] = useState(false);
-  const [chatError, setChatError] = useState<RecoverableChatError | null>(
-    null,
-  );
+  const [chatError, setChatError] = useState<RecoverableChatError | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [shoppingMemoryOpen, setShoppingMemoryOpen] = useState(false);
   const [conversationAttachments, setConversationAttachments] = useState<
@@ -2606,7 +2604,9 @@ export function MatchChat({
         >
           <div className="match-chat-starter-title-row">
             <Compass size={14} aria-hidden="true" />
-            <span>{locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}</span>
+            <span>
+              {locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}
+            </span>
           </div>
 
           <div className="match-chat-starter-grid">
@@ -2634,9 +2634,7 @@ export function MatchChat({
                 <strong className="match-chat-starter-title">
                   {card.title}
                 </strong>
-                <span className="match-chat-starter-desc">
-                  {card.desc}
-                </span>
+                <span className="match-chat-starter-desc">{card.desc}</span>
               </button>
             ))}
           </div>

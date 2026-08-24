@@ -487,11 +487,7 @@ describe("MatchChat sending state", () => {
 
   it("does not expose a history action when that panel is unavailable", () => {
     const sellerView = render(
-      <MatchChat
-        onNotice={vi.fn()}
-        role="seller"
-        subplatform={subplatform}
-      />,
+      <MatchChat onNotice={vi.fn()} role="seller" subplatform={subplatform} />,
     );
 
     expect(

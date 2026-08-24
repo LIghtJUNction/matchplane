@@ -35,7 +35,11 @@ export function PlatformMenu({ locale }: PlatformMenuProps) {
   useEffect(() => {
     if (!open) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
+      if (
+        event.target instanceof Node &&
+        !rootRef.current?.contains(event.target)
+      )
+        setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
