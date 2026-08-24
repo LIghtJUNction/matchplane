@@ -73,21 +73,21 @@ fi
 
 current_preload=$(sudo -u postgres psql -Atqc 'SHOW shared_preload_libraries' postgres)
 case ",$current_preload," in
-  *,timescaledb,*) ;;
-  *)
-    if [[ -n $current_preload ]]; then
-      next_preload="$current_preload,timescaledb"
-    else
-      next_preload=timescaledb
-    fi
-    if [[ ! $next_preload =~ ^[a-zA-Z0-9_,[:space:]-]+$ ]]; then
-      echo 'existing shared_preload_libraries value is unsafe to preserve' >&2
-      exit 1
-    fi
-    printf "ALTER SYSTEM SET shared_preload_libraries = '%s';\n" "$next_preload" \
-      | sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
-    systemctl restart postgresql
-    ;;
+*,timescaledb,*) ;;
+*)
+  if [[ -n $current_preload ]]; then
+    next_preload="$current_preload,timescaledb"
+  else
+    next_preload=timescaledb
+  fi
+  if [[ ! $next_preload =~ ^[a-zA-Z0-9_,[:space:]-]+$ ]]; then
+    echo 'existing shared_preload_libraries value is unsafe to preserve' >&2
+    exit 1
+  fi
+  printf "ALTER SYSTEM SET shared_preload_libraries = '%s';\n" "$next_preload" |
+    sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
+  systemctl restart postgresql
+  ;;
 esac
 
 for _ in $(seq 1 30); do
@@ -100,11 +100,11 @@ pg_isready --quiet --host 127.0.0.1 --port 5432
 
 if [[ $(sudo -u postgres psql -Atqc \
   "SELECT count(*) FROM pg_roles WHERE rolname = 'matchplane'" postgres) == 0 ]]; then
-  printf "CREATE ROLE matchplane LOGIN PASSWORD '%s';\n" "$database_password" \
-    | sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
+  printf "CREATE ROLE matchplane LOGIN PASSWORD '%s';\n" "$database_password" |
+    sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
 else
-  printf "ALTER ROLE matchplane LOGIN PASSWORD '%s';\n" "$database_password" \
-    | sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
+  printf "ALTER ROLE matchplane LOGIN PASSWORD '%s';\n" "$database_password" |
+    sudo -u postgres psql --set=ON_ERROR_STOP=1 postgres
 fi
 
 if [[ $(sudo -u postgres psql -Atqc \
@@ -195,8 +195,8 @@ systemctl start matchplane-initialize.service
 systemctl enable --now matchplane-gateway.service matchplane-payment-service.service
 
 for _ in $(seq 1 30); do
-  if curl --fail --silent http://127.0.0.1:8080/health/ready >/dev/null \
-    && curl --fail --silent http://127.0.0.1:8081/health/ready >/dev/null; then
+  if curl --fail --silent http://127.0.0.1:8080/health/ready >/dev/null &&
+    curl --fail --silent http://127.0.0.1:8081/health/ready >/dev/null; then
     break
   fi
   sleep 1
