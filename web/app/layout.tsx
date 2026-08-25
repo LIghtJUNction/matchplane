@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import "../src/styles.css";
 import "../src/retail-ui.css";
+import "../src/retail-polish.css";
 
 const DIRECTION_CONTRACT = `impeccable-direction:
 world: warm paper marketplace, carbon ink, one calm axis, no brand imitation

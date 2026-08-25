@@ -633,30 +633,6 @@ select {
   line-height: 1.7;
 }
 
-.root-marketplace-need-prompt {
-  max-width: 38rem;
-  margin-top: 1.15rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.55rem;
-}
-
-.root-marketplace-need-input {
-  min-height: 2.85rem;
-  border-radius: 999px;
-  border: 1px solid var(--retail-line-strong);
-  background: var(--retail-paper);
-  padding-inline: 1rem;
-  font-size: 0.95rem;
-}
-
-.root-marketplace-need-prompt > button {
-  min-height: 2.85rem;
-  border-radius: 999px;
-  padding-inline: 1.1rem;
-  white-space: nowrap;
-}
-
 .root-marketplace-catalog-actions {
   flex: 0 0 auto;
   display: flex;
@@ -2349,15 +2325,6 @@ select {
 
   .root-marketplace-catalog-intro h1 {
     font-size: clamp(2rem, 10vw, 3rem);
-  }
-
-  .root-marketplace-need-prompt {
-    width: 100%;
-    grid-template-columns: 1fr;
-  }
-
-  .root-marketplace-need-prompt > button {
-    width: 100%;
   }
 
   .root-marketplace-catalog-actions {

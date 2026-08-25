@@ -26,6 +26,7 @@ export * from "./OAuthConsentScreen";
 export * from "./LegalDocumentScreen";
 export * from "./ShoppingMemoryPanel";
 export * from "./ConversationHistoryPanel";
+export * from "./AssistantThinkingStatus";
 
 // Marketplace & Matching
 export * from "./MarketplaceHome";
@@ -37,6 +38,7 @@ export * from "./StorefrontDirectory";
 // Store & Merchant
 export * from "./StorefrontView";
 export * from "./HostedStoreOnboarding";
+export * from "./OwnedStoreCard";
 export * from "./RemoteStoreOnboarding";
 export * from "./StoreCommercialTermsPanel";
 export * from "./StoreContactConsentCard";

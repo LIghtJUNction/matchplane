@@ -129,20 +129,6 @@ describe("MarketplaceHome actions", () => {
     expect(screen.queryByText("这些结果来自哪里")).not.toBeInTheDocument();
   });
 
-  it("sends the compact need prompt into the inline shopping conversation", async () => {
-    const user = userEvent.setup();
-    const onNeedSubmit = vi.fn();
-    renderHome({ onNeedSubmit });
-
-    await user.type(
-      screen.getByRole("textbox", { name: "描述想买的东西和预算" }),
-      "预算 15 万以内的家用 SUV",
-    );
-    await user.click(screen.getByRole("button", { name: "帮我找" }));
-
-    expect(onNeedSubmit).toHaveBeenCalledWith("预算 15 万以内的家用 SUV");
-  });
-
   it("renders only the current real result stores and opens the selected store", async () => {
     const user = userEvent.setup();
     const { onOpenStore } = renderHome({

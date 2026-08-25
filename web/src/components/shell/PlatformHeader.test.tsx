@@ -61,6 +61,7 @@ function renderHeader(
       authUser={authUser}
       authResolved
       ownedStoresCount={3}
+      ownedStoresError={null}
       ownedStoresResolved
       onOpenSignIn={vi.fn()}
       onOpenStoreCenter={onOpenStoreCenter}

@@ -53,6 +53,7 @@ interface PlatformOverlaysHostProps {
   canManageStoreConsole: boolean;
   ownedStores: StoreSummary[];
   setOwnedStores: React.Dispatch<React.SetStateAction<StoreSummary[]>>;
+  ownedStoresError: string | null;
   ownedStoresResolved: boolean;
   openStoreConsoleFor: (store: StoreSummary) => Promise<void>;
   accountSettingsSection: AccountSettingsSection | null;
@@ -91,6 +92,7 @@ export function PlatformOverlaysHost({
   canManageStoreConsole,
   ownedStores,
   setOwnedStores,
+  ownedStoresError,
   ownedStoresResolved,
   openStoreConsoleFor,
   accountSettingsSection,
@@ -169,7 +171,7 @@ export function PlatformOverlaysHost({
             accountSettingsSection === "account"
               ? ui.account
               : accountSettingsSection === "stores"
-                ? `${ui.myStores}${ownedStoresResolved ? ` · ${ownedStores.length}` : ""}`
+                ? `${ui.myStores}${ownedStoresResolved && !ownedStoresError ? ` · ${ownedStores.length}` : ""}`
                 : ui.profile
           }
           description={
@@ -205,7 +207,10 @@ export function PlatformOverlaysHost({
               id: "stores",
               label: ui.myStores,
               icon: Store,
-              count: ownedStoresResolved ? ownedStores.length : undefined,
+              count:
+              ownedStoresResolved && !ownedStoresError
+                ? ownedStores.length
+                : undefined,
             },
           ]}
           navigationLabel={locale === "en" ? "Account settings" : "账号设置"}

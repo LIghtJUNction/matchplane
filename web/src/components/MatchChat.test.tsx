@@ -193,14 +193,10 @@ describe("MatchChat sending state", () => {
     ).toBeInTheDocument();
     expect(
       screen.getAllByRole("status", { name: "正在回复…" })[0],
-    ).toHaveTextContent("");
+    ).toHaveTextContent("正在检索公开店铺");
     expect(screen.getByText("寻找合适的方案")).toBeInTheDocument();
     expect(screen.queryByText(/我先|AI 已|整理成一份/)).not.toBeInTheDocument();
-    expect(
-      document.querySelectorAll(
-        ".chat-typing-indicator span[aria-hidden='true']",
-      ),
-    ).toHaveLength(3);
+    expect(document.querySelector(".assistant-thinking-status")).not.toBeNull();
 
     expect(document.querySelector(".home-chat")).toHaveClass(
       "has-conversation",

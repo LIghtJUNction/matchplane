@@ -8,7 +8,6 @@ import {
   AlertTitle,
 } from "@appica/ui-react/alert";
 import { Button } from "@appica/ui-react/button";
-import { Input } from "@appica/ui-react/input";
 import { Skeleton } from "@appica/ui-react/skeleton";
 import { Toggle } from "@appica/ui-react/toggle";
 import { ToggleGroup } from "@appica/ui-react/toggle-group";
@@ -28,7 +27,6 @@ interface MarketplaceHomeProps {
   listings: AssetListing[];
   locale: InterfaceLocale;
   assistant: ReactNode;
-  onNeedSubmit?: (text: string) => void;
   searchTrace?: MallAssistantSearchTrace | null;
   onOpenStore: (path: string) => void;
   onOpenListing: (listing: AssetListing) => void;
@@ -83,51 +81,6 @@ function MarketplaceLoading({ locale }: { locale: InterfaceLocale }) {
         </p>
       ) : null}
     </section>
-  );
-}
-
-function MarketplaceNeedPrompt({
-  locale,
-  onSubmit,
-}: {
-  locale: InterfaceLocale;
-  onSubmit: (text: string) => void;
-}) {
-  const [value, setValue] = useState("");
-  const english = locale === "en";
-
-  return (
-    <form
-      className="root-marketplace-need-prompt"
-      aria-label={english ? "Describe what you need" : "描述你的需求"}
-      onSubmit={(event) => {
-        event.preventDefault();
-        const text = value.trim();
-        if (!text) return;
-        onSubmit(text);
-        setValue("");
-      }}
-    >
-      <Input
-        className="root-marketplace-need-input"
-        value={value}
-        maxLength={240}
-        placeholder={
-          english
-            ? "For example: a family SUV under 150,000"
-            : "例如：预算 15 万以内的家用 SUV"
-        }
-        aria-label={
-          english
-            ? "Describe what you want and your budget"
-            : "描述想买的东西和预算"
-        }
-        onChange={(event) => setValue(event.target.value)}
-      />
-      <Button type="submit" disabled={!value.trim()}>
-        {english ? "Find matches" : "帮我找"}
-      </Button>
-    </form>
   );
 }
 
@@ -243,7 +196,6 @@ export function MarketplaceHome({
   listings,
   locale,
   assistant,
-  onNeedSubmit,
   searchTrace,
   onOpenStore,
   onOpenListing,
@@ -290,9 +242,6 @@ export function MarketplaceHome({
                 ? "MatchPlane searches public stores and keeps each visible result tied to its source."
                 : "MatchPlane 会检索公开店铺，并保留每个可见结果的真实来源。"}
             </span>
-            {onNeedSubmit ? (
-              <MarketplaceNeedPrompt locale={locale} onSubmit={onNeedSubmit} />
-            ) : null}
             <ul className="root-marketplace-entry-facts">
               <li>
                 {locale === "en"

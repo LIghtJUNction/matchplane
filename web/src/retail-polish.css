@@ -1,0 +1,214 @@
+/* Surface polish: denser first viewport, truthful recovery, and calmer workspaces. */
+
+.root-marketplace-entry {
+  width: min(100%, 82rem);
+  min-height: auto;
+  margin-inline: auto;
+  padding: clamp(1.25rem, 3.5vw, 2.6rem) clamp(1rem, 3vw, 2.5rem) 3.25rem;
+  gap: 1.1rem;
+}
+
+.root-marketplace-catalog-intro {
+  width: 100%;
+  max-width: none;
+  padding-bottom: 1rem;
+}
+
+.root-marketplace-catalog-intro h1 {
+  max-width: 16ch;
+  font-size: clamp(2rem, 4vw, 3.15rem);
+  line-height: 1.08;
+}
+
+.root-marketplace-catalog-intro > span {
+  max-width: 42rem;
+  margin-top: 0.7rem;
+  line-height: 1.55;
+}
+
+.root-marketplace-entry-facts {
+  margin-top: 0.9rem;
+}
+
+.root-marketplace-concierge {
+  width: min(100%, 62rem);
+  margin-inline: auto;
+}
+
+.root-marketplace-chat-shell {
+  width: 100%;
+}
+
+.root-marketplace-entry:has(.home-chat.has-conversation) {
+  width: min(100%, 70rem);
+  padding-top: 1rem;
+}
+
+.root-marketplace-entry:has(.home-chat.has-conversation)
+  .root-marketplace-catalog-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem 2rem;
+  padding-bottom: 0.8rem;
+}
+
+.root-marketplace-entry:has(.home-chat.has-conversation)
+  .root-marketplace-catalog-intro > span,
+.root-marketplace-entry:has(.home-chat.has-conversation)
+  .root-marketplace-entry-facts {
+  grid-column: 1 / -1;
+}
+
+.root-marketplace-entry:has(.home-chat.has-conversation)
+  .root-marketplace-catalog-intro h1 {
+  font-size: clamp(1.45rem, 3vw, 2.15rem);
+}
+
+.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-concierge {
+  width: min(100%, 58rem);
+}
+
+.home-chat-error {
+  border-left-width: 3px;
+  background: color-mix(in srgb, var(--retail-clay-soft) 60%, var(--retail-surface));
+}
+
+.home-chat-error button {
+  border: 1px solid var(--retail-line-strong);
+  border-radius: 0.65rem;
+  background: var(--retail-surface);
+  color: var(--retail-ink);
+}
+
+.platform-dashboard {
+  width: min(100%, 84rem);
+  margin-inline: auto;
+  padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 3vw, 2.5rem) 3rem;
+}
+
+.platform-dashboard .workspace-heading {
+  min-height: auto;
+  padding: 1.1rem 0 1.35rem;
+  box-shadow: none;
+}
+
+.platform-dashboard .platform-admin-shell {
+  width: 100%;
+  min-height: auto;
+}
+
+.platform-dashboard .platform-admin-content,
+.platform-dashboard .platform-layout,
+.platform-dashboard .platform-component-panel {
+  min-width: 0;
+  width: 100%;
+}
+
+.platform-dashboard .mall-initialization {
+  max-width: none;
+  min-height: auto;
+  padding: clamp(1.1rem, 2.5vw, 1.8rem);
+}
+
+.platform-dashboard .mall-initialization-list {
+  width: 100%;
+}
+
+.workspace-settings-dialog-stores {
+  width: min(calc(100vw - 2rem), 70rem);
+  height: min(42rem, calc(100dvh - 2rem));
+}
+
+.workspace-settings-dialog-stores .workspace-settings-layout {
+  grid-template-columns: 13rem minmax(0, 1fr);
+}
+
+.workspace-settings-dialog-stores .workspace-settings-content {
+  padding-inline: clamp(1rem, 2.5vw, 1.7rem);
+}
+
+.workspace-settings-dialog-stores .hosted-store-onboarding {
+  max-width: none;
+  padding-block: 0.15rem 1.25rem;
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error {
+  min-height: 4.4rem;
+  padding: 0.75rem 0.9rem;
+  border-left-width: 3px;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--retail-clay-soft) 58%, var(--retail-surface));
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error p {
+  max-width: 32rem;
+}
+
+.workspace-settings-dialog-stores .owned-store-card {
+  border-radius: 0.85rem;
+}
+
+.account-menu-count.is-error {
+  display: inline-grid;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--retail-clay) 45%, transparent);
+  border-radius: 999px;
+  background: var(--retail-clay-soft);
+  color: var(--retail-clay);
+  font-size: 0.7rem;
+}
+
+@media (min-width: 64rem) {
+  .root-marketplace-entry:not(:has(.home-chat.has-conversation)) {
+    display: grid;
+    grid-template-columns: minmax(14rem, 0.68fr) minmax(0, 1.32fr);
+    align-items: start;
+    column-gap: clamp(2rem, 5vw, 6rem);
+  }
+
+  .root-marketplace-entry:not(:has(.home-chat.has-conversation))
+    .root-marketplace-catalog-intro {
+    position: sticky;
+    top: 4.5rem;
+    padding-top: 1.1rem;
+    border-bottom: 0;
+  }
+
+  .root-marketplace-entry:not(:has(.home-chat.has-conversation))
+    .root-marketplace-concierge {
+    width: 100%;
+    padding-top: 1.1rem;
+  }
+
+  .root-marketplace-entry:not(:has(.home-chat.has-conversation))
+    .root-marketplace-scroll-cue,
+  .root-marketplace-entry:not(:has(.home-chat.has-conversation))
+    .root-marketplace-search-trace {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 48rem) {
+  .root-marketplace-entry:has(.home-chat.has-conversation)
+    .root-marketplace-catalog-intro {
+    display: block;
+  }
+
+  .platform-dashboard {
+    padding-inline: 0.75rem;
+  }
+
+  .workspace-settings-dialog-stores {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .workspace-settings-dialog-stores .workspace-settings-layout {
+    grid-template-columns: 1fr;
+  }
+}

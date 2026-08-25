@@ -41,6 +41,7 @@ interface PlatformHeaderProps {
   authUser: AuthenticatedUser | null;
   authResolved: boolean;
   ownedStoresCount: number;
+  ownedStoresError: string | null;
   ownedStoresResolved: boolean;
   onOpenSignIn: () => void;
   onOpenStoreCenter: () => void;
@@ -75,6 +76,7 @@ export function PlatformHeader({
   authUser,
   authResolved,
   ownedStoresCount,
+  ownedStoresError,
   ownedStoresResolved,
   onOpenSignIn,
   onOpenStoreCenter,
@@ -197,10 +199,22 @@ export function PlatformHeader({
                   >
                     <Store size={16} aria-hidden="true" />
                     <span>{ui.myStores}</span>
-                    {ownedStoresResolved ? (
+                    {ownedStoresResolved && !ownedStoresError ? (
                       <strong className="account-menu-count">
                         {ownedStoresCount}
                       </strong>
+                    ) : ownedStoresError ? (
+                      <span
+                        className="account-menu-count is-error"
+                        title={ownedStoresError}
+                        aria-label={
+                          locale === "en"
+                            ? "Store list unavailable"
+                            : "店铺列表暂不可用"
+                        }
+                      >
+                        !
+                      </span>
                     ) : null}
                   </DropdownMenuItem>
                   {canOpenPlatformConsole ? (

@@ -60,6 +60,7 @@ export function useOwnedStores({
   openSignIn,
 }: UseOwnedStoresOptions) {
   const [ownedStores, setOwnedStores] = useState<StoreSummary[]>([]);
+  const [ownedStoresError, setOwnedStoresError] = useState<string | null>(null);
   const [ownedStoresResolved, setOwnedStoresResolved] = useState(false);
   const [storeConsoleOpen, setStoreConsoleOpen] = useState(false);
   const [storeConsoleContext, setStoreConsoleContext] =
@@ -69,11 +70,13 @@ export function useOwnedStores({
     let cancelled = false;
     if (!authUser?.id) {
       setOwnedStores([]);
+      setOwnedStoresError(null);
       setOwnedStoresResolved(false);
       return () => {
         cancelled = true;
       };
     }
+    setOwnedStoresError(null);
     setOwnedStoresResolved(false);
     void getOwnedStoresWithRetry()
       .then((stores) => {
@@ -81,11 +84,12 @@ export function useOwnedStores({
       })
       .catch((error) => {
         if (!cancelled) {
-          onNotice(
+          const message =
             error instanceof Error
               ? error.message
-              : "我的店铺暂时无法读取，请稍后重试",
-          );
+              : "我的店铺暂时无法读取，请稍后重试";
+          setOwnedStoresError(message);
+          onNotice(message);
         }
       })
       .finally(() => {
@@ -153,6 +157,7 @@ export function useOwnedStores({
   return {
     ownedStores,
     setOwnedStores,
+    ownedStoresError,
     ownedStoresResolved,
     storeConsoleOpen,
     setStoreConsoleOpen,

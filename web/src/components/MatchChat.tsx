@@ -72,6 +72,7 @@ import {
   readPendingConversion,
 } from "../pending-conversion";
 import type { AssetListing } from "../types";
+import { AssistantThinkingStatus } from "./AssistantThinkingStatus";
 import { ConversationHistoryPanel } from "./ConversationHistoryPanel";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
 import { ShoppingMemoryPanel } from "./ShoppingMemoryPanel";
@@ -2424,15 +2425,10 @@ export function MatchChat({
                 <Sparkles size={12} />
                 <span>{assistantRoleLabel(subplatform.slug, locale)}</span>
               </div>
-              <div
-                className="chat-typing-indicator"
-                role="status"
-                aria-label={locale === "en" ? "Replying…" : "正在回复…"}
-              >
-                <span aria-hidden="true" />
-                <span aria-hidden="true" />
-                <span aria-hidden="true" />
-              </div>
+              <AssistantThinkingStatus
+                locale={locale}
+                mode={isSeller ? "seller" : isRoot ? "shopping" : "store"}
+              />
             </div>
           ) : null}
         </div>
