@@ -28,11 +28,15 @@ export function AssistantThinkingStatus({
     },
     store: {
       title: english ? "Preparing a reply" : "正在准备回复",
-      detail: english ? "Using this store's live context" : "结合当前店铺信息作答",
+      detail: english
+        ? "Using this store's live context"
+        : "结合当前店铺信息作答",
     },
     seller: {
       title: english ? "Organizing the listing" : "正在整理商品信息",
-      detail: english ? "Structuring details for review" : "生成可检查的结构化内容",
+      detail: english
+        ? "Structuring details for review"
+        : "生成可检查的结构化内容",
     },
   }[mode];
 

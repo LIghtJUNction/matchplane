@@ -477,8 +477,12 @@ describe("MatchChat sending state", () => {
     );
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
-    expect(await screen.findByText("找到一件符合条件的商品。")).toBeInTheDocument();
-    expect(screen.queryByRole("img", { name: "照片可见的商品" })).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("找到一件符合条件的商品。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("img", { name: "照片可见的商品" }),
+    ).not.toBeInTheDocument();
     expect(onRecommendations).toHaveBeenCalledWith([recommendation]);
     expect(onSearchTrace).toHaveBeenNthCalledWith(1, null);
     expect(onSearchTrace).toHaveBeenNthCalledWith(2, searchTrace);

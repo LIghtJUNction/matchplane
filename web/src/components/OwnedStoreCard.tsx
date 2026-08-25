@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  ArrowRight,
-  Check,
-  Copy,
-  Link2,
-  UserPlus,
-} from "lucide-react";
+import { ArrowRight, Check, Copy, Link2, UserPlus } from "lucide-react";
 
 import type { StoreCollaboratorInvite, StoreSummary } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
@@ -39,8 +33,10 @@ export function OwnedStoreCard({
   const english = locale === "en";
   const status = store.status ?? "pending";
   const canInvite =
-    store.membershipRole === "owner" || store.membershipRole === "mall_operator";
-  const showsInvite = invite?.storeId === store.id && createdStoreId !== store.id;
+    store.membershipRole === "owner" ||
+    store.membershipRole === "mall_operator";
+  const showsInvite =
+    invite?.storeId === store.id && createdStoreId !== store.id;
   const inviteLabel =
     invitingStoreId === store.id
       ? english
@@ -90,7 +86,11 @@ export function OwnedStoreCard({
               {statusLabel}
             </span>
           </div>
-          <p>{secondary ? inactiveDescription : store.description || (english ? "Hosted store" : "托管店铺")}</p>
+          <p>
+            {secondary
+              ? inactiveDescription
+              : store.description || (english ? "Hosted store" : "托管店铺")}
+          </p>
         </div>
         <a className="owned-store-enter" href={store.path}>
           {enterLabel}
@@ -121,7 +121,10 @@ export function OwnedStoreCard({
             {english ? "Products" : "管理商品"}
           </button>
         ) : (
-          <a className="owned-store-secondary-action" href={`${store.path}?console=products`}>
+          <a
+            className="owned-store-secondary-action"
+            href={`${store.path}?console=products`}
+          >
             {english ? "Products" : "管理商品"}
           </a>
         )}
@@ -184,7 +187,11 @@ export function InviteLinkPanel({
           onFocus={(event) => event.currentTarget.select()}
         />
         <button type="button" onClick={onCopy}>
-          {copied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
+          {copied ? (
+            <Check size={16} aria-hidden="true" />
+          ) : (
+            <Copy size={16} aria-hidden="true" />
+          )}
           {copied ? (english ? "Copied" : "已复制") : english ? "Copy" : "复制"}
         </button>
       </div>
