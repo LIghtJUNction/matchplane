@@ -10,9 +10,11 @@ import { isUuid } from "./lib/uuid";
  * not an activation grant in production. The database record is the source of
  * truth so a dynamically registered child (including a grandchild) receives
  * the same manifest path as the routing Agent.
+ *
+ * A hosted store has no `public/` package: its manifest (display name, description,
+ * status) lives only in the database, so that lookup runs in every environment.
  */
 export async function readActivePlatformManifest(platformPath: string): Promise<string | null> {
-  if (!isProductionEnvironment()) return null;
   const rootTenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!rootTenantId || !isUuid(rootTenantId) || !isPlatformPath(platformPath) || platformPath === "/") {
     return null;
@@ -79,6 +81,10 @@ export async function readActivePlatformManifest(platformPath: string): Promise<
     // registration tree. Package/external projections are resolved only through their exact
     // current_registration_id below.
     if (projectedStore?.integrationKind === "hosted") return null;
+
+    // Package/external registrations are production activation grants; development keeps
+    // the static `public/` package manifest fallback owned by the manifest routes.
+    if (!isProductionEnvironment()) return null;
 
     const result = projectedStore
       ? await authDatabase.query(
