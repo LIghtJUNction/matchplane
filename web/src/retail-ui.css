@@ -1,129 +1,130 @@
-/* MatchPlane contemporary concept store.
-   Product imagery and readable commerce information carry the visual identity. */
+/* MatchPlane × Path-to-Hope editorial storefront.
+   Paper + ink, dual type, flat elevation, product imagery first. */
 
 :root {
   color-scheme: light;
   font-family:
-    "Avenir Next", "SF Pro Text", ui-sans-serif, -apple-system,
-    BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    var(--retail-sans), "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
+    ui-sans-serif, system-ui, sans-serif;
+  --retail-sans: "Instrument Sans", "Noto Sans SC", ui-sans-serif, system-ui;
   --retail-display:
-    "SF Pro Display", "Avenir Next", "PingFang SC", "Microsoft YaHei",
-    sans-serif;
-  --retail-mono: "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, monospace;
-  --retail-canvas: #f3f0e9;
-  --retail-surface: #fffdf8;
-  --retail-surface-soft: #ece9e1;
-  --retail-surface-raised: #fffdf8;
-  --retail-ink: #171715;
-  --retail-ink-soft: #45443f;
-  --retail-muted: #74716a;
-  --retail-line: #ded9cf;
-  --retail-line-strong: #c8c1b5;
-  --retail-accent: #171715;
+    "Source Serif 4", "Noto Serif SC", Georgia, "Songti SC", serif;
+  --retail-mono: "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
+  /* Path-to-Hope paper stack */
+  --retail-canvas: #faf9f5;
+  --retail-surface: #f0eee6;
+  --retail-surface-soft: #e3dacc;
+  --retail-surface-raised: #faf9f5;
+  --retail-elevated: #ffffff;
+  --retail-ink: #141413;
+  --retail-ink-soft: #2c2c2a;
+  --retail-muted: #5e5d59;
+  --retail-line: color-mix(in srgb, #141413 14%, transparent);
+  --retail-line-strong: color-mix(in srgb, #141413 28%, transparent);
+  /* Filled near-black CTAs — no terracotta shout */
+  --retail-accent: #141413;
   --retail-accent-strong: #000000;
-  --retail-accent-soft: #e7e3da;
-  --retail-accent-contrast: #fffdf8;
-  /* Compatibility aliases for existing component selectors. */
+  --retail-accent-soft: #e8e6df;
+  --retail-accent-contrast: #faf9f5;
   --retail-blue: var(--retail-accent);
   --retail-blue-strong: var(--retail-accent-strong);
   --retail-blue-soft: var(--retail-accent-soft);
-  --retail-sage: #dfe7df;
-  --retail-sage-ink: #355744;
+  --retail-sage: #dfe8e4;
+  --retail-sage-ink: #2f4f45;
   --retail-danger: #a43d3d;
-  /* Price ink: the one warm signal on the page, so listings read product-first. */
-  --retail-price: #b3471f;
+  --retail-price: #141413;
   --retail-focus: var(--retail-accent);
-  --background: var(--retail-surface);
-  --background-subtle: var(--retail-canvas);
+  --background: var(--retail-canvas);
+  --background-subtle: var(--retail-surface);
   --background-muted: var(--retail-surface-soft);
-  --background-strong: #d8d2c7;
+  --background-strong: #e3dacc;
   --background-inverse: var(--retail-ink);
   --foreground: var(--retail-ink-soft);
   --foreground-subtle: var(--retail-muted);
-  --foreground-muted: var(--retail-muted);
+  --foreground-muted: #b0aea5;
   --foreground-strong: var(--retail-ink-soft);
   --foreground-intense: var(--retail-ink);
   --foreground-inverse: var(--retail-accent-contrast);
   --border: var(--retail-line);
-  --border-muted: #ebe7de;
+  --border-muted: color-mix(in srgb, #141413 8%, transparent);
   --border-strong: var(--retail-line-strong);
-  --border-intense: #958f85;
+  --border-intense: #5e5d59;
   --primary: var(--retail-accent);
   --primary-strong: var(--retail-accent-strong);
-  --primary-soft: color-mix(in srgb, var(--retail-accent) 28%, transparent);
+  --primary-soft: color-mix(in srgb, var(--retail-accent) 18%, transparent);
   --primary-subtle: var(--retail-accent-soft);
   --primary-muted: color-mix(in srgb, var(--retail-accent) 72%, #ffffff);
   --primary-foreground: var(--retail-accent-contrast);
   --info: var(--retail-accent);
   --info-strong: var(--retail-accent-strong);
-  --info-soft: color-mix(in srgb, var(--retail-accent) 24%, transparent);
+  --info-soft: color-mix(in srgb, var(--retail-accent) 14%, transparent);
   --info-subtle: var(--retail-accent-soft);
   --info-muted: color-mix(in srgb, var(--retail-accent) 64%, #ffffff);
   --info-foreground: var(--retail-accent-contrast);
   --focus-ring: var(--retail-focus);
   --focus-ring-input: var(--retail-focus);
   --focus-ring-primary: var(--retail-focus);
-  --surface: var(--retail-surface);
-  --header-surface: rgba(255, 253, 248, 0.96);
+  --surface: var(--retail-surface-raised);
+  --header-surface: color-mix(in srgb, #faf9f5 92%, transparent);
   --header-veil: transparent;
-  --shadow-small:
-    0 2px 5px rgba(30, 27, 22, 0.05), 0 10px 24px rgba(30, 27, 22, 0.05);
-  --shadow-large:
-    0 22px 70px rgba(30, 27, 22, 0.18), 0 6px 20px rgba(30, 27, 22, 0.09);
-  --radius-small: 0.55rem;
-  --radius-medium: 0.8rem;
-  --radius-large: 1rem;
-  --radius-hero: 1.25rem;
+  /* Flat editorial — shadows nearly absent */
+  --shadow-small: 0 1px 0 color-mix(in srgb, #141413 6%, transparent);
+  --shadow-large: 0 24px 48px color-mix(in srgb, #141413 8%, transparent);
+  --radius-small: 0.35rem;
+  --radius-medium: 0.55rem;
+  --radius-large: 0.85rem;
+  --radius-hero: 1.15rem;
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --retail-canvas: #171715;
-  --retail-surface: #22211e;
-  --retail-surface-soft: #2c2a26;
-  --retail-surface-raised: #272622;
-  --retail-ink: #f4f1e8;
-  --retail-ink-soft: #d8d3c7;
-  --retail-muted: #aaa49a;
-  --retail-line: #3a3833;
-  --retail-line-strong: #514e47;
-  --retail-accent: #f4f1e8;
+  --retail-canvas: #141413;
+  --retail-surface: #1c1c1a;
+  --retail-surface-soft: #262624;
+  --retail-surface-raised: #1c1c1a;
+  --retail-elevated: #232320;
+  --retail-ink: #faf9f5;
+  --retail-ink-soft: #e8e6df;
+  --retail-muted: #b0aea5;
+  --retail-line: color-mix(in srgb, #faf9f5 14%, transparent);
+  --retail-line-strong: color-mix(in srgb, #faf9f5 28%, transparent);
+  --retail-accent: #faf9f5;
   --retail-accent-strong: #ffffff;
-  --retail-accent-soft: #36342f;
-  --retail-accent-contrast: #171715;
+  --retail-accent-soft: #2a2a28;
+  --retail-accent-contrast: #141413;
   --retail-blue: var(--retail-accent);
   --retail-blue-strong: var(--retail-accent-strong);
   --retail-blue-soft: var(--retail-accent-soft);
-  --retail-sage: #29382f;
-  --retail-sage-ink: #add0b8;
+  --retail-sage: #24332c;
+  --retail-sage-ink: #c5d9cf;
   --retail-danger: #f29a96;
-  --retail-price: #f0a17c;
+  --retail-price: #faf9f5;
   --retail-focus: var(--retail-accent);
-  --background: var(--retail-surface);
-  --background-subtle: var(--retail-canvas);
+  --background: var(--retail-canvas);
+  --background-subtle: var(--retail-surface);
   --background-muted: var(--retail-surface-soft);
-  --background-strong: #35322d;
+  --background-strong: #30302d;
   --background-inverse: var(--retail-ink);
   --foreground: var(--retail-ink-soft);
   --foreground-subtle: var(--retail-muted);
-  --foreground-muted: var(--retail-muted);
+  --foreground-muted: #8a8880;
   --foreground-strong: var(--retail-ink-soft);
   --foreground-intense: var(--retail-ink);
   --foreground-inverse: var(--retail-accent-contrast);
   --border: var(--retail-line);
-  --border-muted: #302e2a;
+  --border-muted: color-mix(in srgb, #faf9f5 8%, transparent);
   --border-strong: var(--retail-line-strong);
-  --border-intense: #777168;
+  --border-intense: #8a8880;
   --primary: var(--retail-accent);
   --primary-strong: var(--retail-accent-strong);
-  --primary-soft: color-mix(in srgb, var(--retail-accent) 28%, transparent);
+  --primary-soft: color-mix(in srgb, var(--retail-accent) 18%, transparent);
   --primary-subtle: var(--retail-accent-soft);
   --primary-muted: color-mix(in srgb, var(--retail-accent) 72%, #000000);
   --primary-foreground: var(--retail-accent-contrast);
   --surface: var(--retail-surface);
-  --header-surface: rgba(34, 33, 30, 0.96);
-  --shadow-small: 0 2px 16px rgba(0, 0, 0, 0.2);
-  --shadow-large: 0 24px 70px rgba(0, 0, 0, 0.4);
+  --header-surface: color-mix(in srgb, #141413 92%, transparent);
+  --shadow-small: 0 1px 0 color-mix(in srgb, #000 40%, transparent);
+  --shadow-large: 0 24px 48px rgba(0, 0, 0, 0.35);
 }
 
 :root:not([data-theme="dark"])[data-palette="moss"] {
@@ -354,7 +355,7 @@ select {
   width: min(20rem, calc(100vw - 1.5rem));
   padding: 1.1rem;
   border: 1px solid var(--retail-line);
-  border-radius: 1rem;
+  border-radius: var(--radius-large);
   background: var(--retail-surface-raised);
   color: var(--retail-ink);
   box-shadow: var(--shadow-large);
@@ -455,7 +456,7 @@ select {
 .account-menu,
 .notification-popover {
   border: 1px solid var(--retail-line);
-  border-radius: 0.9rem;
+  border-radius: var(--radius-large);
   background: var(--retail-surface-raised);
   box-shadow: var(--shadow-large);
 }
@@ -488,7 +489,7 @@ select {
   align-items: center;
   gap: 0.75rem;
   border: 1px solid var(--retail-line);
-  border-radius: 0.9rem;
+  border-radius: var(--radius-large);
   background: var(--retail-surface-raised);
   color: var(--retail-ink);
   box-shadow: var(--shadow-large);
@@ -1743,7 +1744,11 @@ select {
 
 .storefront-view-identity p,
 .storefront-manager-chat-heading p {
-  color: var(--retail-blue);
+  color: var(--retail-muted);
+  font-family: var(--retail-mono);
+  font-size: 0.68rem;
+  font-weight: 680;
+  letter-spacing: 0.08em;
 }
 
 .storefront-view-identity h1 {
@@ -1781,7 +1786,7 @@ select {
   padding: 1rem;
   overflow-y: auto;
   border: 1px solid var(--retail-line);
-  border-radius: 1rem;
+  border-radius: var(--radius-large);
   background: var(--retail-surface-raised);
   box-shadow: var(--shadow-large);
 }
@@ -1808,7 +1813,7 @@ select {
 .storefront-view-empty,
 .storefront-view-loading {
   border: 1px solid var(--retail-line);
-  border-radius: 0.9rem;
+  border-radius: var(--radius-large);
   background: var(--retail-surface);
 }
 
@@ -1845,18 +1850,20 @@ select {
   align-items: stretch;
   overflow: hidden;
   border: 1px solid var(--retail-line);
-  border-radius: 1.25rem;
+  border-radius: var(--radius-large);
   background: var(--retail-surface);
-  box-shadow: var(--shadow-large);
+  box-shadow: var(--shadow-small);
 }
 
+/* Full-bleed ink band alongside the paper form — the split-page editorial
+   pairing, not a soft accent wash. */
 .login-layout::before {
   padding: clamp(1.5rem, 4vw, 3.5rem);
   display: flex;
   align-items: end;
   border: 0;
-  background: var(--retail-sage);
-  color: var(--retail-sage-ink);
+  background: var(--retail-ink);
+  color: var(--retail-canvas);
   content: "MATCHPLANE\A 发现适合你的选择";
   font-family: var(--retail-display);
   font-size: clamp(1.8rem, 3.5vw, 3.2rem);
@@ -1907,8 +1914,10 @@ select {
 
 .login-form input,
 .login-form select,
-.login-password-control {
-  border-radius: 0.7rem;
+.login-password-control,
+.login-card .login-form input,
+.login-card .login-form select {
+  border-radius: var(--radius-large);
   background: var(--retail-surface);
 }
 
@@ -1916,12 +1925,19 @@ select {
   border-color: var(--retail-line-strong);
 }
 
-.login-submit {
+.login-submit,
+.login-card .login-submit {
   border-color: var(--retail-blue);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-large);
   background: var(--retail-blue);
   color: var(--retail-accent-contrast);
   box-shadow: none;
+}
+
+.login-card .login-submit:hover:not(:disabled),
+.login-card .login-submit:focus-visible {
+  border-color: var(--retail-blue-strong);
+  background: var(--retail-blue-strong);
 }
 
 .login-methods,
@@ -1931,6 +1947,21 @@ select {
 .login-notice,
 .login-admin-invite-note {
   border-radius: 0.75rem;
+}
+
+/* National identity / passkey primary action reads as the near-black CTA,
+   matching the submit button rather than a soft accent wash. */
+.login-primary-provider button {
+  border: 1px solid var(--retail-blue);
+  border-radius: var(--radius-large);
+  background: var(--retail-blue);
+  color: var(--retail-accent-contrast);
+}
+
+.login-primary-provider button:hover,
+.login-primary-provider button:focus-visible {
+  background: var(--retail-blue-strong);
+  box-shadow: none;
 }
 
 /* Settings */
@@ -2161,7 +2192,7 @@ select {
 .mode-dialog,
 .dialog-panel {
   border: 1px solid var(--retail-line);
-  border-radius: 1rem;
+  border-radius: var(--radius-large);
   background: var(--retail-surface-raised);
   box-shadow: var(--shadow-large);
 }
@@ -2207,11 +2238,31 @@ select {
   color: color-mix(in srgb, var(--retail-accent-contrast) 74%, transparent);
 }
 
+/* Neutral chips instead of the base theme's lavender/terracotta accents —
+   editorial paper+ink stays achromatic outside semantic status colors. */
+.listing-sheet .seller-avatar {
+  background: var(--retail-surface-soft);
+  color: var(--retail-ink);
+}
+
+.listing-sheet .contact-icon {
+  background: color-mix(
+    in srgb,
+    var(--retail-accent-contrast) 16%,
+    transparent
+  );
+  color: var(--retail-accent-contrast);
+}
+
 .sheet-header,
 .sheet-footer {
   border-color: var(--retail-line);
   background: var(--retail-surface-raised);
   backdrop-filter: blur(16px);
+}
+
+.sheet-header button {
+  border-radius: var(--radius-large);
 }
 
 .listing-visual,
