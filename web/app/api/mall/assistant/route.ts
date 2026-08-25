@@ -5,7 +5,6 @@ import { NextResponse } from "next/server";
 import { admitPlatformAiCall } from "../../../../src/platform-ai-admission";
 import {
   answerPlatformShoppingQuestion,
-  isPlatformRouterConfigured,
   PlatformAssistantUnavailableError,
   PlatformRouterQuotaExceededError,
   type ShoppingConversationMessage,
@@ -55,8 +54,6 @@ export async function POST(request: Request): Promise<Response> {
   const requestedStorePath = normalizeStorePath(body.storePath);
   if (body.storePath !== undefined && !requestedStorePath)
     return error("店铺地址无效", 400);
-  if (!isPlatformRouterConfigured())
-    return error("商品搜索尚未配置完整，请稍后再试。", 503);
   const tenantId = configuredTenantId();
   if (!tenantId) return error("商城尚未完成初始化", 503);
   const requestId = randomUUID();

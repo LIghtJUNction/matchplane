@@ -794,6 +794,103 @@ export async function reviseShoppingMemoryWithAi(input: {
  * receives public store summaries; catalogue truth, price, contact, and ordering still remain in
  * their deterministic routes.
  */
+/**
+ * Challenge #11: when no model gateway is configured, still answer with
+ * deterministic Postgres search + clickable budget choices (tool path, not RAG).
+ */
+async function answerPlatformShoppingQuestionDeterministic(input: {
+  question: string;
+  messages: ShoppingConversationMessage[];
+  stores: PublicStore[];
+  memory?: ShoppingMemorySnapshot | null;
+  storeContext?: { path: string; name: string };
+}): Promise<PlatformAssistantReply> {
+  const question = input.question.trim().slice(0, 2_000);
+  if (!question)
+    throw new PlatformAssistantUnavailableError("请告诉我你想找什么。");
+  const conversationIntent = inferShoppingIntent(input.messages);
+  const intent = applyShoppingMemoryDefaults(
+    shoppingMemoryIntent(input.memory),
+    conversationIntent,
+  );
+  const userBlob = input.messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content)
+    .join("\n");
+  const unlimitedBudget = /预算不限|不限预算/.test(userBlob);
+  const vaguePurchase =
+    /想买|找车|帮我找|看看|有没有|推荐/.test(question) ||
+    Boolean(input.storeContext);
+  if (!intent.budget && !unlimitedBudget && vaguePurchase) {
+    return {
+      text: "先选一个预算档位，我再按在售商品给你筛。",
+      model: "deterministic-search",
+      usage: null,
+      modelCalls: 0,
+      recommendations: [],
+      toolCalls: ["ask_user"],
+      uiActions: [
+        {
+          type: "choice",
+          id: "choice-budget-1",
+          kind: "question",
+          question: "预算大概多少？",
+          options: [
+            { id: "b1", label: "8 万以内", value: "预算 8 万以内" },
+            { id: "b2", label: "15 万以内", value: "预算 15 万以内" },
+            { id: "b3", label: "25 万以内", value: "预算 25 万以内" },
+            { id: "b4", label: "不限预算", value: "预算不限" },
+          ],
+        },
+      ],
+    };
+  }
+  const narrative = input.messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content)
+    .join("\n")
+    .slice(0, 2_000);
+  const recommendations = await searchPublicStoreOffers({
+    stores: input.stores,
+    narrative: narrative || question,
+    intent,
+    limit: 6,
+  });
+  if (!recommendations.length) {
+    return {
+      text: "按你现在说的条件，货架上暂时没有匹配的在售商品。可以换个预算或用途再试。",
+      model: "deterministic-search",
+      usage: null,
+      modelCalls: 0,
+      recommendations: [],
+      toolCalls: ["search_public_products"],
+      uiActions: [],
+    };
+  }
+  const productIds = recommendations
+    .map((offer) => offer.offer_id ?? offer.listing_id ?? offer.display_name)
+    .filter(Boolean)
+    .slice(0, 6);
+  return {
+    text: intent.budget?.maximum
+      ? `按预算约 ${intent.budget.maximum.toLocaleString("zh-CN")} 元筛了货架上的在售商品，下面这几台可以点开看。`
+      : "按你的描述在货架里找了几台在售商品，可以点开看详情。",
+    model: "deterministic-search",
+    usage: null,
+    modelCalls: 0,
+    recommendations,
+    toolCalls: ["search_public_products", "show_products"],
+    uiActions: [
+      {
+        type: "products",
+        productIds,
+        presentation: "grid",
+        title: "在售候选",
+      },
+    ],
+  };
+}
+
 export async function answerPlatformShoppingQuestion(input: {
   question: string;
   messages: ShoppingConversationMessage[];
@@ -806,16 +903,13 @@ export async function answerPlatformShoppingQuestion(input: {
   admitCall?: () => Promise<void>;
 }): Promise<PlatformAssistantReply> {
   const router = configuredPlatformRouter();
-  if (!router)
-    throw new PlatformAssistantUnavailableError(
-      "商城 AI 导购尚未配置完整，请稍后再试。",
-    );
+  if (!router) return answerPlatformShoppingQuestionDeterministic(input);
   const question = input.question.trim().slice(0, 2_000);
   if (!question)
-    throw new PlatformAssistantUnavailableError("请告诉我你想了解什么。");
+    throw new PlatformAssistantUnavailableError("请告诉我你想找什么。");
   if (router.protocol !== "openai-compatible") {
     throw new PlatformAssistantUnavailableError(
-      "当前导购 Agent 需要选择 OpenAI Compatible 协议。",
+      "当前找货助手需要选择 OpenAI Compatible 协议。",
     );
   }
   try {
