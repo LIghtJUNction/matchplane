@@ -7,6 +7,7 @@ import {
   ArrowRight,
   CheckCircle2,
   ChevronDown,
+  CircleAlert,
   Plus,
   UserPlus,
 } from "lucide-react";
@@ -16,6 +17,7 @@ import {
   createHostedStore,
   createStoreCollaboratorInvite,
   getOwnedStores,
+  MarketplaceApiError,
   type StoreCollaboratorInvite,
   type StoreSummary,
 } from "../api";
@@ -37,7 +39,7 @@ export function HostedStoreOnboarding({
 }) {
   const [stores, setStores] = useState<StoreSummary[]>(initialStores);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [opening, setOpening] = useState(false);
   const [name, setName] = useState("");
@@ -53,16 +55,26 @@ export function HostedStoreOnboarding({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    setLoadError(false);
+    setLoadError(null);
     getOwnedStores()
       .then((items) => {
         if (!active) return;
         setStores(items);
         onStoresChange?.(items);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!active) return;
-        setLoadError(true);
+        const sessionUnavailable =
+          error instanceof MarketplaceApiError &&
+          (error.status === 401 || error.status === 403);
+        const message = sessionUnavailable
+          ? locale === "en"
+            ? "Refresh your sign-in, then try again."
+            : "请刷新登录状态后重试。"
+          : locale === "en"
+            ? "Your store data is unchanged. Check the connection and try again."
+            : "店铺数据没有变化，请检查网络后重试。";
+        setLoadError(message);
         onNotice(
           locale === "en" ? "Could not load your stores." : "店铺列表读取失败",
         );
@@ -166,16 +178,20 @@ export function HostedStoreOnboarding({
 
       {loadError ? (
         <div className="hosted-store-load-error" role="alert">
-          <p>
-            {locale === "en"
-              ? "Your stores could not be loaded."
-              : "暂时无法读取店铺列表。"}
-          </p>
+          <CircleAlert size={19} aria-hidden="true" />
+          <div>
+            <strong>
+              {locale === "en"
+                ? "Store list did not load"
+                : "店铺列表没有加载成功"}
+            </strong>
+            <p>{loadError}</p>
+          </div>
           <button
             type="button"
             onClick={() => setReloadKey((value) => value + 1)}
           >
-            {locale === "en" ? "Try again" : "重试"}
+            {locale === "en" ? "Try again" : "重新加载"}
           </button>
         </div>
       ) : null}

@@ -15,8 +15,8 @@
 }
 
 .root-marketplace-catalog-intro h1 {
-  max-width: 16ch;
-  font-size: clamp(2rem, 4vw, 3.15rem);
+  max-width: 18ch;
+  font-size: clamp(2rem, 3.5vw, 2.85rem);
   line-height: 1.08;
 }
 
@@ -37,6 +37,10 @@
 
 .root-marketplace-chat-shell {
   width: 100%;
+}
+
+.root-marketplace-catalog {
+  padding: clamp(1.75rem, 4vw, 3rem) clamp(0.75rem, 3vw, 2rem) 4rem;
 }
 
 .root-marketplace-entry:has(.home-chat.has-conversation) {
@@ -103,9 +107,38 @@
 .platform-dashboard .platform-admin-shell {
   width: 100%;
   min-height: auto;
+  align-items: start;
+  gap: 1rem;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
-.platform-dashboard .platform-admin-content,
+.platform-dashboard .platform-admin-nav {
+  position: sticky;
+  top: 4.75rem;
+  padding: 0.45rem;
+  border: 1px solid var(--retail-line);
+  border-radius: 0.85rem;
+  background: var(--retail-surface);
+}
+
+.platform-dashboard .platform-admin-nav button[aria-selected="true"],
+.platform-dashboard .platform-admin-nav button.is-active {
+  background: var(--retail-accent-soft);
+  color: var(--retail-ink);
+}
+
+.platform-dashboard .platform-admin-content {
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--retail-line);
+  border-radius: 0.9rem;
+  background: var(--retail-surface);
+}
+
 .platform-dashboard .platform-layout,
 .platform-dashboard .platform-component-panel {
   min-width: 0;
@@ -116,15 +149,64 @@
   max-width: none;
   min-height: auto;
   padding: clamp(1.1rem, 2.5vw, 1.8rem);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.platform-dashboard .mall-initialization-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, auto);
+  align-items: end;
+  gap: 1rem 2rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--retail-line);
+}
+
+.platform-dashboard .mall-initialization-heading > div:first-child > span,
+.platform-dashboard .mall-initialization-next > span {
+  color: var(--retail-muted);
+  font-family: var(--font-mono, ui-monospace, "SFMono-Regular", monospace);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.platform-dashboard .mall-initialization-heading h2 {
+  margin-top: 0.35rem;
+}
+
+.platform-dashboard .mall-initialization-heading p {
+  max-width: 38rem;
+  margin-top: 0.4rem;
+  color: var(--retail-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.platform-dashboard .mall-initialization-next {
+  min-width: 10rem;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.3rem;
+  border-left: 1px solid var(--retail-line);
+}
+
+.platform-dashboard .mall-initialization-next strong {
+  font-size: 0.88rem;
+  line-height: 1.35;
 }
 
 .platform-dashboard .mall-initialization-list {
   width: 100%;
+  margin-top: 0.3rem;
 }
 
 .workspace-settings-dialog-stores {
-  width: min(calc(100vw - 2rem), 70rem);
-  height: min(42rem, calc(100dvh - 2rem));
+  width: min(calc(100vw - 2rem), 58rem);
+  height: auto;
+  min-height: min(28rem, calc(100dvh - 2rem));
+  max-height: calc(100dvh - 2rem);
 }
 
 .workspace-settings-dialog-stores .workspace-settings-layout {
@@ -143,6 +225,9 @@
 .workspace-settings-dialog-stores .hosted-store-load-error {
   min-height: 4.4rem;
   padding: 0.75rem 0.9rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   border-left-width: 3px;
   border-radius: 0.75rem;
   background: color-mix(
@@ -150,6 +235,20 @@
     var(--retail-clay-soft) 58%,
     var(--retail-surface)
   );
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error > svg {
+  color: var(--retail-clay);
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error strong {
+  color: var(--retail-ink);
+  font-size: 0.78rem;
 }
 
 .workspace-settings-dialog-stores .hosted-store-load-error p {
@@ -210,6 +309,26 @@
 
   .platform-dashboard {
     padding-inline: 0.75rem;
+  }
+
+  .platform-dashboard .platform-admin-shell {
+    gap: 0.75rem;
+  }
+
+  .platform-dashboard .platform-admin-nav {
+    position: static;
+  }
+
+  .platform-dashboard .mall-initialization-heading {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .platform-dashboard .mall-initialization-next {
+    min-width: 0;
+    padding: 0.75rem 0 0;
+    border-top: 1px solid var(--retail-line);
+    border-left: 0;
   }
 
   .workspace-settings-dialog-stores {

@@ -55,6 +55,7 @@ export * from "./PlatformAiConfigPanel";
 export * from "./PlatformSiteSettingsPanel";
 export * from "./MallBrandPanel";
 export * from "./MallCatalogModeration";
+export * from "./MallInitializationPanel";
 export * from "./RootEmailConfigPanel";
 export * from "./NationalIdentityConfigPanel";
 export * from "./WeChatLoginConfigPanel";
