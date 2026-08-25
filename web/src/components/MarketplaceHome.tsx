@@ -11,15 +11,13 @@ import { Button } from "@appica/ui-react/button";
 import { Skeleton } from "@appica/ui-react/skeleton";
 import { Toggle } from "@appica/ui-react/toggle";
 import { ToggleGroup } from "@appica/ui-react/toggle-group";
-import { ArrowRight, PackageOpen, RefreshCw, ShoppingBag } from "lucide-react";
+import { MessageSquareMore, PackageOpen, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { RecommendedBackendListing } from "../api";
 import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
 import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
-import { FloatingMarketplaceClerk } from "./FloatingMarketplaceClerk";
-import { MatchChat } from "./MatchChat";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
 import { StorefrontDirectory } from "./StorefrontDirectory";
 
@@ -28,18 +26,19 @@ interface MarketplaceHomeProps {
         catalogError?: boolean;
         listings: AssetListing[];
         locale: InterfaceLocale;
-        theme: InterfaceTheme;
-        onLocaleChange: (locale: InterfaceLocale) => void;
-        onThemeChange: (theme: InterfaceTheme) => void;
-        onNotice: (message: string) => void;
+        onDescribeNeed?: (platformPath?: string) => void;
         onOpenListing: (listing: AssetListing) => void;
-        onLikeListing: (listing: AssetListing) => Promise<void>;
-        onPublishProduct: () => void;
-        onRetryCatalog: () => void;
-        onRecommendations: (
+        /** Kept for callers migrating from the former root chat surface. */
+        theme?: InterfaceTheme;
+        onLocaleChange?: (locale: InterfaceLocale) => void;
+        onThemeChange?: (theme: InterfaceTheme) => void;
+        onNotice?: (message: string) => void;
+        onRecommendations?: (
                 recommendations: RecommendedBackendListing[],
         ) => void;
-        subplatform: SubplatformConfig;
+        subplatform?: SubplatformConfig;
+        onLikeListing: (listing: AssetListing) => Promise<void>;
+        onRetryCatalog: () => void;
 }
 
 function listingCategory(listing: AssetListing) {
@@ -105,45 +104,41 @@ function MarketplaceLoading({ locale }: { locale: InterfaceLocale }) {
         );
 }
 
-interface MarketplaceSearchPanelProps {
-        locale: InterfaceLocale;
-        onLikeListing: (listing: AssetListing) => Promise<void>;
-        onNotice: (message: string) => void;
-        onOpenListing: (listing: AssetListing) => void;
-        onRecommendations: (
-                recommendations: RecommendedBackendListing[],
-        ) => void;
-        subplatform: SubplatformConfig;
-}
-
-function MarketplaceSearchPanel({
+function MarketplaceDemandEntry({
         locale,
-        onLikeListing,
-        onNotice,
-        onOpenListing,
-        onRecommendations,
-        subplatform,
-}: MarketplaceSearchPanelProps) {
+        platformPath,
+        onDescribeNeed,
+}: {
+        locale: InterfaceLocale;
+        platformPath?: string;
+        onDescribeNeed: (platformPath?: string) => void;
+}) {
         return (
                 <section
-                        className="root-marketplace-search"
-                        aria-label={
-                                locale === "en" ? "Product search" : "商品搜索"
-                        }
+                        className="root-marketplace-demand-entry"
+                        aria-labelledby="root-demand-entry-title"
                 >
-                        <div className="root-marketplace-chat-shell">
-                                <MatchChat
-                                        home
-                                        compact
-                                        role="buyer"
-                                        locale={locale}
-                                        onLikeListing={onLikeListing}
-                                        onNotice={onNotice}
-                                        onOpenListing={onOpenListing}
-                                        onRecommendations={onRecommendations}
-                                        subplatform={subplatform}
-                                />
+                        <div>
+                                <h2 id="root-demand-entry-title">
+                                        {locale === "en"
+                                                ? "Not sure where to start?"
+                                                : "还没找到合适的？"}
+                                </h2>
+                                <p>
+                                        {locale === "en"
+                                                ? "Choose a specialist store, then continue the conversation there."
+                                                : "先进入对应的专业店铺，再由店内选货员继续帮你。"}
+                                </p>
                         </div>
+                        <Button
+                                type="button"
+                                onClick={() => onDescribeNeed(platformPath)}
+                        >
+                                <MessageSquareMore aria-hidden="true" />
+                                {locale === "en"
+                                        ? "Describe your need"
+                                        : "说需求"}
+                        </Button>
                 </section>
         );
 }
@@ -155,7 +150,6 @@ function MarketplaceProducts({
         locale,
         onOpenListing,
         onLikeListing,
-        onPublishProduct,
         onRetryCatalog,
 }: {
         catalogResolved: boolean;
@@ -164,7 +158,6 @@ function MarketplaceProducts({
         locale: InterfaceLocale;
         onOpenListing: (listing: AssetListing) => void;
         onLikeListing: (listing: AssetListing) => Promise<void>;
-        onPublishProduct: () => void;
         onRetryCatalog: () => void;
 }) {
         let content: ReactNode;
@@ -237,17 +230,6 @@ function MarketplaceProducts({
                                                         : "可以询问选货员，也可以浏览下方已营业店铺。"}
                                         </p>
                                 </div>
-                                <Button
-                                        variant="outline"
-                                        size="sm"
-                                        type="button"
-                                        onClick={onPublishProduct}
-                                >
-                                        {locale === "en"
-                                                ? "List a product"
-                                                : "发布商品"}
-                                        <ArrowRight aria-hidden="true" />
-                                </Button>
                         </div>
                 );
 
@@ -294,17 +276,13 @@ export function MarketplaceHome({
         catalogError = false,
         listings,
         locale,
-        onNotice,
+        onDescribeNeed = () => undefined,
         onOpenListing,
         onLikeListing,
-        onPublishProduct,
         onRetryCatalog,
-        onRecommendations,
-        subplatform,
 }: MarketplaceHomeProps) {
         const allLabel = locale === "en" ? "All" : "全部";
         const [category, setCategory] = useState(allLabel);
-        const [clerkOpen, setClerkOpen] = useState(false);
         const categories = useMemo(
                 () => [
                         allLabel,
@@ -331,10 +309,14 @@ export function MarketplaceHome({
                           );
 
         const sparseCatalog = catalogResolved && visibleListings.length <= 2;
+        const demandPlatformPath = listings.find(
+                (listing) =>
+                        listing.platformPath && listing.platformPath !== "/",
+        )?.platformPath;
 
         return (
                 <div
-                        className={`root-marketplace-page min-h-screen bg-background-subtle text-foreground${clerkOpen ? " is-clerk-open" : ""}`}
+                        className="root-marketplace-page min-h-screen bg-background-subtle text-foreground"
                         id="top"
                 >
                         <div className="root-marketplace-main">
@@ -372,34 +354,16 @@ export function MarketplaceHome({
                                                                         </a>
                                                                 }
                                                         />
-                                                        <Button
-                                                                type="button"
-                                                                onClick={
-                                                                        onPublishProduct
-                                                                }
-                                                        >
-                                                                <ShoppingBag aria-hidden="true" />
-                                                                {locale === "en"
-                                                                        ? "List a product"
-                                                                        : "发布商品"}
-                                                        </Button>
                                                 </div>
                                         </header>
                                         <div className="root-marketplace-concierge">
-                                                <MarketplaceSearchPanel
+                                                <MarketplaceDemandEntry
                                                         locale={locale}
-                                                        onLikeListing={
-                                                                onLikeListing
+                                                        platformPath={
+                                                                demandPlatformPath
                                                         }
-                                                        onNotice={onNotice}
-                                                        onOpenListing={
-                                                                onOpenListing
-                                                        }
-                                                        onRecommendations={
-                                                                onRecommendations
-                                                        }
-                                                        subplatform={
-                                                                subplatform
+                                                        onDescribeNeed={
+                                                                onDescribeNeed
                                                         }
                                                 />
                                         </div>
@@ -472,9 +436,6 @@ export function MarketplaceHome({
                                                         onLikeListing={
                                                                 onLikeListing
                                                         }
-                                                        onPublishProduct={
-                                                                onPublishProduct
-                                                        }
                                                         onRetryCatalog={
                                                                 onRetryCatalog
                                                         }
@@ -485,25 +446,14 @@ export function MarketplaceHome({
                                                 >
                                                         <StorefrontDirectory
                                                                 locale={locale}
+                                                                onDescribeNeed={
+                                                                        onDescribeNeed
+                                                                }
                                                         />
                                                 </div>
                                         </div>
                                 </div>
                         </div>
-                        <FloatingMarketplaceClerk
-                                open={clerkOpen}
-                                locale={locale}
-                                onOpenChange={setClerkOpen}
-                        >
-                                <MarketplaceSearchPanel
-                                        locale={locale}
-                                        onLikeListing={onLikeListing}
-                                        onNotice={onNotice}
-                                        onOpenListing={onOpenListing}
-                                        onRecommendations={onRecommendations}
-                                        subplatform={subplatform}
-                                />
-                        </FloatingMarketplaceClerk>
                 </div>
         );
 }

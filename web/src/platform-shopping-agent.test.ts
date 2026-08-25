@@ -36,6 +36,7 @@ vi.mock("ai", () => ({
 vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible }));
 
 vi.mock("./lib/platform-router-config", () => ({
+  getPlatformRouterEffectiveStatus: () => ({ source: "managed", ready: true }),
   readManagedPlatformRouterConfig: () => ({
     endpoint: "https://router.example.com/v1/chat/completions",
     apiKey: "server-only-key",
@@ -824,7 +825,9 @@ describe("platform shopping agent", () => {
   });
 
   it("types no-final-text after tools and logs no prompt, key, or endpoint path", async () => {
-    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
     searchPublicStoreOffers.mockResolvedValue([
       {
         offer_id: "offer-a",
@@ -959,41 +962,66 @@ describe("platform shopping agent", () => {
     }
   });
 
-  it.each([400, 401, 403, 404, 422])(
-    "keeps upstream HTTP %i bounded and non-retryable",
-    async (statusCode) => {
-      generateText.mockRejectedValueOnce(
-        Object.assign(new Error("unsafe provider body with credential"), {
-          statusCode,
-        }),
-      );
+  it("types HTTP 451 as a non-retryable network policy failure", async () => {
+    generateText.mockRejectedValueOnce(
+      Object.assign(new Error("unsafe provider body"), { statusCode: 451 }),
+    );
 
-      const failure = await answerPlatformShoppingQuestion({
+    let failure: unknown;
+    try {
+      await answerPlatformShoppingQuestion({
         question: "你好",
         messages: [{ role: "user", content: "你好" }],
         stores: [],
-      }).catch((error: unknown) => error);
-
-      expect(failure).toMatchObject({
-        kind: "upstream_http",
-        phase: "response",
-        responseStatus: statusCode,
-        retryable: false,
       });
-      expect((failure as Error).message).toContain("联系管理员");
-      expect((failure as Error).message).not.toContain("credential");
-      expect((failure as Error).message).not.toContain("重试");
-    },
-  );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toMatchObject({
+      kind: "network_policy",
+      phase: "response",
+      responseStatus: 451,
+      retryable: false,
+    });
+    expect((failure as Error).message).not.toContain("unsafe");
+  });
+
+  it.each([
+    400, 401, 403, 404, 422,
+  ])("keeps upstream HTTP %i bounded and non-retryable", async (statusCode) => {
+    generateText.mockRejectedValueOnce(
+      Object.assign(new Error("unsafe provider body with credential"), {
+        statusCode,
+      }),
+    );
+
+    const failure = await answerPlatformShoppingQuestion({
+      question: "你好",
+      messages: [{ role: "user", content: "你好" }],
+      stores: [],
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      kind: "upstream_http",
+      phase: "response",
+      responseStatus: statusCode,
+      retryable: false,
+    });
+    expect((failure as Error).message).toContain("联系管理员");
+    expect((failure as Error).message).not.toContain("credential");
+    expect((failure as Error).message).not.toContain("重试");
+  });
 
   it("classifies a nested catalog exception after a provider 200 as a tool failure", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response("{}", {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
+      vi.fn(
+        async () =>
+          new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
       ),
     );
     searchPublicStoreOfferPage.mockRejectedValueOnce(
@@ -1141,6 +1169,8 @@ describe("platform shopping agent", () => {
     expect(generateText).toHaveBeenCalledTimes(1);
 
     const options = generateText.mock.calls[0]?.[0];
+    expect(options.tools).not.toHaveProperty("request_contact_consent");
+    expect(options.tools).not.toHaveProperty("propose_human_handoff");
     expect(options.tools).toEqual(
       expect.objectContaining({
         ask_user: expect.anything(),
@@ -1157,10 +1187,7 @@ describe("platform shopping agent", () => {
         calculate_numbers: expect.anything(),
       }),
     );
-    expect(options.stopWhen).toEqual([
-      { count: 4 },
-      expect.any(Function),
-    ]);
+    expect(options.stopWhen).toEqual([{ count: 4 }, expect.any(Function)]);
     expect(options.messages).toEqual([
       { role: "user", content: "记住我偏好轻薄" },
       { role: "assistant", content: "记住了。" },
@@ -1276,6 +1303,12 @@ describe("platform shopping agent", () => {
       { type: "products", productIds: ["offer-1"], presentation: "grid" },
     ]);
     expect(searchPublicStoreOffers).toHaveBeenCalledTimes(1);
+    expect(generateText.mock.calls[0]?.[0].tools).toEqual(
+      expect.objectContaining({
+        request_contact_consent: expect.anything(),
+        propose_human_handoff: expect.anything(),
+      }),
+    );
     expect(generateText.mock.calls[0]?.[0].system).toContain("AI 店长");
     expect(generateText.mock.calls[0]?.[0].system).toContain("不能替用户同意");
     expect(generateText.mock.calls[0]?.[0].system).toContain(

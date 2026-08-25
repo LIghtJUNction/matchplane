@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
-  getManagedPlatformRouterConfig: vi.fn(),
+  activateManagedPlatformRouterConfig: vi.fn(),
+  getManagedPlatformRouterState: vi.fn(),
   listManagedPlatformRouterModels: vi.fn(),
   saveManagedPlatformRouterConfig: vi.fn(),
   testPlatformAi: vi.fn(),
@@ -18,44 +19,70 @@ import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
 
 const longEndpoint =
   "https://gateway.example.test/organizations/matchplane/environments/production-compatible-endpoint/v1";
+const config = {
+  endpoint: longEndpoint,
+  model: "test-model",
+  protocol: "openai-compatible" as const,
+  enabled: true,
+  credentialConfigured: true,
+  assistantInstructions: "",
+  assistantMaxOutputTokens: 320,
+  assistantTemperature: 0.2,
+  assistantMaxSteps: 3,
+  assistantTimeoutMs: 20_000,
+  assistantReasoningEffort: "none",
+  modelReasoningEfforts: [],
+};
+const effective = {
+  ready: false,
+  code: "upstream_configuration" as const,
+  preferredHttpStatus: 451 as const,
+  source: "managed" as const,
+  managedOverridesEnvironment: true,
+  conflicts: { endpoint: true, model: true, protocol: false },
+  endpointOrigin: "https://gateway.example.test",
+  model: "test-model",
+  protocol: "openai-compatible" as const,
+  enabled: true,
+  credentialConfigured: true,
+  endpointMatchesRequired: false,
+  modelMatchesRequired: false,
+  protocolMatchesRequired: true,
+  requiredEndpoint: "https://api.lmm.best/v1",
+  requiredModel: "gpt-5.6-sol",
+  issues: ["endpoint_mismatch", "model_mismatch"],
+};
 
 beforeEach(() => {
-  api.getManagedPlatformRouterConfig.mockReset();
-  api.listManagedPlatformRouterModels.mockReset();
-  api.saveManagedPlatformRouterConfig.mockReset();
-  api.testPlatformAi.mockReset();
-  api.getManagedPlatformRouterConfig.mockResolvedValue({
-    endpoint: longEndpoint,
-    model: "test-model",
-    protocol: "openai-compatible",
-    enabled: true,
-    credentialConfigured: true,
-    assistantInstructions: "",
-    assistantMaxOutputTokens: 320,
-    assistantTemperature: 0.2,
-    assistantMaxSteps: 3,
-    assistantTimeoutMs: 20_000,
-    assistantReasoningEffort: "none",
-    modelReasoningEfforts: [],
+  vi.clearAllMocks();
+  api.getManagedPlatformRouterState.mockResolvedValue({
+    config,
+    draft: { ...config, testedReady: false, testedAt: null, keyChanged: true },
+    effective,
   });
 });
 
-describe("PlatformAiConfigPanel connection probe", () => {
-  it("reports a slow non-ready result honestly and keeps long endpoints bounded", async () => {
+describe("PlatformAiConfigPanel staged cutover", () => {
+  it("keeps read-only controls accessible and performs no mutations", async () => {
+    const user = userEvent.setup();
+    render(<PlatformAiConfigPanel rootRole="rootViewer" onNotice={vi.fn()} />);
+    const save = await screen.findByRole("button", { name: "保存待测配置" });
+    const activate = screen.getByRole("button", { name: "启用已测试配置" });
+    expect(save).toBeDisabled();
+    expect(activate).toBeDisabled();
+    await user.click(save);
+    await user.click(activate);
+    expect(api.saveManagedPlatformRouterConfig).not.toHaveBeenCalled();
+    expect(api.activateManagedPlatformRouterConfig).not.toHaveBeenCalled();
+    expect(api.testPlatformAi).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected slow candidate honestly without applying uncommitted state", async () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();
-    api.testPlatformAi.mockResolvedValue({
-      status: "slow",
-      outcome: "slow",
-      phase: "first_byte",
-      model: "test-model",
-      responseStatus: 200,
-      latencyMs: 9_200,
-      firstByteLatencyMs: 9_100,
-      performanceBudgetMs: 4_000,
-      hardTimeoutMs: 20_000,
-      message: "模型网关可达，但响应较慢。",
-    });
+    api.testPlatformAi.mockRejectedValue(
+      new Error("模型网关可达，但响应较慢。"),
+    );
 
     const { container } = render(
       <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
@@ -66,14 +93,303 @@ describe("PlatformAiConfigPanel connection probe", () => {
     expect(container.querySelector(".platform-ai-config")).toContainElement(
       endpoint,
     );
+    expect(screen.getByText(/WebUI managed 配置正在覆盖 env/)).toBeVisible();
 
-    const testButton = screen.getByRole("button", { name: "测试连接" });
+    const testButton = screen.getByRole("button", {
+      name: "测试待测配置",
+    });
     await waitFor(() => expect(testButton).toBeEnabled());
     await user.click(testButton);
 
     await waitFor(() =>
       expect(onNotice).toHaveBeenCalledWith("模型网关可达，但响应较慢。"),
     );
-    expect(onNotice).not.toHaveBeenCalledWith("AI 连接测试成功");
+    expect(api.testPlatformAi).toHaveBeenCalledWith({ candidate: true });
+    expect(
+      screen.getByRole("button", { name: "启用已测试配置" }),
+    ).toBeDisabled();
+  });
+
+  it("prevents concurrent mutations and unlocks every control after a failed test", async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    let failProbe = () => {};
+    api.getManagedPlatformRouterState.mockResolvedValue({
+      config,
+      draft: {
+        ...config,
+        testedReady: true,
+        testedAt: "2026-08-25T00:00:00.000Z",
+        keyChanged: true,
+      },
+      effective,
+    });
+    api.testPlatformAi.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          failProbe = () => reject(new Error("模拟测试失败"));
+        }),
+    );
+
+    render(
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
+    );
+    const endpoint = await screen.findByDisplayValue(longEndpoint);
+    const testButton = screen.getByRole("button", { name: "测试待测配置" });
+    const saveButton = screen.getByRole("button", { name: "保存待测配置" });
+    const activateButton = screen.getByRole("button", {
+      name: "启用已测试配置",
+    });
+    await waitFor(() => expect(testButton).toBeEnabled());
+    expect(activateButton).toBeEnabled();
+    await user.click(testButton);
+
+    await waitFor(() => expect(testButton).toBeDisabled());
+    expect(endpoint).toBeDisabled();
+    expect(saveButton).toBeDisabled();
+    expect(activateButton).toBeDisabled();
+    await user.click(testButton);
+    await user.click(saveButton);
+    await user.click(activateButton);
+    expect(api.testPlatformAi).toHaveBeenCalledTimes(1);
+    expect(api.saveManagedPlatformRouterConfig).not.toHaveBeenCalled();
+    expect(api.activateManagedPlatformRouterConfig).not.toHaveBeenCalled();
+
+    failProbe();
+    await waitFor(() => expect(onNotice).toHaveBeenCalledWith("模拟测试失败"));
+    expect(endpoint).toBeEnabled();
+    expect(saveButton).toBeEnabled();
+    expect(testButton).toBeEnabled();
+    expect(activateButton).toBeEnabled();
+  });
+
+  it.each([
+    ["保存", "保存待测配置"],
+    ["启用", "启用已测试配置"],
+  ] as const)(
+    "%s运行时拒绝并发 mutation，并在失败后解锁",
+    async (action, actionName) => {
+      const user = userEvent.setup();
+      const onNotice = vi.fn();
+      let failAction = () => {};
+      api.getManagedPlatformRouterState.mockResolvedValue({
+        config,
+        draft: {
+          ...config,
+          testedReady: true,
+          testedAt: "2026-08-25T00:00:00.000Z",
+          keyChanged: true,
+        },
+        effective,
+      });
+      const actionMock =
+        action === "保存"
+          ? api.saveManagedPlatformRouterConfig
+          : api.activateManagedPlatformRouterConfig;
+      actionMock.mockImplementation(
+        () =>
+          new Promise((_resolve, reject) => {
+            failAction = () => reject(new Error(`模拟${action}失败`));
+          }),
+      );
+
+      render(
+        <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
+      );
+      const endpoint = await screen.findByDisplayValue(longEndpoint);
+      const saveButton = screen.getByRole("button", { name: "保存待测配置" });
+      const testButton = screen.getByRole("button", { name: "测试待测配置" });
+      const activateButton = screen.getByRole("button", {
+        name: "启用已测试配置",
+      });
+      await waitFor(() => expect(activateButton).toBeEnabled());
+      await user.click(screen.getByRole("button", { name: actionName }));
+
+      await waitFor(() => expect(endpoint).toBeDisabled());
+      expect(saveButton).toBeDisabled();
+      expect(testButton).toBeDisabled();
+      expect(activateButton).toBeDisabled();
+      await user.click(saveButton);
+      await user.click(testButton);
+      await user.click(activateButton);
+      expect(api.saveManagedPlatformRouterConfig).toHaveBeenCalledTimes(
+        action === "保存" ? 1 : 0,
+      );
+      expect(api.testPlatformAi).not.toHaveBeenCalled();
+      expect(api.activateManagedPlatformRouterConfig).toHaveBeenCalledTimes(
+        action === "启用" ? 1 : 0,
+      );
+
+      failAction();
+      await waitFor(() =>
+        expect(onNotice).toHaveBeenCalledWith(`模拟${action}失败`),
+      );
+      expect(endpoint).toBeEnabled();
+      expect(saveButton).toBeEnabled();
+      expect(testButton).toBeEnabled();
+      expect(activateButton).toBeEnabled();
+    },
+  );
+
+  it("treats committed 202 save metadata as success and applies returned state", async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    const committedDraft = {
+      ...config,
+      endpoint: "https://api.lmm.best/v1",
+      testedReady: false,
+      testedAt: null,
+      keyChanged: true,
+    };
+    api.saveManagedPlatformRouterConfig.mockResolvedValue({
+      config,
+      draft: committedDraft,
+      effective,
+      requestId: "request-stage-pending",
+      committed: true,
+      auditPending: true,
+      maintenancePending: false,
+      generationId: "generation-stage-pending",
+    });
+
+    render(
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
+    );
+    await screen.findByDisplayValue(longEndpoint);
+    await user.click(screen.getByRole("button", { name: "保存待测配置" }));
+
+    await waitFor(() =>
+      expect(onNotice).toHaveBeenCalledWith("已提交，审计待重放"),
+    );
+    expect(screen.getByDisplayValue("https://api.lmm.best/v1")).toBeEnabled();
+    expect(onNotice).not.toHaveBeenCalledWith(expect.stringContaining("失败"));
+  });
+
+  it("treats committed 202 candidate testing as success and refreshes attested state", async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    const testedDraft = {
+      ...config,
+      testedReady: true,
+      testedAt: "2026-08-25T00:00:00.000Z",
+      keyChanged: true,
+    };
+    api.testPlatformAi.mockResolvedValue({
+      status: "ready",
+      outcome: "ready",
+      phase: "response",
+      model: "test-model",
+      responseStatus: 200,
+      latencyMs: 800,
+      firstByteLatencyMs: 700,
+      performanceBudgetMs: 4_000,
+      hardTimeoutMs: 20_000,
+      message: "模型网关连接正常。",
+      requestId: "request-test-pending",
+      committed: true,
+      auditPending: false,
+      maintenancePending: true,
+      generationId: "generation-test-pending",
+      config,
+      draft: testedDraft,
+      effective,
+    });
+    api.getManagedPlatformRouterState.mockResolvedValueOnce({
+      config,
+      draft: { ...config, testedReady: false, testedAt: null, keyChanged: true },
+      effective,
+    });
+
+    render(
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
+    );
+    const testButton = await screen.findByRole("button", {
+      name: "测试待测配置",
+    });
+    await waitFor(() => expect(testButton).toBeEnabled());
+    await user.click(testButton);
+
+    await waitFor(() =>
+      expect(onNotice).toHaveBeenCalledWith("已提交，后台清理待完成"),
+    );
+    expect(
+      screen.getByRole("button", { name: "启用已测试配置" }),
+    ).toBeEnabled();
+    expect(onNotice).not.toHaveBeenCalledWith(expect.stringContaining("失败"));
+    expect(api.testPlatformAi).toHaveBeenCalledWith({ candidate: true });
+    expect(api.getManagedPlatformRouterState).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fabricate a managed conflict from unreadable null fields", async () => {
+    api.getManagedPlatformRouterState.mockResolvedValue({
+      config: null,
+      draft: null,
+      effective: {
+        ...effective,
+        ready: false,
+        source: "managed",
+        conflicts: { endpoint: null, model: null, protocol: null },
+        endpointOrigin: null,
+        model: null,
+        protocol: null,
+        endpointMatchesRequired: null,
+        modelMatchesRequired: null,
+        protocolMatchesRequired: null,
+        issues: ["managed_configuration_unreadable"],
+      },
+    });
+
+    render(
+      <PlatformAiConfigPanel rootRole="rootAdmin" onNotice={vi.fn()} />,
+    );
+    await screen.findByText(/AI 流量已阻塞/);
+    expect(screen.queryByText(/非秘密配置存在冲突/)).not.toBeInTheDocument();
+  });
+
+  it("stages without replacing active config and enables only an attested draft", async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    const testedDraft = {
+      ...config,
+      endpoint: "https://api.lmm.best/v1",
+      model: "gpt-5.6-sol",
+      testedReady: true,
+      testedAt: "2026-08-24T00:00:00.000Z",
+      keyChanged: true,
+    };
+    api.saveManagedPlatformRouterConfig.mockResolvedValue({
+      config,
+      draft: testedDraft,
+      effective,
+    });
+    api.activateManagedPlatformRouterConfig.mockResolvedValue({
+      config: {
+        ...testedDraft,
+        credentialConfigured: true,
+      },
+      draft: null,
+      effective: { ...effective, ready: true, code: "ready", issues: [] },
+    });
+
+    render(
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={onNotice} />,
+    );
+    await screen.findByDisplayValue(longEndpoint);
+    await user.click(screen.getByRole("button", { name: "保存待测配置" }));
+
+    await waitFor(() =>
+      expect(onNotice).toHaveBeenCalledWith(
+        "待测配置已保存；当前生效配置未改变，请继续测试连接",
+      ),
+    );
+    expect(api.saveManagedPlatformRouterConfig).toHaveBeenCalled();
+    const activate = screen.getByRole("button", {
+      name: "启用已测试配置",
+    });
+    expect(activate).toBeEnabled();
+    await user.click(activate);
+    await waitFor(() =>
+      expect(api.activateManagedPlatformRouterConfig).toHaveBeenCalledTimes(1),
+    );
   });
 });

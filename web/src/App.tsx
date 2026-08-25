@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 
 import { spring } from "./components/Primitives";
+import { FloatingMarketplaceClerk } from "./components/FloatingMarketplaceClerk";
+import { MatchChat } from "./components/MatchChat";
 import { PlatformDashboard } from "./components/PlatformDashboard";
 import { PluginHost } from "./components/PluginHost";
 import { MarketplaceHome } from "./components/MarketplaceHome";
@@ -50,6 +52,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
   const [paymentModeVersion, setPaymentModeVersion] = useState(1);
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
+  const [buyerAssistantOpen, setBuyerAssistantOpen] = useState(false);
 
   // Subplatform routing and URL sync
   const {
@@ -62,8 +65,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     setAccountSettingsSection,
     storeConsoleRequested,
     setStoreConsoleRequested,
-    publishProductRequested,
-    setPublishProductRequested,
+    navigateToSubplatform,
     requestedRoleRef,
   } = useSubplatformRoute({ initialPath, authResolved: false });
 
@@ -77,6 +79,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     });
 
   // Re-sync subplatform route once auth resolves
+  useEffect(() => {
+    if (subplatform.slug === "root") setBuyerAssistantOpen(false);
+  }, [subplatform.slug]);
+
   useEffect(() => {
     if (!hydrated || !authResolved) return;
     const searchParams = new URLSearchParams(window.location.search);
@@ -102,16 +108,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     currentManagedStore,
     canManageStoreConsole,
     openStoreConsoleFor,
-    publishProduct,
   } = useOwnedStores({
     authUser,
-    authResolved,
     subplatform,
     locale,
     storeConsoleRequested,
     setStoreConsoleRequested,
-    publishProductRequested,
-    setPublishProductRequested,
     setAccountSettingsSection,
     onNotice: setNotice,
     openSignIn,
@@ -138,13 +140,17 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   });
 
   // Store AI handoff & contact consent
-  const { requestStoreContactConsent, requestStoreAiHandoff, contactListing } =
-    useStoreHandoff({
-      subplatform,
-      listings,
-      locale,
-      onNotice: setNotice,
-    });
+  const {
+    requestStoreContactConsent,
+    retrieveStoreContact,
+    requestStoreAiHandoff,
+    contactListing,
+  } = useStoreHandoff({
+    subplatform,
+    listings,
+    locale,
+    onNotice: setNotice,
+  });
 
   useEffect(() => {
     if (!authResolved || !authUser || !catalogResolved || listing) return;
@@ -265,6 +271,53 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     setStoreConsoleOpen,
   ]);
 
+  const openMarketplaceListing = useCallback(
+    (selected: (typeof listings)[number]) => {
+      const targetPath = selected.platformPath;
+      if (
+        subplatform.slug === "root" &&
+        targetPath &&
+        targetPath !== subplatform.path
+      ) {
+        void navigateToSubplatform(targetPath).then(() => setListing(selected));
+        return;
+      }
+      setListing(selected);
+    },
+    [
+      listings,
+      navigateToSubplatform,
+      setListing,
+      subplatform.path,
+      subplatform.slug,
+    ],
+  );
+
+  const openMarketplaceDemand = useCallback(
+    (targetPath?: string) => {
+      if (!targetPath) {
+        const stores = document.getElementById("stores");
+        if (typeof stores?.scrollIntoView === "function") {
+          stores.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        setNotice(
+          locale === "en"
+            ? "Choose a specialist store to continue."
+            : "请先选择一个专业店铺，再继续描述需求。",
+        );
+        return;
+      }
+      if (targetPath === subplatform.path) {
+        setBuyerAssistantOpen(true);
+        return;
+      }
+      void navigateToSubplatform(targetPath).then(() =>
+        setBuyerAssistantOpen(true),
+      );
+    },
+    [locale, navigateToSubplatform, subplatform.path],
+  );
+
   const genericWorkspace: ReactNode =
     role === "platform" ? (
       <PlatformDashboard
@@ -297,6 +350,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         onNotice={setNotice}
         onHumanHandoff={requestStoreAiHandoff}
         onContactConsent={requestStoreContactConsent}
+        onContactRetrieve={retrieveStoreContact}
         subplatform={subplatform}
         canManageStore={Boolean(currentManagedStore || canManageStoreConsole)}
         onOpenStoreConsole={() => {
@@ -328,7 +382,13 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       onNotice={setNotice}
       subplatform={subplatform}
       listings={listings}
-      onOpenListing={setListing}
+      onOpenListing={openMarketplaceListing}
+      onLikeListing={likeListing}
+      onOpenDemand={() => setBuyerAssistantOpen(true)}
+      onAuthRequired={() => openSignIn(role)}
+      authStatus={
+        !authResolved ? "pending" : authUser ? "authenticated" : "anonymous"
+      }
       fallback={genericWorkspace}
     />
   ) : null;
@@ -417,18 +477,41 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     listings={listings}
                     onRetryCatalog={retryCatalog}
                     locale={locale}
-                    theme={theme}
-                    onLocaleChange={setLocale}
-                    onThemeChange={setTheme}
-                    onNotice={setNotice}
-                    onOpenListing={setListing}
+                    onDescribeNeed={openMarketplaceDemand}
+                    onOpenListing={openMarketplaceListing}
                     onLikeListing={likeListing}
-                    onPublishProduct={publishProduct}
-                    onRecommendations={replaceFromRecommendations}
-                    subplatform={subplatform}
                   />
-                ) : subplatform.pluginArtifact && role === "platform" ? (
-                  pluginWorkspace
+                ) : subplatform.pluginArtifact &&
+                  (role === "platform" || role === "buyer") ? (
+                  <>
+                    {pluginWorkspace}
+                    {role === "buyer" ? (
+                      <FloatingMarketplaceClerk
+                        open={buyerAssistantOpen}
+                        locale={locale}
+                        launcherLabel={
+                          locale === "en" ? "Describe your need" : "说需求"
+                        }
+                        onOpenChange={setBuyerAssistantOpen}
+                      >
+                        <div className="root-marketplace-chat-shell">
+                          <MatchChat
+                            compact
+                            role="buyer"
+                            locale={locale}
+                            onLikeListing={likeListing}
+                            onNotice={setNotice}
+                            onOpenListing={openMarketplaceListing}
+                            onRecommendations={replaceFromRecommendations}
+                            onHumanHandoff={requestStoreAiHandoff}
+                            onContactConsent={requestStoreContactConsent}
+                            onContactRetrieve={retrieveStoreContact}
+                            subplatform={subplatform}
+                          />
+                        </div>
+                      </FloatingMarketplaceClerk>
+                    ) : null}
+                  </>
                 ) : (
                   genericWorkspace
                 )}

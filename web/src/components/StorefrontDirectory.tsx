@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, MessageSquareMore } from "lucide-react";
 
 import { getStores, type StoreSummary } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 
 export function StorefrontDirectory({
   locale,
+  onDescribeNeed,
 }: {
   locale: InterfaceLocale;
+  onDescribeNeed?: (platformPath: string) => void;
 }) {
   const [stores, setStores] = useState<StoreSummary[]>([]);
   const [resolved, setResolved] = useState(false);
@@ -73,36 +75,47 @@ export function StorefrontDirectory({
       ) : stores.length ? (
         <div className="grid gap-x-8 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
           {stores.map((store) => (
-            <a
+            <article
               className="group flex min-h-40 flex-col py-2 transition-transform duration-150 hover:-translate-y-0.5 motion-reduce:transition-none motion-reduce:hover:transform-none"
-              href={store.path}
               key={store.id}
             >
-              <div className="flex items-start justify-between gap-3">
-                <span
-                  className="grid size-10 shrink-0 place-items-center rounded-full bg-background-muted text-xs font-semibold text-foreground-intense"
-                  aria-hidden="true"
-                >
-                  {storeInitials(store.displayName)}
+              <a className="flex flex-1 flex-col" href={store.path}>
+                <div className="flex items-start justify-between gap-3">
+                  <span
+                    className="grid size-10 shrink-0 place-items-center rounded-full bg-background-muted text-xs font-semibold text-foreground-intense"
+                    aria-hidden="true"
+                  >
+                    {storeInitials(store.displayName)}
+                  </span>
+                  <ArrowUpRight
+                    className="size-4 text-foreground-muted transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 motion-reduce:transition-none"
+                    aria-hidden="true"
+                  />
+                </div>
+                <strong className="mt-5 line-clamp-2 text-base font-semibold text-foreground-intense">
+                  {store.displayName}
+                </strong>
+                <p className="mt-2 line-clamp-2 text-sm leading-6 text-foreground-muted">
+                  {store.description ||
+                    (locale === "en"
+                      ? "Browse published products in this store."
+                      : "进入店铺浏览已发布商品。")}
+                </p>
+                <span className="mt-auto pt-4 text-xs font-medium text-foreground-strong">
+                  {locale === "en" ? "Enter store" : "进入店铺"}
                 </span>
-                <ArrowUpRight
-                  className="size-4 text-foreground-muted transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 motion-reduce:transition-none"
-                  aria-hidden="true"
-                />
-              </div>
-              <strong className="mt-5 line-clamp-2 text-base font-semibold text-foreground-intense">
-                {store.displayName}
-              </strong>
-              <p className="mt-2 line-clamp-2 text-sm leading-6 text-foreground-muted">
-                {store.description ||
-                  (locale === "en"
-                    ? "Browse published products in this store."
-                    : "进入店铺浏览已发布商品。")}
-              </p>
-              <span className="mt-auto pt-4 text-xs font-medium text-foreground-strong">
-                {locale === "en" ? "Enter store" : "进入店铺"}
-              </span>
-            </a>
+              </a>
+              {onDescribeNeed ? (
+                <button
+                  className="storefront-demand-action"
+                  type="button"
+                  onClick={() => onDescribeNeed(store.path)}
+                >
+                  <MessageSquareMore aria-hidden="true" />
+                  {locale === "en" ? "Describe a need" : "说需求"}
+                </button>
+              ) : null}
+            </article>
           ))}
         </div>
       ) : failed ? (

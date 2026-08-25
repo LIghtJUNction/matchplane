@@ -30,6 +30,7 @@ interface FloatingMarketplaceClerkProps {
         open: boolean;
         locale: InterfaceLocale;
         onOpenChange: (open: boolean) => void;
+        launcherLabel?: string;
         children: ReactNode;
 }
 
@@ -37,6 +38,7 @@ export function FloatingMarketplaceClerk({
         open,
         locale,
         onOpenChange,
+        launcherLabel,
         children,
 }: FloatingMarketplaceClerkProps) {
         const isDesktop = useMediaQuery("(min-width: 48rem)");
@@ -46,6 +48,8 @@ export function FloatingMarketplaceClerk({
         const description = isZh
                 ? "描述需求，比较真实在售商品。"
                 : "Describe your needs and compare real listings.";
+        const launcherText =
+                launcherLabel ?? (isZh ? "问选货员" : "Ask assistant");
 
         useEffect(() => {
                 setPortalNode(document.body);
@@ -58,9 +62,7 @@ export function FloatingMarketplaceClerk({
                                   variant="primary"
                                   size="sm"
                                   type="button"
-                                  aria-label={
-                                          isZh ? "问选货员" : "Ask assistant"
-                                  }
+                                  aria-label={launcherText}
                                   aria-haspopup="dialog"
                                   aria-expanded={open}
                                   onClick={() => onOpenChange(true)}
@@ -69,9 +71,7 @@ export function FloatingMarketplaceClerk({
                                           size={17}
                                           aria-hidden="true"
                                   />
-                                  <span>
-                                          {isZh ? "问选货员" : "Ask assistant"}
-                                  </span>
+                                  <span>{launcherText}</span>
                           </Button>,
                           portalNode,
                   )

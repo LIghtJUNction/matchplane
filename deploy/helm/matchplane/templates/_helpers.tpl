@@ -47,6 +47,28 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+  Managed platform-router state must survive Web pod replacement. The application lock is local
+  to a Pod/PID namespace, so this rollout deliberately permits exactly one Web writer. The chart
+  either retains its own PVC or mounts an operator-provided claim.
+*/}}
+{{- define "matchplane.platformRouterClaimName" -}}
+{{- $storage := required "web.platformRouterStorage is required" .Values.web.platformRouterStorage -}}
+{{- if not $storage.enabled -}}
+{{- fail "web.platformRouterStorage.enabled must be true while the Web deployment is enabled" -}}
+{{- end -}}
+{{- if $storage.existingClaim -}}
+{{- $storage.existingClaim -}}
+{{- else -}}
+{{- $_ := required "web.platformRouterStorage.accessModes must not be empty" $storage.accessModes -}}
+{{- $_ := required "web.platformRouterStorage.size is required when existingClaim is empty" $storage.size -}}
+{{- if and (eq .Values.runtime.environment "production") (not $storage.storageClass) -}}
+{{- fail "web.platformRouterStorage.storageClass is required in production when existingClaim is empty" -}}
+{{- end -}}
+{{- printf "%s-platform-router-state" (include "matchplane.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
   Runtime credentials are intentionally selected per workload. The legacy
   runtime.existingSecret value remains a development/test fallback only; a
   production render fails unless every workload has its own secret. Each

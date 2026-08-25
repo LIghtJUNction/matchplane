@@ -103,7 +103,9 @@ export function MarketplaceListingCard({
               onClick={() => {
                 if (!onLike || viewerLikeCount >= 5) return;
                 setLiking(true);
-                void onLike().finally(() => setLiking(false));
+                void onLike()
+                  .catch(() => undefined)
+                  .finally(() => setLiking(false));
               }}
             >
               <Heart

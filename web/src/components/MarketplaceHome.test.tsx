@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -82,39 +82,37 @@ describe("MarketplaceListingCard likes", () => {
 });
 
 describe("MarketplaceHome actions", () => {
-        it("routes the publish-product control through the real publisher action", async () => {
-                const user = userEvent.setup();
-                const onPublishProduct = vi.fn();
-                render(
-                        <MarketplaceHome
-                                catalogResolved
-                                listings={[]}
-                                locale="zh"
-                                theme="light"
-                                onLocaleChange={vi.fn()}
-                                onThemeChange={vi.fn()}
-                                onLikeListing={vi.fn(async () => undefined)}
-                                onNotice={vi.fn()}
-                                onOpenListing={vi.fn()}
-                                onPublishProduct={onPublishProduct}
-                                onRetryCatalog={vi.fn()}
-                                onRecommendations={vi.fn()}
-                                subplatform={
-                                        {
-                                                slug: "root",
-                                                path: "/",
-                                                label: "MatchPlane",
-                                                ui: {},
-                                        } as SubplatformConfig
-                                }
-                        />,
-                );
+        it.each([
+                ["zh", []],
+                ["en", []],
+                ["zh", [listing]],
+                ["en", [listing]],
+        ] as const)(
+                "does not expose root publishing for %s with catalog %s",
+                (locale, listings) => {
+                        render(
+                                <MarketplaceHome
+                                        catalogResolved
+                                        listings={listings as unknown as AssetListing[]}
+                                        locale={locale}
+                                        onLikeListing={vi.fn(async () => undefined)}
+                                        onOpenListing={vi.fn()}
+                                        onRetryCatalog={vi.fn()}
+                                />,
+                        );
 
-                await user.click(
-                        screen.getAllByRole("button", { name: "发布商品" })[0],
-                );
-                expect(onPublishProduct).toHaveBeenCalledTimes(1);
-        });
+                        expect(
+                                screen.queryByRole("button", {
+                                        name: "发布商品",
+                                }),
+                        ).not.toBeInTheDocument();
+                        expect(
+                                screen.queryByRole("button", {
+                                        name: "List a product",
+                                }),
+                        ).not.toBeInTheDocument();
+                },
+        );
 
         it("uses a keyboard-navigable toggle group for category filtering", async () => {
                 const user = userEvent.setup();
@@ -153,7 +151,6 @@ describe("MarketplaceHome actions", () => {
                                 onLikeListing={vi.fn(async () => undefined)}
                                 onNotice={vi.fn()}
                                 onOpenListing={vi.fn()}
-                                onPublishProduct={vi.fn()}
                                 onRetryCatalog={vi.fn()}
                                 onRecommendations={vi.fn()}
                                 subplatform={
@@ -189,123 +186,52 @@ describe("MarketplaceHome actions", () => {
                 ).not.toBeInTheDocument();
         });
 
-        it("keeps one clerk input and exposes it as a mobile bottom sheet", async () => {
+        it("keeps conversation off the root and routes the need to the listing platform", async () => {
                 const user = userEvent.setup();
-                const { container } = render(
+                const onDescribeNeed = vi.fn();
+                render(
                         <MarketplaceHome
                                 catalogResolved
-                                listings={[listing]}
-                                locale="zh"
-                                theme="light"
-                                onLocaleChange={vi.fn()}
-                                onThemeChange={vi.fn()}
-                                onLikeListing={vi.fn(async () => undefined)}
-                                onNotice={vi.fn()}
-                                onOpenListing={vi.fn()}
-                                onPublishProduct={vi.fn()}
-                                onRetryCatalog={vi.fn()}
-                                onRecommendations={vi.fn()}
-                                subplatform={
+                                listings={[
                                         {
-                                                slug: "root",
-                                                path: "/",
-                                                label: "MatchPlane",
-                                                ui: {},
-                                        } as SubplatformConfig
-                                }
+                                                ...listing,
+                                                platformPath: "/used-car",
+                                        },
+                                ]}
+                                locale="zh"
+                                onDescribeNeed={onDescribeNeed}
+                                onLikeListing={vi.fn(async () => undefined)}
+                                onOpenListing={vi.fn()}
+                                onRetryCatalog={vi.fn()}
                         />,
                 );
 
-                expect(screen.getAllByRole("textbox")).toHaveLength(1);
-                const toggle = screen.getByRole("button", { name: "问选货员" });
-                expect(toggle).toHaveAttribute("aria-expanded", "false");
-
-                await user.click(toggle);
-                expect(toggle).toHaveAttribute("aria-expanded", "true");
-                expect(screen.getAllByRole("textbox")).toHaveLength(1);
-                expect(
-                        container.querySelector(".root-marketplace-page"),
-                ).toHaveClass("is-clerk-open");
-
+                expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
                 await user.click(
-                        screen.getAllByRole("button", {
-                                name: "关闭选货员",
-                        })[0],
+                        screen.getByRole("button", { name: "说需求" }),
                 );
-                expect(toggle).toHaveAttribute("aria-expanded", "false");
+                expect(onDescribeNeed).toHaveBeenCalledWith("/used-car");
         });
 
-        it("uses a bounded dialog workspace on desktop", async () => {
-                const originalMatchMedia = window.matchMedia;
-                Object.defineProperty(window, "matchMedia", {
-                        configurable: true,
-                        value: (query: string) => ({
-                                matches: query === "(min-width: 48rem)",
-                                media: query,
-                                onchange: null,
-                                addListener: () => undefined,
-                                removeListener: () => undefined,
-                                addEventListener: () => undefined,
-                                removeEventListener: () => undefined,
-                                dispatchEvent: () => false,
-                        }),
-                });
+        it("keeps a visible demand entry when the catalog has no child path", async () => {
                 const user = userEvent.setup();
-                const view = render(
+                const onDescribeNeed = vi.fn();
+                render(
                         <MarketplaceHome
                                 catalogResolved
-                                catalogError={false}
-                                listings={[listing]}
+                                listings={[]}
                                 locale="zh"
-                                theme="light"
-                                onLocaleChange={vi.fn()}
-                                onThemeChange={vi.fn()}
+                                onDescribeNeed={onDescribeNeed}
                                 onLikeListing={vi.fn(async () => undefined)}
-                                onNotice={vi.fn()}
                                 onOpenListing={vi.fn()}
-                                onPublishProduct={vi.fn()}
                                 onRetryCatalog={vi.fn()}
-                                onRecommendations={vi.fn()}
-                                subplatform={
-                                        {
-                                                slug: "root",
-                                                path: "/",
-                                                label: "MatchPlane",
-                                                ui: {},
-                                        } as SubplatformConfig
-                                }
                         />,
                 );
 
-                const toggle = screen.getByRole("button", { name: "问选货员" });
-                await user.click(toggle);
-                expect(
-                        await screen.findByRole("dialog", { name: "选货员" }),
-                ).toHaveClass("desktop-clerk-dialog");
-                expect(
-                        screen.queryByRole("button", {
-                                name: /收纳|展开|缩放|拖动/,
-                        }),
-                ).not.toBeInTheDocument();
-
                 await user.click(
-                        screen.getByRole("button", { name: "关闭选货员" }),
+                        screen.getByRole("button", { name: "说需求" }),
                 );
-                await waitFor(() =>
-                        expect(
-                                screen.queryByRole("dialog", {
-                                        name: "选货员",
-                                }),
-                        ).not.toBeInTheDocument(),
-                );
-                expect(toggle).toHaveAttribute("aria-expanded", "false");
-                expect(toggle).toHaveFocus();
-
-                view.unmount();
-                Object.defineProperty(window, "matchMedia", {
-                        configurable: true,
-                        value: originalMatchMedia,
-                });
+                expect(onDescribeNeed).toHaveBeenCalledWith(undefined);
         });
 
         it("offers a real retry action when the catalog request fails", async () => {
@@ -323,7 +249,6 @@ describe("MarketplaceHome actions", () => {
                                 onLikeListing={vi.fn(async () => undefined)}
                                 onNotice={vi.fn()}
                                 onOpenListing={vi.fn()}
-                                onPublishProduct={vi.fn()}
                                 onRetryCatalog={onRetryCatalog}
                                 onRecommendations={vi.fn()}
                                 subplatform={

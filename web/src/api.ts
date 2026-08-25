@@ -200,12 +200,26 @@ export interface PlatformSetupStatus {
 export interface PlatformAiStatus {
   router: {
     configured: boolean;
+    aiReady: boolean;
     protocol:
       | "openai-compatible"
       | "anthropic-messages"
-      | "gemini-generate-content";
+      | "gemini-generate-content"
+      | null;
     model: string | null;
     endpointOrigin: string | null;
+    source: "managed" | "environment" | "unconfigured";
+    managedOverridesEnvironment: boolean;
+    conflicts: {
+      endpoint: boolean | null;
+      model: boolean | null;
+      protocol: boolean | null;
+    };
+    credentialConfigured: boolean;
+    policyCode: "ready" | "upstream_configuration";
+    policyIssues: string[];
+    requiredEndpoint: string;
+    requiredModel: string;
     toolMode: "auto" | "required" | "disabled";
     maxInputCharacters: number;
     maxOutputTokens: number;
@@ -256,6 +270,25 @@ export interface PlatformAiProbeResult {
   performanceBudgetMs: number;
   hardTimeoutMs: number;
   message: string;
+  code?: "upstream_configuration";
+  preferredHttpStatus?: 451;
+  issues?: string[];
+  requestId?: string;
+  committed?: true;
+  auditPending?: boolean;
+  maintenancePending?: boolean;
+  generationId?: string;
+  config?: ManagedPlatformRouterConfig | null;
+  draft?: ManagedPlatformRouterDraftConfig | null;
+  effective?: PlatformRouterEffectiveStatus;
+}
+
+export interface PlatformAiCandidateProbeResult extends PlatformAiProbeResult {
+  committed: true;
+  generationId: string;
+  config: ManagedPlatformRouterConfig | null;
+  draft: ManagedPlatformRouterDraftConfig;
+  effective: PlatformRouterEffectiveStatus;
 }
 
 export interface PlatformSiteSettings {
@@ -1471,6 +1504,53 @@ export interface ManagedPlatformRouterConfig {
   modelReasoningEfforts: string[];
 }
 
+export interface ManagedPlatformRouterDraftConfig
+  extends ManagedPlatformRouterConfig {
+  testedReady: boolean;
+  testedAt: string | null;
+  keyChanged: boolean;
+}
+
+export interface PlatformRouterEffectiveStatus {
+  ready: boolean;
+  code: "ready" | "upstream_configuration";
+  preferredHttpStatus: 451 | null;
+  source: "managed" | "environment" | "unconfigured";
+  managedOverridesEnvironment: boolean;
+  conflicts: {
+    endpoint: boolean | null;
+    model: boolean | null;
+    protocol: boolean | null;
+  };
+  endpointOrigin: string | null;
+  model: string | null;
+  protocol: ManagedPlatformRouterConfig["protocol"] | null;
+  enabled: boolean;
+  credentialConfigured: boolean;
+  endpointMatchesRequired: boolean | null;
+  modelMatchesRequired: boolean | null;
+  protocolMatchesRequired: boolean | null;
+  requiredEndpoint: string;
+  requiredModel: string;
+  issues: string[];
+}
+
+export interface ManagedPlatformRouterState {
+  config: ManagedPlatformRouterConfig | null;
+  draft: ManagedPlatformRouterDraftConfig | null;
+  effective: PlatformRouterEffectiveStatus;
+  requestId?: string;
+}
+
+export interface ManagedPlatformRouterMutationState
+  extends ManagedPlatformRouterState {
+  requestId: string;
+  committed: true;
+  auditPending: boolean;
+  maintenancePending: boolean;
+  generationId: string;
+}
+
 export interface ManagedPlatformRouterModel {
   id: string;
   reasoningEfforts: string[];
@@ -2459,11 +2539,23 @@ export async function getPlatformAiStatus(): Promise<PlatformAiStatus> {
 }
 
 /** Test the server-side hosted Agent without sending browser or user content. */
-export async function testPlatformAi(): Promise<PlatformAiProbeResult> {
+export function testPlatformAi(
+  input: { candidate: true },
+): Promise<PlatformAiCandidateProbeResult>;
+export function testPlatformAi(
+  input?: { candidate?: false },
+): Promise<PlatformAiProbeResult>;
+export function testPlatformAi(
+  input: { candidate: boolean },
+): Promise<PlatformAiProbeResult | PlatformAiCandidateProbeResult>;
+export async function testPlatformAi(
+  input: { candidate?: boolean } = {},
+): Promise<PlatformAiProbeResult> {
   const response = await fetch("/api/platform/ai/test", {
     method: "POST",
     credentials: "include",
-    headers: { accept: "application/json" },
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
   });
   const body = (await response.json().catch(() => null)) as
     | (PlatformAiProbeResult & { error?: string })
@@ -2474,48 +2566,91 @@ export async function testPlatformAi(): Promise<PlatformAiProbeResult> {
       body?.message || body?.error || "AI 连接测试失败",
     );
   }
+  if (
+    input.candidate === true &&
+    (body.committed !== true ||
+      typeof body.generationId !== "string" ||
+      !body.generationId.trim() ||
+      !Object.prototype.hasOwnProperty.call(body, "config") ||
+      (body.config !== null &&
+        (typeof body.config !== "object" || Array.isArray(body.config))) ||
+      !Object.prototype.hasOwnProperty.call(body, "draft") ||
+      !body.draft ||
+      typeof body.draft !== "object" ||
+      Array.isArray(body.draft) ||
+      body.draft.testedReady !== true ||
+      !Object.prototype.hasOwnProperty.call(body, "effective") ||
+      !body.effective ||
+      typeof body.effective !== "object" ||
+      Array.isArray(body.effective))
+  ) {
+    throw new MarketplaceApiError(
+      response.status,
+      body.message || "AI 待测配置测试结果未提交",
+    );
+  }
   return body;
 }
 
-export async function getManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterConfig | null> {
+export async function getManagedPlatformRouterState(): Promise<ManagedPlatformRouterState> {
   const response = await fetch("/api/platform/ai/config", {
     credentials: "include",
     headers: { accept: "application/json" },
     cache: "no-store",
   });
-  const body = (await response.json().catch(() => null)) as {
-    config?: ManagedPlatformRouterConfig | null;
-    error?: string;
-  } | null;
-  if (!response.ok)
+  const body = (await response.json().catch(() => null)) as
+    | (ManagedPlatformRouterState & { error?: string })
+    | null;
+  if (!response.ok || !body)
     throw new MarketplaceApiError(
       response.status,
       body?.error || "AI 配置读取失败",
     );
-  return body?.config ?? null;
+  return body;
+}
+
+export async function getManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterConfig | null> {
+  return (await getManagedPlatformRouterState()).config;
 }
 
 export async function saveManagedPlatformRouterConfig(
   input: Omit<ManagedPlatformRouterConfig, "credentialConfigured"> & {
     apiKey?: string;
   },
-): Promise<ManagedPlatformRouterConfig> {
+): Promise<ManagedPlatformRouterMutationState> {
   const response = await fetch("/api/platform/ai/config", {
     method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, action: "stage" }),
   });
-  const body = (await response.json().catch(() => null)) as {
-    config?: ManagedPlatformRouterConfig;
-    error?: string;
-  } | null;
-  if (!response.ok || !body?.config)
+  const body = (await response.json().catch(() => null)) as
+    | (ManagedPlatformRouterMutationState & { error?: string })
+    | null;
+  if (!response.ok || !body?.draft || !body.committed)
     throw new MarketplaceApiError(
       response.status,
-      body?.error || "AI 配置保存失败",
+      body?.error || "AI 待测配置保存失败",
     );
-  return body.config;
+  return body;
+}
+
+export async function activateManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterMutationState> {
+  const response = await fetch("/api/platform/ai/config", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ action: "activate" }),
+  });
+  const body = (await response.json().catch(() => null)) as
+    | (ManagedPlatformRouterMutationState & { error?: string })
+    | null;
+  if (!response.ok || !body?.config || !body.committed)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "AI 待测配置激活失败",
+    );
+  return body;
 }
 
 export async function listManagedPlatformRouterModels(input: {

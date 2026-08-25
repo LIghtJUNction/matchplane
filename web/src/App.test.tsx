@@ -119,41 +119,44 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+async function openUsedCarConversation(
+  user: ReturnType<typeof userEvent.setup>,
+) {
+  window.history.replaceState(null, "", "/used-car");
+  render(<App initialPath="/used-car" />);
+  await user.click(await screen.findByRole("button", { name: "与店长对话" }));
+  return screen.findByRole("textbox", {
+    name: "告诉 MatchPlane 你的需求",
+  });
+}
+
 describe("MatchPlane workspaces", () => {
-  it("keeps the root entry focused on one public buyer chat and a visible sign-in entry", async () => {
+  it("keeps the root as browse plus a child demand entry", async () => {
     render(<App />);
 
-    expect(screen.getByRole("button", { name: "问选货员" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
+    expect(screen.getByRole("button", { name: "说需求" })).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "想找什么？" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "从一句话开始。" }),
+      screen.queryByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("tab", { name: "卖方供给" }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
-    ).toBeInTheDocument();
-
-    expect(screen.queryByText("其他入口")).not.toBeInTheDocument();
     expect(
       await screen.findByRole("button", { name: "登录" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "显示与语言" }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "设置" }),
-    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("供给名称")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "发布商品" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "List a product" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("opens a mounted child as a plain public store instead of dropping buyers into its app", async () => {
+  it("mounts the selected child adapter before exposing its conversation", async () => {
     window.history.replaceState(null, "", "/market/auto");
     vi.mocked(globalThis.fetch).mockImplementation(
       async () =>
@@ -175,23 +178,19 @@ describe("MatchPlane workspaces", () => {
     render(<App initialPath="/market/auto" />);
 
     expect(
-      await screen.findByRole("heading", { name: "Match Auto" }),
+      await screen.findByTitle("Match Auto buyer 工作台"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "商品" })).toBeInTheDocument();
-    expect(
-      screen.queryByTitle("Match Auto buyer 工作台"),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "返回商城" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "商城首页" })).toHaveAttribute(
       "href",
       "/",
     );
     expect(
-      screen.queryByRole("button", { name: "设置" }),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("button", { name: "说需求" }),
+    ).toHaveAttribute("aria-expanded", "false");
     expect(
-      screen.queryByRole("heading", { name: "想买什么，告诉我就行。" }),
+      screen.queryByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText("独立打开")).not.toBeInTheDocument();
+    expect(screen.getByText("独立打开")).toBeInTheDocument();
   });
 
   it("treats a legacy seller URL as the public unified entry until the user signs in", async () => {
@@ -208,132 +207,20 @@ describe("MatchPlane workspaces", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens store creation when a signed-in seller has no store to publish into", async () => {
-    window.sessionStorage.setItem("matchplane.test-auth", "true");
-    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
-    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url;
-      if (url === "/api/stores?mine=1") {
-        return new Response(JSON.stringify({ stores: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (!defaultFetch) throw new Error("missing default fetch mock");
-      return defaultFetch(input, init);
-    });
-    const user = userEvent.setup();
-    render(<App />);
-
-    await screen.findByRole("button", { name: "账号菜单" });
-    await waitFor(() =>
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/stores?mine=1",
-        expect.any(Object),
-      ),
-    );
-    await user.click(screen.getAllByRole("button", { name: "发布商品" })[0]);
-
-    expect(
-      await screen.findByRole("dialog", { name: /^我的店铺/ }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "开一家店" }),
-    ).toBeInTheDocument();
-  });
-
-  it("resumes the publish action encoded by the login return URL", async () => {
+  it("sanitizes legacy root publish URLs without opening seller controls", async () => {
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     window.history.replaceState(null, "", "/?publish=1");
-    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
-    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url;
-      if (url === "/api/stores?mine=1") {
-        return new Response(JSON.stringify({ stores: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (!defaultFetch) throw new Error("missing default fetch mock");
-      return defaultFetch(input, init);
-    });
 
-    render(<App />);
-
-    expect(
-      await screen.findByRole("dialog", { name: /^我的店铺/ }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("region", { name: "你的店铺" }),
-    ).toBeInTheDocument();
-    expect(window.location.search).not.toContain("publish");
-  });
-
-  it("opens a single owned store in place instead of losing the session on a login redirect", async () => {
-    window.sessionStorage.setItem("matchplane.test-auth", "true");
-    const defaultFetch = vi.mocked(globalThis.fetch).getMockImplementation();
-    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url;
-      if (url === "/api/stores?mine=1") {
-        return new Response(
-          JSON.stringify({
-            stores: [
-              {
-                id: "33333333-3333-4333-8333-333333333333",
-                slug: "used-car",
-                path: "/used-car",
-                displayName: "Matx Auto",
-                description: "二手车",
-                integrationKind: "package",
-                status: "active",
-                membershipRole: "owner",
-              },
-            ],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      if (url.startsWith("/api/platform/manifest?path=")) {
-        return new Response(JSON.stringify({ displayName: "Matx Auto" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (!defaultFetch) throw new Error("missing default fetch mock");
-      return defaultFetch(input, init);
-    });
-    const user = userEvent.setup();
     render(<App />);
 
     await screen.findByRole("button", { name: "账号菜单" });
-    await waitFor(() =>
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        "/api/stores?mine=1",
-        expect.any(Object),
-      ),
-    );
-    await user.click(screen.getAllByRole("button", { name: "发布商品" })[0]);
-
+    expect(window.location.search).not.toContain("publish");
     expect(
-      await screen.findByRole("dialog", { name: "Matx Auto" }),
-    ).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/");
-    expect(window.location.href).not.toContain("/login");
+      screen.queryByRole("button", { name: "发布商品" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: /^我的店铺|Matx Auto/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps store opening behind the account's explicit My stores entry", async () => {
@@ -457,12 +344,8 @@ describe("MatchPlane workspaces", () => {
     render(<App initialPath="/used-car" />);
 
     expect(
-      await screen.findByRole("heading", { name: "Matx Auto" }),
+      await screen.findByTitle("Matx Auto buyer 工作台"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "商品" })).toBeInTheDocument();
-    expect(
-      screen.queryByTitle("Matx Auto buyer 工作台"),
-    ).not.toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent(
         "只有店主或店铺运营人员可以管理这家店",
@@ -630,7 +513,7 @@ describe("MatchPlane workspaces", () => {
     );
   });
 
-  it("sends the conversation directly when the buyer is already signed in", async () => {
+  it("sends the conversation directly after entering the selected child", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     savePartySession(
@@ -643,14 +526,10 @@ describe("MatchPlane workspaces", () => {
           Date.now() + 15 * 60 * 1000,
         ).toISOString(),
       },
-      "root",
+      "used-car",
       "buyer",
     );
-    render(<App />);
-
-    const input = screen.getByRole("textbox", {
-      name: "告诉 MatchPlane 你的需求",
-    });
+    const input = await openUsedCarConversation(user);
     await user.type(input, "我有一个需要被认真匹配的问题");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
@@ -665,7 +544,7 @@ describe("MatchPlane workspaces", () => {
     );
   });
 
-  it("submits with Enter while Shift+Enter keeps a multiline draft", async () => {
+  it("submits with Enter while Shift+Enter keeps a multiline child-store draft", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     savePartySession(
@@ -678,14 +557,10 @@ describe("MatchPlane workspaces", () => {
           Date.now() + 15 * 60 * 1000,
         ).toISOString(),
       },
-      "root",
+      "used-car",
       "buyer",
     );
-    render(<App />);
-
-    const input = screen.getByRole("textbox", {
-      name: "告诉 MatchPlane 你的需求",
-    });
+    const input = await openUsedCarConversation(user);
     await user.type(input, "第一行");
     await user.keyboard("{Shift>}{Enter}{/Shift}");
     await user.type(input, "第二行");
@@ -699,7 +574,7 @@ describe("MatchPlane workspaces", () => {
     ).toBeVisible();
   });
 
-  it("lets the user clear the visible conversation without leaving the page", async () => {
+  it("lets the user clear the visible child-store conversation without leaving the page", async () => {
     const user = userEvent.setup();
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     savePartySession(
@@ -712,14 +587,10 @@ describe("MatchPlane workspaces", () => {
           Date.now() + 15 * 60 * 1000,
         ).toISOString(),
       },
-      "root",
+      "used-car",
       "buyer",
     );
-    render(<App />);
-
-    const input = screen.getByRole("textbox", {
-      name: "告诉 MatchPlane 你的需求",
-    });
+    const input = await openUsedCarConversation(user);
     await user.type(input, "把这段需求整理一下");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
     await user.click(await screen.findByRole("button", { name: "对话选项" }));
@@ -755,11 +626,11 @@ describe("MatchPlane workspaces", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭我的店铺" }));
 
-    const input = screen.getByRole("textbox", {
-      name: "告诉 MatchPlane 你的需求",
-    });
-    await user.click(input);
-    expect(input).toHaveFocus();
+    const demandEntry = screen.getByRole("button", { name: "说需求" });
+    await user.click(demandEntry);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "请先选择一个专业店铺",
+    );
   });
 
   it("keeps the platform console in the privileged account menu only", async () => {

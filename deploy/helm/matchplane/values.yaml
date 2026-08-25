@@ -11,7 +11,8 @@ nameOverride: ""
 fullnameOverride: ""
 
 web:
-  replicas: 2
+  # Exactly one writer is required until the router lock is safe across Pod/PID namespaces.
+  replicas: 1
   image:
     repository: ghcr.io/lightjunction/matchplane-web
     # Production renders must provide the immutable digest published by CI.
@@ -44,6 +45,16 @@ web:
   # Optional read-only PVC populated by the deployment secret manager. Its layout is
   # <tenant-uuid>/<domain-uuid>/<slot-name> and is never writable by the web pod.
   secretPvc: ""
+  # Durable state for Web-managed router generations, audit delivery, and credential slots.
+  # This storage is mandatory because an ephemeral Web filesystem can silently lose an activated
+  # router during a restart. Production must name an existing claim or an explicit storage class.
+  platformRouterStorage:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    size: 1Gi
+    accessModes:
+      - ReadWriteOnce
   # The router provider is optional. Keep its API key in existingWebSecret under router-ai-key.
   routerAiUrl: ""
   routerAiModel: ""
@@ -221,6 +232,7 @@ podSecurityContext:
   runAsUser: 12001
   runAsGroup: 12001
   fsGroup: 12001
+  fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
     type: RuntimeDefault
 

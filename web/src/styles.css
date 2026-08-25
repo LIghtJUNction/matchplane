@@ -368,6 +368,14 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .mall-brand-legal-actions small { color: var(--muted); font-size: 0.65rem; }
 .mall-brand-legal-actions .button { min-height: 2.55rem; display: inline-flex; align-items: center; gap: 0.4rem; }
 .platform-ai-config { grid-column: 1 / -1; }
+.platform-ai-effective-status { margin: 0.9rem 0 1.25rem; padding: 0.85rem 0; display: flex; align-items: flex-start; gap: 0.65rem; border-block: 1px solid var(--line); }
+.platform-ai-effective-status > svg { flex: 0 0 auto; margin-top: 0.12rem; }
+.platform-ai-effective-status.is-ready > svg { color: var(--focus); }
+.platform-ai-effective-status.is-blocked > svg { color: var(--danger); }
+.platform-ai-effective-status > div { min-width: 0; display: grid; gap: 0.22rem; }
+.platform-ai-effective-status strong { color: var(--ink); font-size: 0.76rem; }
+.platform-ai-effective-status p, .platform-ai-effective-status span { max-width: 72ch; margin: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 0.66rem; line-height: 1.55; }
+.platform-ai-draft-state { max-width: 72ch; overflow-wrap: anywhere; color: var(--muted); line-height: 1.5; }
 .platform-ai-advanced { padding-top: 1rem; display: grid; grid-template-columns: minmax(0, 1fr) minmax(9rem, 0.36fr) minmax(9rem, 0.36fr); gap: 0.7rem; border-top: 1px solid var(--line); }
 .platform-ai-advanced > div { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 0.42rem; }
 .platform-ai-advanced > div strong { font-size: 0.76rem; }
@@ -1432,8 +1440,8 @@ main { padding: 0.75rem 0.9rem 5rem; }
 .login-card { padding: 1.35rem; border-radius: 1.1rem; }
 .login-card-header .brand { margin-bottom: 1.7rem; }
 .root-email-actions { align-items: stretch; flex-direction: column; }
-.root-email-action-buttons { width: 100%; }
-.root-email-save, .root-email-test { flex: 1; }
+.root-email-action-buttons { width: 100%; flex-wrap: wrap; }
+.root-email-save, .root-email-test { min-width: 0; flex: 1 1 8.5rem; white-space: normal; }
 }
 .header-store-action:hover, .header-store-action:focus-visible { border-color: var(--cactus-ink); background: var(--paper-deep); outline: 0; }
 .header-store-action:active { transform: scale(0.97); }
@@ -1633,6 +1641,8 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .app-shell:has(.match-chat.is-root) .match-chat-send { width: 50px; min-width: 50px; height: 50px; border: 0; border-radius: 9px; background: var(--root-accent); color: var(--ivory); box-shadow: none; }
 .app-shell:has(.match-chat.is-root) .match-chat-send:hover { background: var(--root-accent-hover); }
 @media (max-width: 640px) {
+.root-marketplace-demand-entry { align-items: stretch; flex-direction: column; }
+.root-marketplace-demand-entry button { width: 100%; }
 .app-shell:has(.match-chat.is-root) .header-inner { width: min(100% - 24px, 1240px); min-height: 60px; }
 .app-shell:has(.match-chat.is-root) .platform-menu { display: none; }
 .app-shell:has(.match-chat.is-root) .match-chat-form { min-height: 56px; padding: 4px 4px 4px 13px; border-radius: 10px; }
@@ -1661,6 +1671,16 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .root-marketplace-main #products, .root-marketplace-main #stores { scroll-margin-top: 5.5rem; }
 .root-marketplace-stage { position: sticky; top: 0; z-index: 40; padding: 0.85rem 1.5rem 0.85rem; border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent); background: color-mix(in srgb, var(--background-subtle) 88%, transparent); backdrop-filter: blur(0.7rem); }
 .root-marketplace-search { width: 100%; padding: 0; border: 0; }
+.root-marketplace-demand-entry { width: min(100%, 48rem); margin: 0 auto; padding: 1.1rem 0; display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; border-block: 1px solid var(--border); }
+.root-marketplace-demand-entry > div { max-width: 34rem; }
+.root-marketplace-demand-entry h2 { margin: 0; color: var(--foreground-intense); font-size: clamp(1.05rem, 2vw, 1.3rem); letter-spacing: -0.025em; }
+.root-marketplace-demand-entry p { max-width: 65ch; margin: 0.35rem 0 0; color: var(--foreground-muted); font-size: 0.84rem; line-height: 1.6; }
+.root-marketplace-demand-entry button { min-height: 2.75rem; flex: 0 0 auto; }
+.root-marketplace-demand-entry button svg { width: 1rem; height: 1rem; }
+.storefront-demand-action { min-height: 2.75rem; margin-top: 0.65rem; padding: 0; display: inline-flex; align-items: center; align-self: flex-start; gap: 0.4rem; border: 0; background: transparent; color: var(--foreground-intense); font: inherit; font-size: 0.78rem; font-weight: 650; cursor: pointer; }
+.storefront-demand-action svg { width: 1rem; height: 1rem; }
+.storefront-demand-action:hover { color: var(--focus); }
+.storefront-demand-action:focus-visible { outline: 2px solid var(--focus); outline-offset: 0.2rem; border-radius: 0.2rem; }
 .root-marketplace-chat-shell { width: min(100%, 44rem); margin: 0 auto; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .root-marketplace-chat-shell .home-chat { width: 100%; }
 .root-marketplace-chat-shell .home-chat-thread { max-height: min(22rem, 38vh); margin: 0 0 0.85rem; padding: 0.5rem 0.25rem 0.75rem; overflow-y: auto; scroll-behavior: smooth; }
@@ -2033,6 +2053,12 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .store-contact-consent-result > div { display: grid; gap: 0.18rem; }
 .store-contact-consent-result strong { color: var(--ink); font-size: 0.72rem; }
 .store-contact-consent-result span { color: var(--muted); font-size: 0.65rem; line-height: 1.5; }
+.store-contact-check { width: fit-content; margin-top: 0.45rem; }
+.store-contact-check-message { display: block; margin-top: 0.35rem; }
+.store-contact-released-values { margin: 0.55rem 0 0; display: grid; gap: 0.35rem; }
+.store-contact-released-values > div { display: grid; gap: 0.08rem; }
+.store-contact-released-values dt { color: var(--muted); font-size: 0.62rem; }
+.store-contact-released-values dd { margin: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 0.72rem; font-weight: 650; }
 @media (min-width: 761px) {
 .workspace-settings-dialog.workspace-settings-dialog-store-console { height: auto; min-height: min(34rem, calc(100dvh - 2rem)); max-height: calc(100dvh - 2rem); }
 .workspace-settings-dialog-store-console .workspace-settings-layout { height: auto; max-height: calc(100dvh - 2rem); }

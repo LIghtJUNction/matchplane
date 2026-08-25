@@ -10,7 +10,10 @@
 import { isProductionEnvironment } from "./lib/runtime";
 import { readJsonResponseBody } from "./lib/body-limit";
 import { hasOnlyPublicAddresses } from "./lib/public-endpoint";
-import { readManagedPlatformRouterConfig } from "./lib/platform-router-config";
+import {
+  getPlatformRouterEffectiveStatus,
+  readManagedPlatformRouterConfig,
+} from "./lib/platform-router-config";
 import {
   generateText,
   pruneMessages,
@@ -172,6 +175,7 @@ export type PlatformProviderFailureKind =
   | "first_byte_timeout"
   | "total_timeout"
   | "upstream_http"
+  | "network_policy"
   | "quota"
   | "malformed_response"
   | "no_final_text"
@@ -421,7 +425,7 @@ function stableHash(value: string): number {
   return hash >>> 0;
 }
 
-interface ConfiguredPlatformRouter {
+export interface PlatformRouterProbeConfiguration {
   endpoint: string;
   apiKey: string;
   model: string;
@@ -435,10 +439,18 @@ interface ConfiguredPlatformRouter {
   assistantReasoningEffort: string;
 }
 
-function configuredPlatformRouter(): ConfiguredPlatformRouter | null {
-  const managed = readManagedPlatformRouterConfig();
-  if (managed?.enabled && isAllowedEndpoint(managed.endpoint)) {
-    return { ...managed, managed: true };
+function configuredPlatformRouter(): PlatformRouterProbeConfiguration | null {
+  const effective = getPlatformRouterEffectiveStatus();
+  if (effective.source === "managed") {
+    if (!effective.ready) return null;
+    try {
+      const managed = readManagedPlatformRouterConfig();
+      return managed?.enabled && isAllowedEndpoint(managed.endpoint)
+        ? { ...managed, managed: true }
+        : null;
+    } catch {
+      return null;
+    }
   }
   const endpoint = process.env.MATCHPLANE_ROUTER_AI_URL?.trim();
   const apiKey = process.env.MATCHPLANE_ROUTER_AI_KEY?.trim();
@@ -880,17 +892,18 @@ export async function answerPlatformShoppingQuestion(input: {
     );
   }
   const startedAt = Date.now();
-  const deadline = createProviderDeadline(input.signal, router.assistantTimeoutMs);
+  const deadline = createProviderDeadline(
+    input.signal,
+    router.assistantTimeoutMs,
+  );
   const attempt: ProviderAttemptState = { phase: "connect" };
   const awaitToolOperation = <T>(operation: () => Promise<T>) => {
     attempt.phase = "tool";
     return awaitWithSignal(operation, deadline.signal);
   };
   let admitted = false;
-  let emptyCatalogOutcome:
-    | "empty_catalog"
-    | "no_matching_products"
-    | null = null;
+  let emptyCatalogOutcome: "empty_catalog" | "no_matching_products" | null =
+    null;
   const admitProviderCall = async () => {
     if (admitted) return;
     await awaitWithSignal(
@@ -953,14 +966,13 @@ export async function answerPlatformShoppingQuestion(input: {
         ),
     );
     let recommendations: RecommendedBackendListing[] = initialSearchCompleted
-      ? await awaitToolOperation(
-          () =>
-            searchPublicStoreOffers({
-              stores: input.stores,
-              narrative: question,
-              intent: inferredIntent,
-              limit: 6,
-            }),
+      ? await awaitToolOperation(() =>
+          searchPublicStoreOffers({
+            stores: input.stores,
+            narrative: question,
+            intent: inferredIntent,
+            limit: 6,
+          }),
         )
       : [];
     if (
@@ -1011,16 +1023,15 @@ export async function answerPlatformShoppingQuestion(input: {
       });
     if (explicitStoreHandoff) {
       if (!recommendations.length) {
-        recommendations = await awaitToolOperation(
-          () =>
-            searchPublicStoreOffers({
-              stores: input.stores,
-              narrative: conversation.olderUserContext
-                ? `${conversation.olderUserContext}\n${question}`
-                : question,
-              intent: inferredIntent,
-              limit: 6,
-            }),
+        recommendations = await awaitToolOperation(() =>
+          searchPublicStoreOffers({
+            stores: input.stores,
+            narrative: conversation.olderUserContext
+              ? `${conversation.olderUserContext}\n${question}`
+              : question,
+            intent: inferredIntent,
+            limit: 6,
+          }),
         );
       }
       const products = rememberOffers(recommendations);
@@ -1419,20 +1430,19 @@ export async function answerPlatformShoppingQuestion(input: {
             offset,
             limit,
           }) => {
-            const page = await awaitToolOperation(
-              () =>
-                searchPublicStoreOfferPage({
-                  stores: input.stores,
-                  narrative: query,
-                  intent: mergeShoppingIntent(inferredIntent, {
-                    ...(budget ? { budget } : {}),
-                    requirements,
-                  }),
-                  storePaths,
-                  sort,
-                  offset,
-                  limit,
+            const page = await awaitToolOperation(() =>
+              searchPublicStoreOfferPage({
+                stores: input.stores,
+                narrative: query,
+                intent: mergeShoppingIntent(inferredIntent, {
+                  ...(budget ? { budget } : {}),
+                  requirements,
                 }),
+                storePaths,
+                sort,
+                offset,
+                limit,
+              }),
             );
             recommendations = page.items;
             if (page.total === 0) {
@@ -1671,8 +1681,7 @@ export async function answerPlatformShoppingQuestion(input: {
           completionTokens: result.usage.outputTokens ?? 0,
           totalTokens:
             result.usage.totalTokens ??
-            (result.usage.inputTokens ?? 0) +
-              (result.usage.outputTokens ?? 0),
+            (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0),
         },
       });
     }
@@ -2017,7 +2026,9 @@ function createProviderDeadline(
   else parentSignal?.addEventListener("abort", onParentAbort, { once: true });
   const timer = setTimeout(() => {
     timedOut = true;
-    controller.abort(new DOMException("Provider deadline exceeded", "TimeoutError"));
+    controller.abort(
+      new DOMException("Provider deadline exceeded", "TimeoutError"),
+    );
   }, boundedTimeoutMs);
   timer.unref?.();
   return {
@@ -2104,6 +2115,9 @@ function classifyPlatformProviderFailure(
   if (deadline.timedOut()) {
     return providerTimeoutFailure(attempt, responseStatus);
   }
+  if (responseStatus === 451) {
+    return providerFailure("network_policy", "response", responseStatus);
+  }
   if (responseStatus === 429) {
     return providerFailure("quota", "response", responseStatus);
   }
@@ -2142,10 +2156,7 @@ function isUpstreamSuccessStatus(status: number | null): status is number {
   return status !== null && status >= 200 && status < 300;
 }
 
-const CONNECT_TIMEOUT_CODES = new Set([
-  "ETIMEDOUT",
-  "UND_ERR_CONNECT_TIMEOUT",
-]);
+const CONNECT_TIMEOUT_CODES = new Set(["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT"]);
 const HEADER_TIMEOUT_CODES = new Set(["UND_ERR_HEADERS_TIMEOUT"]);
 
 function providerFailure(
@@ -2159,6 +2170,8 @@ function providerFailure(
     first_byte_timeout: "商城 AI 导购等待上游响应超时，请稍后重试。",
     total_timeout: "商城 AI 导购响应超时，请稍后重试。",
     upstream_http: "商城 AI 导购上游暂时不可用，请稍后重试。",
+    network_policy:
+      "商城 AI 导购当前受网络访问策略限制，请稍后再试或联系管理员。",
     quota: "商城 AI 导购上游额度暂时不可用，请稍后重试。",
     malformed_response: "AI 模型返回了无法解析的响应，请重试。",
     no_final_text: "AI 模型未返回有效回答，请重试。",
@@ -2178,7 +2191,10 @@ function providerFailure(
     phase,
     responseStatus,
     retryable:
-      !nonRetryableUpstream && kind !== "aborted" && kind !== "unconfigured",
+      !nonRetryableUpstream &&
+      kind !== "network_policy" &&
+      kind !== "aborted" &&
+      kind !== "unconfigured",
   });
 }
 
@@ -2224,7 +2240,8 @@ function providerErrorIsTimeout(error: unknown): boolean {
 
 function providerErrorIsAbort(error: unknown): boolean {
   return providerErrorChain(error).some(
-    (candidate) => candidate instanceof Error && candidate.name === "AbortError",
+    (candidate) =>
+      candidate instanceof Error && candidate.name === "AbortError",
   );
 }
 
@@ -2328,11 +2345,7 @@ export function configuredPlatformRouterProtocol(): PlatformRouterProtocol {
 
 export interface PlatformRouterProbeResult {
   status: "ready" | "slow" | "unconfigured" | "failed";
-  outcome:
-    | "ready"
-    | "slow"
-    | "unconfigured"
-    | PlatformProviderFailureKind;
+  outcome: "ready" | "slow" | "unconfigured" | PlatformProviderFailureKind;
   phase: PlatformProviderPhase;
   model: string | null;
   responseStatus: number | null;
@@ -2351,13 +2364,14 @@ export interface PlatformRouterProbeResult {
 export async function probePlatformRouter(
   options: {
     fetcher?: typeof fetch;
+    configuration?: PlatformRouterProbeConfiguration;
     timeoutMs?: number;
     performanceBudgetMs?: number;
     requestId?: string;
     signal?: AbortSignal;
   } = {},
 ): Promise<PlatformRouterProbeResult> {
-  const router = configuredPlatformRouter();
+  const router = options.configuration ?? configuredPlatformRouter();
   const endpoint = router?.endpoint;
   const apiKey = router?.apiKey;
   const model = router?.model ?? null;
@@ -2379,8 +2393,14 @@ export async function probePlatformRouter(
   }
 
   const hardTimeoutMs = Number.isSafeInteger(options.timeoutMs)
-    ? Math.max(1_000, Math.min(MAX_TOTAL_TIMEOUT_MS, options.timeoutMs as number))
-    : Math.max(1_000, Math.min(MAX_TOTAL_TIMEOUT_MS, router.assistantTimeoutMs));
+    ? Math.max(
+        1_000,
+        Math.min(MAX_TOTAL_TIMEOUT_MS, options.timeoutMs as number),
+      )
+    : Math.max(
+        1_000,
+        Math.min(MAX_TOTAL_TIMEOUT_MS, router.assistantTimeoutMs),
+      );
   const performanceBudgetMs = Number.isSafeInteger(options.performanceBudgetMs)
     ? Math.max(
         250,

@@ -6,11 +6,14 @@ import {
   createMarketplaceIntent,
   createMarketplaceIntroduction,
   createMarketplaceSalesHandoff,
+  getMarketplaceIntroductions,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
   recordMarketplaceBehaviorEvent,
   requestMarketplaceContact,
+  retrieveMarketplaceContact,
   type MallAssistantContactConsentAction,
+  type MarketplaceContactResponse,
   type PartySession,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
@@ -19,7 +22,11 @@ import {
   ensurePendingConversion,
   updatePendingConversion,
 } from "../pending-conversion";
-import { loadSubplatform, subplatformCopy, type SubplatformConfig } from "../subplatform";
+import {
+  loadSubplatform,
+  subplatformCopy,
+  type SubplatformConfig,
+} from "../subplatform";
 import type { AssetListing } from "../types";
 
 const CANONICAL_ID =
@@ -61,9 +68,12 @@ function activeIntentIdempotencyKey(
     (offerId !== null && !CANONICAL_ID.test(offerId))
   )
     throw new Error("active intent idempotency scope is invalid");
-  return ["active-intent", session.partyId, domainId, offerId ?? "general"].join(
-    ":",
-  );
+  return [
+    "active-intent",
+    session.partyId,
+    domainId,
+    offerId ?? "general",
+  ].join(":");
 }
 
 interface UseStoreHandoffOptions {
@@ -151,7 +161,7 @@ export function useStoreHandoff({
           : null;
       if (!introductionId)
         throw new Error("撮合结果缺少介绍编号，未发送联系申请");
-      await requestMarketplaceContact({
+      const requestedIntroduction = await requestMarketplaceContact({
         session,
         domainId: subplatform.domainId,
         introductionId,
@@ -209,12 +219,67 @@ export function useStoreHandoff({
       clearPendingConversion(selected.offerId);
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("matchplane.contact.updated"));
+        window.dispatchEvent(new Event("matchplane:notifications-updated"));
       }
       onNotice(
         "联系申请已保存；店员侧投影状态待后台确认，双方同意前不会交换联系方式",
       );
+      return requestedIntroduction;
     },
     [subplatform, listings, onNotice],
+  );
+
+  const retrieveStoreContact = useCallback(
+    async (
+      action: MallAssistantContactConsentAction,
+    ): Promise<MarketplaceContactResponse | null> => {
+      if (!isLiveMarketplaceEnabled())
+        throw new Error("当前环境未连接真实撮合 API");
+      if (!subplatform.domainId || subplatform.slug === "root")
+        throw new Error("当前店铺尚未完成联系交换配置");
+      const selected = listings.find(
+        (item) =>
+          item.offerId === action.productId || item.id === action.productId,
+      );
+      if (!selected?.offerId)
+        throw new Error("同意卡关联的商品已经下架，请继续咨询 AI 店长");
+      const session = await getMarketplaceSession({
+        subplatform: subplatform.slug,
+        platformPath: subplatform.path,
+        tenantId: subplatform.tenantId,
+        domainId: subplatform.domainId,
+        role: "buyer",
+      });
+      if (!session) throw new Error("登录后才能查看联系方式交换状态");
+      const introductions = await getMarketplaceIntroductions({
+        session,
+        domainId: subplatform.domainId,
+      });
+      const matchingIntroductions = introductions.filter(
+        (item) =>
+          item.offer_id === selected.offerId &&
+          item.demand_party_id === session.partyId,
+      );
+      const introduction =
+        matchingIntroductions.find((item) => item.supply_contact_consent_at) ??
+        matchingIntroductions[0];
+      if (!introduction)
+        throw new Error("尚未找到这件商品的联系申请，请先发起申请");
+      if (!introduction.supply_contact_consent_at) return null;
+
+      const contact = await retrieveMarketplaceContact({
+        session,
+        domainId: subplatform.domainId,
+        introductionId: introduction.introduction_id,
+        idempotencyKey: `store-ai-contact-retrieve:${introduction.introduction_id}:${session.partyId}`,
+      });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("matchplane.contact.updated"));
+        window.dispatchEvent(new Event("matchplane:notifications-updated"));
+      }
+      return contact;
+    },
+    [listings, subplatform],
   );
 
   const requestStoreAiHandoff = useCallback(
@@ -333,13 +398,9 @@ export function useStoreHandoff({
         throw new Error("当前环境未连接真实撮合 API，未发送联系申请");
       }
       const isGenericOffer = Boolean(selected.offerId);
-      const listingId = isGenericOffer
-        ? null
-        : listingIdFromBackend(selected);
+      const listingId = isGenericOffer ? null : listingIdFromBackend(selected);
       if (!isGenericOffer && !listingId) {
-        throw new Error(
-          "商品必须来自已接入店铺的真实目录；当前未发送申请",
-        );
+        throw new Error("商品必须来自已接入店铺的真实目录；当前未发送申请");
       }
       if (
         !selectedDomainId ||
@@ -479,15 +540,14 @@ export function useStoreHandoff({
         }
         if (typeof window !== "undefined") {
           window.dispatchEvent(new Event("matchplane.contact.updated"));
+          window.dispatchEvent(new Event("matchplane:notifications-updated"));
         }
         onNotice(
           "联系申请已写入撮合系统；店员通知投递状态待后台确认，供给方同意前不会交换联系方式",
         );
       } catch (error) {
         const message =
-          error instanceof Error
-            ? error.message
-            : "联系申请未发送，请稍后重试";
+          error instanceof Error ? error.message : "联系申请未发送，请稍后重试";
         onNotice(message);
         throw error instanceof Error ? error : new Error(message);
       }
@@ -497,6 +557,7 @@ export function useStoreHandoff({
 
   return {
     requestStoreContactConsent,
+    retrieveStoreContact,
     requestStoreAiHandoff,
     contactListing,
   };

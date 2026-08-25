@@ -1,15 +1,26 @@
 /**
  * Browser cookie requests must originate from an operator-configured front-end origin.
  * Machine calls normally have no Cookie header and are intentionally left to their API-key
- * authorization path.  A missing Origin is kept compatible with non-browser clients; when a
- * browser supplies one, an attacker-controlled cross-site Origin fails closed.
+ * authorization path. A missing Origin remains compatible for those explicit machine paths.
  */
 import { isProductionEnvironment } from "./runtime";
 
 export function hasTrustedBrowserOrigin(request: Request): boolean {
   if (!request.headers.get("cookie")) return true;
-  const origin = request.headers.get("origin")?.trim();
-  if (!origin) return true;
+  return isTrustedOrigin(request.headers.get("origin"));
+}
+
+/** Strict CSRF boundary for cookie-session mutations: require a cookie and Origin. */
+export function hasTrustedCookieOrigin(request: Request): boolean {
+  return (
+    Boolean(request.headers.get("cookie")) &&
+    isTrustedOrigin(request.headers.get("origin"))
+  );
+}
+
+function isTrustedOrigin(rawOrigin: string | null): boolean {
+  const origin = rawOrigin?.trim();
+  if (!origin) return false;
 
   let parsed: URL;
   try {
@@ -17,7 +28,14 @@ export function hasTrustedBrowserOrigin(request: Request): boolean {
   } catch {
     return false;
   }
-  if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) return false;
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash
+  )
+    return false;
 
   const configured = [
     process.env.BETTER_AUTH_URL,

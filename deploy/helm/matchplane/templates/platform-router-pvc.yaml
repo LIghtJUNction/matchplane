@@ -1,0 +1,22 @@
+{{- $storage := required "web.platformRouterStorage is required" .Values.web.platformRouterStorage -}}
+{{- $claimName := include "matchplane.platformRouterClaimName" . -}}
+{{- if not $storage.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claimName }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "matchplane.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web-router-state
+spec:
+  accessModes:
+    {{- toYaml $storage.accessModes | nindent 4 }}
+  {{- if $storage.storageClass }}
+  storageClassName: {{ $storage.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $storage.size | quote }}
+{{- end }}

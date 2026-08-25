@@ -11,9 +11,10 @@
   },
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0 --port 4173",
-    "build": "next build",
+    "build": "next build && node scripts/validate-standalone-output.mjs",
     "test": "vitest run",
-    "check": "bun run test && bun run build",
+    "test:standalone-output": "node --test scripts/validate-standalone-output.node.mjs",
+    "check": "bun run test && bun run test:standalone-output && bun run build",
     "preview": "node .next/standalone/server.js"
   },
   "dependencies": {

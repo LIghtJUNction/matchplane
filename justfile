@@ -36,6 +36,12 @@ down:
 migrate:
     cargo run --locked -p xtask -- migrate
 
+doctor:
+    cargo run --locked -p xtask -- doctor --json
+
+provider-preflight:
+    cargo run --locked -p xtask -- provider-preflight --json
+
 smoke:
     ./tests/integration/smoke.sh
 

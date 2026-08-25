@@ -47,6 +47,7 @@ import {
   type MallAssistantChoiceAction,
   type MallAssistantContactConsentAction,
   type MallAssistantHumanHandoffAction,
+  type MarketplaceContactResponse,
   type RecommendedBackendListing,
   routePlatformIntent,
   type PlatformRouteHop,
@@ -651,7 +652,10 @@ interface MatchChatProps {
   }) => Promise<void>;
   onContactConsent?: (
     action: MallAssistantContactConsentAction,
-  ) => Promise<void>;
+  ) => Promise<unknown>;
+  onContactRetrieve?: (
+    action: MallAssistantContactConsentAction,
+  ) => Promise<MarketplaceContactResponse | null>;
   /** Pass the seller's conversational draft into the schema-driven editor. */
   onSellerDraft?: (draft: {
     narrative: string;
@@ -676,6 +680,7 @@ export function MatchChat({
   onRecommendations,
   onHumanHandoff,
   onContactConsent,
+  onContactRetrieve,
   onSellerDraft,
   onSellerPlatformSelected,
 }: MatchChatProps) {
@@ -2307,6 +2312,7 @@ export function MatchChat({
                   action={item.contactConsent}
                   locale={locale}
                   onAgree={onContactConsent}
+                  onRetrieve={onContactRetrieve}
                 />
               ) : null}
               {item.handoff ? (
