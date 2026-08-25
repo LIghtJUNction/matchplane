@@ -19,6 +19,10 @@
 | 13 | `13-admin-login-methods-wechat-sms.png` | 商城设置：登录方式 / 微信扫码 / 短信网关 |
 | 14 | `14-search-budget-results.png` | 无 AI 网关时预算检索仍出真实商品卡 |
 | 15 | `15-search-budget-choices.png` | 模糊需求先出预算档位选项 |
+| 16 | `16-account-dialog-identity-bindings.png` | 登录后账号设置弹窗：账号绑定入口（`/?account=identity`） |
+| 17 | `17-identity-bindings-panel.png` | 账号绑定面板：邮箱已绑定，手机号 / 网号 / 微信 / 支付宝绑定项 |
+| 18 | `18-identity-bindings-contact-policy-closeup.png` | 联系交换策略特写：只使用已验证绑定，不接受手填联系方式 |
+| 19 | `19-store-customers-contact-consent.png` | 店铺控制台「客户」分区：联系方式仍受用户同意保护 |
 
 复现：
 
@@ -27,5 +31,7 @@ just migrate   # 或已有库
 ./tools/demo/bootstrap-car-shop-demo.sh
 cd web && bun run dev   # :4173
 ```
+
+截图 16–19 使用演示账号 `admin11@example.com` 登录后拍摄：账号绑定弹窗从 `/?account=identity` 打开，店铺客户分区从 `/demo-car-shop?console=products&storeConsoleSection=customers` 打开。
 
 详细点击路径见 `docs/challenge-11-demo-script.zh-CN.md`。
