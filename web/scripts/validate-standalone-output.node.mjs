@@ -117,8 +117,8 @@ test("Dockerfile validates the normalized release tree in the builder", () => {
   );
   const runner = dockerfile.indexOf(" AS runner");
   assert.ok(normalization >= 0, "Docker normalization step is missing");
-  assert.ok(pruning > normalization, "traced source must be pruned after normalization");
-  assert.ok(validation > pruning, "release validation must follow source pruning");
+  assert.equal(pruning, -1, "traced source must be excluded during the Next build");
+  assert.ok(validation > normalization, "release validation must follow normalization");
   assert.ok(runner > validation, "release validation must run in the builder");
 });
 

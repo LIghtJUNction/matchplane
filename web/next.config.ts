@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
   // packaging and container stages normalize that directory to their runtime
   // root (`/app` or `/usr/share/matchplane/web`).
   outputFileTracingRoot: workspaceRoot,
+  outputFileTracingExcludes: {
+    "**": ["app/**/*", "src/**/*"],
+  },
   agentRules: false,
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   turbopack: {
