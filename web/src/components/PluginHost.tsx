@@ -169,7 +169,7 @@ export function PluginHost({
           return;
         }
         document.getElementById("match-chat-input")?.focus();
-        onNotice(copy("pluginChatOpenedNotice", "已打开共享 AI 撮合输入框"));
+        onNotice(copy("pluginChatOpenedNotice", "已打开找商品输入框"));
       } else if (event.data.type === "listing.open") {
         const payload = isRecord(event.data.payload)
           ? event.data.payload

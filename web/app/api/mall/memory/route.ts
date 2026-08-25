@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     const suggestion =
       typeof body.suggestion === "string" ? body.suggestion.trim() : "";
     if (!suggestion || suggestion.length > 2_000)
-      return jsonError("请用 1 到 2000 个字符告诉 AI 如何修改记忆", 400);
+      return jsonError("请用 1 到 2000 个字符说明要修改的内容", 400);
     if (
       !Number.isSafeInteger(body.expectedVersion) ||
       Number(body.expectedVersion) < 0
@@ -169,7 +169,7 @@ export async function POST(request: Request) {
     if (error instanceof PlatformAssistantUnavailableError)
       return jsonError(error.message, 502);
     process.stderr.write("[shopping-memory] AI revision failed\n");
-    return jsonError("AI 暂时无法修改购物记忆，请稍后重试", 500);
+    return jsonError("暂时无法修改购物记忆，请稍后重试", 500);
   }
 }
 

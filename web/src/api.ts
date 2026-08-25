@@ -1970,7 +1970,7 @@ export async function reviseShoppingMemory(input: {
   if (!response.ok || !body?.memory || !body.message)
     throw new MarketplaceApiError(
       response.status,
-      body?.error || "AI 暂时无法修改购物记忆",
+      body?.error || "暂时无法修改购物记忆",
     );
   return { memory: body.memory, message: body.message };
 }

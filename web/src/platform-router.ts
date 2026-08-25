@@ -157,7 +157,7 @@ export interface ShoppingMemoryAiRevision {
 /** Raised when the platform's own model-call budget has no remaining admission. */
 export class PlatformRouterQuotaExceededError extends Error {
   constructor() {
-    super("商城 AI 导购额度暂时用尽，请稍后再试。");
+    super("商品搜索额度暂时用尽，请稍后再试。");
     this.name = "PlatformRouterQuotaExceededError";
   }
 }
@@ -719,11 +719,11 @@ export async function reviseShoppingMemoryWithAi(input: {
   const router = configuredPlatformRouter();
   if (!router)
     throw new PlatformAssistantUnavailableError(
-      "商城 AI 导购尚未配置完整，请稍后再试。",
+      "商品搜索尚未配置完整，请稍后再试。",
     );
   const suggestion = input.suggestion.trim().slice(0, 2_000);
   if (!suggestion)
-    throw new PlatformAssistantUnavailableError("请告诉 AI 需要怎样修改记忆。");
+    throw new PlatformAssistantUnavailableError("请说明需要怎样修改记忆。");
   if (router.protocol !== "openai-compatible")
     throw new PlatformAssistantUnavailableError(
       "当前记忆助手需要选择 OpenAI Compatible 协议。",
@@ -1117,7 +1117,7 @@ export async function answerPlatformShoppingQuestion(input: {
           `[mall-assistant] model omitted required ask_user tool; finish=${String(choiceResult.finishReason ?? "unknown")}\n`,
         );
         throw new PlatformAssistantUnavailableError(
-          "AI 模型未返回有效的澄清选项，请重试。",
+          "模型服务未返回有效的澄清选项，请重试。",
         );
       }
       return {
@@ -1156,7 +1156,7 @@ export async function answerPlatformShoppingQuestion(input: {
           `[mall-assistant] model omitted required confirm_action tool; finish=${String(confirmationResult.finishReason ?? "unknown")}\n`,
         );
         throw new PlatformAssistantUnavailableError(
-          "AI 模型未返回有效的确认选项，请重试。",
+          "模型服务未返回有效的确认选项，请重试。",
         );
       }
       return {
@@ -1584,7 +1584,7 @@ export async function answerPlatformShoppingQuestion(input: {
         `[mall-assistant] model omitted required deterministic tools; missing=${missingRequiredTools.join(",")}\n`,
       );
       throw new PlatformAssistantUnavailableError(
-        "AI 模型未按协议完成必要的检索与工具调用，请重试。",
+        "模型服务未按协议完成必要的检索与工具调用，请重试。",
       );
     }
     const modelText =
@@ -1596,7 +1596,7 @@ export async function answerPlatformShoppingQuestion(input: {
         `[mall-assistant] model returned no final text; finish=${String(result.finishReason ?? "unknown")} steps=${String(result.steps?.length ?? 0)} tools=${modelToolCalls.join(",") || "none"}\n`,
       );
       throw new PlatformAssistantUnavailableError(
-        "AI 模型未返回有效回答，请重试。",
+        "模型服务未返回有效回答，请重试。",
       );
     }
     const shouldShowSearchResults =
@@ -1668,7 +1668,7 @@ export async function answerPlatformShoppingQuestion(input: {
         ? error.message.slice(0, 160)
         : "模型服务暂时不可用";
     throw new PlatformAssistantUnavailableError(
-      `商城 AI 导购暂时不可用：${reason}`,
+      `商品搜索暂时不可用：${reason}`,
     );
   }
 }

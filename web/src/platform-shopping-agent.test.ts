@@ -310,7 +310,7 @@ describe("platform shopping agent", () => {
         memory: { enabled: true, facts: [], version: 3, updatedAt: null },
         updateMemory,
       }),
-    ).rejects.toThrow("AI 模型未返回有效回答");
+    ).rejects.toThrow("模型服务未返回有效回答");
 
     expect(updateMemory).toHaveBeenCalledOnce();
     expect(generateText).toHaveBeenCalledOnce();
@@ -367,7 +367,7 @@ describe("platform shopping agent", () => {
         messages: [{ role: "user", content: "先问我一个问题并给我几个选项" }],
         stores: [],
       }),
-    ).rejects.toThrow("AI 模型未返回有效的澄清选项");
+    ).rejects.toThrow("模型服务未返回有效的澄清选项");
     expect(generateText).toHaveBeenCalledOnce();
   });
 
@@ -765,7 +765,7 @@ describe("platform shopping agent", () => {
         messages: [{ role: "user", content: "对比两款通勤轻薄本" }],
         stores: [],
       }),
-    ).rejects.toThrow("AI 模型未按协议完成必要的检索与工具调用");
+    ).rejects.toThrow("模型服务未按协议完成必要的检索与工具调用");
   });
 
   it("rejects an empty model response instead of synthesizing a product answer", async () => {
@@ -798,7 +798,7 @@ describe("platform shopping agent", () => {
         messages: [{ role: "user", content: "帮我找通勤轻薄本" }],
         stores: [],
       }),
-    ).rejects.toThrow("AI 模型未返回有效回答");
+    ).rejects.toThrow("模型服务未返回有效回答");
     expect(generateText).toHaveBeenCalledOnce();
   });
 
