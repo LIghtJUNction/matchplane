@@ -1424,13 +1424,20 @@ select {
   background: var(--retail-surface-raised);
   box-shadow: var(--shadow-large);
   pointer-events: auto;
+  transform: translateY(0) scale(1);
   transition:
-    opacity 150ms ease,
-    visibility 0s linear 0s;
+    opacity 180ms ease,
+    transform 220ms ease,
+    visibility 0s linear 220ms;
+}
+
+.floating-clerk-rnd.is-open {
+  transition-delay: 0s;
 }
 
 .floating-clerk-rnd.is-stowed {
   opacity: 0;
+  transform: translateY(0.6rem) scale(0.985);
   visibility: hidden;
   pointer-events: none;
 }
@@ -1479,8 +1486,10 @@ select {
 .floating-clerk-drag-handle strong {
   overflow: hidden;
   color: var(--retail-ink);
-  font-size: 0.86rem;
-  font-weight: 720;
+  font-family: var(--retail-display);
+  font-size: 0.9rem;
+  font-weight: 680;
+  letter-spacing: -0.015em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1606,6 +1615,39 @@ select {
   background: var(--retail-surface-soft);
 }
 
+/* Match Chat message log — flat paper text blocks, not chat bubbles.
+   Uniform hairline-radius corners everywhere match-chat renders. */
+.match-chat-message,
+.match-chat-message.is-user,
+.match-chat-message.is-assistant,
+.chat-typing-indicator {
+  border-radius: 0.4rem;
+}
+
+.match-chat-message.is-assistant {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  font-family: var(--retail-display);
+}
+
+.chat-typing-indicator {
+  border: 0;
+  background: transparent;
+}
+
+.match-chat-form textarea,
+.home-chat-form textarea {
+  font-family: var(--retail-sans);
+}
+
+.match-chat-send {
+  border-radius: 999px;
+}
+
+.match-chat-send:hover:not(:disabled) {
+  background: var(--retail-accent-strong);
+}
+
 :where(.floating-clerk-content, .mobile-clerk-drawer-body) .home-chat,
 :where(.floating-clerk-content, .mobile-clerk-drawer-body) .match-chat.is-root {
   width: 100%;
@@ -1660,7 +1702,7 @@ select {
   border: 1px solid var(--retail-line-strong);
   border-radius: 0.75rem;
   background: var(--retail-surface);
-  box-shadow: 0 3px 12px rgba(30, 27, 22, 0.07);
+  box-shadow: var(--shadow-small);
 }
 
 :where(.floating-clerk-content, .mobile-clerk-drawer-body)
@@ -1674,9 +1716,16 @@ select {
 
 :where(.floating-clerk-content, .mobile-clerk-drawer-body)
   :is(.match-chat-send, .home-chat-form button[type="submit"]) {
-  border-radius: 0.65rem;
+  border-radius: 999px;
   background: var(--retail-accent);
   color: var(--retail-accent-contrast);
+}
+
+:where(.floating-clerk-content, .mobile-clerk-drawer-body)
+  :is(.match-chat-send, .home-chat-form button[type="submit"]):hover:not(
+    :disabled
+  ) {
+  background: var(--retail-accent-strong);
 }
 
 :where(.floating-clerk-content, .mobile-clerk-drawer-body)
@@ -1690,6 +1739,13 @@ select {
   border: 1px solid var(--retail-line);
   background: var(--retail-surface-soft);
   color: var(--retail-ink);
+}
+
+/* Conversation history dialog — flatten the default heavy drop shadow to
+   the editorial hairline-and-tonal-step elevation used everywhere else. */
+.conversation-history-dialog {
+  border-color: var(--retail-line);
+  box-shadow: var(--shadow-large);
 }
 
 .root-marketplace-clerk-toggle {
