@@ -29,7 +29,15 @@ import {
 import { useOwnedStores } from "./hooks/useOwnedStores";
 import { useStoreHandoff } from "./hooks/useStoreHandoff";
 
-export function App({ initialPath = "/" }: { initialPath?: string }) {
+export function App({
+  initialPath = "/",
+  initialStoreName,
+  initialStoreDescription,
+}: {
+  initialPath?: string;
+  initialStoreName?: string;
+  initialStoreDescription?: string;
+}) {
   const { theme, locale, palette, setTheme, setLocale, setPalette } =
     useInterfacePreferences();
   const ui = appCopy(locale);
@@ -53,7 +61,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     publishProductRequested,
     setPublishProductRequested,
     requestedRoleRef,
-  } = useSubplatformRoute({ initialPath, authResolved: false });
+  } = useSubplatformRoute({
+    initialPath,
+    initialStoreName,
+    initialStoreDescription,
+    authResolved: false,
+  });
 
   // Authentication session & authorization
   const { authUser, setAuthUser, authResolved, openSignIn, signOut } =

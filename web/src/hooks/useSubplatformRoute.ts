@@ -133,16 +133,33 @@ export function appCopy(locale: "zh" | "en") {
 
 interface UseSubplatformRouteOptions {
   initialPath?: string;
+  /** Server-resolved store identity so the first paint never shows the URL slug. */
+  initialStoreName?: string;
+  initialStoreDescription?: string;
   authResolved: boolean;
 }
 
 export function useSubplatformRoute({
   initialPath = "/",
+  initialStoreName,
+  initialStoreDescription,
   authResolved,
 }: UseSubplatformRouteOptions) {
+  const seedStoreIdentity = (config: SubplatformConfig): SubplatformConfig => {
+    if (!initialStoreName || config.slug === "root") return config;
+    if (config.path !== resolveSubplatform(initialPath).path) return config;
+    return {
+      ...config,
+      brandName: initialStoreName,
+      label: initialStoreName,
+      ...(initialStoreDescription
+        ? { description: initialStoreDescription }
+        : {}),
+    };
+  };
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() =>
-    resolveSubplatform(initialPath),
+    seedStoreIdentity(resolveSubplatform(initialPath)),
   );
   const [hydrated, setHydrated] = useState(false);
   const [accountSettingsSection, setAccountSettingsSection] =
@@ -188,7 +205,7 @@ export function useSubplatformRoute({
         relativeBrowserLocation(searchParams),
       );
     }
-    setSubplatform(resolveSubplatform(requestedPath));
+    setSubplatform(seedStoreIdentity(resolveSubplatform(requestedPath)));
     void loadSubplatform(requestedPath).then(setSubplatform);
     const requestedRole = roleFromLocation();
     requestedRoleRef.current = requestedRole;
