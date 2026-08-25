@@ -71,12 +71,14 @@ function MarketplaceLoading({ locale }: { locale: InterfaceLocale }) {
             aria-label={locale === "en" ? "Loading products" : "商品读取中"}
             aria-busy="true"
         >
-            <div className="root-marketplace-loading" aria-hidden="true">
+            <div className="marketplace-home-loading-rows" aria-hidden="true">
                 {[0, 1, 2, 3].map((item) => (
-                    <div className="root-marketplace-loading-box" key={item}>
+                    <div className="marketplace-home-loading-row" key={item}>
                         <Skeleton className="root-marketplace-loading-visual" />
-                        <Skeleton className="root-marketplace-loading-line" />
-                        <Skeleton className="root-marketplace-loading-line is-short" />
+                        <div className="marketplace-home-loading-lines">
+                            <Skeleton className="root-marketplace-loading-line" />
+                            <Skeleton className="root-marketplace-loading-line is-short" />
+                        </div>
                     </div>
                 ))}
             </div>
@@ -159,7 +161,7 @@ function MarketplaceProducts({
     if (!catalogResolved) content = <MarketplaceLoading locale={locale} />;
     else if (listings.length)
         content = (
-            <div className="root-marketplace-products-grid">
+            <div className="marketplace-home-listing-rows">
                 {listings.map((listing) => (
                     <MarketplaceListingCard
                         listing={listing}
@@ -345,33 +347,70 @@ export function MarketplaceHome({
             className={`root-marketplace-page min-h-screen bg-background-subtle text-foreground${clerkOpen ? " is-clerk-open" : ""}`}
             id="top"
         >
+            <section
+                className="marketplace-hero"
+                aria-label={locale === "en" ? "MatchPlane" : "MatchPlane 商城"}
+            >
+                <div className="marketplace-hero-inner">
+                    <p className="marketplace-hero-brand">
+                        {locale === "en" ? "MATCHPLANE" : "MATCHPLANE 商城"}
+                    </p>
+                    <h1 className="marketplace-hero-title">
+                        {locale === "en"
+                            ? "Find products that fit."
+                            : "发现适合你的商品"}
+                    </h1>
+                    <p className="marketplace-hero-support">
+                        {locale === "en"
+                            ? "Browse live listings, or tell us your budget and needs."
+                            : "浏览真实在售商品，或直接说出预算和需求。"}
+                    </p>
+                    <div className="marketplace-hero-cta">
+                        <MarketplaceNeedPrompt
+                            locale={locale}
+                            onSubmit={(text) => {
+                                setClerkDraft(text);
+                                setClerkOpen(true);
+                            }}
+                        />
+                    </div>
+                </div>
+            </section>
             <div className="root-marketplace-main">
                 <div className="root-marketplace-catalog">
-                    <header className="root-marketplace-catalog-intro">
-                        <div>
-                            <p>
-                                {locale === "en"
-                                    ? "MATCHPLANE MARKET"
-                                    : "MATCHPLANE 商城"}
-                            </p>
-                            <h1>
-                                {locale === "en"
-                                    ? "Find products that fit."
-                                    : "发现适合你的商品"}
-                            </h1>
-                            <span>
-                                {locale === "en"
-                                    ? "Browse live listings. Use search when you want to narrow the choice."
-                                    : "浏览真实在售商品；需要筛选时，在下方填写预算和需求。"}
-                            </span>
-                            <MarketplaceNeedPrompt
-                                locale={locale}
-                                onSubmit={(text) => {
-                                    setClerkDraft(text);
-                                    setClerkOpen(true);
+                    <div className="root-marketplace-catalog-utility">
+                        {categories.length > 1 ? (
+                            <ToggleGroup
+                                className="root-marketplace-inline-categories"
+                                aria-label={
+                                    locale === "en"
+                                        ? "Product categories"
+                                        : "商品分类"
+                                }
+                                value={[effectiveCategory]}
+                                onValueChange={(next) => {
+                                    if (next[0]) setCategory(next[0]);
                                 }}
-                            />
-                        </div>
+                            >
+                                {categories.map((item) => (
+                                    <Toggle
+                                        key={item}
+                                        value={item}
+                                        aria-label={item}
+                                        render={
+                                            <Button
+                                                className="root-marketplace-category"
+                                                variant="ghost"
+                                                size="sm"
+                                                type="button"
+                                            >
+                                                {item}
+                                            </Button>
+                                        }
+                                    />
+                                ))}
+                            </ToggleGroup>
+                        ) : null}
                         <div className="root-marketplace-catalog-actions">
                             <Button
                                 variant="outline"
@@ -386,39 +425,7 @@ export function MarketplaceHome({
                                     : "发布商品"}
                             </Button>
                         </div>
-                    </header>
-                    {categories.length > 1 ? (
-                        <ToggleGroup
-                            className="root-marketplace-inline-categories"
-                            aria-label={
-                                locale === "en"
-                                    ? "Product categories"
-                                    : "商品分类"
-                            }
-                            value={[effectiveCategory]}
-                            onValueChange={(next) => {
-                                if (next[0]) setCategory(next[0]);
-                            }}
-                        >
-                            {categories.map((item) => (
-                                <Toggle
-                                    key={item}
-                                    value={item}
-                                    aria-label={item}
-                                    render={
-                                        <Button
-                                            className="root-marketplace-category"
-                                            variant="ghost"
-                                            size="sm"
-                                            type="button"
-                                        >
-                                            {item}
-                                        </Button>
-                                    }
-                                />
-                            ))}
-                        </ToggleGroup>
-                    ) : null}
+                    </div>
                     <div
                         className={`root-marketplace-content${sparseCatalog ? " is-sparse" : ""}`}
                     >
