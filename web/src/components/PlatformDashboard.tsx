@@ -15,8 +15,6 @@ import {
 import {
   getInvoiceSetting,
   getInvoiceProviders,
-  getPaymentGateways,
-  getPaymentRoutes,
   getSubplatformOrganizations,
   isLiveMarketplaceEnabled,
   activateSubplatform,
@@ -24,14 +22,10 @@ import {
   getSubplatformSourceIntake,
   registerSubplatform,
   saveInvoiceProvider,
-  savePaymentGateway,
-  savePaymentRoute,
   switchInvoiceMode,
   uploadSubplatformArchive,
   type InvoiceProviderRecord,
   type InvoiceSetting,
-  type PaymentGatewayRecord,
-  type PaymentRouteRecord,
   type SubplatformArchiveUpload,
   type SubplatformOrganizationRecord,
 } from "../api";
@@ -40,11 +34,13 @@ import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformBootstrapNotice } from "./PlatformBootstrapNotice";
 import { PlatformFinanceRecordsPanel } from "./PlatformFinanceRecordsPanel";
+import { PlatformPaymentRoutingPanel } from "./PlatformPaymentRoutingPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import {
   freshBootstrapResourceData,
   usePlatformBootstrapResources,
 } from "../hooks/usePlatformBootstrapResources";
+import { usePlatformPaymentRoutingResources } from "../hooks/usePlatformPaymentRoutingResources";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
 import { NationalIdentityConfigPanel } from "./NationalIdentityConfigPanel";
@@ -90,33 +86,32 @@ export function PlatformDashboard({
   });
   const verifiedSetup = freshBootstrapResourceData(bootstrap.setup);
   const verifiedDomains = freshBootstrapResourceData(bootstrap.domains);
+  const marketplaceApiAvailable = isLiveMarketplaceEnabled();
+  const paymentRouting = usePlatformPaymentRoutingResources({
+    authorized: bootstrapAuthorized,
+    apiAvailable: marketplaceApiAvailable,
+    tenant:
+      bootstrap.setup.status === "ready"
+        ? {
+            status: "verified",
+            tenantId: bootstrap.setup.data.root.tenantId,
+          }
+        : { status: "unverified" },
+    onNotice,
+  });
   const [activeSection, setActiveSection] = useState<PlatformSection>("home");
   const [subplatforms, setSubplatforms] = useState<
     SubplatformOrganizationRecord[]
   >([]);
-  const [gateways, setGateways] = useState<PaymentGatewayRecord[]>([]);
-  const [paymentRoutes, setPaymentRoutes] = useState<PaymentRouteRecord[]>([]);
   const [invoiceProviders, setInvoiceProviders] = useState<
     InvoiceProviderRecord[]
   >([]);
   const [invoiceSetting, setInvoiceSetting] = useState<InvoiceSetting | null>(
     null,
   );
-  const [gatewayEditorOpen, setGatewayEditorOpen] = useState(false);
-  const [routeEditorOpen, setRouteEditorOpen] = useState(false);
   const [invoiceEditorOpen, setInvoiceEditorOpen] = useState(false);
   const [invoiceModeDialogOpen, setInvoiceModeDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [gatewayName, setGatewayName] = useState("");
-  const [gatewayKind, setGatewayKind] =
-    useState<PaymentGatewayRecord["kind"]>("test");
-  const [gatewayMode, setGatewayMode] = useState<"test" | "production">("test");
-  const [gatewaySettings, setGatewaySettings] = useState("{}");
-  const [gatewayCredentialRef, setGatewayCredentialRef] = useState("");
-  const [routeGatewayId, setRouteGatewayId] = useState("");
-  const [routeMethodCode, setRouteMethodCode] = useState("");
-  const [routeCurrency, setRouteCurrency] = useState("");
-  const [routePriority, setRoutePriority] = useState("100");
   const [invoiceName, setInvoiceName] = useState("");
   const [invoiceProviderKey, setInvoiceProviderKey] = useState("");
   const [invoiceMode, setInvoiceMode] = useState<"test" | "production">("test");
@@ -173,41 +168,26 @@ export function PlatformDashboard({
   ];
 
   useEffect(() => {
-    if (!rootRole || !isLiveMarketplaceEnabled()) return;
+    if (!rootRole || !marketplaceApiAvailable) return;
     let mounted = true;
     void Promise.allSettled([
-      getPaymentGateways(),
-      getPaymentRoutes(),
       getInvoiceProviders(),
       getInvoiceSetting(),
       getSubplatformOrganizations(),
-    ]).then(
-      ([
-        gatewayResult,
-        routeResult,
-        invoiceResult,
-        invoiceSettingResult,
-        subplatformResult,
-      ]) => {
-        if (!mounted) return;
-        // Payment administration is intentionally allowed to be unavailable while the first
-        // Better Auth session is still settling; the setup card remains useful in that state.
-        if (gatewayResult.status === "fulfilled")
-          setGateways(gatewayResult.value);
-        if (routeResult.status === "fulfilled")
-          setPaymentRoutes(routeResult.value);
-        if (invoiceResult.status === "fulfilled")
-          setInvoiceProviders(invoiceResult.value);
-        if (invoiceSettingResult.status === "fulfilled")
-          setInvoiceSetting(invoiceSettingResult.value);
-        if (subplatformResult.status === "fulfilled")
-          setSubplatforms(subplatformResult.value);
-      },
-    );
+    ]).then(([invoiceResult, invoiceSettingResult, subplatformResult]) => {
+      if (!mounted) return;
+      // Invoice administration and subplatform loading remain independent from payment routing.
+      if (invoiceResult.status === "fulfilled")
+        setInvoiceProviders(invoiceResult.value);
+      if (invoiceSettingResult.status === "fulfilled")
+        setInvoiceSetting(invoiceSettingResult.value);
+      if (subplatformResult.status === "fulfilled")
+        setSubplatforms(subplatformResult.value);
+    });
     return () => {
       mounted = false;
     };
-  }, [rootRole]);
+  }, [marketplaceApiAvailable, rootRole]);
 
   useEffect(() => {
     const currentDomains = verifiedDomains ?? [];
@@ -220,16 +200,11 @@ export function PlatformDashboard({
     });
   }, [verifiedDomains]);
 
-  const refreshPaymentConfiguration = async () => {
-    const [nextGateways, nextRoutes, nextInvoiceProviders, nextInvoiceSetting] =
-      await Promise.all([
-        getPaymentGateways(),
-        getPaymentRoutes(),
-        getInvoiceProviders(),
-        getInvoiceSetting(),
-      ]);
-    setGateways(nextGateways);
-    setPaymentRoutes(nextRoutes);
+  const refreshInvoiceConfiguration = async () => {
+    const [nextInvoiceProviders, nextInvoiceSetting] = await Promise.all([
+      getInvoiceProviders(),
+      getInvoiceSetting(),
+    ]);
     setInvoiceProviders(nextInvoiceProviders);
     setInvoiceSetting(nextInvoiceSetting);
   };
@@ -509,47 +484,6 @@ export function PlatformDashboard({
     );
   };
 
-  const submitPaymentRoute = async () => {
-    const priority = Number.parseInt(routePriority, 10);
-    if (!routeGatewayId) {
-      onNotice("请先选择一个已保存的支付网关");
-      return;
-    }
-    if (!/^[a-z0-9][a-z0-9._:-]{1,63}$/i.test(routeMethodCode.trim())) {
-      onNotice("支付方式编码只能包含字母、数字、点、下划线、冒号或短横线");
-      return;
-    }
-    if (!/^[A-Z]{3}$/.test(routeCurrency.trim().toUpperCase())) {
-      onNotice("币种必须是 3 位 ISO 4217 编码");
-      return;
-    }
-    if (!Number.isSafeInteger(priority) || priority < 0 || priority > 10_000) {
-      onNotice("优先级必须是 0 到 10000 的整数");
-      return;
-    }
-    setSaving(true);
-    try {
-      await savePaymentRoute({
-        gatewayId: routeGatewayId,
-        methodCode: routeMethodCode.trim(),
-        currency: routeCurrency.trim().toUpperCase(),
-        priority,
-        enabled: true,
-        reason: "platform dashboard create payment route",
-      });
-      await refreshPaymentConfiguration();
-      setRouteEditorOpen(false);
-      setRouteMethodCode("");
-      setRouteCurrency("");
-      setRoutePriority("100");
-      onNotice("支付路由已保存；切换生产模式前请完成网关健康检查");
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "支付路由保存失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const confirmInvoiceModeChange = () => {
     if (!invoiceSetting) {
       setInvoiceModeDialogOpen(false);
@@ -575,49 +509,6 @@ export function PlatformDashboard({
         setInvoiceModeDialogOpen(false);
         onNotice(error instanceof Error ? error.message : "发票模式切换失败");
       });
-  };
-
-  const submitGateway = async () => {
-    let settings: Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(gatewaySettings);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-        throw new Error();
-      settings = parsed as Record<string, unknown>;
-    } catch {
-      onNotice("支付网关 settings 必须是 JSON 对象");
-      return;
-    }
-    if (!gatewayName.trim()) {
-      onNotice("请填写支付网关名称");
-      return;
-    }
-    if (gatewayMode === "production" && !gatewayCredentialRef.trim()) {
-      onNotice("生产网关必须填写 secret reference；不接受明文密钥");
-      return;
-    }
-    setSaving(true);
-    try {
-      await savePaymentGateway({
-        name: gatewayName.trim(),
-        kind: gatewayKind,
-        mode: gatewayMode,
-        settings,
-        credentialSecretRef: gatewayCredentialRef.trim() || undefined,
-        enabled: true,
-        reason: "platform dashboard create gateway",
-      });
-      await refreshPaymentConfiguration();
-      setGatewayEditorOpen(false);
-      setGatewayName("");
-      setGatewayCredentialRef("");
-      setGatewaySettings("{}");
-      onNotice("支付网关已保存；请继续配置支付路由后再切换生产模式");
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "支付网关保存失败");
-    } finally {
-      setSaving(false);
-    }
   };
 
   const submitInvoiceProvider = async () => {
@@ -654,7 +545,7 @@ export function PlatformDashboard({
         enabled: true,
         reason: "platform dashboard create invoice provider",
       });
-      await refreshPaymentConfiguration();
+      await refreshInvoiceConfiguration();
       setInvoiceEditorOpen(false);
       setInvoiceName("");
       setInvoiceCredentialRef("");
@@ -1174,254 +1065,10 @@ export function PlatformDashboard({
                   切换支付模式
                 </button>
               </div>
-              <SectionHeading
-                eyebrow="可选能力"
-                title="线上支付网关"
-                action="配置网关"
-                onAction={() => setGatewayEditorOpen(true)}
+              <PlatformPaymentRoutingPanel
+                controller={paymentRouting}
+                onNotice={onNotice}
               />
-              <div className="gateway-list">
-                {gateways.length ? (
-                  gateways.map((gateway) => (
-                    <div className="gateway-row" key={gateway.gateway_id}>
-                      <span className="gateway-row-icon">
-                        <CreditCard size={18} aria-hidden="true" />
-                      </span>
-                      <span>
-                        <strong>{gateway.name}</strong>
-                        <small>
-                          {gateway.kind} · {gateway.mode} · v{gateway.version}
-                        </small>
-                      </span>
-                      <b
-                        className={
-                          gateway.enabled ? "status-chip is-on" : "status-chip"
-                        }
-                      >
-                        {gateway.enabled ? "启用" : "停用"}
-                      </b>
-                    </div>
-                  ))
-                ) : (
-                  <div className="gateway-empty">
-                    <CreditCard size={24} aria-hidden="true" />
-                    <strong>暂不使用线上支付</strong>
-                    <p>
-                      这不会阻断撮合。默认在双方同意后交换微信和手机号；需要平台内收款时再配置网关。
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setGatewayEditorOpen(true)}
-                    >
-                      打开配置
-                    </button>
-                  </div>
-                )}
-              </div>
-              {gatewayEditorOpen ? (
-                <div className="admin-editor" aria-label="支付网关配置">
-                  <div className="admin-editor-heading">
-                    <strong>新增支付网关</strong>
-                    <button
-                      type="button"
-                      onClick={() => setGatewayEditorOpen(false)}
-                    >
-                      关闭
-                    </button>
-                  </div>
-                  <label>
-                    <span>名称</span>
-                    <input
-                      value={gatewayName}
-                      onChange={(event) => setGatewayName(event.target.value)}
-                      placeholder="例如：微信支付主商户"
-                    />
-                  </label>
-                  <label>
-                    <span>协议</span>
-                    <select
-                      value={gatewayKind}
-                      onChange={(event) =>
-                        setGatewayKind(
-                          event.target.value as PaymentGatewayRecord["kind"],
-                        )
-                      }
-                    >
-                      <option value="test">测试网关</option>
-                      <option value="epay">EPay</option>
-                      <option value="waffo_pancake">Waffo Pancake</option>
-                      <option value="wechat_pay_v3">微信支付 API v3</option>
-                      <option value="alipay_openapi">支付宝 OpenAPI</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>模式</span>
-                    <select
-                      value={gatewayMode}
-                      onChange={(event) =>
-                        setGatewayMode(
-                          event.target.value as "test" | "production",
-                        )
-                      }
-                    >
-                      <option value="test">测试</option>
-                      <option value="production">生产</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>secret reference</span>
-                    <input
-                      value={gatewayCredentialRef}
-                      onChange={(event) =>
-                        setGatewayCredentialRef(event.target.value)
-                      }
-                      placeholder="file:///run/secrets/payment/wechat.json"
-                    />
-                  </label>
-                  <label>
-                    <span>settings（JSON）</span>
-                    <textarea
-                      value={gatewaySettings}
-                      onChange={(event) =>
-                        setGatewaySettings(event.target.value)
-                      }
-                      rows={4}
-                      spellCheck={false}
-                    />
-                  </label>
-                  <button
-                    className="button button-dark"
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void submitGateway()}
-                  >
-                    {saving ? "保存中…" : "保存网关"}
-                  </button>
-                </div>
-              ) : null}
-              <div className="route-manager">
-                <div className="subsection-heading">
-                  <div>
-                    <p className="eyebrow">路由矩阵</p>
-                    <strong>支付方式与币种</strong>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setRouteEditorOpen((open) => !open)}
-                  >
-                    {routeEditorOpen ? "关闭配置" : "配置路由"}
-                  </button>
-                </div>
-                {paymentRoutes.length ? (
-                  <div className="route-list" aria-label="已配置支付路由">
-                    {paymentRoutes.map((route) => {
-                      const gateway = gateways.find(
-                        (item) => item.gateway_id === route.gateway_id,
-                      );
-                      return (
-                        <div className="route-row" key={route.route_id}>
-                          <span>
-                            <strong>{route.method_code}</strong>
-                            <small>
-                              {gateway?.name || route.gateway_id} ·{" "}
-                              {route.currency} · 优先级 {route.priority}
-                            </small>
-                          </span>
-                          <b
-                            className={
-                              route.enabled
-                                ? "status-chip is-on"
-                                : "status-chip"
-                            }
-                          >
-                            {route.enabled ? "启用" : "停用"}
-                          </b>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="route-empty">
-                    线上支付为可选；添加网关后，再为微信支付、支付宝或其他协议指定币种。
-                  </p>
-                )}
-                {routeEditorOpen ? (
-                  <div
-                    className="admin-editor route-editor"
-                    aria-label="支付路由配置"
-                  >
-                    <div className="admin-editor-heading">
-                      <strong>新增支付路由</strong>
-                      <button
-                        type="button"
-                        onClick={() => setRouteEditorOpen(false)}
-                      >
-                        关闭
-                      </button>
-                    </div>
-                    <label>
-                      <span>支付网关</span>
-                      <select
-                        value={routeGatewayId}
-                        onChange={(event) =>
-                          setRouteGatewayId(event.target.value)
-                        }
-                      >
-                        <option value="">选择已保存的网关</option>
-                        {gateways.map((gateway) => (
-                          <option
-                            key={gateway.gateway_id}
-                            value={gateway.gateway_id}
-                          >
-                            {gateway.name} · {gateway.kind}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      <span>方式编码</span>
-                      <input
-                        value={routeMethodCode}
-                        onChange={(event) =>
-                          setRouteMethodCode(event.target.value)
-                        }
-                        placeholder="由网关协议定义"
-                      />
-                    </label>
-                    <div className="route-editor-grid">
-                      <label>
-                        <span>币种</span>
-                        <input
-                          value={routeCurrency}
-                          onChange={(event) =>
-                            setRouteCurrency(event.target.value.toUpperCase())
-                          }
-                          maxLength={3}
-                          placeholder="ISO 4217"
-                        />
-                      </label>
-                      <label>
-                        <span>优先级</span>
-                        <input
-                          value={routePriority}
-                          onChange={(event) =>
-                            setRoutePriority(event.target.value)
-                          }
-                          inputMode="numeric"
-                        />
-                      </label>
-                    </div>
-                    <button
-                      className="button button-dark"
-                      type="button"
-                      disabled={saving || !gateways.length}
-                      onClick={() => void submitPaymentRoute()}
-                    >
-                      {saving ? "保存中…" : "保存路由"}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
             </section>
 
             <section

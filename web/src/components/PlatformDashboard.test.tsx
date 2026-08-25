@@ -7,6 +7,21 @@ const api = vi.hoisted(() => ({
   registerSubplatform: vi.fn(),
 }));
 const bootstrapMock = vi.hoisted(() => ({ current: undefined as unknown }));
+const paymentRoutingMock = vi.hoisted(() => ({
+  use: vi.fn(),
+  controller: {
+    gateways: { status: "ready", data: [] },
+    routes: { status: "ready", data: [] },
+    mutation: null,
+    writeBlockReason: null,
+    retryAvailable: true,
+    retryFailed: vi.fn(),
+    refreshGateways: vi.fn(),
+    refreshRoutes: vi.fn(),
+    commitGateway: vi.fn(),
+    commitRoute: vi.fn(),
+  },
+}));
 
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
@@ -17,6 +32,12 @@ vi.mock("../hooks/usePlatformBootstrapResources", () => ({
   freshBootstrapResourceData: (resource: { status: string; data?: unknown }) =>
     resource.status === "ready" ? resource.data : null,
 }));
+vi.mock("../hooks/usePlatformPaymentRoutingResources", () => ({
+  usePlatformPaymentRoutingResources: (options: unknown) => {
+    paymentRoutingMock.use(options);
+    return paymentRoutingMock.controller;
+  },
+}));
 vi.mock("./LoginMethodsPanel", () => ({ LoginMethodsPanel: () => null }));
 vi.mock("./Overlays", () => ({ ModeDialog: () => null }));
 vi.mock("./PlatformAccessPanel", () => ({ PlatformAccessPanel: () => null }));
@@ -25,6 +46,11 @@ vi.mock("./PlatformBootstrapNotice", () => ({
 }));
 vi.mock("./PlatformFinanceRecordsPanel", () => ({
   PlatformFinanceRecordsPanel: () => null,
+}));
+vi.mock("./PlatformPaymentRoutingPanel", () => ({
+  PlatformPaymentRoutingPanel: () => (
+    <div data-testid="payment-routing-panel" />
+  ),
 }));
 vi.mock("./PlatformSiteSettingsPanel", () => ({
   PlatformSiteSettingsPanel: () => null,
@@ -76,6 +102,7 @@ const dashboardProps = {
 beforeEach(() => {
   api.registerSubplatform.mockReset();
   dashboardProps.onNotice.mockReset();
+  paymentRoutingMock.use.mockClear();
 });
 
 describe("PlatformDashboard local store onboarding", () => {
@@ -131,6 +158,39 @@ describe("PlatformDashboard local store onboarding", () => {
 
     await waitFor(() => expect(select).toHaveValue("domain-b"));
     expect(select).toBeEnabled();
+  });
+});
+
+describe("PlatformDashboard payment routing boundary", () => {
+  it("keeps reads independent while passing only a fresh setup tenant for writes", () => {
+    bootstrapMock.current = resources({ status: "ready", data: [domain("a")] });
+    const { rerender } = render(<PlatformDashboard {...dashboardProps} />);
+
+    expect(screen.getByTestId("payment-routing-panel")).toBeInTheDocument();
+    expect(paymentRoutingMock.use).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authorized: true,
+        apiAvailable: false,
+        tenant: { status: "verified", tenantId: "tenant" },
+      }),
+    );
+
+    bootstrapMock.current = {
+      ...resources({ status: "ready", data: [domain("a")] }),
+      setup: {
+        status: "error",
+        message: "初始化状态暂时不可用",
+        previous: setup,
+      },
+    };
+    rerender(<PlatformDashboard {...dashboardProps} />);
+
+    expect(paymentRoutingMock.use).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authorized: true,
+        tenant: { status: "unverified" },
+      }),
+    );
   });
 });
 
