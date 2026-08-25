@@ -12,6 +12,7 @@ hex.workspace = true
 matchplane-domain.workspace = true
 matchplane-engine.workspace = true
 matchplane-events.workspace = true
+matchplane-matching.workspace = true
 matchplane-payments.workspace = true
 matchplane-protocol.workspace = true
 prost.workspace = true

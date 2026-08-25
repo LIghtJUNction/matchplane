@@ -5,6 +5,7 @@ members = [
   "crates/matchplane-config",
   "crates/matchplane-domain",
   "crates/matchplane-engine",
+  "crates/matchplane-matching",
   "crates/matchplane-events",
   "crates/matchplane-agent-runtime",
   "crates/matchplane-http",
@@ -96,6 +97,7 @@ matchplane-application = { path = "crates/matchplane-application" }
 matchplane-config = { path = "crates/matchplane-config" }
 matchplane-domain = { path = "crates/matchplane-domain" }
 matchplane-engine = { path = "crates/matchplane-engine" }
+matchplane-matching = { path = "crates/matchplane-matching", version = "0.1.0" }
 matchplane-events = { path = "crates/matchplane-events" }
 matchplane-http = { path = "crates/matchplane-http" }
 matchplane-observability = { path = "crates/matchplane-observability" }
