@@ -352,14 +352,15 @@ export function MarketplaceHome({
                 aria-label={locale === "en" ? "MatchPlane" : "MatchPlane 商城"}
             >
                 <div className="marketplace-hero-inner">
-                    <p className="marketplace-hero-brand">
-                        {locale === "en" ? "MATCHPLANE" : "MATCHPLANE 商城"}
+                    <p className="marketplace-hero-kicker">
+                        {locale === "en" ? "MARKETPLACE" : "商城"}
                     </p>
-                    <h1 className="marketplace-hero-title">
+                    <h1 className="marketplace-hero-brand">MatchPlane</h1>
+                    <p className="marketplace-hero-title">
                         {locale === "en"
                             ? "Find products that fit."
                             : "发现适合你的商品"}
-                    </h1>
+                    </p>
                     <p className="marketplace-hero-support">
                         {locale === "en"
                             ? "Browse live listings, or tell us your budget and needs."

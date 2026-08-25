@@ -565,12 +565,21 @@ select {
   padding: clamp(1.25rem, 3vw, 2.5rem) clamp(1rem, 3vw, 2rem) 4rem;
 }
 
-/* Hero: brand + one headline + one line + one CTA group. No cards, no stats. */
+/* Hero: brand-first + one line + one CTA. Fills first viewport; no cards/stats. */
 .marketplace-hero {
-  padding: clamp(3.5rem, 9vw, 6.5rem) clamp(1rem, 3vw, 2rem)
+  display: grid;
+  align-content: center;
+  min-height: calc(100svh - 4.5rem);
+  padding: clamp(2.5rem, 6vw, 5rem) clamp(1rem, 3vw, 2rem)
     clamp(2.5rem, 5vw, 4rem);
   border-bottom: 1px solid var(--retail-line);
-  background: var(--retail-canvas);
+  background:
+    radial-gradient(
+      120% 80% at 50% -10%,
+      color-mix(in srgb, var(--retail-surface) 88%, transparent),
+      transparent 62%
+    ),
+    var(--retail-canvas);
 }
 
 .marketplace-hero-inner {
@@ -579,7 +588,7 @@ select {
   margin: 0 auto;
 }
 
-.marketplace-hero-brand {
+.marketplace-hero-kicker {
   margin: 0;
   color: var(--retail-muted);
   font-family: var(--retail-mono);
@@ -588,30 +597,55 @@ select {
   letter-spacing: 0.14em;
 }
 
-.marketplace-hero-title {
-  max-width: 16ch;
-  margin: 0.85rem 0 0;
+.marketplace-hero-brand {
+  margin: 0.55rem 0 0;
   color: var(--retail-ink);
   font-family: var(--retail-display);
-  font-size: clamp(2.35rem, 5.5vw, 3.6rem);
-  font-weight: 620;
-  line-height: 1.05;
+  font-size: clamp(3rem, 8vw, 5.25rem);
+  font-weight: 650;
+  line-height: 0.98;
+  letter-spacing: -0.03em;
+}
+
+.marketplace-hero-title {
+  max-width: 22ch;
+  margin: 1.15rem 0 0;
+  color: var(--retail-ink-soft);
+  font-family: var(--retail-display);
+  font-size: clamp(1.35rem, 2.6vw, 1.85rem);
+  font-weight: 560;
+  line-height: 1.25;
   letter-spacing: -0.01em;
 }
 
 .marketplace-hero-support {
   max-width: 34rem;
-  margin: 1rem 0 0;
+  margin: 0.85rem 0 0;
   color: var(--retail-muted);
   font-size: clamp(0.95rem, 1.2vw, 1.05rem);
   line-height: 1.65;
 }
 
 .marketplace-hero-cta {
-  margin-top: 1.75rem;
+  margin-top: 1.85rem;
+}
+
+/* Keep Path-to-Hope near-black CTA even if a color palette is active. */
+.root-marketplace-page .marketplace-hero-cta .root-marketplace-need-prompt > button,
+.root-marketplace-page .floating-clerk-toggle {
+  background: #141413;
+  color: #faf9f5;
+  border-color: #141413;
+}
+
+.root-marketplace-page .marketplace-hero-cta .root-marketplace-need-prompt > button:hover,
+.root-marketplace-page .floating-clerk-toggle:hover {
+  background: #000000;
+  color: #faf9f5;
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .marketplace-hero-kicker,
   .marketplace-hero-brand,
   .marketplace-hero-title,
   .marketplace-hero-support,
@@ -620,16 +654,20 @@ select {
       both;
   }
 
+  .marketplace-hero-brand {
+    animation-delay: 50ms;
+  }
+
   .marketplace-hero-title {
-    animation-delay: 70ms;
+    animation-delay: 110ms;
   }
 
   .marketplace-hero-support {
-    animation-delay: 140ms;
+    animation-delay: 170ms;
   }
 
   .marketplace-hero-cta {
-    animation-delay: 210ms;
+    animation-delay: 230ms;
   }
 }
 
