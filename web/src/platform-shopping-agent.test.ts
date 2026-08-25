@@ -75,6 +75,16 @@ afterEach(() => {
   searchPublicStoreOffers.mockClear();
 });
 
+function answerQuestion(
+  input: Parameters<typeof answerPlatformShoppingQuestion>[0],
+) {
+  return answerPlatformShoppingQuestion({
+    ...input,
+    fetcher: globalThis.fetch,
+    resolveAddresses: async () => ["8.8.8.8"],
+  });
+}
+
 describe("platform shopping agent", () => {
   it("uses AI SDK pruning and folds older user facts into bounded context", () => {
     const messages = Array.from({ length: 15 }, (_, index) => ({
@@ -113,18 +123,26 @@ describe("platform shopping agent", () => {
   });
 
   it("uses structured AI output to apply a natural-language memory correction", async () => {
-    generateText.mockImplementationOnce(async (options) => {
-      await options.tools.apply_memory_revision.execute({
-        message: "已把预算改为 8000 元，并删除品牌偏好。",
-        facts: [
-          { kind: "budget", key: "maximum", value: "8000", currency: "CNY" },
-        ],
-      });
-      return {
-        text: "",
-        usage: { inputTokens: 20, outputTokens: 12, totalTokens: 32 },
-        steps: [{ toolCalls: [{ toolName: "apply_memory_revision" }] }],
-      };
+    generateText.mockResolvedValueOnce({
+      text: "",
+      usage: { inputTokens: 20, outputTokens: 12, totalTokens: 32 },
+      toolCalls: [
+        {
+          toolName: "apply_memory_revision",
+          input: {
+            message: "已把预算改为 8000 元，并删除品牌偏好。",
+            facts: [
+              {
+                kind: "budget",
+                key: "maximum",
+                value: "8000",
+                currency: "CNY",
+              },
+            ],
+          },
+        },
+      ],
+      steps: [{ toolCalls: [{ toolName: "apply_memory_revision" }] }],
     });
     const admitCall = vi.fn(async () => undefined);
 
@@ -201,7 +219,7 @@ describe("platform shopping agent", () => {
         steps: [{ toolCalls: [{ toolName: "recall_shopping_memory" }] }],
       };
     });
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question: "回顾我保存的购物偏好",
       messages: [{ role: "user", content: "回顾我保存的购物偏好" }],
       stores: [],
@@ -271,7 +289,7 @@ describe("platform shopping agent", () => {
       };
     });
 
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question: "以后预算按 8000 元，主要是日常通勤",
       messages: [
         { role: "user", content: "以后预算按 8000 元，主要是日常通勤" },
@@ -327,7 +345,7 @@ describe("platform shopping agent", () => {
     });
 
     await expect(
-      answerPlatformShoppingQuestion({
+      answerQuestion({
         question: "把长期预算改成 9000 元",
         messages: [{ role: "user", content: "把长期预算改成 9000 元" }],
         stores: [],
@@ -356,7 +374,7 @@ describe("platform shopping agent", () => {
     });
 
     await expect(
-      answerPlatformShoppingQuestion({
+      answerQuestion({
         question: "把长期预算改成 9000 元",
         messages: [{ role: "user", content: "把长期预算改成 9000 元" }],
         stores: [],
@@ -388,7 +406,7 @@ describe("platform shopping agent", () => {
       };
     });
 
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question: "帮我挑一个",
       messages: [{ role: "user", content: "帮我挑一个" }],
       stores: [],
@@ -418,7 +436,7 @@ describe("platform shopping agent", () => {
     });
 
     await expect(
-      answerPlatformShoppingQuestion({
+      answerQuestion({
         question: "先问我一个问题并给我几个选项",
         messages: [{ role: "user", content: "先问我一个问题并给我几个选项" }],
         stores: [],
@@ -542,14 +560,14 @@ describe("platform shopping agent", () => {
       },
     ];
 
-    const first = await answerPlatformShoppingQuestion({
+    const first = await answerQuestion({
       question: "预算 5000，至少 16GB，找两款通勤轻薄本",
       messages: [
         { role: "user", content: "预算 5000，至少 16GB，找两款通勤轻薄本" },
       ],
       stores,
     });
-    const second = await answerPlatformShoppingQuestion({
+    const second = await answerQuestion({
       question: "比较刚才两款并算合计",
       messages: [
         { role: "user", content: "预算 5000，至少 16GB，找两款通勤轻薄本" },
@@ -664,7 +682,7 @@ describe("platform shopping agent", () => {
       };
     });
 
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question: "给我这款的参数，并提供继续或暂不两个选择",
       messages: [
         { role: "user", content: "给我这款的参数，并提供继续或暂不两个选择" },
@@ -723,7 +741,7 @@ describe("platform shopping agent", () => {
       };
     });
 
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question: "执行下一步前请让我确认是否继续",
       messages: [{ role: "user", content: "执行下一步前请让我确认是否继续" }],
       stores: [],
@@ -764,7 +782,7 @@ describe("platform shopping agent", () => {
     });
     const admitCall = vi.fn(async () => undefined);
 
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question: "帮我找啊",
       messages: [{ role: "user", content: "帮我找啊" }],
       stores: [],
@@ -816,7 +834,7 @@ describe("platform shopping agent", () => {
     });
 
     await expect(
-      answerPlatformShoppingQuestion({
+      answerQuestion({
         question: "对比两款通勤轻薄本",
         messages: [{ role: "user", content: "对比两款通勤轻薄本" }],
         stores: [],
@@ -852,7 +870,7 @@ describe("platform shopping agent", () => {
     });
 
     await expect(
-      answerPlatformShoppingQuestion({
+      answerQuestion({
         question: "帮我找通勤轻薄本 private-user-text",
         messages: [
           { role: "user", content: "帮我找通勤轻薄本 private-user-text" },
@@ -879,7 +897,7 @@ describe("platform shopping agent", () => {
     searchPublicStoreOffers.mockResolvedValue([]);
     const admitCall = vi.fn(async () => undefined);
 
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question: "推荐一些在售商品",
       messages: [{ role: "user", content: "推荐一些在售商品" }],
       stores: [],
@@ -914,7 +932,7 @@ describe("platform shopping agent", () => {
     });
     const admitCall = vi.fn(async () => undefined);
 
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question: "帮我找通勤电脑",
       messages: [{ role: "user", content: "帮我找通勤电脑" }],
       stores: [],
@@ -948,7 +966,7 @@ describe("platform shopping agent", () => {
         }),
       );
       await expect(
-        answerPlatformShoppingQuestion({
+        answerQuestion({
           question: "你好",
           messages: [{ role: "user", content: "你好" }],
           stores: [],
@@ -969,7 +987,7 @@ describe("platform shopping agent", () => {
 
     let failure: unknown;
     try {
-      await answerPlatformShoppingQuestion({
+      await answerQuestion({
         question: "你好",
         messages: [{ role: "user", content: "你好" }],
         stores: [],
@@ -996,7 +1014,7 @@ describe("platform shopping agent", () => {
       }),
     );
 
-    const failure = await answerPlatformShoppingQuestion({
+    const failure = await answerQuestion({
       question: "你好",
       messages: [{ role: "user", content: "你好" }],
       stores: [],
@@ -1038,7 +1056,7 @@ describe("platform shopping agent", () => {
       throw new Error("unreachable");
     });
 
-    const failure = await answerPlatformShoppingQuestion({
+    const failure = await answerQuestion({
       question: "你好",
       messages: [{ role: "user", content: "你好" }],
       stores: [],
@@ -1072,7 +1090,7 @@ describe("platform shopping agent", () => {
     });
 
     await expect(
-      answerPlatformShoppingQuestion({
+      answerQuestion({
         question: "以后请记住我的购物偏好",
         messages: [{ role: "user", content: "以后请记住我的购物偏好" }],
         stores: [],
@@ -1096,7 +1114,7 @@ describe("platform shopping agent", () => {
       Object.assign(new Error("unsafe initial search detail"), { status: 500 }),
     );
     await expect(
-      answerPlatformShoppingQuestion({
+      answerQuestion({
         question: "推荐一些在售商品",
         messages: [{ role: "user", content: "推荐一些在售商品" }],
         stores: [],
@@ -1107,7 +1125,7 @@ describe("platform shopping agent", () => {
       Object.assign(new Error("unsafe handoff search detail"), { status: 429 }),
     );
     await expect(
-      answerPlatformShoppingQuestion({
+      answerQuestion({
         question: "请立刻让店员联系我",
         messages: [{ role: "user", content: "请立刻让店员联系我" }],
         stores: [],
@@ -1127,7 +1145,7 @@ describe("platform shopping agent", () => {
     });
     const admitCall = vi.fn(async () => undefined);
 
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question: "想了解如何挑选通勤电脑",
       messages: [
         { role: "user", content: "记住我偏好轻薄" },
@@ -1255,7 +1273,7 @@ describe("platform shopping agent", () => {
       steps: [{ toolCalls: [] }],
     });
 
-    const reply = await answerPlatformShoppingQuestion({
+    const reply = await answerQuestion({
       question:
         "我想买这件商品，请让店员确认交付时间，并询问我是否同意交换联系方式。",
       messages: [
