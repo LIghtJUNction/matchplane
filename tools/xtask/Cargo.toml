@@ -12,7 +12,9 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+bytes.workspace = true
 clap.workspace = true
+futures-util.workspace = true
 getrandom.workspace = true
 hex.workspace = true
 sha2.workspace = true
@@ -20,6 +22,7 @@ matchplane-config.workspace = true
 matchplane-domain.workspace = true
 matchplane-storage.workspace = true
 reqwest.workspace = true
+rig-core.workspace = true
 rpassword.workspace = true
 rustix = { version = "1.1.4", features = ["fs"] }
 scrypt.workspace = true

@@ -1,13 +1,11 @@
 use std::{
-    collections::BTreeSet,
     env, fs,
     future::Future,
     io::{self, IsTerminal, Write},
-    net::SocketAddr,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::Path,
     process::Command as ProcessCommand,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -18,7 +16,7 @@ use matchplane_storage::{
     CatalogProjectionStatus, MarketplaceConversionRecoveryAction, PgStore, ProvisionRootDomain,
     ProvisionRootPlatform, ProvisionedRootPlatform, VerifiedHostOperator,
 };
-use reqwest::{Client, ClientBuilder};
+use reqwest::Client;
 use rpassword::prompt_password;
 use scrypt::{Params as ScryptParams, scrypt as derive_scrypt};
 use secrecy::{ExposeSecret, SecretString};
@@ -34,10 +32,14 @@ use uuid::{Uuid, Variant};
 use zeroize::Zeroize;
 
 mod platform_router;
+mod provider_preflight;
 
 use platform_router::{
-    ManagedRouterRead, ManagedSource, PlatformRouterReader, private_or_reserved_ip,
-    reserved_platform_router_slot,
+    ManagedRouterRead, ManagedSource, PlatformRouterReader, reserved_platform_router_slot,
+};
+use provider_preflight::{
+    DEFAULT_PROVIDER_PROTOCOL, ProviderPreflightReport, provider_preflight_command,
+    provider_preflight_report, provider_preflight_report_from_managed,
 };
 
 #[derive(Debug, Parser)]
@@ -2028,568 +2030,6 @@ struct HostedAgentReport {
     issues: Vec<String>,
 }
 
-const M0_REQUIRED_ROUTER_ENDPOINT: &str = "https://api.lmm.best/v1";
-const M0_REQUIRED_ROUTER_MODEL: &str = "gpt-5.6-sol";
-const M0_REQUIRED_ROUTER_PROTOCOL: &str = "openai-compatible";
-
-#[derive(Debug, Clone, Default, Serialize)]
-struct ProviderConfigConflicts {
-    endpoint: bool,
-    model: bool,
-    protocol: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ProviderPreflightReport {
-    ready: bool,
-    blocking: bool,
-    status: String,
-    code: Option<String>,
-    preferred_http_status: Option<u16>,
-    source: String,
-    managed_overrides_environment: bool,
-    conflicts: ProviderConfigConflicts,
-    endpoint_origin: Option<String>,
-    model: Option<String>,
-    protocol: Option<String>,
-    credential_configured: bool,
-    endpoint_matches_required: bool,
-    model_matches_required: bool,
-    protocol_matches_required: bool,
-    required_endpoint: String,
-    required_model: String,
-    response_status: Option<u16>,
-    latency_ms: u64,
-    issues: Vec<String>,
-}
-
-struct EffectiveProviderConfig {
-    endpoint: Url,
-    api_key: SecretString,
-    model: String,
-    protocol: String,
-}
-
-struct ProviderResolution {
-    config: Option<EffectiveProviderConfig>,
-    intent_enabled: bool,
-    source: String,
-    managed_overrides_environment: bool,
-    conflicts: ProviderConfigConflicts,
-    endpoint_origin: Option<String>,
-    model: Option<String>,
-    protocol: Option<String>,
-    credential_configured: bool,
-    endpoint_matches_required: bool,
-    model_matches_required: bool,
-    protocol_matches_required: bool,
-    issues: Vec<String>,
-}
-
-#[derive(Default)]
-struct EnvironmentProviderValues {
-    endpoint: Option<String>,
-    api_key: Option<SecretString>,
-    model: Option<String>,
-    protocol: Option<String>,
-}
-
-async fn provider_preflight_command() -> Result<()> {
-    let managed = PlatformRouterReader::default().read();
-    let report = provider_preflight_report_from_managed(&managed).await;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&report).context("provider preflight encoding failed")?
-    );
-    if report.ready {
-        Ok(())
-    } else {
-        bail!("AI provider preflight is not ready")
-    }
-}
-
-async fn provider_preflight_report() -> ProviderPreflightReport {
-    let managed = PlatformRouterReader::default().read();
-    provider_preflight_report_from_managed(&managed).await
-}
-
-async fn provider_preflight_report_from_managed(
-    managed: &ManagedRouterRead,
-) -> ProviderPreflightReport {
-    let resolution = resolve_effective_provider(managed);
-    let mut report = preflight_report_from_resolution(&resolution);
-    if !resolution.intent_enabled {
-        report.status = "disabled".to_owned();
-        report.blocking = false;
-        report.code = None;
-        report.preferred_http_status = None;
-        return report;
-    }
-    if !resolution.issues.is_empty() {
-        return report;
-    }
-    let Some(config) = resolution.config.as_ref() else {
-        return report;
-    };
-    let timeout_ms = bounded_environment_millis(
-        "MATCHPLANE_ROUTER_AI_PREFLIGHT_TIMEOUT_MS",
-        20_000,
-        100,
-        30_000,
-    );
-    let budget_ms = bounded_environment_millis(
-        "MATCHPLANE_ROUTER_AI_PREFLIGHT_BUDGET_MS",
-        4_000,
-        100,
-        timeout_ms,
-    );
-    let outcome = execute_provider_probe_with(
-        config,
-        Duration::from_millis(timeout_ms),
-        Duration::from_millis(budget_ms),
-    )
-    .await;
-    report.ready = outcome.status == "ready";
-    report.blocking = !report.ready;
-    report.status = outcome.status;
-    report.response_status = outcome.response_status;
-    report.latency_ms = outcome.latency_ms;
-    if report.ready {
-        report.code = None;
-        report.preferred_http_status = None;
-        report.issues.clear();
-    } else {
-        report.code = Some("upstream_configuration".to_owned());
-        report.preferred_http_status = Some(451);
-        report.issues.push(outcome.issue);
-    }
-    report
-}
-
-fn resolve_effective_provider(managed: &ManagedRouterRead) -> ProviderResolution {
-    let environment = EnvironmentProviderValues {
-        endpoint: nonempty_environment("MATCHPLANE_ROUTER_AI_URL"),
-        api_key: nonempty_environment("MATCHPLANE_ROUTER_AI_KEY").map(SecretString::from),
-        model: nonempty_environment("MATCHPLANE_ROUTER_AI_MODEL"),
-        protocol: nonempty_environment("MATCHPLANE_ROUTER_AI_PROTOCOL")
-            .or_else(|| Some(M0_REQUIRED_ROUTER_PROTOCOL.to_owned())),
-    };
-    resolve_effective_provider_with_environment(
-        managed,
-        environment,
-        environment_flag("MATCHPLANE_ROUTER_AI_REQUIRED"),
-    )
-}
-
-fn resolve_effective_provider_with_environment(
-    managed: &ManagedRouterRead,
-    environment: EnvironmentProviderValues,
-    required: bool,
-) -> ProviderResolution {
-    let environment_present = environment.endpoint.is_some()
-        || environment.api_key.is_some()
-        || environment.model.is_some();
-    let managed_authoritative = matches!(
-        managed.source(),
-        ManagedSource::ManagedGeneration | ManagedSource::Legacy
-    );
-    let managed_config = managed.active();
-    let managed_disabled =
-        managed_authoritative && managed_config.is_some_and(|config| !config.enabled);
-    let managed_enabled =
-        managed_authoritative && managed_config.is_some_and(|config| config.enabled);
-    let managed_unreadable = managed.source() == ManagedSource::ManagedUnreadable;
-
-    let mut managed_secret_error = None;
-    let managed_secret = if managed_enabled {
-        match managed.read_active_secret() {
-            Ok(secret) => secret,
-            Err(error) => {
-                managed_secret_error = Some(error.code().to_owned());
-                None
-            }
-        }
-    } else {
-        None
-    };
-    let (source, endpoint, api_key, model, protocol, credential_configured) = if managed_unreadable
-    {
-        ("managed_unreadable", None, None, None, None, false)
-    } else if managed_authoritative {
-        (
-            managed.source().as_str(),
-            managed_config.map(|config| config.endpoint.clone()),
-            managed_secret,
-            managed_config.map(|config| config.model.clone()),
-            managed_config.map(|config| config.protocol.clone()),
-            managed.active_credential_configured(),
-        )
-    } else if environment_present {
-        (
-            "environment",
-            environment.endpoint.clone(),
-            environment.api_key.clone(),
-            environment.model.clone(),
-            environment.protocol.clone(),
-            environment.api_key.is_some(),
-        )
-    } else {
-        ("absent", None, None, None, None, false)
-    };
-    let parsed_endpoint = endpoint.as_deref().and_then(parse_provider_endpoint);
-    let endpoint_matches_required = endpoint
-        .as_deref()
-        .is_some_and(|value| canonical_endpoint(value) == M0_REQUIRED_ROUTER_ENDPOINT);
-    let model_matches_required = model.as_deref() == Some(M0_REQUIRED_ROUTER_MODEL);
-    let protocol_matches_required = protocol.as_deref() == Some(M0_REQUIRED_ROUTER_PROTOCOL);
-    let mut issues = Vec::new();
-    if let Some(error) = managed.unreadable() {
-        issues.push(error.code().to_owned());
-        issues.push("managed_state_unreadable".to_owned());
-    }
-    if let Some(error) = managed_secret_error {
-        issues.push(error);
-        issues.push("managed_state_unreadable".to_owned());
-    }
-    if !managed_disabled {
-        if source == "absent" || (managed_authoritative && managed_config.is_none()) {
-            issues.push("provider_not_configured".to_owned());
-        }
-        if parsed_endpoint.is_none() {
-            issues.push("endpoint_invalid".to_owned());
-        }
-        if !credential_configured {
-            issues.push("credential_not_configured".to_owned());
-        }
-        if !endpoint_matches_required {
-            issues.push("endpoint_mismatch".to_owned());
-        }
-        if !model_matches_required {
-            issues.push("model_mismatch".to_owned());
-        }
-        if !protocol_matches_required {
-            issues.push("protocol_mismatch".to_owned());
-        }
-    }
-    issues.sort();
-    issues.dedup();
-    let config = if managed_disabled {
-        None
-    } else {
-        match (
-            parsed_endpoint.clone(),
-            api_key,
-            model.clone(),
-            protocol.clone(),
-        ) {
-            (Some(endpoint), Some(api_key), Some(model), Some(protocol)) => {
-                Some(EffectiveProviderConfig {
-                    endpoint,
-                    api_key,
-                    model,
-                    protocol,
-                })
-            }
-            _ => None,
-        }
-    };
-    let conflicts = ProviderConfigConflicts {
-        endpoint: managed_enabled
-            && environment.endpoint.as_ref().is_some_and(|value| {
-                managed_config.is_some_and(|managed| {
-                    canonical_endpoint(value) != canonical_endpoint(&managed.endpoint)
-                })
-            }),
-        model: managed_enabled
-            && environment
-                .model
-                .as_ref()
-                .is_some_and(|value| managed_config.is_some_and(|managed| value != &managed.model)),
-        protocol: managed_enabled
-            && environment.protocol.as_ref().is_some_and(|value| {
-                managed_config.is_some_and(|managed| value != &managed.protocol)
-            }),
-    };
-    ProviderResolution {
-        config,
-        intent_enabled: !managed_disabled
-            && (required || managed_authoritative || managed_unreadable || environment_present),
-        source: source.to_owned(),
-        managed_overrides_environment: managed_enabled && environment_present,
-        conflicts,
-        endpoint_origin: parsed_endpoint.map(|url| url.origin().ascii_serialization()),
-        model,
-        protocol,
-        credential_configured,
-        endpoint_matches_required,
-        model_matches_required,
-        protocol_matches_required,
-        issues,
-    }
-}
-
-fn preflight_report_from_resolution(resolution: &ProviderResolution) -> ProviderPreflightReport {
-    ProviderPreflightReport {
-        ready: false,
-        blocking: resolution.intent_enabled,
-        status: "configuration_mismatch".to_owned(),
-        code: Some("upstream_configuration".to_owned()),
-        preferred_http_status: Some(451),
-        source: resolution.source.clone(),
-        managed_overrides_environment: resolution.managed_overrides_environment,
-        conflicts: resolution.conflicts.clone(),
-        endpoint_origin: resolution.endpoint_origin.clone(),
-        model: resolution.model.clone(),
-        protocol: resolution.protocol.clone(),
-        credential_configured: resolution.credential_configured,
-        endpoint_matches_required: resolution.endpoint_matches_required,
-        model_matches_required: resolution.model_matches_required,
-        protocol_matches_required: resolution.protocol_matches_required,
-        required_endpoint: M0_REQUIRED_ROUTER_ENDPOINT.to_owned(),
-        required_model: M0_REQUIRED_ROUTER_MODEL.to_owned(),
-        response_status: None,
-        latency_ms: 0,
-        issues: resolution.issues.clone(),
-    }
-}
-
-struct ProviderProbeOutcome {
-    status: String,
-    issue: String,
-    response_status: Option<u16>,
-    latency_ms: u64,
-}
-
-async fn execute_provider_probe_with(
-    config: &EffectiveProviderConfig,
-    timeout: Duration,
-    budget: Duration,
-) -> ProviderProbeOutcome {
-    execute_provider_probe_with_resolver(config, timeout, budget, |host, port| async move {
-        tokio::net::lookup_host((host.as_str(), port))
-            .await
-            .map(|addresses| addresses.collect())
-            .map_err(|_| ())
-    })
-    .await
-}
-
-struct ProviderProbePlan {
-    client: Client,
-    endpoint: String,
-    #[cfg(test)]
-    resolved_addresses: Vec<SocketAddr>,
-}
-
-async fn execute_provider_probe_with_resolver<R, F>(
-    config: &EffectiveProviderConfig,
-    timeout: Duration,
-    budget: Duration,
-    resolver: R,
-) -> ProviderProbeOutcome
-where
-    R: FnOnce(String, u16) -> F,
-    F: Future<Output = Result<Vec<SocketAddr>, ()>>,
-{
-    let started = Instant::now();
-    if config.protocol != M0_REQUIRED_ROUTER_PROTOCOL {
-        return provider_probe_outcome(started, "unsupported_protocol", None);
-    }
-    let plan = match prepare_provider_probe_plan(config, timeout, resolver).await {
-        Ok(plan) => plan,
-        Err(issue) => return provider_probe_outcome(started, issue, None),
-    };
-    execute_provider_probe_request(config, plan.client, plan.endpoint, budget, started).await
-}
-
-async fn prepare_provider_probe_plan<R, F>(
-    config: &EffectiveProviderConfig,
-    timeout: Duration,
-    resolver: R,
-) -> Result<ProviderProbePlan, &'static str>
-where
-    R: FnOnce(String, u16) -> F,
-    F: Future<Output = Result<Vec<SocketAddr>, ()>>,
-{
-    let host = config
-        .endpoint
-        .host_str()
-        .ok_or("provider_dns_untrusted")?
-        .to_owned();
-    let port = config
-        .endpoint
-        .port_or_known_default()
-        .ok_or("provider_dns_untrusted")?;
-    let addresses = resolver(host.clone(), port)
-        .await
-        .map_err(|()| "provider_dns_resolution")?
-        .into_iter()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    if addresses.is_empty()
-        || addresses
-            .iter()
-            .any(|address| address.port() != port || private_or_reserved_ip(address.ip()))
-    {
-        return Err("provider_dns_untrusted");
-    }
-    let client = build_provider_probe_client(Client::builder(), timeout, &host, &addresses)
-        .map_err(|()| "client_configuration")?;
-    Ok(ProviderProbePlan {
-        client,
-        endpoint: completion_endpoint(&config.endpoint),
-        #[cfg(test)]
-        resolved_addresses: addresses,
-    })
-}
-
-fn build_provider_probe_client(
-    builder: ClientBuilder,
-    timeout: Duration,
-    host: &str,
-    addresses: &[SocketAddr],
-) -> Result<Client, ()> {
-    builder
-        .timeout(timeout)
-        // Clear both configured and environment/system proxies before attaching credentials.
-        .no_proxy()
-        .resolve_to_addrs(host, addresses)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| ())
-}
-
-async fn execute_provider_probe_request(
-    config: &EffectiveProviderConfig,
-    client: Client,
-    endpoint: String,
-    budget: Duration,
-    started: Instant,
-) -> ProviderProbeOutcome {
-    // The key is attached only after DNS policy validation and client address pinning succeed.
-    let response = match client
-        .post(endpoint)
-        .bearer_auth(config.api_key.expose_secret())
-        .header("accept", "application/json")
-        .json(&json!({
-            "model": config.model,
-            "messages": [{ "role": "user", "content": "Reply OK." }],
-            "max_tokens": 8,
-            "temperature": 0,
-            "stream": false
-        }))
-        .send()
-        .await
-    {
-        Ok(response) => response,
-        Err(error) if error.is_timeout() => {
-            return provider_probe_outcome(started, "provider_timeout", None);
-        }
-        Err(_) => return provider_probe_outcome(started, "provider_unreachable", None),
-    };
-    let response_status = response.status().as_u16();
-    if response.status().is_server_error() {
-        return provider_probe_outcome(started, "provider_5xx", Some(response_status));
-    }
-    if !response.status().is_success() {
-        return provider_probe_outcome(started, "provider_http", Some(response_status));
-    }
-    let payload = match response.bytes().await {
-        Ok(bytes) if bytes.len() <= 64 * 1024 => serde_json::from_slice::<Value>(&bytes).ok(),
-        _ => None,
-    };
-    let valid = payload
-        .as_ref()
-        .and_then(|value| value.get("choices"))
-        .and_then(Value::as_array)
-        .is_some_and(|choices| !choices.is_empty());
-    if !valid {
-        return provider_probe_outcome(
-            started,
-            "provider_malformed_response",
-            Some(response_status),
-        );
-    }
-    let elapsed = started.elapsed();
-    if elapsed > budget {
-        return ProviderProbeOutcome {
-            status: "slow".to_owned(),
-            issue: "provider_slow".to_owned(),
-            response_status: Some(response_status),
-            latency_ms: elapsed.as_millis().try_into().unwrap_or(u64::MAX),
-        };
-    }
-    ProviderProbeOutcome {
-        status: "ready".to_owned(),
-        issue: String::new(),
-        response_status: Some(response_status),
-        latency_ms: elapsed.as_millis().try_into().unwrap_or(u64::MAX),
-    }
-}
-
-fn provider_probe_outcome(
-    started: Instant,
-    issue: &str,
-    response_status: Option<u16>,
-) -> ProviderProbeOutcome {
-    ProviderProbeOutcome {
-        status: issue.to_owned(),
-        issue: issue.to_owned(),
-        response_status,
-        latency_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
-    }
-}
-
-fn completion_endpoint(endpoint: &Url) -> String {
-    let base = endpoint.as_str().trim_end_matches('/');
-    if base.ends_with("/chat/completions") {
-        base.to_owned()
-    } else if base.ends_with("/v1") {
-        format!("{base}/chat/completions")
-    } else {
-        format!("{base}/v1/chat/completions")
-    }
-}
-
-fn parse_provider_endpoint(value: &str) -> Option<Url> {
-    let url = Url::parse(&canonical_endpoint(value)).ok()?;
-    (url.scheme() == "https"
-        && url.host_str().is_some()
-        && url.username().is_empty()
-        && url.password().is_none()
-        && url.query().is_none()
-        && url.fragment().is_none())
-    .then_some(url)
-}
-
-fn canonical_endpoint(value: &str) -> String {
-    value.trim().trim_end_matches('/').to_owned()
-}
-
-fn nonempty_environment(name: &str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
-fn environment_flag(name: &str) -> bool {
-    env::var(name).ok().is_some_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
-
-fn bounded_environment_millis(name: &str, fallback: u64, minimum: u64, maximum: u64) -> u64 {
-    nonempty_environment(name)
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(fallback)
-        .clamp(minimum, maximum)
-}
-
 fn hosted_agent_report() -> HostedAgentReport {
     let managed = PlatformRouterReader::default().read();
     hosted_agent_report_from_managed(&managed)
@@ -2603,7 +2043,7 @@ fn hosted_agent_report_from_managed(managed: &ManagedRouterRead) -> HostedAgentR
             configured: false,
             enabled: false,
             source: ManagedSource::ManagedUnreadable.as_str().to_owned(),
-            protocol: M0_REQUIRED_ROUTER_PROTOCOL.to_owned(),
+            protocol: DEFAULT_PROVIDER_PROTOCOL.to_owned(),
             model: None,
             endpoint_origin: None,
             key_configured: false,
@@ -2618,17 +2058,17 @@ fn hosted_agent_report_from_managed(managed: &ManagedRouterRead) -> HostedAgentR
                     configured: false,
                     enabled: false,
                     source: managed.source().as_str().to_owned(),
-                    protocol: M0_REQUIRED_ROUTER_PROTOCOL.to_owned(),
+                    protocol: DEFAULT_PROVIDER_PROTOCOL.to_owned(),
                     model: None,
                     endpoint_origin: None,
                     key_configured: false,
                     issues: vec!["managed hosted Agent has no active configuration".to_owned()],
                 };
             };
-            let mut report = hosted_agent_report_from_values_with_source(
+            let mut report = hosted_agent_report_from_metadata_with_source(
                 &environment,
                 Some(&config.endpoint),
-                Some("configured"),
+                managed.active_credential_configured(),
                 Some(&config.model),
                 Some(&config.protocol),
                 managed.source().as_str(),
@@ -2638,18 +2078,18 @@ fn hosted_agent_report_from_managed(managed: &ManagedRouterRead) -> HostedAgentR
         }
         ManagedSource::Absent => {
             let endpoint = env::var("MATCHPLANE_ROUTER_AI_URL").ok();
-            let key = env::var("MATCHPLANE_ROUTER_AI_KEY").ok();
+            let key_configured = env::var_os("MATCHPLANE_ROUTER_AI_KEY").is_some();
             let model = env::var("MATCHPLANE_ROUTER_AI_MODEL").ok();
             let protocol = env::var("MATCHPLANE_ROUTER_AI_PROTOCOL").ok();
-            let source = if endpoint.is_some() || key.is_some() || model.is_some() {
+            let source = if endpoint.is_some() || key_configured || model.is_some() {
                 "environment"
             } else {
                 "absent"
             };
-            hosted_agent_report_from_values_with_source(
+            hosted_agent_report_from_metadata_with_source(
                 &environment,
                 endpoint.as_deref(),
-                key.as_deref(),
+                key_configured,
                 model.as_deref(),
                 protocol.as_deref(),
                 source,
@@ -2666,20 +2106,20 @@ fn hosted_agent_report_from_values(
     model: Option<&str>,
     protocol: Option<&str>,
 ) -> HostedAgentReport {
-    hosted_agent_report_from_values_with_source(
+    hosted_agent_report_from_metadata_with_source(
         environment,
         endpoint,
-        key,
+        key.is_some_and(|value| !value.trim().is_empty()),
         model,
         protocol,
         "environment",
     )
 }
 
-fn hosted_agent_report_from_values_with_source(
+fn hosted_agent_report_from_metadata_with_source(
     environment: &str,
     endpoint: Option<&str>,
-    key: Option<&str>,
+    key_configured: bool,
     model: Option<&str>,
     protocol: Option<&str>,
     source: &str,
@@ -2690,7 +2130,6 @@ fn hosted_agent_report_from_values_with_source(
         .unwrap_or("openai-compatible")
         .to_owned();
     let endpoint_origin = endpoint.and_then(|value| safe_endpoint_origin(value.trim()));
-    let key_configured = key.is_some_and(|value| !value.trim().is_empty());
     let model = model
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -2800,43 +2239,25 @@ impl JsonRpcResponse {
 mod tests {
     use super::{
         AdminInviteRole, AuthCommand, Cli, Command, ConversionProjectionCommand,
-        EffectiveProviderConfig, EnvironmentProviderValues, ManagedRouterRead,
-        PasswordMaintenanceConfig, PlatformRouterReader, ProcessCommand, ProviderConfigConflicts,
-        ProviderResolution, RecoveryPathSecurity, SecretCommand, Service, admin_invite_role_value,
-        better_auth_derived_key, build_provider_probe_client, completion_endpoint, dotenv_value,
-        execute_provider_probe_request, execute_provider_probe_with_resolver,
-        hosted_agent_report_from_managed, hosted_agent_report_from_values,
-        load_conversion_recovery_connection, load_conversion_recovery_connection_with_verifier,
-        normalize_admin_base_url, preflight_report_from_resolution, prepare_provider_probe_plan,
-        provider_preflight_report_from_managed, put_root_email_secret,
-        resolve_effective_provider_with_environment, resolve_web_node_with,
-        run_workload_with_detached_preflight, safe_endpoint_origin, select_root_admin_email,
-        service_command, sha256, tool_list, valid_root_email_secret_slot, validate_mounts_output,
-        validate_operator_email, validate_operator_uuid, validate_root_owned_recovery_path,
-        write_root_email_secret_at,
+        PasswordMaintenanceConfig, PlatformRouterReader, ProcessCommand, RecoveryPathSecurity,
+        SecretCommand, Service, admin_invite_role_value, better_auth_derived_key, dotenv_value,
+        hosted_agent_report_from_values, load_conversion_recovery_connection,
+        load_conversion_recovery_connection_with_verifier, normalize_admin_base_url,
+        put_root_email_secret, resolve_web_node_with, run_workload_with_detached_preflight,
+        safe_endpoint_origin, select_root_admin_email, service_command, sha256, tool_list,
+        valid_root_email_secret_slot, validate_mounts_output, validate_operator_email,
+        validate_operator_uuid, validate_root_owned_recovery_path, write_root_email_secret_at,
     };
     use std::{
         cell::Cell,
         fs,
-        net::SocketAddr,
         os::unix::fs::{MetadataExt, PermissionsExt},
         path::Path,
-        sync::{
-            Arc, Mutex,
-            atomic::{AtomicUsize, Ordering},
-        },
-        time::{Duration, Instant},
+        time::Duration,
     };
 
     use anyhow::Context as _;
     use clap::Parser;
-    use secrecy::SecretString;
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-        time::sleep,
-    };
-    use url::Url;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -3328,69 +2749,6 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_present_pointer_never_falls_back_to_ready_environment() -> anyhow::Result<()> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/xtask-platform-router-tests")
-            .join(Uuid::now_v7().to_string());
-        fs::create_dir_all(&root)?;
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o770))?;
-        let root = fs::canonicalize(root)?;
-        let pointer = root.join("platform-router.current");
-        fs::write(&pointer, b"{malformed")?;
-        fs::set_permissions(&pointer, fs::Permissions::from_mode(0o640))?;
-        let managed = PlatformRouterReader::new(&root).read();
-        let ready_environment = EnvironmentProviderValues {
-            endpoint: Some("https://api.lmm.best/v1".to_owned()),
-            api_key: Some(SecretString::from("ready-environment-value")),
-            model: Some("gpt-5.6-sol".to_owned()),
-            protocol: Some("openai-compatible".to_owned()),
-        };
-        let resolution =
-            resolve_effective_provider_with_environment(&managed, ready_environment, true);
-        assert_eq!(resolution.source, "managed_unreadable");
-        assert!(resolution.config.is_none());
-        assert!(
-            resolution
-                .issues
-                .iter()
-                .any(|issue| issue == "managed_state_unreadable")
-        );
-        fs::remove_dir_all(root)?;
-        Ok(())
-    }
-
-    #[test]
-    fn absent_managed_state_allows_environment_and_disabled_generation_is_authoritative()
-    -> anyhow::Result<()> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/xtask-platform-router-tests")
-            .join(Uuid::now_v7().to_string());
-        fs::create_dir_all(&root)?;
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o770))?;
-        let root = fs::canonicalize(root)?;
-        let absent = PlatformRouterReader::new(&root).read();
-        let ready_environment = || EnvironmentProviderValues {
-            endpoint: Some("https://api.lmm.best/v1".to_owned()),
-            api_key: Some(SecretString::from("ready-environment-value")),
-            model: Some("gpt-5.6-sol".to_owned()),
-            protocol: Some("openai-compatible".to_owned()),
-        };
-        let environment_resolution =
-            resolve_effective_provider_with_environment(&absent, ready_environment(), true);
-        assert_eq!(environment_resolution.source, "environment");
-        assert!(environment_resolution.config.is_some());
-
-        let disabled = ManagedRouterRead::test_managed_generation(false);
-        let disabled_resolution =
-            resolve_effective_provider_with_environment(&disabled, ready_environment(), true);
-        assert_eq!(disabled_resolution.source, "managed_generation");
-        assert!(!disabled_resolution.intent_enabled);
-        assert!(disabled_resolution.config.is_none());
-        fs::remove_dir_all(root)?;
-        Ok(())
-    }
-
-    #[test]
     fn provider_preflight_command_is_available() -> anyhow::Result<()> {
         let cli = Cli::try_parse_from(["matchplane", "provider-preflight", "--json"])?;
         assert!(matches!(
@@ -3398,355 +2756,6 @@ mod tests {
             Command::ProviderPreflight { json: true }
         ));
         Ok(())
-    }
-
-    #[test]
-    fn provider_preflight_blocks_the_old_managed_model_without_serializing_the_key()
-    -> anyhow::Result<()> {
-        let resolution = ProviderResolution {
-            config: Some(EffectiveProviderConfig {
-                endpoint: Url::parse("https://api.lmm.best/v1")?,
-                api_key: SecretString::from("test-only-secret"),
-                model: "deepseek-v4-flash-0731".to_owned(),
-                protocol: "openai-compatible".to_owned(),
-            }),
-            intent_enabled: true,
-            source: "managed".to_owned(),
-            managed_overrides_environment: true,
-            conflicts: ProviderConfigConflicts {
-                endpoint: false,
-                model: true,
-                protocol: false,
-            },
-            endpoint_origin: Some("https://api.lmm.best".to_owned()),
-            model: Some("deepseek-v4-flash-0731".to_owned()),
-            protocol: Some("openai-compatible".to_owned()),
-            credential_configured: true,
-            endpoint_matches_required: true,
-            model_matches_required: false,
-            protocol_matches_required: true,
-            issues: vec!["model_mismatch".to_owned()],
-        };
-        let report = preflight_report_from_resolution(&resolution);
-        let encoded = serde_json::to_string(&report)?;
-
-        assert!(report.blocking);
-        assert!(!report.ready);
-        assert_eq!(report.code.as_deref(), Some("upstream_configuration"));
-        assert_eq!(report.preferred_http_status, Some(451));
-        assert!(report.managed_overrides_environment);
-        assert!(!encoded.contains("test-only-secret"));
-        assert!(!encoded.contains("fingerprint"));
-        Ok(())
-    }
-
-    #[test]
-    fn provider_preflight_reports_an_unconfigured_required_provider() {
-        let report = preflight_report_from_resolution(&ProviderResolution {
-            config: None,
-            intent_enabled: true,
-            source: "unconfigured".to_owned(),
-            managed_overrides_environment: false,
-            conflicts: ProviderConfigConflicts::default(),
-            endpoint_origin: None,
-            model: None,
-            protocol: None,
-            credential_configured: false,
-            endpoint_matches_required: false,
-            model_matches_required: false,
-            protocol_matches_required: false,
-            issues: vec!["provider_not_configured".to_owned()],
-        });
-
-        assert!(report.blocking);
-        assert_eq!(report.status, "configuration_mismatch");
-        assert_eq!(report.response_status, None);
-    }
-
-    #[tokio::test]
-    async fn unsafe_managed_modes_block_environment_hosted_readiness_and_provider_probe() {
-        let managed = ManagedRouterRead::test_security_policy_unreadable();
-        let resolution = resolve_effective_provider_with_environment(
-            &managed,
-            EnvironmentProviderValues {
-                endpoint: Some("https://api.lmm.best/v1".to_owned()),
-                api_key: Some(SecretString::from("environment-must-not-win")),
-                model: Some("deepseek-v3.2".to_owned()),
-                protocol: Some("openai-compatible".to_owned()),
-            },
-            true,
-        );
-        assert_eq!(resolution.source, "managed_unreadable");
-        assert!(resolution.config.is_none());
-        assert!(
-            resolution
-                .issues
-                .iter()
-                .any(|issue| issue == "managed_security_policy_invalid")
-        );
-        assert_eq!(
-            managed
-                .read_active_secret()
-                .expect_err("unreadable state refuses key reads")
-                .code(),
-            "managed_security_policy_invalid"
-        );
-
-        let hosted = hosted_agent_report_from_managed(&managed);
-        assert!(!hosted.configured);
-        assert!(!hosted.enabled);
-        assert_eq!(hosted.source, "managed_unreadable");
-        let preflight = provider_preflight_report_from_managed(&managed).await;
-        assert!(!preflight.ready);
-        assert!(preflight.blocking);
-        assert!(
-            preflight
-                .issues
-                .iter()
-                .any(|issue| issue == "managed_security_policy_invalid")
-        );
-    }
-
-    #[tokio::test]
-    async fn provider_dns_policy_rejects_empty_private_ipv6_and_mixed_answers() {
-        let config = test_provider_config(
-            Url::parse("https://provider.example/v1").expect("valid provider URL"),
-        );
-        let cases: Vec<Vec<SocketAddr>> = vec![
-            Vec::new(),
-            vec!["127.0.0.1:443".parse().expect("loopback fixture")],
-            vec!["10.0.0.1:443".parse().expect("private fixture")],
-            vec!["[::1]:443".parse().expect("IPv6 loopback fixture")],
-            vec!["[fc00::1]:443".parse().expect("IPv6 private fixture")],
-            vec!["[4000::1]:443".parse().expect("outside-global fixture")],
-            vec![
-                "8.8.8.8:443".parse().expect("public fixture"),
-                "169.254.169.254:443".parse().expect("metadata fixture"),
-            ],
-            vec![
-                "8.8.8.8:443".parse().expect("public fixture"),
-                "[::ffff:10.0.0.1]:443"
-                    .parse()
-                    .expect("mapped-private fixture"),
-            ],
-            vec![
-                "8.8.8.8:443".parse().expect("public fixture"),
-                "[4000::1]:443".parse().expect("outside-global fixture"),
-            ],
-            vec!["8.8.8.8:444".parse().expect("wrong-port fixture")],
-        ];
-        for addresses in cases {
-            let outcome = execute_provider_probe_with_resolver(
-                &config,
-                Duration::from_secs(1),
-                Duration::from_secs(1),
-                move |_, _| async move { Ok(addresses) },
-            )
-            .await;
-            assert_eq!(outcome.status, "provider_dns_untrusted");
-            assert_eq!(outcome.response_status, None);
-        }
-    }
-
-    #[tokio::test]
-    async fn provider_dns_policy_accepts_public_answers_and_pins_the_first_resolution() {
-        let config = test_provider_config(
-            Url::parse("https://provider.example/v1").expect("valid provider URL"),
-        );
-        let public: Vec<SocketAddr> = vec![
-            "8.8.8.8:443".parse().expect("public IPv4 fixture"),
-            "[::ffff:8.8.8.8]:443"
-                .parse()
-                .expect("mapped-public fixture"),
-            "[2606:4700:4700::1111]:443"
-                .parse()
-                .expect("public IPv6 fixture"),
-        ];
-        let resolver_state = Arc::new(Mutex::new(public.clone()));
-        let resolver_calls = Arc::new(AtomicUsize::new(0));
-        let state = Arc::clone(&resolver_state);
-        let calls = Arc::clone(&resolver_calls);
-        let plan = prepare_provider_probe_plan(&config, Duration::from_secs(1), move |_, _| {
-            let addresses = state.lock().expect("resolver state lock").clone();
-            calls.fetch_add(1, Ordering::SeqCst);
-            async move { Ok(addresses) }
-        })
-        .await
-        .expect("public DNS answers are accepted");
-        *resolver_state.lock().expect("resolver state lock") =
-            vec!["127.0.0.1:443".parse().expect("simulated rebound fixture")];
-
-        assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(plan.resolved_addresses, public);
-    }
-
-    #[tokio::test]
-    async fn provider_transport_uses_exact_pin_without_dns_or_configured_proxy()
-    -> anyhow::Result<()> {
-        let origin = TcpListener::bind("127.0.0.1:0").await?;
-        let origin_address = origin.local_addr()?;
-        let proxy_trap = TcpListener::bind("127.0.0.1:0").await?;
-        let proxy_address = proxy_trap.local_addr()?;
-        let hostname = "provider-resolution-override.invalid";
-        let endpoint = Url::parse(&format!("http://{hostname}:{}/v1", origin_address.port()))?;
-        let origin_task = tokio::spawn(async move {
-            let (mut stream, _) = origin.accept().await?;
-            let mut request = [0_u8; 4096];
-            let _ = stream.read(&mut request).await?;
-            let body = r#"{"choices":[{"message":{"content":"OK"}}]}"#;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes()).await
-        });
-        let proxy = reqwest::Proxy::all(format!("http://{proxy_address}"))?;
-        let client = build_provider_probe_client(
-            super::Client::builder().proxy(proxy),
-            Duration::from_secs(1),
-            hostname,
-            &[origin_address],
-        )
-        .map_err(|()| anyhow::anyhow!("build pinned no-proxy test client"))?;
-        let outcome = execute_provider_probe_request(
-            &test_provider_config(endpoint.clone()),
-            client,
-            completion_endpoint(&endpoint),
-            Duration::from_secs(1),
-            Instant::now(),
-        )
-        .await;
-
-        assert_eq!(outcome.status, "ready");
-        tokio::time::timeout(Duration::from_secs(2), origin_task)
-            .await
-            .context("pinned origin was not contacted")?
-            .context("pinned origin task failed")??;
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), proxy_trap.accept())
-                .await
-                .is_err(),
-            "configured proxy trap must not receive a connection"
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn provider_preflight_accepts_a_bounded_openai_compatible_response() -> anyhow::Result<()>
-    {
-        let endpoint = spawn_provider_response(
-            200,
-            r#"{"choices":[{"message":{"content":"OK"}}]}"#,
-            Duration::ZERO,
-        )
-        .await?;
-        let outcome = execute_provider_probe_with_test_transport(
-            &test_provider_config(endpoint),
-            Duration::from_secs(1),
-            Duration::from_secs(1),
-        )
-        .await;
-
-        assert_eq!(outcome.status, "ready");
-        assert_eq!(outcome.response_status, Some(200));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn provider_preflight_classifies_timeout_without_error_detail() -> anyhow::Result<()> {
-        let endpoint = spawn_provider_response(
-            200,
-            r#"{"choices":[{"message":{"content":"OK"}}]}"#,
-            Duration::from_millis(100),
-        )
-        .await?;
-        let outcome = execute_provider_probe_with_test_transport(
-            &test_provider_config(endpoint),
-            Duration::from_millis(20),
-            Duration::from_secs(1),
-        )
-        .await;
-
-        assert_eq!(outcome.status, "provider_timeout");
-        assert_eq!(outcome.response_status, None);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn provider_preflight_classifies_provider_5xx_without_reading_the_body()
-    -> anyhow::Result<()> {
-        let endpoint =
-            spawn_provider_response(503, "sensitive upstream response body", Duration::ZERO)
-                .await?;
-        let outcome = execute_provider_probe_with_test_transport(
-            &test_provider_config(endpoint),
-            Duration::from_secs(1),
-            Duration::from_secs(1),
-        )
-        .await;
-
-        assert_eq!(outcome.status, "provider_5xx");
-        assert_eq!(outcome.response_status, Some(503));
-        assert!(!outcome.issue.contains("sensitive"));
-        Ok(())
-    }
-
-    async fn execute_provider_probe_with_test_transport(
-        config: &EffectiveProviderConfig,
-        timeout: Duration,
-        budget: Duration,
-    ) -> super::ProviderProbeOutcome {
-        let client = super::Client::builder()
-            .timeout(timeout)
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("build deliberately injected loopback test client");
-        execute_provider_probe_request(
-            config,
-            client,
-            completion_endpoint(&config.endpoint),
-            budget,
-            Instant::now(),
-        )
-        .await
-    }
-
-    fn test_provider_config(endpoint: Url) -> EffectiveProviderConfig {
-        EffectiveProviderConfig {
-            endpoint,
-            api_key: SecretString::from("test-only-secret"),
-            model: "gpt-5.6-sol".to_owned(),
-            protocol: "openai-compatible".to_owned(),
-        }
-    }
-
-    async fn spawn_provider_response(
-        status: u16,
-        body: &str,
-        delay: Duration,
-    ) -> anyhow::Result<Url> {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
-        let address = listener.local_addr()?;
-        let body = body.to_owned();
-        tokio::spawn(async move {
-            if let Ok((mut stream, _)) = listener.accept().await {
-                let mut request = [0_u8; 4096];
-                let _ = stream.read(&mut request).await;
-                sleep(delay).await;
-                let reason = if status == 200 {
-                    "OK"
-                } else {
-                    "Service Unavailable"
-                };
-                let response = format!(
-                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                let _ = stream.write_all(response.as_bytes()).await;
-            }
-        });
-        Ok(Url::parse(&format!("http://{address}/v1"))?)
     }
 
     #[test]

@@ -5148,13 +5148,16 @@ name = "xtask"
 version = "0.1.10"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
+ "futures-util",
  "getrandom 0.3.4",
  "hex",
  "matchplane-config",
  "matchplane-domain",
  "matchplane-storage",
  "reqwest 0.13.4",
+ "rig-core",
  "rpassword",
  "rustix",
  "scrypt",

@@ -180,6 +180,23 @@ impl ManagedRouterRead {
     }
 
     #[cfg(test)]
+    pub(crate) fn test_absent() -> Self {
+        Self {
+            _root: None,
+            active_credential: None,
+            source: ManagedSource::Absent,
+            active: None,
+            draft: None,
+            unreadable: None,
+            pointer_valid: None,
+            generation_valid: None,
+            permission_issues: Vec::new(),
+            orphan_temp_count: 0,
+            oldest_orphan_age_seconds: None,
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn test_managed_generation(enabled: bool) -> Self {
         Self {
             _root: None,
