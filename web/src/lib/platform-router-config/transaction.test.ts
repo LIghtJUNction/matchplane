@@ -549,16 +549,15 @@ describe("non-destructive audit projection", () => {
     const event = auditRecord(205);
     const snapshot = await commitState(root, 205, null, null, [event]);
     const prefix = `${JSON.stringify(auditRecord(206))}\n`;
-    let line = "";
-    for (let paddingLength = 0; paddingLength < 64 * 1024; paddingLength += 1) {
-      const candidate = JSON.stringify({ ...event, padding: `${"x".repeat(paddingLength)}界` });
-      const characterOffset = Buffer.byteLength(`${prefix}${candidate.slice(0, candidate.indexOf("界"))}`);
-      if (characterOffset % (64 * 1024) === 64 * 1024 - 1) {
-        line = candidate;
-        break;
-      }
-    }
-    expect(line).not.toBe("");
+    const scanChunkBytes = 64 * 1024;
+    const template = JSON.stringify({ ...event, padding: "界" });
+    const characterIndex = template.indexOf("界");
+    const fixedOffset = Buffer.byteLength(`${prefix}${template.slice(0, characterIndex)}`);
+    const paddingLength = (scanChunkBytes - 1 - (fixedOffset % scanChunkBytes) + scanChunkBytes)
+      % scanChunkBytes;
+    const line = JSON.stringify({ ...event, padding: `${"x".repeat(paddingLength)}界` });
+    const characterOffset = Buffer.byteLength(`${prefix}${line.slice(0, line.indexOf("界"))}`);
+    expect(characterOffset % scanChunkBytes).toBe(scanChunkBytes - 1);
     writeFileSync(path.join(root, PLATFORM_ROUTER_AUDIT_FILE), `${prefix}${line}\n`, { mode: 0o640 });
     const handle = await acquirePlatformRouterLock({ root });
     try {
