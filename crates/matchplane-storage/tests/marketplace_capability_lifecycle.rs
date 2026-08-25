@@ -1,6 +1,13 @@
-use matchplane_domain::{DomainId, MarketplacePartyId, TenantId};
-use matchplane_storage::{PgStore, StorageError};
+use matchplane_domain::{
+    DomainId, MarketplaceIntentId, MarketplaceOfferId, MarketplacePartyId, MatchIntroductionId,
+    TenantId,
+};
+use matchplane_storage::{
+    CreateMarketplaceIntroduction, MatchMarketplaceDemands, MatchMarketplaceOffers, PgStore,
+    StorageError,
+};
 use sqlx::PgPool;
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 struct LegacyStoreParty {
@@ -222,5 +229,202 @@ async fn legacy_capability_without_a_store_should_remain_compatible(
         .await;
 
     assert!(result.is_ok(), "legacy capability failed: {result:?}");
+    Ok(())
+}
+
+struct DiscoveryFixture {
+    store: PgStore,
+    tenant_id: TenantId,
+    domain_id: DomainId,
+    demand_party_id: MarketplacePartyId,
+    supply_party_id: MarketplacePartyId,
+    store_id: Uuid,
+    intent_id: MarketplaceIntentId,
+    offer_id: MarketplaceOfferId,
+}
+
+async fn discovery_fixture(pool: PgPool) -> Result<DiscoveryFixture, StorageError> {
+    let supply = legacy_store_party(pool, "seller", "supply").await?;
+    let demand_party_id = MarketplacePartyId::new();
+    let intent_id = MarketplaceIntentId::new();
+    let offer_id = MarketplaceOfferId::new();
+
+    sqlx::query(
+        "INSERT INTO marketplace_parties
+         (id, tenant_id, scope_domain_id, platform_path, external_key, display_name, role,
+          marketplace_sides, access_token_hash, access_token_expires_at, contact_ciphertext,
+          contact_nonce, contact_key_version)
+         VALUES ($1, $2, $3, '/legacy-demand', 'demand-party', 'Demand party', 'buyer',
+                 ARRAY['demand']::text[], decode(repeat('08', 32), 'hex'),
+                 clock_timestamp() + INTERVAL '15 minutes', decode('00', 'hex'),
+                 decode('000000000000000000000000', 'hex'), 1)",
+    )
+    .bind(demand_party_id.into_uuid())
+    .bind(supply.tenant_id.into_uuid())
+    .bind(supply.domain_id.into_uuid())
+    .execute(supply.store.pool())
+    .await?;
+    sqlx::query(
+        "INSERT INTO marketplace_intents
+         (id, tenant_id, domain_id, participant_id, side, narrative, attributes, terms,
+          supply_discovery_enabled, idempotency_key, status)
+         VALUES ($1, $2, $3, $4, 'demand', 'electric bicycle',
+                 '{\"category\":\"electric bicycle\"}'::jsonb, '{}'::jsonb,
+                 true, 'discovery-intent', 'active')",
+    )
+    .bind(intent_id.into_uuid())
+    .bind(supply.tenant_id.into_uuid())
+    .bind(supply.domain_id.into_uuid())
+    .bind(demand_party_id.into_uuid())
+    .execute(supply.store.pool())
+    .await?;
+    sqlx::query(
+        "INSERT INTO marketplace_offers
+         (id, tenant_id, domain_id, supply_party_id, external_key, display_name, attributes,
+          terms, status, published_at)
+         VALUES ($1, $2, $3, $4, 'electric-bike-1', 'Electric bicycle',
+                 '{\"description\":\"Electric bicycle\"}'::jsonb,
+                 '{\"pricing_mode\":\"fixed\",\"amount_minor\":\"10000\",\"currency\":\"CNY\",\"currency_scale\":\"2\"}'::jsonb,
+                 'active', clock_timestamp())",
+    )
+    .bind(offer_id.into_uuid())
+    .bind(supply.tenant_id.into_uuid())
+    .bind(supply.domain_id.into_uuid())
+    .bind(supply.party_id.into_uuid())
+    .execute(supply.store.pool())
+    .await?;
+
+    let assigned_store_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT store_id FROM marketplace_offers WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(supply.tenant_id.into_uuid())
+    .bind(offer_id.into_uuid())
+    .fetch_one(supply.store.pool())
+    .await?;
+    assert_eq!(assigned_store_id, Some(supply.store_id));
+
+    Ok(DiscoveryFixture {
+        store: supply.store,
+        tenant_id: supply.tenant_id,
+        domain_id: supply.domain_id,
+        demand_party_id,
+        supply_party_id: supply.party_id,
+        store_id: supply.store_id,
+        intent_id,
+        offer_id,
+    })
+}
+
+async fn assert_store_offer_is_not_discoverable(
+    fixture: &DiscoveryFixture,
+    lifecycle: &str,
+) -> Result<(), StorageError> {
+    let offers = fixture
+        .store
+        .match_marketplace_offers(&MatchMarketplaceOffers {
+            tenant_id: fixture.tenant_id,
+            intent_id: fixture.intent_id,
+            participant_id: fixture.demand_party_id,
+            limit: 10,
+        })
+        .await?;
+    assert!(
+        offers.is_empty(),
+        "{lifecycle} store offer leaked to demand matching"
+    );
+
+    let demands = fixture
+        .store
+        .match_marketplace_demands(&MatchMarketplaceDemands {
+            tenant_id: fixture.tenant_id,
+            domain_id: fixture.domain_id,
+            offer_id: fixture.offer_id,
+            participant_id: fixture.supply_party_id,
+            limit: 10,
+        })
+        .await;
+    assert!(
+        matches!(demands, Err(StorageError::Conflict(_))),
+        "{lifecycle} store offer remained open for supply discovery: {demands:?}"
+    );
+
+    let introduction = fixture
+        .store
+        .create_marketplace_introduction(&CreateMarketplaceIntroduction {
+            introduction_id: MatchIntroductionId::new(),
+            tenant_id: fixture.tenant_id,
+            intent_id: fixture.intent_id,
+            offer_id: fixture.offer_id,
+            participant_id: fixture.demand_party_id,
+            score: 0.9,
+            reasons: vec!["matching test attributes".to_owned()],
+            idempotency_key: format!("{lifecycle}-introduction"),
+            expires_at: OffsetDateTime::now_utc() + Duration::hours(1),
+        })
+        .await;
+    assert!(
+        matches!(introduction, Err(StorageError::Conflict(_))),
+        "{lifecycle} store offer allowed a new introduction: {introduction:?}"
+    );
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "requires a PostgreSQL server with the MatchPlane extensions"]
+async fn store_lifecycle_should_gate_offer_matching_and_new_introductions(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    let fixture = discovery_fixture(pool).await?;
+
+    let offers = fixture
+        .store
+        .match_marketplace_offers(&MatchMarketplaceOffers {
+            tenant_id: fixture.tenant_id,
+            intent_id: fixture.intent_id,
+            participant_id: fixture.demand_party_id,
+            limit: 10,
+        })
+        .await?;
+    assert_eq!(offers.len(), 1);
+    let demands = fixture
+        .store
+        .match_marketplace_demands(&MatchMarketplaceDemands {
+            tenant_id: fixture.tenant_id,
+            domain_id: fixture.domain_id,
+            offer_id: fixture.offer_id,
+            participant_id: fixture.supply_party_id,
+            limit: 10,
+        })
+        .await?;
+    assert_eq!(demands.len(), 1);
+
+    sqlx::query("UPDATE stores SET visibility = 'private' WHERE tenant_id = $1 AND id = $2")
+        .bind(fixture.tenant_id.into_uuid())
+        .bind(fixture.store_id)
+        .execute(fixture.store.pool())
+        .await?;
+    assert_store_offer_is_not_discoverable(&fixture, "private").await?;
+
+    sqlx::query(
+        "UPDATE stores SET visibility = 'public', status = 'suspended'
+         WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id.into_uuid())
+    .bind(fixture.store_id)
+    .execute(fixture.store.pool())
+    .await?;
+    assert_store_offer_is_not_discoverable(&fixture, "suspended").await?;
+
+    sqlx::query("UPDATE stores SET status = 'active' WHERE tenant_id = $1 AND id = $2")
+        .bind(fixture.tenant_id.into_uuid())
+        .bind(fixture.store_id)
+        .execute(fixture.store.pool())
+        .await?;
+    sqlx::query("UPDATE domains SET status = 'disabled' WHERE tenant_id = $1 AND id = $2")
+        .bind(fixture.tenant_id.into_uuid())
+        .bind(fixture.domain_id.into_uuid())
+        .execute(fixture.store.pool())
+        .await?;
+    assert_store_offer_is_not_discoverable(&fixture, "disabled-domain").await?;
     Ok(())
 }

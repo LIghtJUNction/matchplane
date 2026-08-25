@@ -131,6 +131,9 @@ jobs:
           trap cleanup EXIT
           "${compose[@]}" up --build --detach --wait postgres
           cargo test --locked -p matchplane-storage --test migration_fresh_install -- --ignored
+          # Lifecycle isolation gate: private or inactive stores and disabled domains must neither
+          # expose offers to matching nor permit new introductions.
+          CARGO_BUILD_JOBS=2 cargo test --locked -p matchplane-storage --test marketplace_capability_lifecycle -- --ignored --test-threads=1
       - name: Test ordered outbox claims against PostgreSQL
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres

@@ -1142,7 +1142,7 @@ mod tests {
         let job_id = Uuid::now_v7();
         for attempts in 1..=12 {
             let delay = deterministic_retry_delay_ms(job_id, attempts);
-            let exponent = u32::try_from(attempts.clamp(1, 10)).unwrap();
+            let exponent = attempts.clamp(1, 10).unsigned_abs();
             let base = u64::from(2_u32.pow(exponent).min(300)) * 1_000;
             assert!((base * 4 / 5..=base * 6 / 5).contains(&delay));
             assert_eq!(delay, deterministic_retry_delay_ms(job_id, attempts));
