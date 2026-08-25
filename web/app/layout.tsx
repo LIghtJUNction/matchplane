@@ -6,7 +6,7 @@ import "../src/retail-ui.css";
 export const metadata: Metadata = {
   title: "MatchPlane · 找到真正适合你的匹配",
   description:
-    "MatchPlane AI 撮合平台：把真实需求交给合适的供给方，解释匹配理由，并在双方同意后交换联系。",
+    "MatchPlane 商城：说说预算和需求，从真实店铺挑选商品，双方同意后再交换联系方式。",
   icons: {
     icon: "/favicon.svg",
   },

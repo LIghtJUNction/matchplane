@@ -94,7 +94,7 @@ export function resolveSubplatform(pathname = "/"): SubplatformConfig {
         slug: "root",
         path: "/",
         brandName: "MatchPlane",
-        label: "通用 AI 撮合",
+        label: "通用撮合",
         description: "把需求交给合适的供给方。",
         pricing: { mode: "none" },
         marketplaceContract: "generic-v1",
