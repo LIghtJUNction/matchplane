@@ -41,6 +41,7 @@ export * from "./HostedStoreOnboarding";
 export * from "./RemoteStoreOnboarding";
 export * from "./StoreCommercialTermsPanel";
 export * from "./StoreContactConsentCard";
+export * from "./StoreContactRequestsPanel";
 export * from "./StoreCustomersPanel";
 export * from "./StoreFinancePanel";
 export * from "./StoreManagementPanel";

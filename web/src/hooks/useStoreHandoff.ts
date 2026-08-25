@@ -13,6 +13,7 @@ import {
   requestMarketplaceContact,
   type MallAssistantContactConsentAction,
 } from "../api";
+import { markStoreContactRequested } from "../lib/contact-requests";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { loadSubplatform, subplatformCopy, type SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
@@ -135,6 +136,7 @@ export function useStoreHandoff({
         domainId: subplatform.domainId,
         introductionId,
       });
+      markStoreContactRequested(subplatform.path);
       const handoffId =
         typeof handoff.handoff_id === "string" ? handoff.handoff_id : null;
       if (handoffId)
@@ -142,7 +144,9 @@ export function useStoreHandoff({
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("matchplane.contact.updated"));
       }
-      onNotice("联系申请已发送；只有店员也同意后才会交换已验证绑定");
+      onNotice(
+        "联系申请已发送；店员同意后，可在店铺页「联系申请」查看对方联系方式",
+      );
     },
     [subplatform, listings, onNotice],
   );
@@ -348,6 +352,7 @@ export function useStoreHandoff({
             domainId: selectedDomainId,
             introductionId,
           });
+          markStoreContactRequested(selectedPath);
         } else if (listingId && selectedSubplatform.currency) {
           await createBuyerIntroduction({
             session,

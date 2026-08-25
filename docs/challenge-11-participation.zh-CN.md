@@ -102,6 +102,9 @@ matchplane serve gateway
 7. **人工与联系方式**：说 **「请店员联系我确认看车时间」** → 触发 `request_human_handoff`
    店员通知卡；联系方式只能经 `request_contact_consent` 的双方同意卡交换，AI 与店员都不能代答，
    聊天中也不允许手填联系方式。
+8. **双方同意后的互相披露**：店员在 **店铺工作台 → 联系申请** 点「同意交换」后，
+   双方各自读取对方的已验证联系方式——店员在同一列表点「查看对方联系方式」；
+   买家回到店铺页，在 **「联系申请」** 面板点「查看对方联系方式」（店员未同意前显示「等待店员同意」）。
 
 审计佐证：每轮回复的 `toolCalls` 已写入 `platform_ai_usage` / `platform_match_requests`
 （`routing_decision.toolCalls`），可在数据库中当场证明「工具检索而非 RAG」。

@@ -80,8 +80,8 @@ export function StoreContactConsentCard({
           <span>
             {status === "accepted"
               ? english
-                ? "Details are released only after store staff also approve. You can keep chatting with the AI manager."
-                : "只有店员也同意后才会交换；你仍可继续与 AI 店长对话。"
+                ? "Once store staff also approve, the contact appears under Contact requests on this store page. You can keep chatting with the AI manager."
+                : "店员也同意后，可在本店铺页「联系申请」查看对方联系方式；你仍可继续与 AI 店长对话。"
               : english
                 ? "No contact details were shared. The AI manager remains available."
                 : "没有交换任何联系方式，AI 店长仍会继续对话。"}

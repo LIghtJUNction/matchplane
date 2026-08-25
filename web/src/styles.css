@@ -1419,6 +1419,18 @@ main { padding: 0.75rem 0.9rem 5rem; }
 .storefront-view-identity h1 { color: var(--ink); font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 560; letter-spacing: -0.055em; line-height: 1.04; }
 .storefront-view-identity div > span { max-width: 42rem; margin-top: 0.72rem; display: block; color: var(--ink-soft); font-size: 0.9rem; line-height: 1.7; }
 .storefront-view-products { padding: clamp(2rem, 5vw, 3.5rem) 0 4rem; }
+.storefront-contact-requests { width: min(100% - 2rem, 76rem); margin: clamp(1.4rem, 3vw, 2rem) auto 0; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 0.95rem; background: var(--paper); }
+.storefront-contact-requests-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.storefront-contact-requests-heading h2 { color: var(--ink); font-size: 0.92rem; font-weight: 640; }
+.storefront-contact-requests-heading span { margin-top: 0.2rem; display: block; color: var(--muted); font-size: 0.7rem; line-height: 1.5; }
+.storefront-contact-requests-heading button { min-height: 2rem; padding: 0.3rem 0.6rem; border: 1px solid var(--line); border-radius: 0.6rem; background: transparent; color: var(--ink-soft); cursor: pointer; font-size: 0.7rem; }
+.storefront-contact-requests-heading button:hover, .storefront-contact-requests-heading button:focus-visible { border-color: var(--line-strong); color: var(--ink); outline: 0; }
+.storefront-contact-requests-error { margin: 0.65rem 0 0; color: #8c3e2a; font-size: 0.72rem; line-height: 1.45; }
+.storefront-contact-requests-list { margin: 0.35rem 0 0; padding: 0; display: grid; list-style: none; }
+.storefront-contact-requests-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.72rem 0; border-top: 1px solid var(--line); }
+.storefront-contact-requests-list li:first-child { border-top: 0; }
+.storefront-contact-requests-list li > div { min-width: 0; }
+.storefront-contact-requests-list strong { display: block; color: var(--ink); font-size: 0.76rem; }
 .storefront-view-products-heading { margin-bottom: 1.2rem; display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
 .storefront-view-products-heading h2 { color: var(--ink); font-size: 1.55rem; font-weight: 600; letter-spacing: -0.035em; }
 .storefront-view-products-heading span { color: var(--muted); font-size: 0.75rem; }

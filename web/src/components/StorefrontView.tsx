@@ -21,6 +21,7 @@ import type { SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
 import { MatchChat } from "./MatchChat";
+import { StoreContactRequestsPanel } from "./StoreContactRequestsPanel";
 
 /** A public store is a browse surface: identity, introduction, and products only. */
 export function StorefrontView({
@@ -240,6 +241,10 @@ export function StorefrontView({
             onContactConsent={onContactConsent}
           />
         </section>
+      ) : null}
+
+      {!isInactive ? (
+        <StoreContactRequestsPanel subplatform={subplatform} locale={locale} />
       ) : null}
 
       {!isInactive ? (
