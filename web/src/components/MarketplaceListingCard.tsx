@@ -134,7 +134,7 @@ export function MarketplaceListingCard({
           <div className="marketplace-product-price-row">
             <strong>{listing.price}</strong>
             <button type="button" onClick={onOpen}>
-              {locale === "en" ? "Pull box" : "抽出查看"}
+              {locale === "en" ? "View product" : "查看商品"}
               <ArrowRight aria-hidden="true" />
             </button>
           </div>

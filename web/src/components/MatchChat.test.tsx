@@ -1,13 +1,18 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MallAssistantUiAction, RecommendedBackendListing } from "../api";
+import type {
+  MallAssistantSearchTrace,
+  MallAssistantUiAction,
+  RecommendedBackendListing,
+} from "../api";
 
 type AssistantReplyFixture = {
   requestId: string;
   answer: string;
   recommendations: RecommendedBackendListing[];
   uiActions: MallAssistantUiAction[];
+  searchTrace?: MallAssistantSearchTrace;
   outcome?: "empty_catalog" | "no_matching_products";
 };
 
@@ -427,36 +432,45 @@ describe("MatchChat sending state", () => {
     ).toEqual([]);
   });
 
-  it("shows a public attachment photo inside the assistant answer", async () => {
+  it("hands home results and their trace to the page without duplicating product cards", async () => {
     const user = userEvent.setup();
+    const recommendation = {
+      listing_id: "66666666-6666-4666-8666-666666666666",
+      display_name: "照片可见的商品",
+      store_name: "影像店",
+      platform_path: "/camera",
+      asking_amount: "12900",
+      currency: "CNY",
+      currency_scale: 2,
+      attributes: {
+        attachments: [
+          {
+            kind: "image",
+            public_url: "https://images.example.test/product.jpg",
+          },
+        ],
+      },
+    } satisfies RecommendedBackendListing;
+    const searchTrace: MallAssistantSearchTrace = {
+      source: "visible_recommendations",
+      resultCount: 1,
+      stores: [{ path: "/camera", displayName: "影像店", offerCount: 1 }],
+    };
     askMallShoppingAssistant.mockResolvedValueOnce({
       requestId: "55555555-5555-4555-8555-555555555555",
       answer: "找到一件符合条件的商品。",
-      recommendations: [
-        {
-          listing_id: "66666666-6666-4666-8666-666666666666",
-          display_name: "照片可见的商品",
-          asking_amount: "12900",
-          currency: "CNY",
-          currency_scale: 2,
-          attributes: {
-            attachments: [
-              {
-                kind: "image",
-                public_url: "https://images.example.test/product.jpg",
-              },
-            ],
-          },
-        },
-      ],
+      recommendations: [recommendation],
       uiActions: [],
+      searchTrace,
     });
-    const onOpenListing = vi.fn();
+    const onRecommendations = vi.fn();
+    const onSearchTrace = vi.fn();
     render(
       <MatchChat
         home
         onNotice={vi.fn()}
-        onOpenListing={onOpenListing}
+        onRecommendations={onRecommendations}
+        onSearchTrace={onSearchTrace}
         subplatform={subplatform}
       />,
     );
@@ -467,16 +481,11 @@ describe("MatchChat sending state", () => {
     );
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
-    const image = await screen.findByRole("img", { name: "照片可见的商品" });
-    expect(image).toHaveAttribute(
-      "src",
-      "https://images.example.test/product.jpg",
-    );
-    expect(image.closest(".match-chat-recommendations")).not.toBeNull();
-    await user.click(screen.getByRole("button", { name: "照片可见的商品" }));
-    expect(onOpenListing).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "照片可见的商品" }),
-    );
+    expect(await screen.findByText("找到一件符合条件的商品。")).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "照片可见的商品" })).not.toBeInTheDocument();
+    expect(onRecommendations).toHaveBeenCalledWith([recommendation]);
+    expect(onSearchTrace).toHaveBeenNthCalledWith(1, null);
+    expect(onSearchTrace).toHaveBeenNthCalledWith(2, searchTrace);
   });
 
   it("opens a saved conversation from browser history", async () => {

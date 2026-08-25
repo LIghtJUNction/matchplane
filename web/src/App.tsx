@@ -19,6 +19,7 @@ import {
   getPaymentSetting,
   isLiveMarketplaceEnabled,
   switchPaymentMode,
+  type MallAssistantSearchTrace,
 } from "./api";
 import { useInterfacePreferences } from "./lib/preferences";
 import { useMarketplaceCatalog } from "./hooks/useMarketplaceCatalog";
@@ -53,6 +54,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [paymentModeVersion, setPaymentModeVersion] = useState(1);
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [buyerAssistantOpen, setBuyerAssistantOpen] = useState(false);
+  const [rootSearchTrace, setRootSearchTrace] =
+    useState<MallAssistantSearchTrace | null>(null);
 
   // Subplatform routing and URL sync
   const {
@@ -81,7 +84,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   // Re-sync subplatform route once auth resolves
   useEffect(() => {
     if (subplatform.slug === "root") setBuyerAssistantOpen(false);
-  }, [subplatform.slug]);
+    if (subplatform.slug !== "root" || role !== "buyer")
+      setRootSearchTrace(null);
+  }, [role, subplatform.slug]);
 
   useEffect(() => {
     if (!hydrated || !authResolved) return;
@@ -293,31 +298,6 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     ],
   );
 
-  const openMarketplaceDemand = useCallback(
-    (targetPath?: string) => {
-      if (!targetPath) {
-        const stores = document.getElementById("stores");
-        if (typeof stores?.scrollIntoView === "function") {
-          stores.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-        setNotice(
-          locale === "en"
-            ? "Choose a specialist store to continue."
-            : "请先选择一个专业店铺，再继续描述需求。",
-        );
-        return;
-      }
-      if (targetPath === subplatform.path) {
-        setBuyerAssistantOpen(true);
-        return;
-      }
-      void navigateToSubplatform(targetPath).then(() =>
-        setBuyerAssistantOpen(true),
-      );
-    },
-    [locale, navigateToSubplatform, subplatform.path],
-  );
-
   const genericWorkspace: ReactNode =
     role === "platform" ? (
       <PlatformDashboard
@@ -477,7 +457,26 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     listings={listings}
                     onRetryCatalog={retryCatalog}
                     locale={locale}
-                    onDescribeNeed={openMarketplaceDemand}
+                    assistant={
+                      <MatchChat
+                        home
+                        role="buyer"
+                        locale={locale}
+                        onLikeListing={likeListing}
+                        onNotice={setNotice}
+                        onOpenListing={openMarketplaceListing}
+                        onRecommendations={replaceFromRecommendations}
+                        onSearchTrace={setRootSearchTrace}
+                        onHumanHandoff={requestStoreAiHandoff}
+                        onContactConsent={requestStoreContactConsent}
+                        onContactRetrieve={retrieveStoreContact}
+                        subplatform={subplatform}
+                      />
+                    }
+                    searchTrace={rootSearchTrace}
+                    onOpenStore={(path) => {
+                      void navigateToSubplatform(path);
+                    }}
                     onOpenListing={openMarketplaceListing}
                     onLikeListing={likeListing}
                   />

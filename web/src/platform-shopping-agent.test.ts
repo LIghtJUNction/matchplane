@@ -425,6 +425,7 @@ describe("platform shopping agent", () => {
       },
     ]);
     expect(reply.recommendations).toEqual([]);
+    expect(reply.searchTrace).toBeUndefined();
   });
 
   it("rejects a model that omits the required choice tool instead of inventing options", async () => {
@@ -578,6 +579,13 @@ describe("platform shopping agent", () => {
     });
 
     expect(first.recommendations).toHaveLength(2);
+    expect(first.searchTrace).toEqual({
+      source: "visible_recommendations",
+      resultCount: 2,
+      stores: [
+        { path: "/electronics", displayName: "电子店", offerCount: 2 },
+      ],
+    });
     expect(first.modelCalls).toBe(1);
     expect(second.modelCalls).toBe(1);
     expect(first.toolCalls).toEqual([

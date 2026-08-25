@@ -1832,6 +1832,18 @@ export interface MallAssistantMessage {
   content: string;
 }
 
+export interface MallAssistantSearchTraceStore {
+  path: string;
+  displayName: string;
+  offerCount: number;
+}
+
+export interface MallAssistantSearchTrace {
+  source: "visible_recommendations";
+  resultCount: number;
+  stores: MallAssistantSearchTraceStore[];
+}
+
 export interface MallAssistantChoiceAction {
   type: "choice";
   id: string;
@@ -2011,6 +2023,7 @@ export async function askMallShoppingAssistant(
   answer: string;
   recommendations: RecommendedBackendListing[];
   uiActions: MallAssistantUiAction[];
+  searchTrace?: MallAssistantSearchTrace;
   outcome?: "empty_catalog" | "no_matching_products";
 }> {
   const response = await fetch("/api/mall/assistant", {
@@ -2027,6 +2040,7 @@ export async function askMallShoppingAssistant(
     answer?: string;
     recommendations?: unknown;
     uiActions?: unknown;
+    searchTrace?: unknown;
     outcome?: unknown;
     error?:
       | string
@@ -2069,16 +2083,115 @@ export async function askMallShoppingAssistant(
     body.outcome === "empty_catalog" || body.outcome === "no_matching_products"
       ? body.outcome
       : undefined;
+  const recommendations = Array.isArray(body.recommendations)
+    ? (body.recommendations as RecommendedBackendListing[])
+    : [];
+  const searchTrace = normalizeMallAssistantSearchTrace(
+    body.searchTrace,
+    recommendations,
+  );
   return {
     requestId: body.requestId,
     answer: body.answer,
-    recommendations: Array.isArray(body.recommendations)
-      ? (body.recommendations as RecommendedBackendListing[])
-      : [],
+    recommendations,
     uiActions: Array.isArray(body.uiActions)
       ? (body.uiActions as MallAssistantUiAction[])
       : [],
+    ...(searchTrace ? { searchTrace } : {}),
     ...(outcome ? { outcome } : {}),
+  };
+}
+
+const CANONICAL_SEARCH_TRACE_STORE_PATH =
+  /^\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function normalizeMallAssistantSearchTraceStore(
+  value: unknown,
+): MallAssistantSearchTraceStore | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const store = value as {
+    path?: unknown;
+    displayName?: unknown;
+    offerCount?: unknown;
+  };
+  if (
+    typeof store.path !== "string" ||
+    !CANONICAL_SEARCH_TRACE_STORE_PATH.test(store.path) ||
+    typeof store.displayName !== "string" ||
+    !store.displayName.trim() ||
+    store.displayName.length > 120 ||
+    !Number.isInteger(store.offerCount)
+  )
+    return undefined;
+  const offerCount = Number(store.offerCount);
+  if (offerCount < 1 || offerCount > 12) return undefined;
+  return {
+    path: store.path,
+    displayName: store.displayName.trim(),
+    offerCount,
+  };
+}
+
+function visibleRecommendationCountByPath(
+  recommendations: RecommendedBackendListing[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const recommendation of recommendations) {
+    const path = recommendation.platform_path?.trim();
+    if (path)
+      counts.set(path, (counts.get(path) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function normalizeMallAssistantSearchTrace(
+  value: unknown,
+  recommendations: RecommendedBackendListing[],
+): MallAssistantSearchTrace | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as {
+    source?: unknown;
+    resultCount?: unknown;
+    stores?: unknown;
+  };
+  if (
+    candidate.source !== "visible_recommendations" ||
+    !Number.isInteger(candidate.resultCount) ||
+    !Array.isArray(candidate.stores)
+  )
+    return undefined;
+  const resultCount = Number(candidate.resultCount);
+  if (
+    resultCount < 1 ||
+    resultCount > 12 ||
+    candidate.stores.length < 1 ||
+    candidate.stores.length > 8
+  )
+    return undefined;
+  const normalizedStores: MallAssistantSearchTraceStore[] = [];
+  for (const value of candidate.stores) {
+    const store = normalizeMallAssistantSearchTraceStore(value);
+    if (!store) return undefined;
+    normalizedStores.push(store);
+  }
+  if (
+    normalizedStores.reduce(
+      (total, store) => total + store.offerCount,
+      0,
+    ) !== resultCount
+  )
+    return undefined;
+  const visibleCounts = visibleRecommendationCountByPath(recommendations);
+  if (
+    normalizedStores.some(
+      (store) => visibleCounts.get(store.path) !== store.offerCount,
+    )
+  )
+    return undefined;
+  return {
+    source: "visible_recommendations",
+    resultCount,
+    stores: normalizedStores,
   };
 }
 

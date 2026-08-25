@@ -49,15 +49,15 @@ describe("marketplace capability cache", () => {
       role: "both" as const,
       accessToken: "shared",
       accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-      platformPath: "/used-car",
+      platformPath: "/store-a",
     };
-    savePartySession(session, "used-car", "seller", "/used-car");
+    savePartySession(session, "used-car", "seller", "/store-a");
 
     expect(
-      readPartySession("buyer", "used-car", "/used-car")?.accessToken,
+      readPartySession("buyer", "used-car", "/store-a")?.accessToken,
     ).toBe("shared");
     expect(
-      readPartySession("seller", "used-car", "/used-car")?.accessToken,
+      readPartySession("seller", "used-car", "/store-a")?.accessToken,
     ).toBe("shared");
   });
 
@@ -208,6 +208,97 @@ describe("shopping assistant retry metadata", () => {
       retryable: true,
       retryAfterMs: 5_000,
     });
+  });
+
+  it("accepts a bounded search trace tied to visible result stores", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          requestId: "55555555-5555-4555-8555-555555555554",
+          answer: "找到三件商品。",
+          recommendations: [
+            { listing_id: "offer-1", platform_path: "/store-a" },
+            { listing_id: "offer-2", platform_path: "/store-a" },
+            { listing_id: "offer-3", platform_path: "/store-b" },
+          ],
+          uiActions: [],
+          searchTrace: {
+            source: "visible_recommendations",
+            resultCount: 3,
+            stores: [
+              { path: "/store-a", displayName: "示例店铺甲", offerCount: 2 },
+              { path: "/store-b", displayName: "示例店铺乙", offerCount: 1 },
+            ],
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      askMallShoppingAssistant([{ role: "user", content: "找一辆通勤车" }]),
+    ).resolves.toMatchObject({
+      searchTrace: {
+        source: "visible_recommendations",
+        resultCount: 3,
+        stores: [
+          { path: "/store-a", displayName: "示例店铺甲", offerCount: 2 },
+          { path: "/store-b", displayName: "示例店铺乙", offerCount: 1 },
+        ],
+      },
+    });
+  });
+
+  it("drops an inconsistent or unbounded search trace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          requestId: "55555555-5555-4555-8555-555555555553",
+          answer: "暂时没有可验证的来源。",
+          recommendations: [],
+          uiActions: [],
+          searchTrace: {
+            source: "visible_recommendations",
+            resultCount: 99,
+            stores: [
+              { path: "https://private.example", displayName: "未知店铺", offerCount: 1 },
+            ],
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      askMallShoppingAssistant([{ role: "user", content: "找一件商品" }]),
+    ).resolves.not.toHaveProperty("searchTrace");
+  });
+
+  it("drops a recursive path even when a recommendation repeats it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          requestId: "55555555-5555-4555-8555-555555555552",
+          answer: "忽略非 canonical 路径。",
+          recommendations: [
+            { listing_id: "offer-nested", platform_path: "/group/store-a" },
+          ],
+          uiActions: [],
+          searchTrace: {
+            source: "visible_recommendations",
+            resultCount: 1,
+            stores: [
+              { path: "/group/store-a", displayName: "嵌套店铺", offerCount: 1 },
+            ],
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      askMallShoppingAssistant([{ role: "user", content: "找一件商品" }]),
+    ).resolves.not.toHaveProperty("searchTrace");
   });
 
   it("returns request identity with a typed empty-catalog outcome", async () => {

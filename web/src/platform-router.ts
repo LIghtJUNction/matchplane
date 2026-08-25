@@ -144,6 +144,19 @@ export type PlatformAssistantUiAction =
   | PlatformAssistantHumanHandoffAction
   | PlatformAssistantContactConsentAction;
 
+export interface PlatformAssistantSearchTraceStore {
+  path: string;
+  displayName: string;
+  offerCount: number;
+}
+
+/** Bounded, public provenance for the recommendations visible in one reply. */
+export interface PlatformAssistantSearchTrace {
+  source: "visible_recommendations";
+  resultCount: number;
+  stores: PlatformAssistantSearchTraceStore[];
+}
+
 export interface PlatformAssistantReply {
   text: string;
   model: string;
@@ -152,6 +165,7 @@ export interface PlatformAssistantReply {
   recommendations: RecommendedBackendListing[];
   toolCalls: string[];
   uiActions: PlatformAssistantUiAction[];
+  searchTrace?: PlatformAssistantSearchTrace;
   outcome?: "empty_catalog" | "no_matching_products";
 }
 
@@ -243,11 +257,22 @@ const MAX_TOTAL_TIMEOUT_MS = 60_000;
 const MAX_ROUTER_INPUT_CHARACTERS = 24_000;
 const MAX_ROUTER_RESPONSE_BYTES = 256 * 1024;
 const MAX_ASSISTANT_RESPONSE_BYTES = 256 * 1024;
+const CANONICAL_STORE_PATH_PATTERN = /^\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_FALLBACK_CHILDREN = 4;
 // Provider function names use a wire-safe alias because OpenAI-compatible gateways reject dots.
 const NATIVE_ROUTER_TOOL_NAME = "matchplane_platform_select_children";
 const DEFAULT_ROUTER_PROTOCOL = "openai-compatible";
+const structuredProviderDecisionSchema = z
+  .object({
+    selectedSlugs: z.array(z.string().min(1).max(128)).max(MAX_CANDIDATES),
+    rationale: z.string().max(MAX_RATIONALE_LENGTH).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+  })
+  .strict();
 
+type StructuredProviderDecision = z.infer<
+  typeof structuredProviderDecisionSchema
+>;
 type RouterToolMode = "auto" | "required" | "disabled";
 
 class MissingProviderToolError extends Error {
@@ -1803,6 +1828,10 @@ export async function answerPlatformShoppingQuestion(input: {
       finishReason: result.finishReason,
       responseStatus: attempt.responseStatus,
     });
+    const searchTrace = assistantSearchTrace(
+      visibleRecommendations,
+      input.stores,
+    );
     return {
       text: modelText,
       model: router.model,
@@ -1810,6 +1839,7 @@ export async function answerPlatformShoppingQuestion(input: {
       modelCalls: Math.max(1, result.steps?.length ?? 1),
       recommendations: visibleRecommendations,
       toolCalls,
+      ...(searchTrace ? { searchTrace } : {}),
       uiActions: [
         ...choiceActions,
         ...handoffActions,
@@ -1871,6 +1901,47 @@ export async function answerPlatformShoppingQuestion(input: {
   } finally {
     deadline.dispose();
   }
+}
+
+function assistantSearchTrace(
+  recommendations: RecommendedBackendListing[],
+  stores: PublicStore[],
+): PlatformAssistantSearchTrace | undefined {
+  const publicStoreByPath = new Map(stores.map((store) => [store.path, store]));
+  const sources = new Map<string, PlatformAssistantSearchTraceStore>();
+  for (const recommendation of recommendations.slice(0, 12)) {
+    const path =
+      typeof recommendation.platform_path === "string"
+        ? recommendation.platform_path.trim()
+        : "";
+    const store = publicStoreByPath.get(path);
+    const displayName = store?.displayName.trim().slice(0, 120) ?? "";
+    if (
+      !store ||
+      !displayName ||
+      !CANONICAL_STORE_PATH_PATTERN.test(path)
+    )
+      continue;
+    const current = sources.get(path);
+    if (current) current.offerCount += 1;
+    else {
+      sources.set(path, {
+        path,
+        displayName,
+        offerCount: 1,
+      });
+    }
+  }
+  if (!sources.size) return undefined;
+  const traceStores = [...sources.values()].slice(0, 8);
+  return {
+    source: "visible_recommendations",
+    resultCount: traceStores.reduce(
+      (total, store) => total + store.offerCount,
+      0,
+    ),
+    stores: traceStores,
+  };
 }
 
 export function inferShoppingIntent(
@@ -2727,23 +2798,16 @@ function routerSelectionSchema(candidates: PlatformRouteCandidate[]) {
     .strict();
 }
 
-function parseStructuredProviderDecision(text: string): unknown {
+function parseStructuredProviderDecision(
+  text: string,
+): StructuredProviderDecision {
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch {
     throw new MissingProviderTextError();
   }
-  return z
-    .object({
-      selectedSlugs: z
-        .array(z.string().min(1).max(128))
-        .max(MAX_CANDIDATES),
-      rationale: z.string().max(MAX_RATIONALE_LENGTH).optional(),
-      confidence: z.number().min(0).max(1).optional(),
-    })
-    .strict()
-    .parse(value);
+  return structuredProviderDecisionSchema.parse(value);
 }
 
 function normalizeDecision(

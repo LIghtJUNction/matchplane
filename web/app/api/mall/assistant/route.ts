@@ -164,6 +164,7 @@ export async function POST(request: Request): Promise<Response> {
         answer: reply.text,
         recommendations: reply.recommendations,
         uiActions: reply.uiActions,
+        ...(reply.searchTrace ? { searchTrace: reply.searchTrace } : {}),
         ...(reply.outcome ? { outcome: reply.outcome } : {}),
       },
       { headers: { "cache-control": "no-store", "x-request-id": requestId } },

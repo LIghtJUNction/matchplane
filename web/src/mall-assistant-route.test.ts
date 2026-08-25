@@ -213,6 +213,41 @@ describe("mall assistant provider failure mapping", () => {
     });
   });
 
+  it("serializes the bounded visible-result search trace", async () => {
+    mocks.answerPlatformShoppingQuestion.mockResolvedValue({
+      text: "找到三件公开商品。",
+      model: "shopping-model",
+      usage: null,
+      modelCalls: 1,
+      recommendations: [],
+      toolCalls: ["search_public_products"],
+      uiActions: [],
+      searchTrace: {
+        source: "visible_recommendations",
+        resultCount: 3,
+        stores: [
+          { path: "/store-a", displayName: "示例店铺甲", offerCount: 2 },
+          { path: "/store-b", displayName: "示例店铺乙", offerCount: 1 },
+        ],
+      },
+    });
+
+    const response = await POST(assistantRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      answer: "找到三件公开商品。",
+      searchTrace: {
+        source: "visible_recommendations",
+        resultCount: 3,
+        stores: [
+          { path: "/store-a", displayName: "示例店铺甲", offerCount: 2 },
+          { path: "/store-b", displayName: "示例店铺乙", offerCount: 1 },
+        ],
+      },
+    });
+  });
+
   it("keeps malformed output separate from an unreachable provider", async () => {
     mocks.answerPlatformShoppingQuestion.mockRejectedValue(
       new mocks.PlatformAssistantUnavailableError(

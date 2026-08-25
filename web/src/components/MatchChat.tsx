@@ -47,6 +47,7 @@ import {
   type MallAssistantChoiceAction,
   type MallAssistantContactConsentAction,
   type MallAssistantHumanHandoffAction,
+  type MallAssistantSearchTrace,
   type MarketplaceContactResponse,
   type RecommendedBackendListing,
   routePlatformIntent,
@@ -644,6 +645,7 @@ interface MatchChatProps {
   onLikeListing?: (listing: AssetListing) => Promise<void>;
   onOpenListing?: (listing: AssetListing) => void;
   onRecommendations?: (recommendations: RecommendedBackendListing[]) => void;
+  onSearchTrace?: (trace: MallAssistantSearchTrace | null) => void;
   onHumanHandoff?: (input: {
     requestId: string;
     conversionAttemptId: string;
@@ -678,6 +680,7 @@ export function MatchChat({
   onLikeListing,
   onOpenListing,
   onRecommendations,
+  onSearchTrace,
   onHumanHandoff,
   onContactConsent,
   onContactRetrieve,
@@ -1682,6 +1685,7 @@ export function MatchChat({
       const text = rawText.trim();
       if (!text || sending) return;
       setSending(true);
+      onSearchTrace?.(null);
       const failedUserMessageId = chatError?.failedUserMessageId;
       setChatError(null);
       setMessage("");
@@ -1733,6 +1737,7 @@ export function MatchChat({
           locale,
         );
         onRecommendations?.(reply.recommendations);
+        onSearchTrace?.(reply.searchTrace ?? null);
         const assistantId = `${requestId}-assistant`;
         const handoff = (reply.uiActions ?? []).find(
           (action): action is MallAssistantHumanHandoffAction =>
@@ -1767,7 +1772,6 @@ export function MatchChat({
             ...(contactConsent ? { contactConsent } : {}),
           },
         ]);
-        onNotice(reply.answer);
       } catch (error) {
         const detail =
           error instanceof Error ? error.message : runtime.sendFailed;
@@ -1791,6 +1795,7 @@ export function MatchChat({
       messages,
       onNotice,
       onRecommendations,
+      onSearchTrace,
       runtime.sendFailed,
       sending,
       subplatform,
@@ -2057,9 +2062,10 @@ export function MatchChat({
     setMessages([]);
     setConversationAttachments([]);
     setConversationHistoryOpen(false);
+    onSearchTrace?.(null);
     conversationIdRef.current = null;
     window.requestAnimationFrame(() => inputRef.current?.focus());
-  }, [conversationStorageKey, sending]);
+  }, [conversationStorageKey, onSearchTrace, sending]);
 
   const clearConversation = () => {
     if (sending) return;
@@ -2086,6 +2092,7 @@ export function MatchChat({
     setMessages(conversation.messages);
     setConversationAttachments([]);
     setConversationHistoryOpen(false);
+    onSearchTrace?.(null);
     conversationIdRef.current = null;
     window.requestAnimationFrame(() => {
       const thread = threadRef.current;
@@ -2111,6 +2118,7 @@ export function MatchChat({
     setChatError(null);
     setMessages([]);
     setConversationAttachments([]);
+    onSearchTrace?.(null);
     conversationIdRef.current = null;
   };
 
@@ -2208,26 +2216,34 @@ export function MatchChat({
             : "match-chat-heading"
         }
       >
-        <div className={hideMarketingHeading ? "sr-only" : undefined}>
-          {home ? (
-            <h2 id="match-chat-title">{visibleHeadline}</h2>
-          ) : (
-            <h1 id="match-chat-title">{visibleHeadline}</h1>
-          )}
-          <p>{visibleDescription}</p>
-          {isRoot && !isSeller && !compact ? (
-            <ul
-              className="match-chat-promises"
-              aria-label={
-                locale === "en" ? "Shopping assistant capabilities" : "导购能力"
-              }
-            >
-              {shoppingPromises.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+        {hideMarketingHeading ? (
+          <h2 id="match-chat-title">
+            {locale === "en" ? "Shopping conversation" : "购物对话"}
+          </h2>
+        ) : (
+          <div>
+            {home ? (
+              <h2 id="match-chat-title">{visibleHeadline}</h2>
+            ) : (
+              <h1 id="match-chat-title">{visibleHeadline}</h1>
+            )}
+            <p>{visibleDescription}</p>
+            {isRoot && !isSeller && !compact ? (
+              <ul
+                className="match-chat-promises"
+                aria-label={
+                  locale === "en"
+                    ? "Shopping assistant capabilities"
+                    : "导购能力"
+                }
+              >
+                {shoppingPromises.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        )}
         {home ? null : <div className="match-chat-actions">{chatActions}</div>}
       </div>
 
@@ -2351,7 +2367,7 @@ export function MatchChat({
                   ) : null}
                 </div>
               ) : null}
-              {item.recommendations?.length ? (
+              {item.recommendations?.length && !home ? (
                 <section
                   className="match-chat-recommendations"
                   aria-label={
@@ -2456,51 +2472,6 @@ export function MatchChat({
             </li>
           ))}
         </ul>
-      ) : null}
-      {isRoot && !isSeller && !messages.length ? (
-        <section
-          className="match-chat-suggestions"
-          aria-label={
-            locale === "en" ? "Example shopping requests" : "购物需求示例"
-          }
-        >
-          <div className="match-chat-starter-title-row">
-            <Compass size={14} aria-hidden="true" />
-            <span>
-              {locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}
-            </span>
-          </div>
-
-          <div className="match-chat-starter-grid">
-            {starterPromptCards.map((card) => (
-              <button
-                key={card.id}
-                type="button"
-                className="match-chat-starter-card"
-                onClick={() => {
-                  if (isRoot && !isSeller) {
-                    void submitGuestMessage(card.prompt);
-                  } else {
-                    applyQuickPrompt(card.prompt);
-                  }
-                }}
-              >
-                <div className="match-chat-starter-card-top">
-                  <span className="match-chat-starter-badge">{card.badge}</span>
-                  <ArrowUpRight
-                    size={13}
-                    className="match-chat-starter-arrow"
-                    aria-hidden="true"
-                  />
-                </div>
-                <strong className="match-chat-starter-title">
-                  {card.title}
-                </strong>
-                <span className="match-chat-starter-desc">{card.desc}</span>
-              </button>
-            ))}
-          </div>
-        </section>
       ) : null}
       {chatError ? (
         <div className="home-chat-error" role="alert">
@@ -2628,7 +2599,7 @@ export function MatchChat({
           <div className="match-chat-starter-title-row">
             <Compass size={14} aria-hidden="true" />
             <span>
-              {locale === "en" ? "Try asking" : "猜你想找 · 快捷咨询"}
+              {locale === "en" ? "Try asking" : "可以这样开始"}
             </span>
           </div>
 

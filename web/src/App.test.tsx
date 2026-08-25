@@ -131,13 +131,16 @@ async function openUsedCarConversation(
 }
 
 describe("MatchPlane workspaces", () => {
-  it("keeps the root as browse plus a child demand entry", async () => {
+  it("keeps the root as browse plus one inline shopping conversation", async () => {
     render(<App />);
 
-    expect(screen.getByRole("button", { name: "说需求" })).toBeInTheDocument();
     expect(
-      screen.queryByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("heading", { name: "说说你想找什么。", level: 1 }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "说需求" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("tab", { name: "卖方供给" }),
     ).not.toBeInTheDocument();
@@ -626,11 +629,12 @@ describe("MatchPlane workspaces", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭我的店铺" }));
 
-    const demandEntry = screen.getByRole("button", { name: "说需求" });
-    await user.click(demandEntry);
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "请先选择一个专业店铺",
-    );
+    const shoppingInput = screen.getByRole("textbox", {
+      name: "告诉 MatchPlane 你的需求",
+    });
+    await user.type(shoppingInput, "想找一台轻便的通勤电脑");
+    expect(shoppingInput).toHaveValue("想找一台轻便的通勤电脑");
+    expect(screen.getByRole("button", { name: "发送需求" })).toBeEnabled();
   });
 
   it("keeps the platform console in the privileged account menu only", async () => {

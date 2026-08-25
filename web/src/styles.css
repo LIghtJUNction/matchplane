@@ -1641,8 +1641,6 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .app-shell:has(.match-chat.is-root) .match-chat-send { width: 50px; min-width: 50px; height: 50px; border: 0; border-radius: 9px; background: var(--root-accent); color: var(--ivory); box-shadow: none; }
 .app-shell:has(.match-chat.is-root) .match-chat-send:hover { background: var(--root-accent-hover); }
 @media (max-width: 640px) {
-.root-marketplace-demand-entry { align-items: stretch; flex-direction: column; }
-.root-marketplace-demand-entry button { width: 100%; }
 .app-shell:has(.match-chat.is-root) .header-inner { width: min(100% - 24px, 1240px); min-height: 60px; }
 .app-shell:has(.match-chat.is-root) .platform-menu { display: none; }
 .app-shell:has(.match-chat.is-root) .match-chat-form { min-height: 56px; padding: 4px 4px 4px 13px; border-radius: 10px; }
@@ -1671,12 +1669,6 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .root-marketplace-main #products, .root-marketplace-main #stores { scroll-margin-top: 5.5rem; }
 .root-marketplace-stage { position: sticky; top: 0; z-index: 40; padding: 0.85rem 1.5rem 0.85rem; border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent); background: color-mix(in srgb, var(--background-subtle) 88%, transparent); backdrop-filter: blur(0.7rem); }
 .root-marketplace-search { width: 100%; padding: 0; border: 0; }
-.root-marketplace-demand-entry { width: min(100%, 48rem); margin: 0 auto; padding: 1.1rem 0; display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; border-block: 1px solid var(--border); }
-.root-marketplace-demand-entry > div { max-width: 34rem; }
-.root-marketplace-demand-entry h2 { margin: 0; color: var(--foreground-intense); font-size: clamp(1.05rem, 2vw, 1.3rem); letter-spacing: -0.025em; }
-.root-marketplace-demand-entry p { max-width: 65ch; margin: 0.35rem 0 0; color: var(--foreground-muted); font-size: 0.84rem; line-height: 1.6; }
-.root-marketplace-demand-entry button { min-height: 2.75rem; flex: 0 0 auto; }
-.root-marketplace-demand-entry button svg { width: 1rem; height: 1rem; }
 .storefront-demand-action { min-height: 2.75rem; margin-top: 0.65rem; padding: 0; display: inline-flex; align-items: center; align-self: flex-start; gap: 0.4rem; border: 0; background: transparent; color: var(--foreground-intense); font: inherit; font-size: 0.78rem; font-weight: 650; cursor: pointer; }
 .storefront-demand-action svg { width: 1rem; height: 1rem; }
 .storefront-demand-action:hover { color: var(--focus); }

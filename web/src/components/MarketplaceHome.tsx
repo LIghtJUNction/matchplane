@@ -1,459 +1,316 @@
 "use client";
 
 import {
-        Alert,
-        AlertAction,
-        AlertDescription,
-        AlertIcon,
-        AlertTitle,
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
 } from "@appica/ui-react/alert";
 import { Button } from "@appica/ui-react/button";
 import { Skeleton } from "@appica/ui-react/skeleton";
 import { Toggle } from "@appica/ui-react/toggle";
 import { ToggleGroup } from "@appica/ui-react/toggle-group";
-import { MessageSquareMore, PackageOpen, RefreshCw } from "lucide-react";
+import { PackageOpen, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import type { RecommendedBackendListing } from "../api";
-import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
-import type { SubplatformConfig } from "../subplatform";
+import type { MallAssistantSearchTrace } from "../api";
+import type { InterfaceLocale } from "../lib/preferences";
 import type { AssetListing } from "../types";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
+import { MarketplaceSearchTrace } from "./MarketplaceSearchTrace";
 import { StorefrontDirectory } from "./StorefrontDirectory";
 
 interface MarketplaceHomeProps {
-        catalogResolved: boolean;
-        catalogError?: boolean;
-        listings: AssetListing[];
-        locale: InterfaceLocale;
-        onDescribeNeed?: (platformPath?: string) => void;
-        onOpenListing: (listing: AssetListing) => void;
-        /** Kept for callers migrating from the former root chat surface. */
-        theme?: InterfaceTheme;
-        onLocaleChange?: (locale: InterfaceLocale) => void;
-        onThemeChange?: (theme: InterfaceTheme) => void;
-        onNotice?: (message: string) => void;
-        onRecommendations?: (
-                recommendations: RecommendedBackendListing[],
-        ) => void;
-        subplatform?: SubplatformConfig;
-        onLikeListing: (listing: AssetListing) => Promise<void>;
-        onRetryCatalog: () => void;
+  catalogResolved: boolean;
+  catalogError?: boolean;
+  listings: AssetListing[];
+  locale: InterfaceLocale;
+  assistant: ReactNode;
+  searchTrace?: MallAssistantSearchTrace | null;
+  onOpenStore: (path: string) => void;
+  onOpenListing: (listing: AssetListing) => void;
+  onLikeListing: (listing: AssetListing) => Promise<void>;
+  onRetryCatalog: () => void;
 }
 
 function listingCategory(listing: AssetListing) {
-        const fact = listing.facts.find((item) => {
-                const key = item.key?.toLowerCase();
-                const label = item.label.toLowerCase();
-                return (
-                        key === "category" ||
-                        key === "product_category" ||
-                        label === "品类" ||
-                        label === "分类" ||
-                        label === "category"
-                );
-        });
-        return fact?.value.trim() ?? "";
+  const fact = listing.facts.find((item) => {
+    const key = item.key?.toLowerCase();
+    const label = item.label.toLowerCase();
+    return (
+      key === "category" ||
+      key === "product_category" ||
+      label === "品类" ||
+      label === "分类" ||
+      label === "category"
+    );
+  });
+  return fact?.value.trim() ?? "";
 }
 
 function MarketplaceLoading({ locale }: { locale: InterfaceLocale }) {
-        const [showLongWait, setShowLongWait] = useState(false);
+  const [showLongWait, setShowLongWait] = useState(false);
 
-        useEffect(() => {
-                const timeout = window.setTimeout(
-                        () => setShowLongWait(true),
-                        2_000,
-                );
-                return () => window.clearTimeout(timeout);
-        }, []);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setShowLongWait(true), 2_000);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
-        return (
-                <section
-                        className="root-marketplace-loading-state"
-                        role="status"
-                        aria-label={
-                                locale === "en"
-                                        ? "Loading products"
-                                        : "商品读取中"
-                        }
-                        aria-busy="true"
-                >
-                        <div
-                                className="root-marketplace-loading"
-                                aria-hidden="true"
-                        >
-                                {[0, 1, 2, 3].map((item) => (
-                                        <div
-                                                className="root-marketplace-loading-box"
-                                                key={item}
-                                        >
-                                                <Skeleton className="root-marketplace-loading-visual" />
-                                                <Skeleton className="root-marketplace-loading-line" />
-                                                <Skeleton className="root-marketplace-loading-line is-short" />
-                                        </div>
-                                ))}
-                        </div>
-                        {showLongWait ? (
-                                <p>
-                                        {locale === "en"
-                                                ? "Reading the live catalog. This can take a moment."
-                                                : "正在读取实时商品目录，请稍候。"}
-                                </p>
-                        ) : null}
-                </section>
-        );
-}
-
-function MarketplaceDemandEntry({
-        locale,
-        platformPath,
-        onDescribeNeed,
-}: {
-        locale: InterfaceLocale;
-        platformPath?: string;
-        onDescribeNeed: (platformPath?: string) => void;
-}) {
-        return (
-                <section
-                        className="root-marketplace-demand-entry"
-                        aria-labelledby="root-demand-entry-title"
-                >
-                        <div>
-                                <h2 id="root-demand-entry-title">
-                                        {locale === "en"
-                                                ? "Not sure where to start?"
-                                                : "还没找到合适的？"}
-                                </h2>
-                                <p>
-                                        {locale === "en"
-                                                ? "Choose a specialist store, then continue the conversation there."
-                                                : "先进入对应的专业店铺，再由店内选货员继续帮你。"}
-                                </p>
-                        </div>
-                        <Button
-                                type="button"
-                                onClick={() => onDescribeNeed(platformPath)}
-                        >
-                                <MessageSquareMore aria-hidden="true" />
-                                {locale === "en"
-                                        ? "Describe your need"
-                                        : "说需求"}
-                        </Button>
-                </section>
-        );
+  return (
+    <section
+      className="root-marketplace-loading-state"
+      role="status"
+      aria-label={locale === "en" ? "Loading products" : "商品读取中"}
+      aria-busy="true"
+    >
+      <div className="root-marketplace-loading" aria-hidden="true">
+        {[0, 1, 2, 3].map((item) => (
+          <div className="root-marketplace-loading-box" key={item}>
+            <Skeleton className="root-marketplace-loading-visual" />
+            <Skeleton className="root-marketplace-loading-line" />
+            <Skeleton className="root-marketplace-loading-line is-short" />
+          </div>
+        ))}
+      </div>
+      {showLongWait ? (
+        <p>
+          {locale === "en"
+            ? "Reading the live catalog. This can take a moment."
+            : "正在读取实时商品目录，请稍候。"}
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 function MarketplaceProducts({
-        catalogResolved,
-        catalogError,
-        listings,
-        locale,
-        onOpenListing,
-        onLikeListing,
-        onRetryCatalog,
+  catalogResolved,
+  catalogError,
+  listings,
+  locale,
+  onOpenListing,
+  onLikeListing,
+  onRetryCatalog,
 }: {
-        catalogResolved: boolean;
-        catalogError: boolean;
-        listings: AssetListing[];
-        locale: InterfaceLocale;
-        onOpenListing: (listing: AssetListing) => void;
-        onLikeListing: (listing: AssetListing) => Promise<void>;
-        onRetryCatalog: () => void;
+  catalogResolved: boolean;
+  catalogError: boolean;
+  listings: AssetListing[];
+  locale: InterfaceLocale;
+  onOpenListing: (listing: AssetListing) => void;
+  onLikeListing: (listing: AssetListing) => Promise<void>;
+  onRetryCatalog: () => void;
 }) {
-        let content: ReactNode;
-        if (!catalogResolved) content = <MarketplaceLoading locale={locale} />;
-        else if (listings.length)
-                content = (
-                        <div className="root-marketplace-products-grid">
-                                {listings.map((listing) => (
-                                        <MarketplaceListingCard
-                                                listing={listing}
-                                                locale={locale}
-                                                onOpen={() =>
-                                                        onOpenListing(listing)
-                                                }
-                                                onLike={() =>
-                                                        onLikeListing(listing)
-                                                }
-                                                key={listing.id}
-                                        />
-                                ))}
-                        </div>
-                );
-        else if (catalogError)
-                content = (
-                        <Alert
-                                className="root-marketplace-error"
-                                variant="error"
-                                layout="inline"
-                        >
-                                <AlertIcon>
-                                        <PackageOpen aria-hidden="true" />
-                                </AlertIcon>
-                                <AlertTitle as="div">
-                                        {locale === "en"
-                                                ? "The product shelf did not load"
-                                                : "商品货架读取失败"}
-                                </AlertTitle>
-                                <AlertDescription>
-                                        {locale === "en"
-                                                ? "The shopping assistant is still available."
-                                                : "选货员仍然可用，可以直接描述你的需要。"}
-                                </AlertDescription>
-                                <AlertAction>
-                                        <Button
-                                                size="sm"
-                                                type="button"
-                                                onClick={onRetryCatalog}
-                                        >
-                                                <RefreshCw aria-hidden="true" />
-                                                {locale === "en"
-                                                        ? "Retry catalog"
-                                                        : "重新读取商品"}
-                                        </Button>
-                                </AlertAction>
-                        </Alert>
-                );
-        else
-                content = (
-                        <div className="root-marketplace-empty">
-                                <PackageOpen aria-hidden="true" />
-                                <div>
-                                        <strong>
-                                                {locale === "en"
-                                                        ? "No approved products yet"
-                                                        : "暂时还没有通过审核的商品"}
-                                        </strong>
-                                        <p>
-                                                {locale === "en"
-                                                        ? "Ask the shopping assistant, or browse the open stores below."
-                                                        : "可以询问选货员，也可以浏览下方已营业店铺。"}
-                                        </p>
-                                </div>
-                        </div>
-                );
+  let content: ReactNode;
+  if (!catalogResolved) content = <MarketplaceLoading locale={locale} />;
+  else if (listings.length)
+    content = (
+      <div className="root-marketplace-products-grid">
+        {listings.map((listing) => (
+          <MarketplaceListingCard
+            listing={listing}
+            locale={locale}
+            onOpen={() => onOpenListing(listing)}
+            onLike={() => onLikeListing(listing)}
+            key={listing.id}
+          />
+        ))}
+      </div>
+    );
+  else if (catalogError)
+    content = (
+      <Alert className="root-marketplace-error" variant="error" layout="inline">
+        <AlertIcon>
+          <PackageOpen aria-hidden="true" />
+        </AlertIcon>
+        <AlertTitle as="div">
+          {locale === "en"
+            ? "The product shelf did not load"
+            : "商品货架读取失败"}
+        </AlertTitle>
+        <AlertDescription>
+          {locale === "en"
+            ? "The shopping assistant is still available above."
+            : "上方选货员仍然可用，可以直接描述你的需要。"}
+        </AlertDescription>
+        <AlertAction>
+          <Button size="sm" type="button" onClick={onRetryCatalog}>
+            <RefreshCw aria-hidden="true" />
+            {locale === "en" ? "Retry catalog" : "重新读取商品"}
+          </Button>
+        </AlertAction>
+      </Alert>
+    );
+  else
+    content = (
+      <div className="root-marketplace-empty">
+        <PackageOpen aria-hidden="true" />
+        <div>
+          <strong>
+            {locale === "en"
+              ? "No approved products yet"
+              : "暂时还没有通过审核的商品"}
+          </strong>
+          <p>
+            {locale === "en"
+              ? "Refine your request above, or browse the open stores below."
+              : "可以修改上方需求，也可以浏览下方已营业店铺。"}
+          </p>
+        </div>
+      </div>
+    );
 
-        return (
-                <section
-                        className="root-marketplace-products"
-                        id="products"
-                        aria-labelledby="marketplace-products-title"
-                >
-                        <div className="root-marketplace-products-heading">
-                                <div>
-                                        <p>
-                                                {locale === "en"
-                                                        ? "CURATED PRODUCTS"
-                                                        : "精选在售"}
-                                        </p>
-                                        <h2 id="marketplace-products-title">
-                                                {locale === "en"
-                                                        ? "Products"
-                                                        : "商品"}
-                                        </h2>
-                                        <span>
-                                                {locale === "en"
-                                                        ? "Clear product details from open stores."
-                                                        : "商品信息来自当前营业店铺。"}
-                                        </span>
-                                </div>
-                                {listings.length ? (
-                                        <strong className="root-marketplace-inventory-count">
-                                                <span>{listings.length}</span>
-                                                {locale === "en"
-                                                        ? " products"
-                                                        : " 件商品"}
-                                        </strong>
-                                ) : null}
-                        </div>
-                        {content}
-                </section>
-        );
+  return (
+    <section
+      className="root-marketplace-products"
+      id="products"
+      aria-labelledby="marketplace-products-title"
+    >
+      <div className="root-marketplace-products-heading">
+        <div>
+          <p>{locale === "en" ? "VISIBLE NOW" : "当前可见"}</p>
+          <h2 id="marketplace-products-title">
+            {locale === "en" ? "Products" : "商品"}
+          </h2>
+          <span>
+            {locale === "en"
+              ? "Published product details from open stores."
+              : "商品信息来自当前营业店铺。"}
+          </span>
+        </div>
+        {listings.length ? (
+          <strong className="root-marketplace-inventory-count">
+            <span>{listings.length}</span>
+            {locale === "en" ? " products" : " 件商品"}
+          </strong>
+        ) : null}
+      </div>
+      {content}
+    </section>
+  );
 }
 
 export function MarketplaceHome({
-        catalogResolved,
-        catalogError = false,
-        listings,
-        locale,
-        onDescribeNeed = () => undefined,
-        onOpenListing,
-        onLikeListing,
-        onRetryCatalog,
+  catalogResolved,
+  catalogError = false,
+  listings,
+  locale,
+  assistant,
+  searchTrace,
+  onOpenStore,
+  onOpenListing,
+  onLikeListing,
+  onRetryCatalog,
 }: MarketplaceHomeProps) {
-        const allLabel = locale === "en" ? "All" : "全部";
-        const [category, setCategory] = useState(allLabel);
-        const categories = useMemo(
-                () => [
-                        allLabel,
-                        ...Array.from(
-                                new Set(
-                                        listings
-                                                .map(listingCategory)
-                                                .filter(Boolean),
-                                ),
-                        ),
-                ],
-                [allLabel, listings],
+  const allLabel = locale === "en" ? "All" : "全部";
+  const [category, setCategory] = useState(allLabel);
+  const categories = useMemo(
+    () => [
+      allLabel,
+      ...Array.from(new Set(listings.map(listingCategory).filter(Boolean))),
+    ],
+    [allLabel, listings],
+  );
+  const effectiveCategory = categories.includes(category) ? category : allLabel;
+  const visibleListings =
+    effectiveCategory === allLabel
+      ? listings
+      : listings.filter(
+          (listing) => listingCategory(listing) === effectiveCategory,
         );
-        const effectiveCategory = categories.includes(category)
-                ? category
-                : allLabel;
-        const visibleListings =
-                effectiveCategory === allLabel
-                        ? listings
-                        : listings.filter(
-                                  (listing) =>
-                                          listingCategory(listing) ===
-                                          effectiveCategory,
-                          );
+  const sparseCatalog = catalogResolved && visibleListings.length <= 2;
 
-        const sparseCatalog = catalogResolved && visibleListings.length <= 2;
-        const demandPlatformPath = listings.find(
-                (listing) =>
-                        listing.platformPath && listing.platformPath !== "/",
-        )?.platformPath;
+  return (
+    <div
+      className="root-marketplace-page min-h-screen bg-background-subtle text-foreground"
+      id="top"
+    >
+      <div className="root-marketplace-main">
+        <section
+          className={`root-marketplace-entry${searchTrace ? " has-results" : ""}`}
+          aria-labelledby="root-marketplace-title"
+        >
+          <header className="root-marketplace-catalog-intro">
+            <p>{locale === "en" ? "OPEN MARKETPLACE" : "开放商城"}</p>
+            <h1 id="root-marketplace-title">
+              {locale === "en"
+                ? "Describe what you are looking for."
+                : "说说你想找什么。"}
+            </h1>
+            <span>
+              {locale === "en"
+                ? "MatchPlane searches public stores and keeps each visible result tied to its source."
+                : "MatchPlane 会检索公开店铺，并保留每个可见结果的真实来源。"}
+            </span>
+            <ul className="root-marketplace-entry-facts">
+              <li>{locale === "en" ? "Browse without signing in" : "无需登录即可浏览"}</li>
+              <li>{locale === "en" ? "Public listings only" : "只检索公开商品"}</li>
+              <li>{locale === "en" ? "Sources stay visible" : "结果来源始终可见"}</li>
+            </ul>
+          </header>
+          <div className="root-marketplace-concierge">
+            <div className="root-marketplace-chat-shell">{assistant}</div>
+          </div>
+          {searchTrace ? (
+            <MarketplaceSearchTrace
+              trace={searchTrace}
+              locale={locale}
+              onOpenStore={onOpenStore}
+            />
+          ) : null}
+          <a className="root-marketplace-scroll-cue" href="#products">
+            {locale === "en" ? "Browse what is live" : "浏览当前在售"}
+            <span aria-hidden="true">↓</span>
+          </a>
+        </section>
 
-        return (
-                <div
-                        className="root-marketplace-page min-h-screen bg-background-subtle text-foreground"
-                        id="top"
-                >
-                        <div className="root-marketplace-main">
-                                <div className="root-marketplace-catalog">
-                                        <header className="root-marketplace-catalog-intro">
-                                                <div>
-                                                        <p>
-                                                                {locale === "en"
-                                                                        ? "MATCHPLANE MARKET"
-                                                                        : "MATCHPLANE 商城"}
-                                                        </p>
-                                                        <h1>
-                                                                {locale === "en"
-                                                                        ? "Find products that fit."
-                                                                        : "发现适合你的商品"}
-                                                        </h1>
-                                                        <span>
-                                                                {locale === "en"
-                                                                        ? "Browse real listings. The shopping assistant can help narrow the choice when needed."
-                                                                        : "浏览真实在售商品；需要帮助时，选货员会帮你缩小范围。"}
-                                                        </span>
-                                                </div>
-                                                <div className="root-marketplace-catalog-actions">
-                                                        <Button
-                                                                variant="outline"
-                                                                nativeButton={
-                                                                        false
-                                                                }
-                                                                render={
-                                                                        <a href="#stores">
-                                                                                {locale ===
-                                                                                "en"
-                                                                                        ? "Browse stores"
-                                                                                        : "浏览店铺"}
-                                                                        </a>
-                                                                }
-                                                        />
-                                                </div>
-                                        </header>
-                                        <div className="root-marketplace-concierge">
-                                                <MarketplaceDemandEntry
-                                                        locale={locale}
-                                                        platformPath={
-                                                                demandPlatformPath
-                                                        }
-                                                        onDescribeNeed={
-                                                                onDescribeNeed
-                                                        }
-                                                />
-                                        </div>
-                                        {categories.length > 1 ? (
-                                                <ToggleGroup
-                                                        className="root-marketplace-inline-categories"
-                                                        aria-label={
-                                                                locale === "en"
-                                                                        ? "Product categories"
-                                                                        : "商品分类"
-                                                        }
-                                                        value={[
-                                                                effectiveCategory,
-                                                        ]}
-                                                        onValueChange={(
-                                                                next,
-                                                        ) => {
-                                                                if (next[0])
-                                                                        setCategory(
-                                                                                next[0],
-                                                                        );
-                                                        }}
-                                                >
-                                                        {categories.map(
-                                                                (item) => (
-                                                                        <Toggle
-                                                                                key={
-                                                                                        item
-                                                                                }
-                                                                                value={
-                                                                                        item
-                                                                                }
-                                                                                aria-label={
-                                                                                        item
-                                                                                }
-                                                                                render={
-                                                                                        <Button
-                                                                                                className="root-marketplace-category"
-                                                                                                variant="ghost"
-                                                                                                size="sm"
-                                                                                                type="button"
-                                                                                        >
-                                                                                                {
-                                                                                                        item
-                                                                                                }
-                                                                                        </Button>
-                                                                                }
-                                                                        />
-                                                                ),
-                                                        )}
-                                                </ToggleGroup>
-                                        ) : null}
-                                        <div
-                                                className={`root-marketplace-content${sparseCatalog ? " is-sparse" : ""}`}
-                                        >
-                                                <MarketplaceProducts
-                                                        catalogResolved={
-                                                                catalogResolved
-                                                        }
-                                                        catalogError={
-                                                                catalogError
-                                                        }
-                                                        listings={
-                                                                visibleListings
-                                                        }
-                                                        locale={locale}
-                                                        onOpenListing={
-                                                                onOpenListing
-                                                        }
-                                                        onLikeListing={
-                                                                onLikeListing
-                                                        }
-                                                        onRetryCatalog={
-                                                                onRetryCatalog
-                                                        }
-                                                />
-                                                <div
-                                                        className="root-marketplace-stores"
-                                                        id="stores"
-                                                >
-                                                        <StorefrontDirectory
-                                                                locale={locale}
-                                                                onDescribeNeed={
-                                                                        onDescribeNeed
-                                                                }
-                                                        />
-                                                </div>
-                                        </div>
-                                </div>
-                        </div>
-                </div>
-        );
+        <div className="root-marketplace-catalog">
+          {categories.length > 1 ? (
+            <ToggleGroup
+              className="root-marketplace-inline-categories"
+              aria-label={locale === "en" ? "Product categories" : "商品分类"}
+              value={[effectiveCategory]}
+              onValueChange={(next) => {
+                if (next[0]) setCategory(next[0]);
+              }}
+            >
+              {categories.map((item) => (
+                <Toggle
+                  key={item}
+                  value={item}
+                  aria-label={item}
+                  render={
+                    <Button
+                      className="root-marketplace-category"
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                    >
+                      {item}
+                    </Button>
+                  }
+                />
+              ))}
+            </ToggleGroup>
+          ) : null}
+          <div
+            className={`root-marketplace-content${sparseCatalog ? " is-sparse" : ""}`}
+          >
+            <MarketplaceProducts
+              catalogResolved={catalogResolved}
+              catalogError={catalogError}
+              listings={visibleListings}
+              locale={locale}
+              onOpenListing={onOpenListing}
+              onLikeListing={onLikeListing}
+              onRetryCatalog={onRetryCatalog}
+            />
+            <div className="root-marketplace-stores" id="stores">
+              <StorefrontDirectory locale={locale} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
