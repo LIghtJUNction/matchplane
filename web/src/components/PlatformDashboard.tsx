@@ -17,14 +17,10 @@ import {
   getInvoiceProviders,
   getPaymentGateways,
   getPaymentRoutes,
-  getPlatformSetupStatus,
-  getPlatformAiStatus,
   getSubplatformOrganizations,
-  createRootPlatformOrganization,
   isLiveMarketplaceEnabled,
   activateSubplatform,
   discoverSubplatformSource,
-  getPlatformDomains,
   getSubplatformSourceIntake,
   registerSubplatform,
   saveInvoiceProvider,
@@ -36,17 +32,19 @@ import {
   type InvoiceSetting,
   type PaymentGatewayRecord,
   type PaymentRouteRecord,
-  type PlatformSetupStatus,
-  type PlatformAiStatus,
-  type PlatformDomainRecord,
   type SubplatformArchiveUpload,
   type SubplatformOrganizationRecord,
 } from "../api";
 import { LoginMethodsPanel } from "./LoginMethodsPanel";
 import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
+import { PlatformBootstrapNotice } from "./PlatformBootstrapNotice";
 import { PlatformFinanceRecordsPanel } from "./PlatformFinanceRecordsPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
+import {
+  freshBootstrapResourceData,
+  usePlatformBootstrapResources,
+} from "../hooks/usePlatformBootstrapResources";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
 import { NationalIdentityConfigPanel } from "./NationalIdentityConfigPanel";
@@ -83,10 +81,16 @@ export function PlatformDashboard({
   onBrandUpdated,
   onNotice,
 }: PlatformDashboardProps) {
-  const [setup, setSetup] = useState<PlatformSetupStatus | null>(null);
+  const bootstrapAuthorized =
+    rootRole === "rootSuperAdmin" || rootRole === "rootAdmin";
+  const bootstrap = usePlatformBootstrapResources({
+    authorized: bootstrapAuthorized,
+    rootRole,
+    onNotice,
+  });
+  const verifiedSetup = freshBootstrapResourceData(bootstrap.setup);
+  const verifiedDomains = freshBootstrapResourceData(bootstrap.domains);
   const [activeSection, setActiveSection] = useState<PlatformSection>("home");
-  const [aiStatus, setAiStatus] = useState<PlatformAiStatus | null>(null);
-  const [domains, setDomains] = useState<PlatformDomainRecord[]>([]);
   const [subplatforms, setSubplatforms] = useState<
     SubplatformOrganizationRecord[]
   >([]);
@@ -143,16 +147,16 @@ export function PlatformDashboard({
   const [subplatformDiscoveryState, setSubplatformDiscoveryState] =
     useState("");
   const accessOrganizations: SubplatformOrganizationRecord[] = [
-    ...(setup?.root.organization
+    ...(verifiedSetup?.root.organization
       ? [
           {
-            id: setup.root.organization.id,
+            id: verifiedSetup.root.organization.id,
             isRoot: true,
-            name: setup.root.organization.name,
-            slug: setup.root.organization.slug,
+            name: verifiedSetup.root.organization.name,
+            slug: verifiedSetup.root.organization.slug,
             parentOrganizationId: null,
-            tenantId: setup.root.organization.tenantId,
-            domainId: setup.root.organization.domainId,
+            tenantId: verifiedSetup.root.organization.tenantId,
+            domainId: verifiedSetup.root.organization.domainId,
             sourceRepository: null,
             createdAt: "",
             registrationId: null,
@@ -163,34 +167,10 @@ export function PlatformDashboard({
         ]
       : []),
     ...subplatforms.filter(
-      (organization) => organization.id !== setup?.root.organization?.id,
+      (organization) =>
+        organization.id !== verifiedSetup?.root.organization?.id,
     ),
   ];
-
-  useEffect(() => {
-    if (!rootRole) return;
-    let mounted = true;
-    void Promise.allSettled([
-      getPlatformSetupStatus(),
-      getPlatformDomains(),
-      getPlatformAiStatus(),
-    ]).then(([statusResult, domainsResult, aiResult]) => {
-      if (!mounted) return;
-      if (statusResult.status === "fulfilled") {
-        setSetup(statusResult.value);
-      }
-      // A fresh deployment can report its bounded setup state before a root tenant exists.
-      // Keep that useful state visible instead of turning the whole admin panel into a generic
-      // error just because the domain endpoint correctly returned 503.
-      setDomains(
-        domainsResult.status === "fulfilled" ? domainsResult.value : [],
-      );
-      if (aiResult.status === "fulfilled") setAiStatus(aiResult.value);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [rootRole]);
 
   useEffect(() => {
     if (!rootRole || !isLiveMarketplaceEnabled()) return;
@@ -230,9 +210,15 @@ export function PlatformDashboard({
   }, [rootRole]);
 
   useEffect(() => {
-    if (!subplatformDomainId && setup?.domains[0])
-      setSubplatformDomainId(setup.domains[0].id);
-  }, [setup, subplatformDomainId]);
+    const currentDomains = verifiedDomains ?? [];
+    setSubplatformDomainId((current) => {
+      if (current && !currentDomains.some((domain) => domain.id === current))
+        return "";
+      if (!current && currentDomains.length === 1)
+        return currentDomains[0]?.id ?? "";
+      return current;
+    });
+  }, [verifiedDomains]);
 
   const refreshPaymentConfiguration = async () => {
     const [nextGateways, nextRoutes, nextInvoiceProviders, nextInvoiceSetting] =
@@ -252,39 +238,6 @@ export function PlatformDashboard({
     setSubplatforms(await getSubplatformOrganizations());
   };
 
-  const refreshDomains = async () => {
-    const [status, records] = await Promise.all([
-      getPlatformSetupStatus(),
-      getPlatformDomains(),
-    ]);
-    setSetup(status);
-    setDomains(records);
-  };
-
-  const initializeRootOrganization = async () => {
-    if (!setup?.root.tenantExists || !setup.root.tenant) {
-      onNotice("根商城尚未由部署工具创建，暂时不能在网页中继续初始化");
-      return;
-    }
-    if (rootRole !== "rootSuperAdmin") {
-      onNotice("只有商城负责人可以创建根商城组织");
-      return;
-    }
-    setSaving(true);
-    try {
-      const organization = await createRootPlatformOrganization({
-        name: setup.root.tenant.name,
-        slug: setup.root.tenant.slug,
-      });
-      await refreshDomains();
-      onNotice(`商城组织“${organization.name}”已创建`);
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "商城组织创建失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const resetSubplatformEditor = () => {
     setSubplatformSourceKind("git");
     setSubplatformPackageId("");
@@ -301,12 +254,24 @@ export function PlatformDashboard({
   };
 
   const submitSubplatform = async () => {
-    if (!setup?.root.tenantId) {
-      onNotice("商城尚未完成初始化，暂时不能接入店铺");
+    if (bootstrap.setup.status !== "ready") {
+      onNotice("商城初始化状态尚未验证，请重新读取后再接入店铺");
       return;
     }
-    if (!subplatformDomainId) {
-      onNotice("商城内部数据尚未初始化，请先完成商城初始化");
+    const currentSetup = bootstrap.setup.data;
+    if (!currentSetup.root.tenantId) {
+      onNotice("商城已确认尚未完成初始化，暂时不能接入店铺");
+      return;
+    }
+    if (bootstrap.domains.status !== "ready") {
+      onNotice("商城数据范围尚未验证，请重新读取后再接入店铺");
+      return;
+    }
+    const selectedDomain = bootstrap.domains.data.find(
+      (domain) => domain.id === subplatformDomainId,
+    );
+    if (!selectedDomain) {
+      onNotice("请选择一个已验证的商城数据范围后再接入店铺");
       return;
     }
     let packageId = subplatformPackageId.trim();
@@ -368,7 +333,7 @@ export function PlatformDashboard({
       } else {
         setSubplatformDiscoveryState("正在提交到隔离构建器…");
         const intake = await discoverSubplatformSource({
-          domainId: subplatformDomainId,
+          domainId: selectedDomain.id,
           sourceKind: subplatformSourceKind,
           sourceLocator,
           sourceDigest: sourceDigest || undefined,
@@ -431,8 +396,8 @@ export function PlatformDashboard({
         return;
       }
       const result = await registerSubplatform({
-        tenantId: setup.root.tenantId,
-        domainId: subplatformDomainId,
+        tenantId: currentSetup.root.tenantId,
+        domainId: selectedDomain.id,
         packageId,
         slug,
         sourceKind: subplatformSourceKind,
@@ -460,6 +425,19 @@ export function PlatformDashboard({
   const activateRegisteredSubplatform = async (
     organization: SubplatformOrganizationRecord,
   ) => {
+    if (bootstrap.domains.status !== "ready") {
+      onNotice("商城数据范围尚未验证，请重新读取后再上线店铺");
+      return;
+    }
+    if (
+      !organization.domainId ||
+      !bootstrap.domains.data.some(
+        (domain) => domain.id === organization.domainId,
+      )
+    ) {
+      onNotice("店铺关联的数据范围已变化，请重新验证后再上线");
+      return;
+    }
     if (!organization.registrationId || !organization.buildDigest) {
       onNotice("该版本还没有隔离构建器签发的 build digest");
       return;
@@ -480,6 +458,23 @@ export function PlatformDashboard({
   };
 
   const updateLocalStore = (organization: SubplatformOrganizationRecord) => {
+    if (bootstrap.setup.status !== "ready") {
+      onNotice("商城初始化状态尚未验证，请重新读取后再更新店铺");
+      return;
+    }
+    if (bootstrap.domains.status !== "ready") {
+      onNotice("商城数据范围尚未验证，请重新读取后再更新店铺");
+      return;
+    }
+    if (
+      !organization.domainId ||
+      !bootstrap.domains.data.some(
+        (domain) => domain.id === organization.domainId,
+      )
+    ) {
+      onNotice("店铺关联的数据范围已变化，请重新验证后再更新");
+      return;
+    }
     const sourceKind =
       organization.sourceKind === "archive"
         ? "archive"
@@ -492,9 +487,7 @@ export function PlatformDashboard({
     }
     setSubplatformEditorOpen(true);
     setSubplatformSourceKind(sourceKind);
-    setSubplatformDomainId(
-      organization.domainId || setup?.domains[0]?.id || "",
-    );
+    setSubplatformDomainId(organization.domainId);
     setSubplatformPackageId("");
     setSubplatformSlug("");
     setSubplatformManifest("");
@@ -790,6 +783,13 @@ export function PlatformDashboard({
         </nav>
 
         <div className="platform-admin-content">
+          <PlatformBootstrapNotice
+            authorized={bootstrapAuthorized}
+            setup={bootstrap.setup}
+            domains={bootstrap.domains}
+            ai={bootstrap.ai}
+            onRetryFailed={() => void bootstrap.retryFailed()}
+          />
           <div className="platform-layout">
             <section
               id="platform-panel-home"
@@ -799,11 +799,14 @@ export function PlatformDashboard({
               hidden={activeSection !== "home"}
             >
               <MallInitializationPanel
-                setup={setup}
+                setupResource={bootstrap.setup}
+                domainsResource={bootstrap.domains}
+                aiResource={bootstrap.ai}
                 rootRole={rootRole}
-                aiStatus={aiStatus}
-                saving={saving}
-                onInitializeRoot={() => void initializeRootOrganization()}
+                saving={saving || bootstrap.rootInitializing}
+                onInitializeRoot={() =>
+                  void bootstrap.initializeRootOrganization()
+                }
                 onOpenStores={() => setActiveSection("tree")}
                 onOpenSettings={() => setActiveSection("brand")}
                 onOpenAi={() => setActiveSection("ai")}
@@ -834,12 +837,20 @@ export function PlatformDashboard({
               />
               <WeChatLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
               <PhoneLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
-              <PlatformSiteSettingsPanel
-                organizationId={setup?.root.organization?.id}
-                platformPath="/"
-                platformName={setup?.root.organization?.name || "商城"}
-                onNotice={onNotice}
-              />
+              {verifiedSetup?.root.organization?.id ? (
+                <PlatformSiteSettingsPanel
+                  organizationId={verifiedSetup.root.organization.id}
+                  platformPath="/"
+                  platformName={verifiedSetup.root.organization.name}
+                  onNotice={onNotice}
+                />
+              ) : (
+                <p className="platform-access-empty" role="status">
+                  {bootstrap.setup.status === "ready"
+                    ? "商城组织已确认为未创建；创建后才能保存站点设置。"
+                    : "商城组织状态尚未验证，站点设置保存已暂停。"}
+                </p>
+              )}
             </div>
             <section
               id="platform-panel-ai"
@@ -870,15 +881,19 @@ export function PlatformDashboard({
                   type="button"
                   disabled={
                     saving ||
-                    !setup?.root.organization?.id ||
-                    !setup.domains.length
+                    !verifiedSetup?.root.organization?.id ||
+                    !verifiedDomains?.length
                   }
                   title={
-                    setup?.root.organization?.id
-                      ? setup.domains.length
-                        ? undefined
-                        : "商城数据尚未准备好"
-                      : "商城尚未完成初始化"
+                    bootstrap.setup.status !== "ready"
+                      ? "商城初始化状态尚未验证"
+                      : !verifiedSetup?.root.organization?.id
+                        ? "商城尚未完成初始化"
+                        : bootstrap.domains.status !== "ready"
+                          ? "商城数据范围尚未验证"
+                          : verifiedDomains?.length
+                            ? undefined
+                            : "商城数据尚未准备好"
                   }
                   onClick={() => setSubplatformEditorOpen((open) => !open)}
                 >
@@ -923,7 +938,13 @@ export function PlatformDashboard({
                         <button
                           className="button button-dark subplatform-activate"
                           type="button"
-                          disabled={saving}
+                          disabled={
+                            saving ||
+                            !organization.domainId ||
+                            !verifiedDomains?.some(
+                              (domain) => domain.id === organization.domainId,
+                            )
+                          }
                           onClick={() =>
                             void activateRegisteredSubplatform(organization)
                           }
@@ -937,7 +958,13 @@ export function PlatformDashboard({
                         <button
                           className="button button-light subplatform-activate"
                           type="button"
-                          disabled={saving}
+                          disabled={
+                            saving ||
+                            !organization.domainId ||
+                            !verifiedDomains?.some(
+                              (domain) => domain.id === organization.domainId,
+                            )
+                          }
                           onClick={() => updateLocalStore(organization)}
                         >
                           {organization.sourceKind === "git"
@@ -1001,6 +1028,26 @@ export function PlatformDashboard({
                       上传压缩包
                     </button>
                   </div>
+                  <div className="subplatform-form-grid">
+                    <label className="subplatform-form-wide">
+                      <span>商城数据范围</span>
+                      <select
+                        required
+                        value={subplatformDomainId}
+                        disabled={bootstrap.domains.status !== "ready"}
+                        onChange={(event) =>
+                          setSubplatformDomainId(event.target.value)
+                        }
+                      >
+                        <option value="">明确选择数据范围</option>
+                        {(verifiedDomains ?? []).map((domain) => (
+                          <option key={domain.id} value={domain.id}>
+                            {domain.name} · /{domain.slug}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                   {subplatformSourceKind === "git" ? (
                     <div className="subplatform-form-grid">
                       <label className="subplatform-form-wide">
@@ -1057,9 +1104,10 @@ export function PlatformDashboard({
                       type="button"
                       disabled={
                         saving ||
-                        !setup?.root.tenantId ||
-                        !setup.root.organization?.id ||
-                        !setup?.domains.length
+                        bootstrap.domains.status !== "ready" ||
+                        !verifiedSetup?.root.tenantId ||
+                        !verifiedSetup.root.organization?.id ||
+                        !subplatformDomainId
                       }
                       onClick={() => void submitSubplatform()}
                     >
@@ -1074,7 +1122,10 @@ export function PlatformDashboard({
               className="platform-component-panel"
               hidden={activeSection !== "tree"}
             >
-              <RemoteStoreOnboarding domains={domains} onNotice={onNotice} />
+              <RemoteStoreOnboarding
+                domainsResource={bootstrap.domains}
+                onNotice={onNotice}
+              />
             </div>
 
             <div
@@ -1410,11 +1461,16 @@ export function PlatformDashboard({
                 onAction={() => setInvoiceEditorOpen(true)}
               />
               <PlatformFinanceRecordsPanel
-                authorized={
-                  rootRole === "rootSuperAdmin" || rootRole === "rootAdmin"
-                }
+                authorized={bootstrapAuthorized}
                 apiAvailable={isLiveMarketplaceEnabled()}
-                tenantId={setup?.root.tenantId ?? null}
+                tenant={
+                  bootstrap.setup.status === "ready"
+                    ? {
+                        status: "verified",
+                        tenantId: bootstrap.setup.data.root.tenantId,
+                      }
+                    : { status: "unverified" }
+                }
                 onNotice={onNotice}
               />
               {invoiceProviders.length ? (

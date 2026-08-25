@@ -19,10 +19,14 @@ import {
   RefundEditor,
 } from "./PlatformFinanceRecordViews";
 
+export type PlatformFinanceTenantState =
+  | { status: "unverified" }
+  | { status: "verified"; tenantId: string | null };
+
 interface PlatformFinanceRecordsPanelProps {
   authorized: boolean;
   apiAvailable: boolean;
-  tenantId: string | null;
+  tenant: PlatformFinanceTenantState;
   onNotice: (message: string) => void;
 }
 
@@ -47,7 +51,7 @@ const resourceLabels: Record<FinanceResourceKey, string> = {
 export function PlatformFinanceRecordsPanel({
   authorized,
   apiAvailable,
-  tenantId,
+  tenant,
   onNotice,
 }: PlatformFinanceRecordsPanelProps) {
   const [payments, setPayments] = useState<
@@ -170,11 +174,15 @@ export function PlatformFinanceRecordsPanel({
 
   async function submitRefund() {
     if (refundSubmittingRef.current) return;
+    if (tenant.status !== "verified") {
+      onNotice("商城租户状态尚未验证，请重新读取后再提交退款");
+      return;
+    }
     const selectedPayment = capturedPayments.find(
       (payment) => payment.payment_id === refundPaymentId,
     );
     if (
-      !tenantId ||
+      !tenant.tenantId ||
       !selectedPayment ||
       !refundAmount.trim() ||
       !refundReason.trim()
@@ -188,7 +196,7 @@ export function PlatformFinanceRecordsPanel({
     setRefundSaving(true);
     try {
       await createAdminRefund({
-        tenantId,
+        tenantId: tenant.tenantId,
         paymentId: selectedPayment.payment_id,
         amount: refundAmount.trim(),
         reason: refundReason.trim(),
@@ -335,7 +343,13 @@ export function PlatformFinanceRecordsPanel({
 
       {view === "refunds" ? (
         <RefundEditor
-          tenantReady={Boolean(tenantId)}
+          tenantStatus={
+            tenant.status === "unverified"
+              ? "unverified"
+              : tenant.tenantId
+                ? "ready"
+                : "verified-missing"
+          }
           paymentsReady={payments.status === "ready"}
           capturedPayments={capturedPayments}
           paymentId={refundPaymentId}

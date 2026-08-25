@@ -86,7 +86,7 @@ export function FinanceRecordList(props: FinanceRecordListProps) {
 }
 
 export function RefundEditor({
-    tenantReady,
+    tenantStatus,
     paymentsReady,
     capturedPayments,
     paymentId,
@@ -98,7 +98,7 @@ export function RefundEditor({
     onReasonChange,
     onSubmit,
 }: {
-    tenantReady: boolean;
+    tenantStatus: "ready" | "verified-missing" | "unverified";
     paymentsReady: boolean;
     capturedPayments: PaymentAdminRecord[];
     paymentId: string;
@@ -110,10 +110,17 @@ export function RefundEditor({
     onReasonChange: (value: string) => void;
     onSubmit: () => void;
 }) {
-    if (!tenantReady) {
+    if (tenantStatus === "unverified") {
         return (
             <p className="platform-access-empty">
-                商城尚未完成初始化，暂时不能提交退款。
+                商城租户状态尚未验证，退款操作已暂停。请重新读取后再试。
+            </p>
+        );
+    }
+    if (tenantStatus === "verified-missing") {
+        return (
+            <p className="platform-access-empty">
+                商城已确认尚未完成初始化，暂时不能提交退款。
             </p>
         );
     }

@@ -19,6 +19,7 @@ import type {
 import { PlatformFinanceRecordsPanel } from "./PlatformFinanceRecordsPanel";
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
+const verifiedTenant = { status: "verified", tenantId } as const;
 
 const capturedPayment = {
   payment_id: "22222222-2222-4222-8222-222222222222",
@@ -100,7 +101,7 @@ describe("PlatformFinanceRecordsPanel", () => {
       <PlatformFinanceRecordsPanel
         authorized
         apiAvailable
-        tenantId={tenantId}
+        tenant={verifiedTenant}
         onNotice={vi.fn()}
       />,
     );
@@ -137,7 +138,7 @@ describe("PlatformFinanceRecordsPanel", () => {
       <PlatformFinanceRecordsPanel
         authorized
         apiAvailable
-        tenantId={tenantId}
+        tenant={verifiedTenant}
         onNotice={vi.fn()}
       />,
     );
@@ -173,7 +174,7 @@ describe("PlatformFinanceRecordsPanel", () => {
       <PlatformFinanceRecordsPanel
         authorized
         apiAvailable
-        tenantId={tenantId}
+        tenant={verifiedTenant}
         onNotice={onNotice}
       />,
     );
@@ -238,7 +239,7 @@ describe("PlatformFinanceRecordsPanel", () => {
       <PlatformFinanceRecordsPanel
         authorized
         apiAvailable
-        tenantId={tenantId}
+        tenant={verifiedTenant}
         onNotice={onNotice}
       />,
     );
@@ -272,7 +273,7 @@ describe("PlatformFinanceRecordsPanel", () => {
       .mockReturnValueOnce(supersededPayments.promise)
       .mockResolvedValueOnce([capturedPayment]);
     const props = {
-      tenantId,
+      tenant: verifiedTenant,
       onNotice: vi.fn(),
     };
     const { rerender } = render(
@@ -302,12 +303,52 @@ describe("PlatformFinanceRecordsPanel", () => {
     expect(api.getPaymentAdminRecords).toHaveBeenCalledTimes(2);
   });
 
+  it("distinguishes an unverified tenant from verified missing initialization", async () => {
+    api.getPaymentAdminRecords.mockResolvedValue([capturedPayment]);
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    const { rerender } = render(
+      <PlatformFinanceRecordsPanel
+        authorized
+        apiAvailable
+        tenant={{ status: "unverified" }}
+        onNotice={onNotice}
+      />,
+    );
+
+    await screen.findByText(/支付 1 笔/);
+    await user.click(screen.getByRole("button", { name: "退款与退款申请" }));
+
+    expect(
+      screen.getByText(/商城租户状态尚未验证，退款操作已暂停/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/商城已确认尚未完成初始化/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "提交退款" }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <PlatformFinanceRecordsPanel
+        authorized
+        apiAvailable
+        tenant={{ status: "verified", tenantId: null }}
+        onNotice={onNotice}
+      />,
+    );
+    expect(
+      screen.getByText(/商城已确认尚未完成初始化，暂时不能提交退款/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/商城租户状态尚未验证/)).not.toBeInTheDocument();
+  });
+
   it("shows authorization-required without issuing record requests", () => {
     render(
       <PlatformFinanceRecordsPanel
         authorized={false}
         apiAvailable
-        tenantId={tenantId}
+        tenant={verifiedTenant}
         onNotice={vi.fn()}
       />,
     );
@@ -326,7 +367,7 @@ describe("PlatformFinanceRecordsPanel", () => {
       <PlatformFinanceRecordsPanel
         authorized
         apiAvailable={false}
-        tenantId={tenantId}
+        tenant={verifiedTenant}
         onNotice={vi.fn()}
       />,
     );
