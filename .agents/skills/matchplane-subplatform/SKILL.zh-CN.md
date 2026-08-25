@@ -12,7 +12,7 @@
 
 ## 打包工作流程
 
-1.从`subplatforms/auto/matchplane.subplatform.json`开始，将域名内容替换为
+1.从经过审查的`matchplane.subplatform.json`开始，将域名内容替换为
    商家提供的舱单数据。不要在根代码中对车辆字段进行硬编码。
 2. 验证不可变的 `id`、slug、API 版本、路线、范围、代理阶段/技能/MCP 工具
    名称，以及可选的子平台拥有的检索声明。

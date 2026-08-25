@@ -12,8 +12,8 @@ stable store projection described by `docs/storefront-contract.md`.
 
 ## Package workflow
 
-1. Start from `subplatforms/auto/matchplane.subplatform.json` and replace domain content with
-   merchant-supplied manifest data. Do not hard-code vehicle fields in root code.
+1. Start from a reviewed `matchplane.subplatform.json` supplied by the merchant and replace its
+   domain content with merchant-supplied manifest data. Do not hard-code vehicle fields in root code.
 2. Validate the immutable `id`, slug, API versions, routes, scopes, agent stages/skills/MCP tool
    names, and optional subplatform-owned retrieval declaration.
 3. Register a pinned Git commit, archive digest, hosted store, or reviewed external binding. The

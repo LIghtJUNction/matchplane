@@ -87,20 +87,20 @@ const sellerEnglishFallbacks: Record<string, string> = {
   pricingNotePlaceholder: "Explain the price, terms, or negotiable range",
   advancedAttributesLabel: "Advanced attributes (JSON)",
   reviewNotice:
-    "New submissions start in review; the platform will not publish unconfirmed information.",
+    "The mall reviews every submission before buyers can see it.",
   submittingLabel: "Submitting…",
   submitForReviewLabel: "Submit for review",
   submissionHistoryEyebrow: "Submission history",
   submissionHistoryTitle: "Your offers on this platform",
   noSubmissionHistoryLabel: "No uploads yet. Define your first offer.",
-  demandDiscoveryEyebrow: "Matching",
-  demandDiscoveryTitle: "Find published demand",
+  demandDiscoveryEyebrow: "Find buyers",
+  demandDiscoveryTitle: "See what buyers are looking for",
   demandDiscoveryDescription:
     "Only people who opted in to discovery appear here. Contact details are exchanged only after both sides agree.",
   contactRequestsEyebrow: "Contact requests",
   contactRequestsTitle:
     "Both sides must agree before contact details are exchanged",
-  contactRequestLabel: "A matching contact request",
+  contactRequestLabel: "A buyer wants to contact you",
   contactVisibleLabel: "Ready to contact",
   contactReadingLabel: "Loading…",
   viewContactLabel: "View contact details",
@@ -194,7 +194,7 @@ export function SellerDashboard({
       setSubmissionsError(
         copy(
           "supplyApiUnavailable",
-          "当前部署未启用真实供给 API",
+          "当前环境暂时无法发布商品，请联系商城工作人员",
           "The live supply API is not enabled for this deployment",
         ),
       );
@@ -204,7 +204,7 @@ export function SellerDashboard({
       setSubmissionsError(
         copy(
           "platformIdentityIncomplete",
-          "当前店铺还没有完成身份配置",
+          "店铺信息还没配置好，请联系商城工作人员",
           "This store has not finished its identity setup",
         ),
       );
@@ -223,7 +223,7 @@ export function SellerDashboard({
         setSubmissionsError(
           copy(
             "signInToViewSubmissions",
-            "请先登录后查看你的提交记录",
+            "请先登录，再查看你的商品",
             "Sign in to view your submissions",
           ),
         );
@@ -261,7 +261,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "submissionLoadError",
-              "提交记录读取失败",
+              "商品列表加载失败，请稍后再试",
               "Could not load submissions",
             );
       setSubmissionsError(message);
@@ -301,7 +301,7 @@ export function SellerDashboard({
         onNotice(
           copy(
             "signInToFindDemand",
-            "请先登录后寻找已公开需求",
+            "请先登录，再寻找买家",
             "Sign in to find published demand",
           ),
         );
@@ -323,7 +323,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "demandMatchLoadError",
-              "需求匹配暂时无法读取",
+              "暂时找不到买家信息，请稍后再试",
               "Demand matching is temporarily unavailable",
             );
       setDemandMatchesError((current) => ({
@@ -353,7 +353,7 @@ export function SellerDashboard({
         onNotice(
           copy(
             "signInToProcessContact",
-            "请先登录后处理联系申请",
+            "请先登录，再处理买家的联系申请",
             "Sign in to process contact requests",
           ),
         );
@@ -373,7 +373,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "contactConsentSaved",
-          "已同意交换联系方式，买方可以查看你提供的联系渠道",
+          "已同意交换联系方式，买家现在可以看到你的联系方式",
           "Contact exchange approved; the buyer can view your channels",
         ),
       );
@@ -383,7 +383,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "contactConsentError",
-              "联系申请处理失败",
+              "联系申请处理失败，请稍后再试",
               "Could not process the contact request",
             ),
       );
@@ -405,7 +405,7 @@ export function SellerDashboard({
       });
       if (!session) {
         onNotice(
-          copy("contactLoginNotice", "请先登录后查看已同意交换的联系方式"),
+          copy("contactLoginNotice", "请先登录，再查看对方的联系方式"),
         );
         return;
       }
@@ -422,14 +422,14 @@ export function SellerDashboard({
       onNotice(
         copy(
           "contactReleasedNotice",
-          "联系方式已解锁，请通过对方提供的渠道联系",
+          "已拿到对方的联系方式，可以直接联系对方了",
         ),
       );
     } catch (error) {
       onNotice(
         error instanceof Error
           ? error.message
-          : copy("contactReleaseError", "联系方式暂时无法读取"),
+          : copy("contactReleaseError", "联系方式暂时看不了，请稍后再试"),
       );
     } finally {
       setReleasingContactId(null);
@@ -545,7 +545,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "platformSessionError",
-              "当前店铺身份配置不完整",
+              "店铺信息不完整，请联系商城工作人员",
               "This store's identity configuration is incomplete",
             ),
       );
@@ -583,7 +583,7 @@ export function SellerDashboard({
           "offerWithdrawnNotice",
           offer.status === "draft"
             ? "商品草稿已删除"
-            : "商品已下架并从公开目录移除",
+            : "商品已下架，买家不会再看到它",
           offer.status === "draft"
             ? "Draft deleted"
             : "Offer removed from the public catalog",
@@ -595,7 +595,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "offerWithdrawError",
-              "商品下架失败，请重新读取后重试",
+              "商品下架失败，请刷新页面后再试",
               "Could not withdraw the offer; reload and try again",
             ),
       );
@@ -614,7 +614,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "platformIdentityIncompleteNotice",
-          "当前店铺尚未完成身份配置",
+          "店铺信息还没配置好，请联系商城工作人员",
           "This store's identity configuration is incomplete",
         ),
       );
@@ -625,8 +625,8 @@ export function SellerDashboard({
       onNotice(
         copy(
           "mediaLimitNotice",
-          "最多添加 8 个附件",
-          "You can add up to 8 attachments",
+          "最多上传 8 张图片",
+          "You can add up to 8 images",
         ),
       );
       return;
@@ -649,8 +649,8 @@ export function SellerDashboard({
         onNotice(
           copy(
             "mediaLimitNotice",
-            "最多添加 8 个附件",
-            "You can add up to 8 attachments",
+            "最多上传 8 张图片",
+            "You can add up to 8 images",
           ),
         );
     } catch (error) {
@@ -659,8 +659,8 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "mediaUploadError",
-              "附件上传失败，请稍后重试",
-              "Could not upload the attachment; try again",
+              "图片上传失败，请再试一次",
+              "Could not upload the image; try again",
             ),
       );
     } finally {
@@ -688,7 +688,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "supplyApiUnavailableNotice",
-          "当前环境未启用真实供给 API，资料没有写入系统",
+          "当前环境暂时无法发布商品，内容没有保存",
           "The live supply API is disabled; nothing was saved",
         ),
       );
@@ -719,7 +719,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "invalidProductStock",
-          "库存必须是 0 到 1000000 之间的整数",
+          "库存请填 0 到 1000000 之间的整数",
           "Stock must be an integer between 0 and 1000000",
         ),
       );
@@ -739,7 +739,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "platformIdentityIncompleteNotice",
-          "当前店铺尚未完成身份配置",
+          "店铺信息还没配置好，请联系商城工作人员",
           "This store has not finished its identity setup",
         ),
       );
@@ -757,7 +757,7 @@ export function SellerDashboard({
       onNotice(
         copy(
           "platformSchemaIncomplete",
-          "当前店铺尚未配置完整的商品字段、币种和价格精度",
+          "店铺设置还没完成，请联系商城工作人员",
           "This store has incomplete product fields, currency, or price precision settings",
         ),
       );
@@ -790,7 +790,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "platformSessionError",
-              "当前店铺身份配置不完整",
+              "店铺信息不完整，请联系商城工作人员",
               "This store's identity configuration is incomplete",
             ),
       );
@@ -867,8 +867,8 @@ export function SellerDashboard({
         copy(
           wasEditing ? "offerUpdatedNotice" : "offerSubmittedNotice",
           wasEditing
-            ? "商品修改已保存，等待平台重新审核"
-            : "供给已提交，等待平台审核后展示",
+            ? "商品修改已保存，等待商城重新审核"
+            : "商品已提交，商城审核通过后就会上架",
           wasEditing
             ? "Changes saved; the offer is awaiting review again"
             : "Offer submitted; it will appear after platform review",
@@ -880,7 +880,7 @@ export function SellerDashboard({
           ? error.message
           : copy(
               "offerSubmitError",
-              "供给提交失败，请稍后重试",
+              "商品提交失败，请稍后再试",
               "Could not submit the offer; try again",
             ),
       );
@@ -925,8 +925,8 @@ export function SellerDashboard({
         role="tablist"
         aria-label={copy(
           "sellerSettingsSectionsLabel",
-          "供给设置分区",
-          "Supply settings sections",
+          "卖家功能分区",
+          "Seller sections",
         )}
       >
         <button
@@ -961,7 +961,7 @@ export function SellerDashboard({
             className={activePanel === "demand" ? "is-active" : ""}
             onClick={() => setActivePanel("demand")}
           >
-            {copy("sellerDemandTab", "需求匹配", "Demand")}
+            {copy("sellerDemandTab", "找买家", "Find buyers")}
           </button>
         )}
         <button
@@ -1001,8 +1001,8 @@ export function SellerDashboard({
           />
           <p className="seller-upload-intro">
             {editingOffer
-              ? "修改会生成新版本并回到待审核状态，通过后才会重新公开。"
-              : "填写买家真正需要看到的信息。提交后进入审核，通过后才会公开展示。"}
+              ? "保存后商品会回到待审核状态，商城审核通过后买家才能看到新内容。"
+              : "填写买家真正需要看到的信息。提交后商城会先审核，通过后才会公开展示。"}
           </p>
           {editingOffer ? (
             <div className="seller-edit-notice" role="status">
@@ -1070,7 +1070,7 @@ export function SellerDashboard({
             {attachments.length ? (
               <ul
                 className="seller-media-list"
-                aria-label={copy("mediaListLabel", "已添加的附件")}
+                aria-label={copy("mediaListLabel", "已上传的图片")}
               >
                 {attachments.map((attachment) => (
                   <li key={attachment.attachment_ref}>
@@ -1080,7 +1080,7 @@ export function SellerDashboard({
                     <small>{formatAttachmentSize(attachment.size_bytes)}</small>
                     <button
                       type="button"
-                      aria-label={`${copy("removeMediaLabel", "移除附件")} ${attachment.file_name}`}
+                      aria-label={`${copy("removeMediaLabel", "删除图片")} ${attachment.file_name}`}
                       onClick={() =>
                         setAttachments((current) =>
                           current.filter(
@@ -1161,9 +1161,9 @@ export function SellerDashboard({
                 required
               >
                 <option value="">选择交付方式</option>
-                <option value="digital">在线交付</option>
-                <option value="shipping">物流交付</option>
-                <option value="service">线下或人工交付</option>
+                <option value="digital">线上发送（不用邮寄）</option>
+                <option value="shipping">快递发货</option>
+                <option value="service">到店或上门服务</option>
               </select>
             </label>
             <label htmlFor="seller-stock">
@@ -1185,7 +1185,7 @@ export function SellerDashboard({
                 <FileUp size={17} aria-hidden="true" />{" "}
                 {copy(
                   "reviewNotice",
-                  "提交后状态为“待审核”，平台不会自动发布未经确认的资料。",
+                  "提交后商城会先审核，审核通过才会展示给买家。",
                 )}
               </p>
               <motion.button
@@ -1204,7 +1204,7 @@ export function SellerDashboard({
                   !isLiveMarketplaceEnabled()
                     ? copy(
                         "supplyApiUnavailableNotice",
-                        "当前环境未启用真实供给 API，资料不会写入系统",
+                        "当前环境暂时无法发布商品，内容不会被保存",
                         "The live supply API is disabled; nothing will be saved",
                       )
                     : undefined
@@ -1254,7 +1254,7 @@ export function SellerDashboard({
             <p>
               {copy(
                 "loadingSubmissionsLabel",
-                "正在读取你的提交记录…",
+                "正在加载你的商品…",
                 "Loading your submissions…",
               )}
             </p>
@@ -1264,7 +1264,7 @@ export function SellerDashboard({
             <FileUp size={24} aria-hidden="true" />
             <p>{submissionsError}</p>
             <button type="button" onClick={() => void loadSubmissions()}>
-              {copy("reloadSubmissionsLabel", "重新读取", "Reload")}
+              {copy("reloadSubmissionsLabel", "重新加载", "Reload")}
             </button>
           </div>
         ) : submissions.length ? (
@@ -1409,13 +1409,13 @@ export function SellerDashboard({
         >
           <SectionHeading
             titleId="seller-demand-title"
-            eyebrow={copy("demandDiscoveryEyebrow", "供需撮合")}
-            title={copy("demandDiscoveryTitle", "找到已公开的需求")}
+            eyebrow={copy("demandDiscoveryEyebrow", "找买家")}
+            title={copy("demandDiscoveryTitle", "看看哪些买家在找货")}
           />
           <p className="seller-discovery-intro">
             {copy(
               "demandDiscoveryDescription",
-              "只有主动允许供给方发现的需求会出现在这里。你可以先查看是否合适；需求方发起联系后，双方都同意才会交换联系方式。",
+              "这里只显示愿意让商家看到的买家求购信息。买家联系你后，双方都同意才会交换联系方式。",
             )}
           </p>
           {publishedOffers.length ? (
@@ -1454,8 +1454,8 @@ export function SellerDashboard({
                               )
                             : copy(
                                 "findDemandLabel",
-                                "寻找需求",
-                                "Find demand",
+                                "找买家",
+                                "Find buyers",
                               )}
                         <ArrowRight size={15} aria-hidden="true" />
                       </button>
@@ -1484,7 +1484,7 @@ export function SellerDashboard({
                                 <span className="submission-status">
                                   {copy(
                                     "waitingDemandContactLabel",
-                                    "等待需求方联系",
+                                    "等买家来联系",
                                     "Waiting for the buyer to make contact",
                                   )}
                                 </span>
@@ -1497,7 +1497,7 @@ export function SellerDashboard({
                           <p>
                             {copy(
                               "noDemandMatchesLabel",
-                              "暂时没有符合条件的公开需求。",
+                              "暂时没有合适的买家在找这类商品。",
                               "No matching published demand yet.",
                             )}
                           </p>
@@ -1513,8 +1513,8 @@ export function SellerDashboard({
               <p>
                 {copy(
                   "demandDiscoveryEmptyLabel",
-                  "供给审核通过并发布后，可以在这里寻找需求。",
-                  "Once an offer is approved and published, you can find demand here.",
+                  "商品审核通过、上架后，就可以在这里找买家。",
+                  "Once an offer is approved and published, you can find buyers here.",
                 )}
               </p>
             </div>
@@ -1550,7 +1550,7 @@ export function SellerDashboard({
                 <li key={introduction.introduction_id}>
                   <div>
                     <strong>
-                      {copy("contactRequestLabel", "一条撮合联系申请")}
+                      {copy("contactRequestLabel", "有买家想和你联系")}
                     </strong>
                     <small>
                       {introductionStatusLabel(introduction.status, locale)} ·{" "}
@@ -1604,7 +1604,7 @@ export function SellerDashboard({
                     <span className="submission-status">
                       {copy(
                         "waitingBuyerConfirmationLabel",
-                        "等待需求方确认",
+                        "等买家确认",
                         "Waiting for the buyer to confirm",
                       )}
                     </span>
@@ -1614,7 +1614,7 @@ export function SellerDashboard({
             </ol>
           ) : (
             <div className="seller-empty-state">
-              <p>{copy("noContactRequestsLabel", "暂无待处理的联系申请。")}</p>
+              <p>{copy("noContactRequestsLabel", "还没有买家申请联系你。")}</p>
             </div>
           )}
         </section>
@@ -1938,14 +1938,14 @@ function introductionStatusLabel(
   }
   return (
     {
-      proposed: "已建立撮合",
+      proposed: "已匹配到买家",
       contact_requested: "等待你的同意",
       contact_released: "已同意交换",
       completed: "已完成",
       declined: "已拒绝",
       expired: "已过期",
       disputed: "处理中",
-    }[status] ?? "撮合处理中"
+    }[status] ?? "处理中"
   );
 }
 

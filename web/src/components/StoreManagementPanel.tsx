@@ -59,7 +59,7 @@ export function StoreManagementPanel({
               ? error.message
               : isEn
                 ? "Failed to load store details"
-                : "店铺资料读取失败",
+                : "店铺资料加载失败，请稍后再试",
           );
       })
       .finally(() => {
@@ -126,10 +126,10 @@ export function StoreManagementPanel({
         action === "close"
           ? isEn
             ? "Store paused and hidden from public catalog"
-            : "店铺已暂停营业，已从搜索和公开目录中隐藏"
+            : "店铺已暂停营业，顾客暂时看不到你的店铺和商品"
           : isEn
             ? "Store reopened and is now live"
-            : "店铺已恢复营业，商品已重新对外开放",
+            : "店铺已恢复营业，顾客又能看到你的商品了",
       );
     } catch (error) {
       onNotice(
@@ -163,7 +163,7 @@ export function StoreManagementPanel({
           <p>
             {isEn
               ? "Manage store profile, public description, and open/close operating status."
-              : "管理店铺基本信息与营业状态。店长可自主开启或暂停对外营业。"}
+              : "在这里修改店铺信息，随时暂停或恢复营业。"}
           </p>
         </div>
       </div>
@@ -197,7 +197,7 @@ export function StoreManagementPanel({
               {status === "suspended" && (
                 <span className="store-status-badge is-suspended">
                   <AlertTriangle size={13} aria-hidden="true" />
-                  {isEn ? "Suspended by platform" : "已被平台暂停"}
+                  {isEn ? "Suspended by platform" : "已被商城暂停"}
                 </span>
               )}
             </div>
@@ -205,19 +205,19 @@ export function StoreManagementPanel({
               {status === "active" &&
                 (isEn
                   ? "Your store and products are visible in search and recommendations. Customers can browse, consult, and place orders."
-                  : "店铺正常对外展示。商品可被商城搜索和智能助手撮合推荐，顾客可正常发起咨询与下单。")}
+                  : "店铺正常营业中。顾客可以在商城里搜到你的商品，也能咨询和下单。")}
               {status === "closed" &&
                 (isEn
                   ? "Your store is currently paused. Products are hidden from public search, but all data is safely kept. You can reopen at any time."
-                  : "店铺当前处于暂停营业状态。商品已从公共搜索和推荐中隐藏，现有数据完整保留。您可以随时点击「恢复营业」重新开放。")}
+                  : "店铺已暂停营业，顾客暂时看不到你的商品。所有资料都完整保留，随时可以点「恢复营业」重新开张。")}
               {status === "pending" &&
                 (isEn
                   ? "Store onboarding is being reviewed. It will become active once approved."
-                  : "店铺接入与资料正在审核中，审核通过后将自动开放营业。")}
+                  : "店铺资料正在审核中，审核通过后就会自动开始营业。")}
               {status === "suspended" &&
                 (isEn
                   ? "Store operations have been suspended by mall management. Please contact platform staff."
-                  : "店铺已被商城管理暂停，店主无法自行恢复。如有疑问请联系商城客服或运营人员。")}
+                  : "店铺已被商城暂停，暂时无法自行恢复。有疑问请联系商城客服。")}
             </p>
           </div>
 
@@ -265,7 +265,7 @@ export function StoreManagementPanel({
               <p>
                 {isEn
                   ? "Once closed, the store and its products will be hidden from public search and cannot receive new orders. All catalog items, customer records, and settings remain safe and can be restored anytime."
-                  : "暂停营业后，店铺及其旗下所有商品将从商城公开搜索与推荐列表中暂时隐藏，顾客将无法发起新的咨询或下单。所有商品数据、客户记录与经营历史均完整保留，您可以随时点击「恢复营业」重新开放。"}
+                  : "暂停营业后，顾客在商城里暂时看不到你的店铺和商品，也不能咨询或下单。所有商品和经营记录都会完整保留，随时可以点「恢复营业」重新开张。"}
               </p>
             </div>
             <div className="store-lifecycle-confirm-actions">
@@ -328,7 +328,7 @@ export function StoreManagementPanel({
         </label>
         <div className="store-management-meta">
           <span>
-            {isEn ? "Store URL:" : "店铺地址："} {current.path}
+            {isEn ? "Store URL:" : "店铺网址："} {current.path}
           </span>
           <span>
             {isEn ? "Version:" : "资料版本："} v{current.version ?? 1}
@@ -353,7 +353,7 @@ export function StoreManagementPanel({
           <p className="store-management-readonly">
             {isEn
               ? "Staff can manage products; store profile and operating status are managed by the store owner."
-              : "店员可以管理商品；店铺资料与营业状态由店长或商城后台维护。"}
+              : "店员可以管理商品；店铺资料和营业状态由店长或商城工作人员管理。"}
           </p>
         )}
       </form>

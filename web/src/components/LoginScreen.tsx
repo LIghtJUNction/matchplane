@@ -304,8 +304,14 @@ export function LoginScreen({
       return;
     }
     if (method === "password" && resolvedIdentifier.kind === "phone") {
+      // Send the user to the working path instead of a generic credential error:
+      // phone numbers sign in through SMS codes, never through passwords.
       setError(
-        isRegistration ? copy.registrationEmailOnly : copy.invalidCredentials,
+        isRegistration
+          ? copy.registrationEmailOnly
+          : capabilities.phoneOtp
+            ? copy.phonePasswordUnavailable
+            : copy.phoneOtpUnavailable,
       );
       return;
     }
@@ -709,11 +715,25 @@ export function LoginScreen({
     setNotice(null);
   };
 
-  const availableMethods: AuthMethod[] = ["password"];
+  // Methods follow the deployment's configured delivery capabilities so that an
+  // operator who enables SMS or email codes sees the tab appear without a code
+  // change; password stays as the deployment-independent fallback.
+  const availableMethods: AuthMethod[] = [
+    "password",
+    ...(capabilities.emailOtp || capabilities.phoneOtp
+      ? (["email-otp"] as const)
+      : []),
+    ...(capabilities.magicLink ? (["magic-link"] as const) : []),
+  ];
   const isRegistration = authIntent === "sign-up";
   const emailOnlyIdentifier =
     isRegistration || registrationPending || passwordResetMode;
-  const hasMethodTabs = availableMethods.length > 1;
+  // Registration is email-based by design; the alternate sign-in methods would
+  // silently fail for a not-yet-created account, so hide the tabs there.
+  const hasMethodTabs = !isRegistration && availableMethods.length > 1;
+  // Only advertise phone numbers in the shared identifier field when the
+  // deployment can actually deliver an SMS code for them.
+  const phoneIdentifierEnabled = capabilities.phoneOtp && !emailOnlyIdentifier;
   const activeMethodTabId = `${authMethodsId}-${method}-tab`;
   const registrationHref = `/register?next=${encodeURIComponent(next)}`;
   const loginHref = `/login?next=${encodeURIComponent(next)}`;
@@ -833,7 +853,7 @@ export function LoginScreen({
             onSubmit={submit}
           >
             <label htmlFor="login-identifier">
-              <span>{emailOnlyIdentifier ? copy.email : copy.identifier}</span>
+              <span>{phoneIdentifierEnabled ? copy.identifier : copy.email}</span>
               <Input
                 id="login-identifier"
                 type="text"
@@ -846,9 +866,9 @@ export function LoginScreen({
                 autoComplete="username webauthn"
                 inputMode="text"
                 placeholder={
-                  emailOnlyIdentifier
-                    ? copy.emailPlaceholder
-                    : copy.identifierPlaceholder
+                  phoneIdentifierEnabled
+                    ? copy.identifierPlaceholder
+                    : copy.emailPlaceholder
                 }
                 autoFocus
               />

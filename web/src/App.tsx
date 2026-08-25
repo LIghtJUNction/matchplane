@@ -54,6 +54,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [paymentModeVersion, setPaymentModeVersion] = useState(1);
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [buyerAssistantOpen, setBuyerAssistantOpen] = useState(false);
+  const [buyerAssistantDraft, setBuyerAssistantDraft] = useState<string>();
   const [rootSearchTrace, setRootSearchTrace] =
     useState<MallAssistantSearchTrace | null>(null);
 
@@ -83,7 +84,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   // Re-sync subplatform route once auth resolves
   useEffect(() => {
-    if (subplatform.slug === "root") setBuyerAssistantOpen(false);
+    if (subplatform.slug === "root") {
+      setBuyerAssistantOpen(false);
+    }
+    setBuyerAssistantDraft(undefined);
     if (subplatform.slug !== "root" || role !== "buyer")
       setRootSearchTrace(null);
   }, [role, subplatform.slug]);
@@ -457,6 +461,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                     listings={listings}
                     onRetryCatalog={retryCatalog}
                     locale={locale}
+                    onNeedSubmit={setBuyerAssistantDraft}
                     assistant={
                       <MatchChat
                         home
@@ -470,6 +475,10 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                         onHumanHandoff={requestStoreAiHandoff}
                         onContactConsent={requestStoreContactConsent}
                         onContactRetrieve={retrieveStoreContact}
+                        draftMessage={buyerAssistantDraft}
+                        onDraftMessageApplied={() =>
+                          setBuyerAssistantDraft(undefined)
+                        }
                         subplatform={subplatform}
                       />
                     }

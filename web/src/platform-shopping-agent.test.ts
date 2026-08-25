@@ -582,9 +582,7 @@ describe("platform shopping agent", () => {
     expect(first.searchTrace).toEqual({
       source: "visible_recommendations",
       resultCount: 2,
-      stores: [
-        { path: "/electronics", displayName: "电子店", offerCount: 2 },
-      ],
+      stores: [{ path: "/electronics", displayName: "电子店", offerCount: 2 }],
     });
     expect(first.modelCalls).toBe(1);
     expect(second.modelCalls).toBe(1);
@@ -1197,6 +1195,10 @@ describe("platform shopping agent", () => {
     const options = generateText.mock.calls[0]?.[0];
     expect(options.tools).not.toHaveProperty("request_contact_consent");
     expect(options.tools).not.toHaveProperty("propose_human_handoff");
+    // The sponsor demo depends on the agent proactively asking budget/use-case
+    // through the clickable ask_user tool and presenting cards after retrieval.
+    expect(options.system).toContain("先用 ask_user 给出预算档位选项");
+    expect(options.system).toContain("检索到匹配商品后默认调用 show_products");
     expect(options.tools).toEqual(
       expect.objectContaining({
         ask_user: expect.anything(),
@@ -1335,7 +1337,7 @@ describe("platform shopping agent", () => {
         propose_human_handoff: expect.anything(),
       }),
     );
-    expect(generateText.mock.calls[0]?.[0].system).toContain("AI 店长");
+    expect(generateText.mock.calls[0]?.[0].system).toContain("在线咨询");
     expect(generateText.mock.calls[0]?.[0].system).toContain("不能替用户同意");
     expect(generateText.mock.calls[0]?.[0].system).toContain(
       "收到确定性确认成功结果前，绝不能声称",

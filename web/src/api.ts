@@ -2064,7 +2064,7 @@ export async function askMallShoppingAssistant(
       typeof body?.error === "string" ? body.error : typedError?.message;
     throw new MarketplaceApiError(
       response.status,
-      errorMessage || "商城 AI 导购暂时不可用",
+      errorMessage || "商品搜索暂时不可用",
       {
         code: typedError?.code || body?.code,
         retryable:
@@ -2102,8 +2102,7 @@ export async function askMallShoppingAssistant(
   };
 }
 
-const CANONICAL_SEARCH_TRACE_STORE_PATH =
-  /^\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const CANONICAL_SEARCH_TRACE_STORE_PATH = /^\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function normalizeMallAssistantSearchTraceStore(
   value: unknown,
@@ -2138,8 +2137,7 @@ function visibleRecommendationCountByPath(
   const counts = new Map<string, number>();
   for (const recommendation of recommendations) {
     const path = recommendation.platform_path?.trim();
-    if (path)
-      counts.set(path, (counts.get(path) ?? 0) + 1);
+    if (path) counts.set(path, (counts.get(path) ?? 0) + 1);
   }
   return counts;
 }
@@ -2175,10 +2173,8 @@ function normalizeMallAssistantSearchTrace(
     normalizedStores.push(store);
   }
   if (
-    normalizedStores.reduce(
-      (total, store) => total + store.offerCount,
-      0,
-    ) !== resultCount
+    normalizedStores.reduce((total, store) => total + store.offerCount, 0) !==
+    resultCount
   )
     return undefined;
   const visibleCounts = visibleRecommendationCountByPath(recommendations);
@@ -2274,6 +2270,129 @@ export async function saveNationalIdentityConfig(input: {
     throw new MarketplaceApiError(
       response.status,
       body?.error || "国家网络身份认证配置保存失败",
+    );
+  return {
+    config: body.config,
+    restartRequired: body.restartRequired === true,
+  };
+}
+
+export interface SmsGatewayConfig {
+  enabled: boolean;
+  gatewayUrl: string;
+  tokenConfigured: boolean;
+}
+
+export async function getSmsGatewayConfig(): Promise<SmsGatewayConfig | null> {
+  const response = await fetch("/api/platform/sms-gateway/config", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: SmsGatewayConfig | null;
+    error?: string;
+  } | null;
+  if (!response.ok || !body)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "短信网关配置读取失败",
+    );
+  return body.config ?? null;
+}
+
+export async function saveSmsGatewayConfig(input: {
+  enabled: boolean;
+  gatewayUrl: string;
+  token?: string;
+}): Promise<SmsGatewayConfig> {
+  const response = await fetch("/api/platform/sms-gateway/config", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: SmsGatewayConfig;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.config)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "短信网关配置保存失败",
+    );
+  return body.config;
+}
+
+export async function testSmsGatewayConfig(phoneNumber: string): Promise<void> {
+  const response = await fetch("/api/platform/sms-gateway/test", {
+    method: "POST",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ phoneNumber }),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    error?: string;
+  } | null;
+  if (!response.ok)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "测试短信发送失败",
+    );
+}
+
+export interface WeChatOAuthConfig {
+  enabled: boolean;
+  appId: string;
+  scopes: string[];
+  authorizationUrl: string;
+  tokenUrl: string;
+  userInfoUrl: string;
+  credentialConfigured: boolean;
+}
+
+export async function getWeChatOAuthConfig(): Promise<WeChatOAuthConfig | null> {
+  const response = await fetch("/api/platform/wechat-oauth/config", {
+    credentials: "include",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: WeChatOAuthConfig | null;
+    error?: string;
+  } | null;
+  if (!response.ok || !body)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "微信扫码登录配置读取失败",
+    );
+  return body.config ?? null;
+}
+
+export async function saveWeChatOAuthConfig(input: {
+  enabled: boolean;
+  appId: string;
+  appSecret?: string;
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  userInfoUrl?: string;
+  scopes: string[];
+}): Promise<{ config: WeChatOAuthConfig; restartRequired: boolean }> {
+  const response = await fetch("/api/platform/wechat-oauth/config", {
+    method: "PATCH",
+    credentials: "include",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body = (await response.json().catch(() => null)) as {
+    config?: WeChatOAuthConfig;
+    restartRequired?: boolean;
+    error?: string;
+  } | null;
+  if (!response.ok || !body?.config)
+    throw new MarketplaceApiError(
+      response.status,
+      body?.error || "微信扫码登录配置保存失败",
     );
   return {
     config: body.config,
@@ -2642,15 +2761,15 @@ export async function getPlatformAiStatus(): Promise<PlatformAiStatus> {
 }
 
 /** Test the server-side hosted Agent without sending browser or user content. */
-export function testPlatformAi(
-  input: { candidate: true },
-): Promise<PlatformAiCandidateProbeResult>;
-export function testPlatformAi(
-  input?: { candidate?: false },
-): Promise<PlatformAiProbeResult>;
-export function testPlatformAi(
-  input: { candidate: boolean },
-): Promise<PlatformAiProbeResult | PlatformAiCandidateProbeResult>;
+export function testPlatformAi(input: {
+  candidate: true;
+}): Promise<PlatformAiCandidateProbeResult>;
+export function testPlatformAi(input?: {
+  candidate?: false;
+}): Promise<PlatformAiProbeResult>;
+export function testPlatformAi(input: {
+  candidate: boolean;
+}): Promise<PlatformAiProbeResult | PlatformAiCandidateProbeResult>;
 export async function testPlatformAi(
   input: { candidate?: boolean } = {},
 ): Promise<PlatformAiProbeResult> {

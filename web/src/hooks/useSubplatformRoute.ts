@@ -251,6 +251,21 @@ export function useSubplatformRoute({
     );
   }, [authResolved, hydrated, role]);
 
+  // In-page requests (for example the contact consent card) open the account
+  // bindings dialog without a full navigation, so an ongoing chat is not lost.
+  useEffect(() => {
+    const openAccountBindings = (event: Event) => {
+      event.preventDefault();
+      setAccountSettingsSection("account");
+    };
+    window.addEventListener("matchplane.account.bindings", openAccountBindings);
+    return () =>
+      window.removeEventListener(
+        "matchplane.account.bindings",
+        openAccountBindings,
+      );
+  }, []);
+
   return {
     role,
     setRole,

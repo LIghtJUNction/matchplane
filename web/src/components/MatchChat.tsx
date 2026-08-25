@@ -404,14 +404,14 @@ interface ChatCopy {
 }
 
 const defaultChatCopy: ChatCopy = {
-  buyerEyebrow: "AI 导购",
+  buyerEyebrow: "商品筛选",
   sellerEyebrow: "供给方入口",
-  buyerTitle: "想买什么，告诉我就行。",
+  buyerTitle: "说说预算和需求",
   sellerTitle: "说说你能提供什么。",
   buyerHeadlines: [
-    "想买什么，告诉我就行。",
-    "帮你逛店、比价、算清总价。",
-    "从一句话开始挑选。",
+    "说说预算和需求",
+    "帮你逛店、比价、算清总价",
+    "从在售商品里开始挑",
   ],
   sellerHeadlines: [
     "说说你能提供什么。",
@@ -419,7 +419,7 @@ const defaultChatCopy: ChatCopy = {
     "把你的优势交给匹配。",
   ],
   buyerDescription:
-    "我会在商城店铺中找商品、比较价格，并说明为什么适合你。无需登录即可开始。",
+    "按你的描述，从各店铺在售商品里筛选、比价并说明理由。无需登录即可开始。",
   sellerDescription: "说出你能提供的内容、条件和限制。",
   buyerPlaceholder: "输入预算、用途和偏好……",
   buyerDiscoveryLabel: "允许供给方看到这条需求摘要（不含联系方式）",
@@ -432,14 +432,14 @@ const defaultChatCopy: ChatCopy = {
 };
 
 const defaultChatCopyEn: ChatCopy = {
-  buyerEyebrow: "AI shopping assistant",
+  buyerEyebrow: "Product search",
   sellerEyebrow: "Seller entry",
-  buyerTitle: "Tell me what you want to buy.",
+  buyerTitle: "Share your budget and needs",
   sellerTitle: "Tell us what you can offer.",
   buyerHeadlines: [
-    "Tell me what you want to buy.",
-    "Browse stores and compare prices.",
-    "Start with one sentence.",
+    "Share your budget and needs",
+    "Browse stores and compare prices",
+    "Start from what's on sale",
   ],
   sellerHeadlines: [
     "Tell us what you can offer.",
@@ -447,7 +447,7 @@ const defaultChatCopyEn: ChatCopy = {
     "Start with one sentence.",
   ],
   buyerDescription:
-    "I’ll search the mall, compare products, and explain the best options. No sign-in needed to browse.",
+    "We filter live listings, compare prices, and explain the fit. No sign-in needed to browse.",
   sellerDescription: "Share what you offer, the terms, and any constraints.",
   buyerPlaceholder: "Describe your budget, needs, and preferences…",
   buyerDiscoveryLabel:
@@ -551,9 +551,9 @@ function runtimeChatCopy(locale: InterfaceLocale): RuntimeChatCopy {
     routeNode: "商城",
     routeOverflow: " 等平台",
     routeDegraded: (names, overflow) =>
-      `AI 导购暂时不可用，已按相关性在 ${names}${overflow} 中查找商品。`,
+      `搜索服务暂时繁忙，已按相关性在 ${names}${overflow} 中查找商品。`,
     routeSelected: (names, overflow) =>
-      `AI 导购选择了 ${names}${overflow}，正在从这些店铺的在售商品中挑选并解释理由。`,
+      `已从 ${names}${overflow} 的在售商品中挑选并说明理由。`,
     noMatch:
       "暂时没有找到合适的店铺。你可以补充品类、预算或必须具备的功能后重试。",
     noChildren: "商城目前还没有上线店铺。",
@@ -668,6 +668,9 @@ interface MatchChatProps {
   }) => void;
   /** Move a seller into the selected terminal platform before showing its supply form. */
   onSellerPlatformSelected?: (hop: PlatformRouteHop) => void | Promise<void>;
+  /** Prefill the composer when opened from another entry point on the same page. */
+  draftMessage?: string;
+  onDraftMessageApplied?: () => void;
 }
 
 export function MatchChat({
@@ -686,6 +689,8 @@ export function MatchChat({
   onContactRetrieve,
   onSellerDraft,
   onSellerPlatformSelected,
+  draftMessage,
+  onDraftMessageApplied,
 }: MatchChatProps) {
   const copy = resolveChatCopy(subplatform, locale);
   const runtime = runtimeChatCopy(locale);
@@ -722,6 +727,15 @@ export function MatchChat({
   const submitMessageRef = useRef<
     ((rawText: string, session?: PartySession) => Promise<void>) | null
   >(null);
+
+  useEffect(() => {
+    const next = draftMessage?.trim();
+    if (!next) return;
+    setMessage(next);
+    onDraftMessageApplied?.();
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, [draftMessage, onDraftMessageApplied]);
+
   const [sellerRouteChoices, setSellerRouteChoices] = useState<
     PlatformRouteHop[]
   >([]);
@@ -2232,9 +2246,7 @@ export function MatchChat({
               <ul
                 className="match-chat-promises"
                 aria-label={
-                  locale === "en"
-                    ? "Shopping assistant capabilities"
-                    : "导购能力"
+                  locale === "en" ? "Search capabilities" : "搜索能力"
                 }
               >
                 {shoppingPromises.map((item) => (
@@ -2598,9 +2610,7 @@ export function MatchChat({
         >
           <div className="match-chat-starter-title-row">
             <Compass size={14} aria-hidden="true" />
-            <span>
-              {locale === "en" ? "Try asking" : "可以这样开始"}
-            </span>
+            <span>{locale === "en" ? "Try asking" : "可以这样开始"}</span>
           </div>
 
           <div className="match-chat-starter-grid">

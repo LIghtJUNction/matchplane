@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AssetListing } from "../types";
 import type { SubplatformConfig } from "../subplatform";
-import { ListingSheet } from "./Overlays";
+import { ListingSheet } from "./ListingSheet";
 
 const listing: AssetListing = {
   id: "offer-1",

@@ -91,7 +91,9 @@ describe("MarketplaceListingCard likes", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: /点赞/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /点赞/ }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -101,18 +103,19 @@ describe("MarketplaceHome actions", () => {
     ["en", []],
     ["zh", [listing]],
     ["en", [listing]],
-  ] as const)(
-    "does not expose root publishing for %s with catalog %s",
-    (locale, listings) => {
-      renderHome({
-        locale,
-        listings: listings as unknown as AssetListing[],
-      });
+  ] as const)("does not expose root publishing for %s with catalog %s", (locale, listings) => {
+    renderHome({
+      locale,
+      listings: listings as unknown as AssetListing[],
+    });
 
-      expect(screen.queryByRole("button", { name: "发布商品" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "List a product" })).not.toBeInTheDocument();
-    },
-  );
+    expect(
+      screen.queryByRole("button", { name: "发布商品" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "List a product" }),
+    ).not.toBeInTheDocument();
+  });
 
   it("keeps the inline shopping prompt as the root primary task", () => {
     renderHome();
@@ -120,8 +123,24 @@ describe("MarketplaceHome actions", () => {
     expect(
       screen.getByRole("heading", { name: "说说你想找什么。", level: 1 }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "购物需求" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "购物需求" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("这些结果来自哪里")).not.toBeInTheDocument();
+  });
+
+  it("sends the compact need prompt into the inline shopping conversation", async () => {
+    const user = userEvent.setup();
+    const onNeedSubmit = vi.fn();
+    renderHome({ onNeedSubmit });
+
+    await user.type(
+      screen.getByRole("textbox", { name: "描述想买的东西和预算" }),
+      "预算 15 万以内的家用 SUV",
+    );
+    await user.click(screen.getByRole("button", { name: "帮我找" }));
+
+    expect(onNeedSubmit).toHaveBeenCalledWith("预算 15 万以内的家用 SUV");
   });
 
   it("renders only the current real result stores and opens the selected store", async () => {
@@ -161,7 +180,9 @@ describe("MarketplaceHome actions", () => {
       },
     });
 
-    expect(screen.getByText("1 visible match from 1 store")).toBeInTheDocument();
+    expect(
+      screen.getByText("1 visible match from 1 store"),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
         name: "Open Example Store, 1 visible match",
@@ -197,7 +218,9 @@ describe("MarketplaceHome actions", () => {
     await user.keyboard(" ");
 
     expect(home).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "云朵羊毛毯" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "云朵羊毛毯" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "日光便携音箱" }),
     ).not.toBeInTheDocument();

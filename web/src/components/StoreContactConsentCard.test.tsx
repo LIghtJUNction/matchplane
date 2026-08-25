@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getVerifiedContactChannels = vi.hoisted(() => vi.fn());
 
@@ -9,6 +9,7 @@ vi.mock("../api", async () => {
   return { ...actual, getVerifiedContactChannels };
 });
 
+import { MarketplaceApiError } from "../api";
 import { StoreContactConsentCard } from "./StoreContactConsentCard";
 
 const action = {
@@ -21,6 +22,10 @@ const action = {
 describe("StoreContactConsentCard", () => {
   beforeEach(() => {
     getVerifiedContactChannels.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("shows verified bindings as read-only values and waits for explicit agreement", async () => {
@@ -87,8 +92,60 @@ describe("StoreContactConsentCard", () => {
     expect(await screen.findByText("没有已验证的邮箱或手机")).toBeVisible();
     expect(screen.getByRole("link", { name: "前往账号绑定" })).toHaveAttribute(
       "href",
-      "/?accountSection=account",
+      "/?account=identity",
     );
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("opens the account bindings dialog in place when the app shell listens", async () => {
+    const user = userEvent.setup();
+    getVerifiedContactChannels.mockResolvedValue([]);
+    const openedInApp = vi.fn((event: Event) => event.preventDefault());
+    window.addEventListener("matchplane.account.bindings", openedInApp);
+    try {
+      render(<StoreContactConsentCard action={action} locale="zh" />);
+      await user.click(
+        await screen.findByRole("link", { name: "前往账号绑定" }),
+      );
+      expect(openedInApp).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("matchplane.account.bindings", openedInApp);
+    }
+  });
+
+  it("re-checks bindings after the user verifies one, without losing the chat", async () => {
+    const user = userEvent.setup();
+    getVerifiedContactChannels
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { type: "email", value: "buyer@example.com" },
+      ]);
+    render(<StoreContactConsentCard action={action} locale="zh" />);
+
+    await screen.findByText("没有已验证的邮箱或手机");
+    await user.click(
+      screen.getByRole("button", { name: "我已完成绑定，重新检测" }),
+    );
+
+    expect(await screen.findByText("buyer@example.com")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "同意并申请联系" }),
+    ).toBeVisible();
+  });
+
+  it("offers a sign-in link instead of a useless retry when unauthenticated", async () => {
+    getVerifiedContactChannels.mockRejectedValue(
+      new MarketplaceApiError(401, "请先登录"),
+    );
+    render(<StoreContactConsentCard action={action} locale="zh" />);
+
+    expect(await screen.findByText("请先登录")).toBeVisible();
+    expect(screen.getByRole("link", { name: "前往登录" })).toHaveAttribute(
+      "href",
+      `/login?next=${encodeURIComponent("/")}`,
+    );
+    expect(
+      screen.queryByRole("button", { name: "重试" }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -13,7 +13,6 @@ web/out
 .playwright-cli
 output
 ci-artifacts-*
-subplatforms/auto/node_modules
 deploy/compose/data
 **/*.pkg.tar.*
 **/*.rpm

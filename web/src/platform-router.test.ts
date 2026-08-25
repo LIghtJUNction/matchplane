@@ -602,7 +602,7 @@ describe("platform Agent router", () => {
 
     expect(decision.source).toBe("policy_fallback");
     expect(decision.degraded).toBe(true);
-    expect(decision.rationale).toContain("AI 导购暂时降级");
+    expect(decision.rationale).toContain("搜索暂时降级");
   });
 
   it("reserves a provider call before paying for it", async () => {

@@ -39,6 +39,7 @@ interface IdentitySnapshot {
   configuredProviders: Set<ProviderId>;
   providers: ProviderId[];
   phoneOtp: boolean;
+  emailOtp: boolean;
 }
 
 /** A single Better Auth user may link verified login methods without another credential store. */
@@ -56,6 +57,7 @@ export function IdentityBindingsPanel({
     configuredProviders: new Set(),
     providers: [...CORE_BINDING_PROVIDERS],
     phoneOtp: false,
+    emailOtp: false,
   });
   const [loading, setLoading] = useState(true);
   const [phoneOpen, setPhoneOpen] = useState(false);
@@ -63,6 +65,9 @@ export function IdentityBindingsPanel({
   const [phoneCode, setPhoneCode] = useState("");
   const [phoneCodeSent, setPhoneCodeSent] = useState(false);
   const [savingPhone, setSavingPhone] = useState(false);
+  const [emailCodeSent, setEmailCodeSent] = useState(false);
+  const [emailCode, setEmailCode] = useState("");
+  const [savingEmail, setSavingEmail] = useState(false);
   const [linkingProvider, setLinkingProvider] = useState<ProviderId | null>(
     null,
   );
@@ -100,6 +105,7 @@ export function IdentityBindingsPanel({
             primary?: unknown;
             social?: unknown;
             phoneOtp?: unknown;
+            emailOtp?: unknown;
           })
         : null;
       const linkedProviders = new Set(
@@ -138,6 +144,7 @@ export function IdentityBindingsPanel({
         configuredProviders,
         providers: visibleProviders,
         phoneOtp: providers?.phoneOtp === true,
+        emailOtp: providers?.emailOtp === true,
       });
     } catch {
       onNotice(copy.loadFailed);
@@ -169,12 +176,8 @@ export function IdentityBindingsPanel({
       setPhoneCode("");
       setPhoneCodeSent(true);
       onNotice(copy.phoneCodeSent);
-    } catch (error) {
-      onNotice(
-        error instanceof Error && error.message
-          ? copy.phoneFailed
-          : copy.phoneFailed,
-      );
+    } catch {
+      onNotice(copy.phoneFailed);
     } finally {
       setSavingPhone(false);
     }
@@ -205,6 +208,53 @@ export function IdentityBindingsPanel({
       onNotice(copy.phoneFailed);
     } finally {
       setSavingPhone(false);
+    }
+  };
+
+  const sendEmailCode = async () => {
+    if (!identity.email || savingEmail) return;
+    setSavingEmail(true);
+    try {
+      const result = await authClient.emailOtp.sendVerificationOtp({
+        email: identity.email,
+        type: "email-verification",
+        fetchOptions: authFetchOptions(subplatform.slug),
+      });
+      if (result.error)
+        throw new Error(result.error.message || copy.emailFailed);
+      setEmailCode("");
+      setEmailCodeSent(true);
+      onNotice(copy.emailCodeSent);
+    } catch {
+      onNotice(copy.emailFailed);
+    } finally {
+      setSavingEmail(false);
+    }
+  };
+
+  const confirmEmail = async () => {
+    if (!identity.email) return;
+    if (!/^\d{6}$/.test(emailCode)) {
+      onNotice(copy.invalidCode);
+      return;
+    }
+    setSavingEmail(true);
+    try {
+      const result = await authClient.emailOtp.verifyEmail({
+        email: identity.email,
+        otp: emailCode,
+        fetchOptions: authFetchOptions(subplatform.slug),
+      });
+      if (result.error)
+        throw new Error(result.error.message || copy.emailFailed);
+      setEmailCodeSent(false);
+      setEmailCode("");
+      await load();
+      onNotice(copy.emailVerifiedNotice);
+    } catch {
+      onNotice(copy.emailFailed);
+    } finally {
+      setSavingEmail(false);
     }
   };
 
@@ -268,7 +318,27 @@ export function IdentityBindingsPanel({
             <strong>{copy.email}</strong>
             <small>{identity.email ?? copy.unavailable}</small>
           </span>
-          <em>{identity.emailVerified ? copy.bound : copy.unverified}</em>
+          {identity.emailVerified ? (
+            <em>{copy.bound}</em>
+          ) : identity.email && identity.emailOtp ? (
+            <Button
+              variant="outline"
+              type="button"
+              disabled={loading || savingEmail}
+              onClick={() => {
+                if (emailCodeSent) {
+                  setEmailCodeSent(false);
+                  setEmailCode("");
+                  return;
+                }
+                void sendEmailCode();
+              }}
+            >
+              {emailCodeSent ? copy.cancel : copy.verifyEmail}
+            </Button>
+          ) : (
+            <em>{copy.unverified}</em>
+          )}
         </li>
         <li>
           <Smartphone size={18} aria-hidden="true" />
@@ -282,10 +352,14 @@ export function IdentityBindingsPanel({
             <Button
               variant="outline"
               type="button"
-              onClick={() => setPhoneOpen((open) => !open)}
+              onClick={() => {
+                setPhoneOpen((open) => !open);
+                setPhoneCodeSent(false);
+                setPhoneCode("");
+              }}
               disabled={loading}
             >
-              {copy.bindPhone}
+              {phoneOpen ? copy.cancel : copy.bindPhone}
             </Button>
           ) : (
             <em>{copy.notConfigured}</em>
@@ -328,9 +402,44 @@ export function IdentityBindingsPanel({
           );
         })}
       </ul>
+      {emailCodeSent ? (
+        <form
+          className="identity-phone-form"
+          aria-label={copy.verifyEmail}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void confirmEmail();
+          }}
+        >
+          <label>
+            <span>{copy.code}</span>
+            <input
+              value={emailCode}
+              onChange={(event) =>
+                setEmailCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+              }
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder={copy.codePlaceholder}
+            />
+          </label>
+          <Button type="submit" variant="outline" disabled={savingEmail}>
+            {savingEmail ? copy.saving : copy.confirmEmail}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={savingEmail}
+            onClick={() => void sendEmailCode()}
+          >
+            {copy.resendCode}
+          </Button>
+        </form>
+      ) : null}
       {phoneOpen ? (
         <form
           className="identity-phone-form"
+          aria-label={copy.bindPhone}
           onSubmit={
             phoneCodeSent
               ? (event) => {
@@ -374,6 +483,19 @@ export function IdentityBindingsPanel({
                 ? copy.confirmPhone
                 : copy.sendPhoneCode}
           </Button>
+          {phoneCodeSent ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={savingPhone}
+              onClick={() => {
+                setPhoneCodeSent(false);
+                setPhoneCode("");
+              }}
+            >
+              {copy.changePhone}
+            </Button>
+          ) : null}
         </form>
       ) : null}
     </section>
@@ -443,7 +565,6 @@ function identityCopy(locale: InterfaceLocale) {
         email: "邮箱",
         phone: "手机号",
         bound: "已绑定",
-        boundLogin: "已绑定登录",
         unverified: "未验证",
         notBound: "未绑定",
         unavailable: "暂不可用",
@@ -452,11 +573,19 @@ function identityCopy(locale: InterfaceLocale) {
         bindProvider: "绑定",
         sendPhoneCode: "发送验证码",
         confirmPhone: "确认绑定",
+        changePhone: "换个手机号",
+        verifyEmail: "验证邮箱",
+        confirmEmail: "确认验证",
+        resendCode: "重新发送",
+        cancel: "取消",
         code: "验证码",
         codePlaceholder: "6 位验证码",
         saving: "处理中…",
         phoneCodeSent: "验证码已发送到该手机号。",
         phoneBound: "手机号已验证并绑定。",
+        emailCodeSent: "验证码已发送到该邮箱。",
+        emailVerifiedNotice: "邮箱已验证，可用于联系交换。",
+        emailFailed: "邮箱验证没有完成，请重试。",
         invalidPhone: "请输入有效的手机号。",
         invalidCode: "请输入 6 位验证码。",
         phoneFailed: "手机号绑定没有完成，请重试。",
@@ -473,7 +602,6 @@ function identityCopy(locale: InterfaceLocale) {
         email: "Email",
         phone: "Phone",
         bound: "Bound",
-        boundLogin: "Bound for sign-in",
         unverified: "Unverified",
         notBound: "Not bound",
         unavailable: "Unavailable",
@@ -482,11 +610,19 @@ function identityCopy(locale: InterfaceLocale) {
         bindProvider: "Bind",
         sendPhoneCode: "Send code",
         confirmPhone: "Confirm binding",
+        changePhone: "Use another number",
+        verifyEmail: "Verify email",
+        confirmEmail: "Confirm code",
+        resendCode: "Resend code",
+        cancel: "Cancel",
         code: "Code",
         codePlaceholder: "6-digit code",
         saving: "Working…",
         phoneCodeSent: "A code was sent to this phone number.",
         phoneBound: "Phone number verified and bound.",
+        emailCodeSent: "A code was sent to this email.",
+        emailVerifiedNotice: "Email verified. It can now be exchanged after mutual consent.",
+        emailFailed: "Email verification did not complete. Try again.",
         invalidPhone: "Enter a valid phone number.",
         invalidCode: "Enter the 6-digit code.",
         phoneFailed: "Phone binding did not complete. Try again.",
