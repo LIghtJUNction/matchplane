@@ -419,7 +419,7 @@ describe("MatchChat sending state", () => {
       name: "告诉 MatchPlane 你的需求",
     });
     expect(input).toHaveAttribute("placeholder", "自定义首页提示");
-    const memory = await screen.findByRole("button", { name: "记忆" });
+    const memory = await screen.findByRole("button", { name: "偏好" });
     expect(memory.closest("form")).toBe(input.closest("form"));
   });
 
