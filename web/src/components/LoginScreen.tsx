@@ -8,7 +8,6 @@ import { Input } from "@appica/ui-react/input";
 import {
   clearPartySessionCache,
   establishMarketplaceSession,
-  getMallLegalDocuments,
   isLiveMarketplaceEnabled,
   redeemPlatformAdminInvite,
   type BetterAuthMarketplaceRole,
@@ -22,6 +21,10 @@ import {
 } from "../subplatform";
 import { Brand } from "./Primitives";
 import { PreferenceControls } from "./PreferenceControls";
+import {
+  RegistrationLegalConsent,
+  type RegistrationLegalVersions,
+} from "./RegistrationLegalConsent";
 
 type AuthMethod = "password" | "email-otp" | "magic-link";
 type SocialProvider = "google" | "wechat" | "qq" | "alipay";
@@ -82,10 +85,8 @@ export function LoginScreen({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [legalVersions, setLegalVersions] = useState<{
-    terms: number;
-    privacy: number;
-  } | null>(null);
+  const [legalVersions, setLegalVersions] =
+    useState<RegistrationLegalVersions | null>(null);
   const [legalAccepted, setLegalAccepted] = useState(false);
   const redeemingInviteRef = useRef(false);
   const authMethodsId = useId();
@@ -178,17 +179,6 @@ export function LoginScreen({
           magicLink: false,
           passkey: true,
         });
-      });
-    void getMallLegalDocuments()
-      .then((legal) => {
-        if (!cancelled)
-          setLegalVersions({
-            terms: legal.documents.terms.version,
-            privacy: legal.documents.privacy.version,
-          });
-      })
-      .catch(() => {
-        if (!cancelled) setLegalVersions(null);
       });
     return () => {
       cancelled = true;
@@ -853,7 +843,9 @@ export function LoginScreen({
             onSubmit={submit}
           >
             <label htmlFor="login-identifier">
-              <span>{phoneIdentifierEnabled ? copy.identifier : copy.email}</span>
+              <span>
+                {phoneIdentifierEnabled ? copy.identifier : copy.email}
+              </span>
               <Input
                 id="login-identifier"
                 type="text"
@@ -939,25 +931,13 @@ export function LoginScreen({
               </div>
             ) : null}
             {isRegistration && !registrationPending && !passwordResetMode ? (
-              <div className="login-legal-consent">
-                <input
-                  id="login-legal-consent"
-                  type="checkbox"
-                  checked={legalAccepted}
-                  onChange={(event) => setLegalAccepted(event.target.checked)}
-                  disabled={submitting || !legalVersions}
-                />
-                <label htmlFor="login-legal-consent">
-                  {copy.legalConsentPrefix}{" "}
-                  <a href="/terms" target="_blank" rel="noreferrer">
-                    {copy.terms}
-                  </a>{" "}
-                  {copy.legalConsentJoin}{" "}
-                  <a href="/privacy" target="_blank" rel="noreferrer">
-                    {copy.privacy}
-                  </a>
-                </label>
-              </div>
+              <RegistrationLegalConsent
+                locale={locale}
+                accepted={legalAccepted}
+                disabled={submitting}
+                onAcceptedChange={setLegalAccepted}
+                onVersionsChange={setLegalVersions}
+              />
             ) : null}
             {(method === "email-otp" && otpSent) ||
             registrationPending ||
@@ -1269,10 +1249,6 @@ function loginCopy(locale: "zh" | "en") {
       socialMethods: "Social sign-in",
       password: "Password",
       confirmPassword: "Confirm password",
-      terms: "Terms of Service",
-      privacy: "Privacy Policy",
-      legalConsentPrefix: "I have read and agree to the",
-      legalConsentJoin: "and",
       legalAcceptanceRequired:
         "Read and agree to the Terms of Service and Privacy Policy to register.",
       emailOtp: "Code",
@@ -1362,10 +1338,6 @@ function loginCopy(locale: "zh" | "en") {
     socialMethods: "第三方登录",
     password: "密码",
     confirmPassword: "确认密码",
-    terms: "用户协议",
-    privacy: "隐私政策",
-    legalConsentPrefix: "我已阅读并同意",
-    legalConsentJoin: "和",
     legalAcceptanceRequired: "请先阅读并同意用户协议和隐私政策。",
     emailOtp: "验证码",
     magicLink: "免密链接",
