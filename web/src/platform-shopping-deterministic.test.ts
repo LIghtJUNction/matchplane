@@ -31,26 +31,35 @@ vi.mock("./storefront-search", () => ({
 }));
 
 import { answerPlatformShoppingQuestion } from "./platform-router";
+import type { PublicStore } from "./store-directory";
 
 afterEach(() => {
   searchPublicStoreOffers.mockClear();
 });
+
+function demoStore(publicFields: string[]): PublicStore {
+  return {
+    id: "11111111-1111-4111-8111-111111111111",
+    slug: "demo",
+    path: "/demo",
+    displayName: "星辰二手车行",
+    description: "",
+    integrationKind: "hosted",
+    capabilities: [],
+    agentStages: [],
+    agentSkills: [],
+    publicFields,
+    tenantId: "22222222-2222-4222-8222-222222222222",
+    domainId: "33333333-3333-4333-8333-333333333333",
+  };
+}
 
 describe("deterministic shopping fallback without AI gateway", () => {
   it("asks for budget when purchase intent is vague", async () => {
     const reply = await answerPlatformShoppingQuestion({
       question: "我想买辆车",
       messages: [{ role: "user", content: "我想买辆车" }],
-      stores: [
-        {
-          id: "s1",
-          slug: "demo",
-          path: "/demo",
-          displayName: "星辰二手车行",
-          description: "",
-          publicFields: [],
-        },
-      ],
+      stores: [demoStore([])],
     });
     expect(reply.model).toBeNull();
     expect(reply.toolCalls).toEqual(["ask_user"]);
@@ -81,16 +90,7 @@ describe("deterministic shopping fallback without AI gateway", () => {
     const reply = await answerPlatformShoppingQuestion({
       question: "预算 15 万以内的家用 SUV",
       messages: [{ role: "user", content: "预算 15 万以内的家用 SUV" }],
-      stores: [
-        {
-          id: "s1",
-          slug: "demo",
-          path: "/demo",
-          displayName: "星辰二手车行",
-          description: "",
-          publicFields: ["category"],
-        },
-      ],
+      stores: [demoStore(["category"])],
     });
     expect(reply.model).toBeNull();
     expect(reply.toolCalls).toEqual([
