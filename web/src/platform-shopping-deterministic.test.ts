@@ -52,7 +52,7 @@ describe("deterministic shopping fallback without AI gateway", () => {
         },
       ],
     });
-    expect(reply.model).toBe("deterministic-search");
+    expect(reply.model).toBeNull();
     expect(reply.toolCalls).toEqual(["ask_user"]);
     expect(reply.uiActions[0]).toMatchObject({ type: "choice" });
     expect(searchPublicStoreOffers).not.toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe("deterministic shopping fallback without AI gateway", () => {
         },
       ],
     });
-    expect(reply.model).toBe("deterministic-search");
+    expect(reply.model).toBeNull();
     expect(reply.toolCalls).toEqual([
       "search_public_products",
       "show_products",

@@ -138,7 +138,8 @@ export type PlatformAssistantUiAction =
 
 export interface PlatformAssistantReply {
   text: string;
-  model: string;
+  /** Null when no provider model was involved (deterministic tool fallback). */
+  model: string | null;
   usage: PlatformRouteUsage | null;
   modelCalls: number;
   recommendations: RecommendedBackendListing[];
@@ -824,7 +825,7 @@ async function answerPlatformShoppingQuestionDeterministic(input: {
   if (!intent.budget && !unlimitedBudget && vaguePurchase) {
     return {
       text: "先选一个预算档位，我再按在售商品给你筛。",
-      model: "deterministic-search",
+      model: null,
       usage: null,
       modelCalls: 0,
       recommendations: [],
@@ -859,7 +860,7 @@ async function answerPlatformShoppingQuestionDeterministic(input: {
   if (!recommendations.length) {
     return {
       text: "按你现在说的条件，货架上暂时没有匹配的在售商品。可以换个预算或用途再试。",
-      model: "deterministic-search",
+      model: null,
       usage: null,
       modelCalls: 0,
       recommendations: [],
@@ -875,7 +876,7 @@ async function answerPlatformShoppingQuestionDeterministic(input: {
     text: intent.budget?.maximum
       ? `按预算约 ${intent.budget.maximum.toLocaleString("zh-CN")} 元筛了货架上的在售商品，下面这几台可以点开看。`
       : "按你的描述在货架里找了几台在售商品，可以点开看详情。",
-    model: "deterministic-search",
+    model: null,
     usage: null,
     modelCalls: 0,
     recommendations,

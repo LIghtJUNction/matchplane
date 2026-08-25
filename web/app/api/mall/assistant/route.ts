@@ -160,7 +160,7 @@ async function recordAssistantUsage(input: {
   requestId: string;
   subject: string;
   question: string;
-  model: string;
+  model: string | null;
   usage: {
     promptTokens: number;
     completionTokens: number;
@@ -196,7 +196,7 @@ async function recordAssistantUsage(input: {
       input.subject,
       minimizeQuestion(input.question),
       randomUUID(),
-      input.model,
+      input.model ?? "deterministic-search",
       input.usage?.promptTokens ?? null,
       input.usage?.completionTokens ?? null,
       input.usage?.totalTokens ?? null,

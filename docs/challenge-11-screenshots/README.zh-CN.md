@@ -17,6 +17,8 @@
 | 11 | `11-home-logged-in.png` | 登录后首页（商城控制台入口） |
 | 12 | `12-admin-console.png` | 商城后台就绪面板 |
 | 13 | `13-admin-login-methods-wechat-sms.png` | 商城设置：登录方式 / 微信扫码 / 短信网关 |
+| 14 | `14-search-budget-results.png` | 无 AI 网关时预算检索仍出真实商品卡 |
+| 15 | `15-search-budget-choices.png` | 模糊需求先出预算档位选项 |
 
 复现：
 
