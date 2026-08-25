@@ -13,33 +13,28 @@ import {
 } from "lucide-react";
 
 import {
-  getInvoiceSetting,
-  getInvoiceProviders,
   getSubplatformOrganizations,
   isLiveMarketplaceEnabled,
   activateSubplatform,
   discoverSubplatformSource,
   getSubplatformSourceIntake,
   registerSubplatform,
-  saveInvoiceProvider,
-  switchInvoiceMode,
   uploadSubplatformArchive,
-  type InvoiceProviderRecord,
-  type InvoiceSetting,
   type SubplatformArchiveUpload,
   type SubplatformOrganizationRecord,
 } from "../api";
 import { LoginMethodsPanel } from "./LoginMethodsPanel";
-import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformBootstrapNotice } from "./PlatformBootstrapNotice";
 import { PlatformFinanceRecordsPanel } from "./PlatformFinanceRecordsPanel";
+import { PlatformInvoiceConfigurationPanel } from "./PlatformInvoiceConfigurationPanel";
 import { PlatformPaymentRoutingPanel } from "./PlatformPaymentRoutingPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import {
   freshBootstrapResourceData,
   usePlatformBootstrapResources,
 } from "../hooks/usePlatformBootstrapResources";
+import { usePlatformInvoiceConfigurationResources } from "../hooks/usePlatformInvoiceConfigurationResources";
 import { usePlatformPaymentRoutingResources } from "../hooks/usePlatformPaymentRoutingResources";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
@@ -99,24 +94,23 @@ export function PlatformDashboard({
         : { status: "unverified" },
     onNotice,
   });
+  const invoiceConfiguration = usePlatformInvoiceConfigurationResources({
+    authorized: bootstrapAuthorized,
+    apiAvailable: marketplaceApiAvailable,
+    tenant:
+      bootstrap.setup.status === "ready"
+        ? {
+            status: "verified",
+            tenantId: bootstrap.setup.data.root.tenantId,
+          }
+        : { status: "unverified" },
+    onNotice,
+  });
   const [activeSection, setActiveSection] = useState<PlatformSection>("home");
   const [subplatforms, setSubplatforms] = useState<
     SubplatformOrganizationRecord[]
   >([]);
-  const [invoiceProviders, setInvoiceProviders] = useState<
-    InvoiceProviderRecord[]
-  >([]);
-  const [invoiceSetting, setInvoiceSetting] = useState<InvoiceSetting | null>(
-    null,
-  );
-  const [invoiceEditorOpen, setInvoiceEditorOpen] = useState(false);
-  const [invoiceModeDialogOpen, setInvoiceModeDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [invoiceName, setInvoiceName] = useState("");
-  const [invoiceProviderKey, setInvoiceProviderKey] = useState("");
-  const [invoiceMode, setInvoiceMode] = useState<"test" | "production">("test");
-  const [invoiceSettings, setInvoiceSettings] = useState("{}");
-  const [invoiceCredentialRef, setInvoiceCredentialRef] = useState("");
   const [subplatformEditorOpen, setSubplatformEditorOpen] = useState(false);
   const [subplatformSourceKind, setSubplatformSourceKind] = useState<
     "git" | "archive"
@@ -170,20 +164,12 @@ export function PlatformDashboard({
   useEffect(() => {
     if (!rootRole || !marketplaceApiAvailable) return;
     let mounted = true;
-    void Promise.allSettled([
-      getInvoiceProviders(),
-      getInvoiceSetting(),
-      getSubplatformOrganizations(),
-    ]).then(([invoiceResult, invoiceSettingResult, subplatformResult]) => {
-      if (!mounted) return;
-      // Invoice administration and subplatform loading remain independent from payment routing.
-      if (invoiceResult.status === "fulfilled")
-        setInvoiceProviders(invoiceResult.value);
-      if (invoiceSettingResult.status === "fulfilled")
-        setInvoiceSetting(invoiceSettingResult.value);
-      if (subplatformResult.status === "fulfilled")
-        setSubplatforms(subplatformResult.value);
-    });
+    void Promise.allSettled([getSubplatformOrganizations()]).then(
+      ([subplatformResult]) => {
+        if (mounted && subplatformResult.status === "fulfilled")
+          setSubplatforms(subplatformResult.value);
+      },
+    );
     return () => {
       mounted = false;
     };
@@ -199,15 +185,6 @@ export function PlatformDashboard({
       return current;
     });
   }, [verifiedDomains]);
-
-  const refreshInvoiceConfiguration = async () => {
-    const [nextInvoiceProviders, nextInvoiceSetting] = await Promise.all([
-      getInvoiceProviders(),
-      getInvoiceSetting(),
-    ]);
-    setInvoiceProviders(nextInvoiceProviders);
-    setInvoiceSetting(nextInvoiceSetting);
-  };
 
   const refreshSubplatforms = async () => {
     setSubplatforms(await getSubplatformOrganizations());
@@ -482,82 +459,6 @@ export function PlatformDashboard({
         ? `准备检查 ${organization.name} 的 Git 更新`
         : `请选择 ${organization.name} 的新版本压缩包`,
     );
-  };
-
-  const confirmInvoiceModeChange = () => {
-    if (!invoiceSetting) {
-      setInvoiceModeDialogOpen(false);
-      onNotice("发票模式尚未读取完成");
-      return;
-    }
-    const nextMode =
-      invoiceSetting.active_mode === "test" ? "production" : "test";
-    void switchInvoiceMode({
-      mode: nextMode,
-      providerId: invoiceSetting.provider_id ?? undefined,
-      expectedVersion: invoiceSetting.version,
-      reason: `web-admin switch invoice mode to ${nextMode}`,
-    })
-      .then((setting) => {
-        setInvoiceSetting(setting);
-        setInvoiceModeDialogOpen(false);
-        onNotice(
-          `发票系统已切换为${setting.active_mode === "test" ? "测试" : "生产"}模式`,
-        );
-      })
-      .catch((error) => {
-        setInvoiceModeDialogOpen(false);
-        onNotice(error instanceof Error ? error.message : "发票模式切换失败");
-      });
-  };
-
-  const submitInvoiceProvider = async () => {
-    let settings: Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(invoiceSettings);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-        throw new Error();
-      settings = parsed as Record<string, unknown>;
-    } catch {
-      onNotice("发票 provider settings 必须是 JSON 对象");
-      return;
-    }
-    if (!invoiceName.trim()) {
-      onNotice("请填写发票 provider 名称");
-      return;
-    }
-    if (!invoiceProviderKey.trim()) {
-      onNotice("请选择发票 provider 协议");
-      return;
-    }
-    if (invoiceMode === "production" && !invoiceCredentialRef.trim()) {
-      onNotice("生产发票 provider 必须填写 secret reference");
-      return;
-    }
-    setSaving(true);
-    try {
-      await saveInvoiceProvider({
-        name: invoiceName.trim(),
-        providerKey: invoiceProviderKey,
-        mode: invoiceMode,
-        settings,
-        credentialSecretRef: invoiceCredentialRef.trim() || undefined,
-        enabled: true,
-        reason: "platform dashboard create invoice provider",
-      });
-      await refreshInvoiceConfiguration();
-      setInvoiceEditorOpen(false);
-      setInvoiceName("");
-      setInvoiceCredentialRef("");
-      setInvoiceSettings("{}");
-      onNotice("发票 provider 已保存；切换生产模式前请完成真实税务服务校验");
-    } catch (error) {
-      onNotice(
-        error instanceof Error ? error.message : "发票 provider 保存失败",
-      );
-    } finally {
-      setSaving(false);
-    }
   };
 
   const subplatformStateLabel: Record<string, string> = {
@@ -1101,12 +1002,7 @@ export function PlatformDashboard({
               aria-labelledby="finance-activity-title"
               hidden={activeSection !== "finance"}
             >
-              <SectionHeading
-                eyebrow="财务动态"
-                title="支付、发票与退款"
-                action="配置发票"
-                onAction={() => setInvoiceEditorOpen(true)}
-              />
+              <SectionHeading eyebrow="财务动态" title="支付、发票与退款" />
               <PlatformFinanceRecordsPanel
                 authorized={bootstrapAuthorized}
                 apiAvailable={isLiveMarketplaceEnabled()}
@@ -1120,134 +1016,14 @@ export function PlatformDashboard({
                 }
                 onNotice={onNotice}
               />
-              {invoiceProviders.length ? (
-                <div className="provider-list">
-                  {invoiceProviders.map((provider) => (
-                    <div className="provider-row" key={provider.provider_id}>
-                      <span>
-                        <strong>{provider.name}</strong>
-                        <small>
-                          {provider.provider_key} · {provider.mode}
-                        </small>
-                      </span>
-                      <b>{provider.enabled ? "启用" : "停用"}</b>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <div className="invoice-mode-card">
-                <div>
-                  <p className="eyebrow">发票运行模式</p>
-                  <strong>
-                    {invoiceSetting
-                      ? invoiceSetting.active_mode === "test"
-                        ? "测试模式"
-                        : "生产模式"
-                      : "读取中…"}
-                  </strong>
-                  <small>
-                    {invoiceSetting?.provider_id
-                      ? "已绑定发票 provider"
-                      : "尚未绑定默认 provider"}
-                  </small>
-                </div>
-                <button
-                  type="button"
-                  disabled={!invoiceSetting}
-                  onClick={() => setInvoiceModeDialogOpen(true)}
-                >
-                  切换模式
-                </button>
-              </div>
-              {invoiceEditorOpen ? (
-                <div className="admin-editor" aria-label="发票 provider 配置">
-                  <div className="admin-editor-heading">
-                    <strong>新增发票 provider</strong>
-                    <button
-                      type="button"
-                      onClick={() => setInvoiceEditorOpen(false)}
-                    >
-                      关闭
-                    </button>
-                  </div>
-                  <label>
-                    <span>名称</span>
-                    <input
-                      value={invoiceName}
-                      onChange={(event) => setInvoiceName(event.target.value)}
-                      placeholder="例如：电子发票服务"
-                    />
-                  </label>
-                  <label>
-                    <span>provider</span>
-                    <select
-                      value={invoiceProviderKey}
-                      onChange={(event) =>
-                        setInvoiceProviderKey(event.target.value)
-                      }
-                    >
-                      <option value="">选择 provider 协议</option>
-                      <option value="local_test">测试协议</option>
-                      <option value="http_json">HTTP JSON</option>
-                      <option value="fapiao_http">Fapiao HTTP</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>模式</span>
-                    <select
-                      value={invoiceMode}
-                      onChange={(event) =>
-                        setInvoiceMode(
-                          event.target.value as "test" | "production",
-                        )
-                      }
-                    >
-                      <option value="test">测试</option>
-                      <option value="production">生产</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>secret reference</span>
-                    <input
-                      value={invoiceCredentialRef}
-                      onChange={(event) =>
-                        setInvoiceCredentialRef(event.target.value)
-                      }
-                      placeholder="file:///run/secrets/invoice/provider.token"
-                    />
-                  </label>
-                  <label>
-                    <span>settings（JSON）</span>
-                    <textarea
-                      value={invoiceSettings}
-                      onChange={(event) =>
-                        setInvoiceSettings(event.target.value)
-                      }
-                      rows={4}
-                      spellCheck={false}
-                    />
-                  </label>
-                  <button
-                    className="button button-dark"
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void submitInvoiceProvider()}
-                  >
-                    {saving ? "保存中…" : "保存 provider"}
-                  </button>
-                </div>
-              ) : null}
+              <PlatformInvoiceConfigurationPanel
+                controller={invoiceConfiguration}
+                onNotice={onNotice}
+              />
             </section>
           </div>
         </div>
       </div>
-      <ModeDialog
-        open={invoiceModeDialogOpen}
-        currentMode={invoiceSetting?.active_mode ?? "test"}
-        resourceLabel="发票"
-        onClose={() => setInvoiceModeDialogOpen(false)}
-        onConfirm={confirmInvoiceModeChange}
-      />
     </div>
   );
 }

@@ -7,6 +7,31 @@ const api = vi.hoisted(() => ({
   registerSubplatform: vi.fn(),
 }));
 const bootstrapMock = vi.hoisted(() => ({ current: undefined as unknown }));
+const invoiceConfigurationMock = vi.hoisted(() => ({
+  use: vi.fn(),
+  controller: {
+    providers: { status: "ready", data: [] },
+    setting: {
+      status: "ready",
+      data: {
+        tenant_id: "tenant",
+        active_mode: "test",
+        provider_id: null,
+        updated_by: "admin",
+        version: 1,
+        updated_at: "2026-08-26T00:00:00.000Z",
+      },
+    },
+    mutation: null,
+    writeBlockReason: null,
+    retryAvailable: true,
+    retryFailed: vi.fn(),
+    refreshProviders: vi.fn(),
+    refreshSetting: vi.fn(),
+    commitProvider: vi.fn(),
+    commitMode: vi.fn(),
+  },
+}));
 const paymentRoutingMock = vi.hoisted(() => ({
   use: vi.fn(),
   controller: {
@@ -32,6 +57,12 @@ vi.mock("../hooks/usePlatformBootstrapResources", () => ({
   freshBootstrapResourceData: (resource: { status: string; data?: unknown }) =>
     resource.status === "ready" ? resource.data : null,
 }));
+vi.mock("../hooks/usePlatformInvoiceConfigurationResources", () => ({
+  usePlatformInvoiceConfigurationResources: (options: unknown) => {
+    invoiceConfigurationMock.use(options);
+    return invoiceConfigurationMock.controller;
+  },
+}));
 vi.mock("../hooks/usePlatformPaymentRoutingResources", () => ({
   usePlatformPaymentRoutingResources: (options: unknown) => {
     paymentRoutingMock.use(options);
@@ -46,6 +77,11 @@ vi.mock("./PlatformBootstrapNotice", () => ({
 }));
 vi.mock("./PlatformFinanceRecordsPanel", () => ({
   PlatformFinanceRecordsPanel: () => null,
+}));
+vi.mock("./PlatformInvoiceConfigurationPanel", () => ({
+  PlatformInvoiceConfigurationPanel: () => (
+    <div data-testid="invoice-configuration-panel" />
+  ),
 }));
 vi.mock("./PlatformPaymentRoutingPanel", () => ({
   PlatformPaymentRoutingPanel: () => (
@@ -102,6 +138,7 @@ const dashboardProps = {
 beforeEach(() => {
   api.registerSubplatform.mockReset();
   dashboardProps.onNotice.mockReset();
+  invoiceConfigurationMock.use.mockClear();
   paymentRoutingMock.use.mockClear();
 });
 
@@ -158,6 +195,41 @@ describe("PlatformDashboard local store onboarding", () => {
 
     await waitFor(() => expect(select).toHaveValue("domain-b"));
     expect(select).toBeEnabled();
+  });
+});
+
+describe("PlatformDashboard invoice configuration boundary", () => {
+  it("keeps invoice reads independent while passing only a fresh setup tenant for writes", () => {
+    bootstrapMock.current = resources({ status: "ready", data: [domain("a")] });
+    const { rerender } = render(<PlatformDashboard {...dashboardProps} />);
+
+    expect(
+      screen.getByTestId("invoice-configuration-panel"),
+    ).toBeInTheDocument();
+    expect(invoiceConfigurationMock.use).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authorized: true,
+        apiAvailable: false,
+        tenant: { status: "verified", tenantId: "tenant" },
+      }),
+    );
+
+    bootstrapMock.current = {
+      ...resources({ status: "ready", data: [domain("a")] }),
+      setup: {
+        status: "error",
+        message: "初始化状态暂时不可用",
+        previous: setup,
+      },
+    };
+    rerender(<PlatformDashboard {...dashboardProps} />);
+
+    expect(invoiceConfigurationMock.use).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authorized: true,
+        tenant: { status: "unverified" },
+      }),
+    );
   });
 });
 
