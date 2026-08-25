@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   Archive,
-  BanknoteArrowDown,
   Bot,
   ChevronLeft,
   CreditCard,
@@ -14,17 +13,13 @@ import {
 } from "lucide-react";
 
 import {
-  getInvoiceAdminRecords,
   getInvoiceSetting,
   getInvoiceProviders,
-  getPaymentAdminRecords,
   getPaymentGateways,
   getPaymentRoutes,
   getPlatformSetupStatus,
   getPlatformAiStatus,
   getSubplatformOrganizations,
-  getRefundAdminRecords,
-  createAdminRefund,
   createRootPlatformOrganization,
   isLiveMarketplaceEnabled,
   activateSubplatform,
@@ -38,21 +33,19 @@ import {
   switchInvoiceMode,
   uploadSubplatformArchive,
   type InvoiceProviderRecord,
-  type InvoiceAdminRecord,
   type InvoiceSetting,
-  type PaymentAdminRecord,
   type PaymentGatewayRecord,
   type PaymentRouteRecord,
   type PlatformSetupStatus,
   type PlatformAiStatus,
   type PlatformDomainRecord,
-  type RefundAdminRecord,
   type SubplatformArchiveUpload,
   type SubplatformOrganizationRecord,
 } from "../api";
 import { LoginMethodsPanel } from "./LoginMethodsPanel";
 import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
+import { PlatformFinanceRecordsPanel } from "./PlatformFinanceRecordsPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
@@ -105,16 +98,6 @@ export function PlatformDashboard({
   const [invoiceSetting, setInvoiceSetting] = useState<InvoiceSetting | null>(
     null,
   );
-  const [payments, setPayments] = useState<PaymentAdminRecord[]>([]);
-  const [refunds, setRefunds] = useState<RefundAdminRecord[]>([]);
-  const [invoices, setInvoices] = useState<InvoiceAdminRecord[]>([]);
-  const [financeView, setFinanceView] = useState<"invoices" | "refunds">(
-    "invoices",
-  );
-  const [refundPaymentId, setRefundPaymentId] = useState("");
-  const [refundAmount, setRefundAmount] = useState("");
-  const [refundReason, setRefundReason] = useState("");
-  const [refundSaving, setRefundSaving] = useState(false);
   const [gatewayEditorOpen, setGatewayEditorOpen] = useState(false);
   const [routeEditorOpen, setRouteEditorOpen] = useState(false);
   const [invoiceEditorOpen, setInvoiceEditorOpen] = useState(false);
@@ -217,9 +200,6 @@ export function PlatformDashboard({
       getPaymentRoutes(),
       getInvoiceProviders(),
       getInvoiceSetting(),
-      getPaymentAdminRecords(),
-      getRefundAdminRecords(),
-      getInvoiceAdminRecords(),
       getSubplatformOrganizations(),
     ]).then(
       ([
@@ -227,9 +207,6 @@ export function PlatformDashboard({
         routeResult,
         invoiceResult,
         invoiceSettingResult,
-        paymentResult,
-        refundResult,
-        invoiceRecordResult,
         subplatformResult,
       ]) => {
         if (!mounted) return;
@@ -243,11 +220,6 @@ export function PlatformDashboard({
           setInvoiceProviders(invoiceResult.value);
         if (invoiceSettingResult.status === "fulfilled")
           setInvoiceSetting(invoiceSettingResult.value);
-        if (paymentResult.status === "fulfilled")
-          setPayments(paymentResult.value);
-        if (refundResult.status === "fulfilled") setRefunds(refundResult.value);
-        if (invoiceRecordResult.status === "fulfilled")
-          setInvoices(invoiceRecordResult.value);
         if (subplatformResult.status === "fulfilled")
           setSubplatforms(subplatformResult.value);
       },
@@ -262,61 +234,18 @@ export function PlatformDashboard({
       setSubplatformDomainId(setup.domains[0].id);
   }, [setup, subplatformDomainId]);
 
-  const refreshPaymentAdministration = async () => {
-    const [
-      nextGateways,
-      nextRoutes,
-      nextInvoiceProviders,
-      nextInvoiceSetting,
-      nextPayments,
-      nextRefunds,
-      nextInvoices,
-    ] = await Promise.all([
-      getPaymentGateways(),
-      getPaymentRoutes(),
-      getInvoiceProviders(),
-      getInvoiceSetting(),
-      getPaymentAdminRecords(),
-      getRefundAdminRecords(),
-      getInvoiceAdminRecords(),
-    ]);
+  const refreshPaymentConfiguration = async () => {
+    const [nextGateways, nextRoutes, nextInvoiceProviders, nextInvoiceSetting] =
+      await Promise.all([
+        getPaymentGateways(),
+        getPaymentRoutes(),
+        getInvoiceProviders(),
+        getInvoiceSetting(),
+      ]);
     setGateways(nextGateways);
     setPaymentRoutes(nextRoutes);
     setInvoiceProviders(nextInvoiceProviders);
     setInvoiceSetting(nextInvoiceSetting);
-    setPayments(nextPayments);
-    setRefunds(nextRefunds);
-    setInvoices(nextInvoices);
-  };
-
-  const submitRefund = async () => {
-    const tenantId = setup?.root.tenantId;
-    if (
-      !tenantId ||
-      !refundPaymentId ||
-      !refundAmount.trim() ||
-      !refundReason.trim()
-    ) {
-      onNotice("请选择可退款支付单，并填写退款金额和原因");
-      return;
-    }
-    setRefundSaving(true);
-    try {
-      await createAdminRefund({
-        tenantId,
-        paymentId: refundPaymentId,
-        amount: refundAmount.trim(),
-        reason: refundReason.trim(),
-      });
-      await refreshPaymentAdministration();
-      setRefundAmount("");
-      setRefundReason("");
-      onNotice("退款请求已提交；最终状态以支付网关回调和对账为准");
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "退款请求提交失败");
-    } finally {
-      setRefundSaving(false);
-    }
   };
 
   const refreshSubplatforms = async () => {
@@ -615,7 +544,7 @@ export function PlatformDashboard({
         enabled: true,
         reason: "platform dashboard create payment route",
       });
-      await refreshPaymentAdministration();
+      await refreshPaymentConfiguration();
       setRouteEditorOpen(false);
       setRouteMethodCode("");
       setRouteCurrency("");
@@ -685,7 +614,7 @@ export function PlatformDashboard({
         enabled: true,
         reason: "platform dashboard create gateway",
       });
-      await refreshPaymentAdministration();
+      await refreshPaymentConfiguration();
       setGatewayEditorOpen(false);
       setGatewayName("");
       setGatewayCredentialRef("");
@@ -732,7 +661,7 @@ export function PlatformDashboard({
         enabled: true,
         reason: "platform dashboard create invoice provider",
       });
-      await refreshPaymentAdministration();
+      await refreshPaymentConfiguration();
       setInvoiceEditorOpen(false);
       setInvoiceName("");
       setInvoiceCredentialRef("");
@@ -1480,66 +1409,14 @@ export function PlatformDashboard({
                 action="配置发票"
                 onAction={() => setInvoiceEditorOpen(true)}
               />
-              <div className="finance-empty">
-                <ReceiptText size={22} aria-hidden="true" />
-                {payments.length || invoices.length || refunds.length ? (
-                  <p>
-                    最近记录：{payments.length} 笔支付、{invoices.length}{" "}
-                    张发票、{refunds.length} 笔退款。
-                  </p>
-                ) : (
-                  <p>暂无财务记录；接入支付服务后，这里会显示真实事件。</p>
-                )}
-              </div>
-              {(financeView === "invoices" ? invoices : refunds).length ? (
-                <div
-                  className="finance-record-list"
-                  aria-label={
-                    financeView === "invoices" ? "最近发票" : "最近退款"
-                  }
-                >
-                  {(financeView === "invoices" ? invoices : refunds)
-                    .slice(0, 5)
-                    .map((record) => {
-                      const invoice =
-                        financeView === "invoices"
-                          ? (record as InvoiceAdminRecord)
-                          : null;
-                      const refund =
-                        financeView === "refunds"
-                          ? (record as RefundAdminRecord)
-                          : null;
-                      return (
-                        <div
-                          className="finance-record-row"
-                          key={invoice?.invoice_id ?? refund?.refund_id}
-                        >
-                          <span>
-                            <strong>
-                              {invoice
-                                ? invoice.invoice_number || invoice.kind
-                                : `退款 ${refund?.payment_id.slice(0, 8)}`}
-                            </strong>
-                            <small>
-                              {invoice
-                                ? `${invoice.status} · ${invoice.amount} ${invoice.currency}`
-                                : `${refund?.status} · ${refund?.amount} ${refund?.currency}`}
-                            </small>
-                          </span>
-                          <time
-                            dateTime={invoice?.updated_at ?? refund?.updated_at}
-                          >
-                            {new Date(
-                              invoice?.updated_at ??
-                                refund?.updated_at ??
-                                Date.now(),
-                            ).toLocaleDateString("zh-CN")}
-                          </time>
-                        </div>
-                      );
-                    })}
-                </div>
-              ) : null}
+              <PlatformFinanceRecordsPanel
+                authorized={
+                  rootRole === "rootSuperAdmin" || rootRole === "rootAdmin"
+                }
+                apiAvailable={isLiveMarketplaceEnabled()}
+                tenantId={setup?.root.tenantId ?? null}
+                onNotice={onNotice}
+              />
               {invoiceProviders.length ? (
                 <div className="provider-list">
                   {invoiceProviders.map((provider) => (
@@ -1655,101 +1532,6 @@ export function PlatformDashboard({
                   >
                     {saving ? "保存中…" : "保存 provider"}
                   </button>
-                </div>
-              ) : null}
-              <div className="finance-actions">
-                <button
-                  type="button"
-                  onClick={() => setInvoiceEditorOpen(true)}
-                >
-                  <ReceiptText size={18} aria-hidden="true" />
-                  <span>
-                    <strong>发票管理</strong>
-                    <small>配置与切换真实 provider</small>
-                  </span>
-                </button>
-                <button type="button" onClick={() => setFinanceView("refunds")}>
-                  <BanknoteArrowDown size={18} aria-hidden="true" />
-                  <span>
-                    <strong>退款管理</strong>
-                    <small>选择支付单后执行退款</small>
-                  </span>
-                </button>
-              </div>
-              {financeView === "refunds" ? (
-                <div
-                  className="admin-editor refund-editor"
-                  aria-label="创建退款"
-                >
-                  <div className="admin-editor-heading">
-                    <strong>提交退款</strong>
-                    <small>
-                      支持全额或部分退款；网关能力不足时会明确返回失败
-                    </small>
-                  </div>
-                  {payments.some((payment) => payment.status === "captured") ? (
-                    <>
-                      <label>
-                        <span>支付单</span>
-                        <select
-                          value={refundPaymentId}
-                          onChange={(event) =>
-                            setRefundPaymentId(event.target.value)
-                          }
-                        >
-                          <option value="">选择已捕获支付</option>
-                          {payments
-                            .filter((payment) => payment.status === "captured")
-                            .map((payment) => (
-                              <option
-                                key={payment.payment_id}
-                                value={payment.payment_id}
-                              >
-                                {payment.merchant_order_id ||
-                                  payment.payment_id}{" "}
-                                · {payment.captured_amount} {payment.currency}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                      <div className="subplatform-form-grid">
-                        <label>
-                          <span>退款金额</span>
-                          <input
-                            value={refundAmount}
-                            onChange={(event) =>
-                              setRefundAmount(event.target.value)
-                            }
-                            inputMode="decimal"
-                            placeholder="按支付单币种填写"
-                          />
-                        </label>
-                        <label>
-                          <span>退款原因</span>
-                          <input
-                            value={refundReason}
-                            onChange={(event) =>
-                              setRefundReason(event.target.value)
-                            }
-                            maxLength={2000}
-                            placeholder="说明退款原因"
-                          />
-                        </label>
-                      </div>
-                      <button
-                        className="button button-dark"
-                        type="button"
-                        disabled={refundSaving}
-                        onClick={() => void submitRefund()}
-                      >
-                        {refundSaving ? "提交中…" : "提交退款"}
-                      </button>
-                    </>
-                  ) : (
-                    <p className="platform-access-empty">
-                      暂无已捕获且可退款的支付单。
-                    </p>
-                  )}
                 </div>
               ) : null}
             </section>
