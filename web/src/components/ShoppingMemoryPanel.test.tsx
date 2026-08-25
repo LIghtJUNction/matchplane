@@ -62,7 +62,7 @@ describe("ShoppingMemoryPanel", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByText(
-        "AI 自动总结长期购物需求；你可以随时查看、纠正、暂停或清空。",
+        "自动记下长期购物需求；你可以随时查看、纠正、暂停或清空。",
       ),
     ).not.toBeInTheDocument();
   });
@@ -72,10 +72,10 @@ describe("ShoppingMemoryPanel", () => {
     await screen.findByText("当前摘要");
     fireEvent.click(screen.getByRole("button", { name: "修改记忆" }));
 
-    fireEvent.change(screen.getByLabelText("告诉 AI 如何修改"), {
+    fireEvent.change(screen.getByLabelText("说明要修改的内容"), {
       target: { value: "预算改成 8000 元，其他不变" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "让 AI 更新" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交修改" }));
 
     await waitFor(() =>
       expect(api.reviseShoppingMemory).toHaveBeenCalledWith({

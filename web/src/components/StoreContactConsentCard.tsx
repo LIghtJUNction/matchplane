@@ -81,10 +81,10 @@ export function StoreContactConsentCard({
             {status === "accepted"
               ? english
                 ? "Once store staff also approve, the contact appears under Contact requests on this store page. You can keep chatting with the AI manager."
-                : "店员也同意后，可在本店铺页「联系申请」查看对方联系方式；你仍可继续与 AI 店长对话。"
+                : "店员也同意后，可在本店铺页「联系申请」查看对方联系方式；你仍可继续与店长对话。"
               : english
                 ? "No contact details were shared. The AI manager remains available."
-                : "没有交换任何联系方式，AI 店长仍会继续对话。"}
+                : "没有交换任何联系方式，你可以继续与店长对话。"}
           </span>
         </div>
       </div>
@@ -131,7 +131,7 @@ export function StoreContactConsentCard({
           <p className="store-contact-consent-explain">
             {english
               ? "If you agree, only the verified bindings below can be released after store staff also approve. The AI cannot edit these values or consent for you."
-              : "同意后，只有以下已验证绑定可在店员也同意后交换。AI 不能修改这些内容，也不能替你同意。"}
+              : "同意后，只有以下已验证绑定可在店员也同意后交换。店长不能修改这些内容，也不能替你同意。"}
           </p>
           <ul className="store-contact-consent-channels">
             {channels.map((channel) => (

@@ -67,7 +67,7 @@ export function useStoreHandoff({
           item.offerId === action.productId || item.id === action.productId,
       );
       if (!selected?.offerId)
-        throw new Error("同意卡关联的商品已经下架，请继续咨询 AI 店长");
+        throw new Error("同意卡关联的商品已经下架，请继续咨询店长");
       const session = await getMarketplaceSession({
         subplatform: subplatform.slug,
         platformPath: subplatform.path,
@@ -221,7 +221,7 @@ export function useStoreHandoff({
       onNotice(
         locale === "en"
           ? "Store staff were notified. The AI manager remains available."
-          : "已通知店员，AI 店长会继续和你对话。",
+          : "已通知店员，店长会继续和你对话。",
       );
     },
     [subplatform, locale, onNotice],
