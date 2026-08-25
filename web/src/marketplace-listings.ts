@@ -93,14 +93,16 @@ function mapRecommendation(
     listing.priceCurrency = money.currency;
     listing.priceCurrencyScale = money.scale;
   }
-  if (intentId) {
+  const reasons =
+    item.match_reasons ?? stringList(dynamicItem.reasons) ?? undefined;
+  const risks =
+    item.match_risks ?? stringList(dynamicItem.risks) ?? undefined;
+  if (reasons?.length) listing.reasons = reasons;
+  if (risks?.length) listing.risks = risks;
+  if (intentId || item.match_score !== undefined) {
     listing.matchScore = Math.round(
       Math.max(0, Math.min(1, item.match_score ?? 0)) * 100,
     );
-    listing.reasons =
-      item.match_reasons ?? stringList(dynamicItem.reasons) ?? undefined;
-    listing.risks =
-      item.match_risks ?? stringList(dynamicItem.risks) ?? undefined;
   }
 
   return listing;

@@ -133,6 +133,16 @@ export function MarketplaceListingCard({
             <span>{sellerLabel}</span>
           </div>
         ) : null}
+        {compact && listing.reasons?.length ? (
+          <ul
+            className="marketplace-product-match-reasons"
+            aria-label={locale === "en" ? "Why it matches" : "匹配理由"}
+          >
+            {listing.reasons.slice(0, 3).map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     </article>
   );

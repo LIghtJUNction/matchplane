@@ -295,6 +295,40 @@ describe("MatchChat sending state", () => {
     );
   });
 
+  it("shows match reasons on search result cards so users can verify retrieval", async () => {
+    const user = userEvent.setup();
+    askMallShoppingAssistant.mockResolvedValueOnce({
+      requestId: "77777777-7777-4777-8777-777777777777",
+      answer: "按预算筛了几台在售 SUV，可以点开看。",
+      recommendations: [
+        {
+          offer_id: "88888888-8888-4888-8888-888888888888",
+          display_name: "本田 CR-V",
+          store_name: "星辰二手车行",
+          asking_amount: "13280000",
+          currency: "CNY",
+          currency_scale: 2,
+          attributes: { category: "SUV" },
+          match_reasons: ["价格符合预算", "品类为 SUV"],
+        },
+      ],
+      uiActions: [],
+    });
+    render(<MatchChat home onNotice={vi.fn()} subplatform={subplatform} />);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
+      "预算 15 万以内的家用 SUV",
+    );
+    await user.click(screen.getByRole("button", { name: "发送需求" }));
+
+    expect(await screen.findByText("价格符合预算")).toBeInTheDocument();
+    expect(screen.getByText("品类为 SUV")).toBeInTheDocument();
+    expect(
+      screen.getByRole("list", { name: "匹配理由" }),
+    ).toBeInTheDocument();
+  });
+
   it("opens a saved conversation from browser history", async () => {
     const historyKey = "matchplane.shopping-conversation-history.v1:root:buyer";
     window.localStorage.setItem(
