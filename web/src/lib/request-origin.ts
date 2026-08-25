@@ -1,12 +1,14 @@
 /**
- * Browser cookie requests must originate from an operator-configured front-end origin.
- * Machine calls normally have no Cookie header and are intentionally left to their API-key
- * authorization path. A missing Origin remains compatible for those explicit machine paths.
+ * Browser cookie mutations must originate from an operator-configured front-end origin.
+ * Browser GET/HEAD requests commonly omit Origin, so authenticated read paths use the session
+ * check and remain readable without a synthetic Origin header. Machine calls normally have no
+ * Cookie header and are intentionally left to their API-key authorization path.
  */
 import { isProductionEnvironment } from "./runtime";
 
 export function hasTrustedBrowserOrigin(request: Request): boolean {
   if (!request.headers.get("cookie")) return true;
+  if (request.method === "GET" || request.method === "HEAD") return true;
   return isTrustedOrigin(request.headers.get("origin"));
 }
 

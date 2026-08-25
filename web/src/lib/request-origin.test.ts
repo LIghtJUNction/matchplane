@@ -6,8 +6,13 @@ import {
 } from "./request-origin";
 
 const cookie = "better-auth.session_token=opaque";
-const request = (origin?: string, withCookie = true) =>
+const request = (
+  origin?: string,
+  withCookie = true,
+  method: "GET" | "HEAD" | "POST" = "GET",
+) =>
   new Request("http://localhost:4173/api/mutation", {
+    method,
     headers: {
       ...(withCookie ? { cookie } : {}),
       ...(origin === undefined ? {} : { origin }),
@@ -30,6 +35,16 @@ describe("request origin boundaries", () => {
   it("accepts a configured same-origin cookie request", () => {
     process.env.BETTER_AUTH_TRUSTED_ORIGINS = "http://localhost:4173";
     expect(hasTrustedCookieOrigin(request("http://localhost:4173"))).toBe(true);
+  });
+
+  it("allows authenticated GET reads without a browser Origin header", () => {
+    expect(hasTrustedBrowserOrigin(request())).toBe(true);
+    expect(hasTrustedBrowserOrigin(request(undefined, true, "HEAD"))).toBe(
+      true,
+    );
+    expect(hasTrustedBrowserOrigin(request(undefined, true, "POST"))).toBe(
+      false,
+    );
   });
 
   it("keeps no-cookie browser-origin behavior for explicit machine routes", () => {
