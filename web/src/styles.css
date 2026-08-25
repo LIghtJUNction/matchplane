@@ -303,15 +303,16 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .invoice-provider-empty { padding: 0.75rem; display: flex; align-items: center; gap: 0.55rem; border: 1px dashed var(--line); border-radius: 0.85rem; color: var(--muted); font-size: 0.68rem; }
 .invoice-provider-empty p { margin: 0; }
 .platform-finance-records { margin-top: 0.75rem; display: grid; gap: 0.65rem; }
-.finance-resource-status, .bootstrap-resource-status, .payment-routing-status, .invoice-configuration-status { padding: 0.72rem 0.8rem; border: 1px solid var(--line); border-radius: 0.85rem; background: var(--paper-deep); color: var(--muted); font-size: 0.68rem; line-height: 1.5; }
-.finance-resource-alert, .bootstrap-resource-alert, .payment-routing-alert, .invoice-configuration-alert { padding: 0.78rem; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 0.7rem; border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--line)); border-radius: 0.9rem; background: color-mix(in srgb, var(--danger) 6%, var(--paper)); color: var(--ink-soft); }
-.finance-resource-alert > svg, .bootstrap-resource-alert > svg, .payment-routing-alert > svg, .invoice-configuration-alert > svg { margin-top: 0.12rem; color: var(--danger); }
-.finance-resource-alert strong, .bootstrap-resource-alert strong, .payment-routing-alert strong, .invoice-configuration-alert strong { font-size: 0.72rem; }
+.finance-resource-status, .bootstrap-resource-status, .payment-routing-status, .invoice-configuration-status, .local-store-status { padding: 0.72rem 0.8rem; border: 1px solid var(--line); border-radius: 0.85rem; background: var(--paper-deep); color: var(--muted); font-size: 0.68rem; line-height: 1.5; }
+.finance-resource-alert, .bootstrap-resource-alert, .payment-routing-alert, .invoice-configuration-alert, .local-store-alert { padding: 0.78rem; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 0.7rem; border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--line)); border-radius: 0.9rem; background: color-mix(in srgb, var(--danger) 6%, var(--paper)); color: var(--ink-soft); }
+.finance-resource-alert > svg, .bootstrap-resource-alert > svg, .payment-routing-alert > svg, .invoice-configuration-alert > svg, .local-store-alert > svg { margin-top: 0.12rem; color: var(--danger); }
+.finance-resource-alert strong, .bootstrap-resource-alert strong, .payment-routing-alert strong, .invoice-configuration-alert strong, .local-store-alert strong { font-size: 0.72rem; }
 .finance-resource-alert ul, .bootstrap-resource-alert ul, .payment-routing-alert ul, .invoice-configuration-alert ul { margin: 0.25rem 0 0; padding-left: 1rem; color: var(--muted); font-size: 0.64rem; line-height: 1.5; }
-.finance-resource-alert > button, .bootstrap-resource-alert > button, .payment-routing-alert > button, .invoice-configuration-alert > button { grid-column: 2; justify-self: start; }
+.finance-resource-alert > button, .bootstrap-resource-alert > button, .payment-routing-alert > button, .invoice-configuration-alert > button, .local-store-alert > button { grid-column: 2; justify-self: start; }
+.local-store-alert p { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.64rem; line-height: 1.5; }
 .finance-record-tabs { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .finance-record-list { margin-top: 0.15rem; display: grid; gap: 0.35rem; }
-.finance-record-stale, .payment-routing-stale, .invoice-configuration-stale { margin: 0; padding: 0.55rem 0.65rem; border-radius: 0.7rem; background: var(--paper-deep); color: var(--muted); font-size: 0.64rem; line-height: 1.45; }
+.finance-record-stale, .payment-routing-stale, .invoice-configuration-stale, .local-store-stale { margin: 0; padding: 0.55rem 0.65rem; border-radius: 0.7rem; background: var(--paper-deep); color: var(--muted); font-size: 0.64rem; line-height: 1.45; }
 .finance-record-row { min-height: 3.2rem; padding: 0.55rem 0.65rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; border-top: 1px solid var(--line); }
 .finance-record-row:first-of-type { border-top: 0; }
 .finance-record-row > span { display: grid; min-width: 0; }

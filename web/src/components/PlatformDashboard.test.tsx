@@ -1,10 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   isLiveMarketplaceEnabled: vi.fn(() => false),
-  registerSubplatform: vi.fn(),
 }));
 const bootstrapMock = vi.hoisted(() => ({ current: undefined as unknown }));
 const invoiceConfigurationMock = vi.hoisted(() => ({
@@ -30,6 +28,23 @@ const invoiceConfigurationMock = vi.hoisted(() => ({
     refreshSetting: vi.fn(),
     commitProvider: vi.fn(),
     commitMode: vi.fn(),
+  },
+}));
+const localStoreMock = vi.hoisted(() => ({
+  use: vi.fn(),
+  controller: {
+    organizations: { status: "ready", data: [] },
+    mutation: null,
+    operationPhase: "",
+    registrationCancellable: false,
+    writeBlockReason: null,
+    retryAvailable: true,
+    retryFailed: vi.fn(),
+    refreshOrganizations: vi.fn(),
+    cancelRegistration: vi.fn(),
+    commitRegistration: vi.fn(),
+    commitActivation: vi.fn(),
+    prepareUpdate: vi.fn(),
   },
 }));
 const paymentRoutingMock = vi.hoisted(() => ({
@@ -63,6 +78,12 @@ vi.mock("../hooks/usePlatformInvoiceConfigurationResources", () => ({
     return invoiceConfigurationMock.controller;
   },
 }));
+vi.mock("../hooks/usePlatformLocalStoreResources", () => ({
+  usePlatformLocalStoreResources: (options: unknown) => {
+    localStoreMock.use(options);
+    return localStoreMock.controller;
+  },
+}));
 vi.mock("../hooks/usePlatformPaymentRoutingResources", () => ({
   usePlatformPaymentRoutingResources: (options: unknown) => {
     paymentRoutingMock.use(options);
@@ -82,6 +103,9 @@ vi.mock("./PlatformInvoiceConfigurationPanel", () => ({
   PlatformInvoiceConfigurationPanel: () => (
     <div data-testid="invoice-configuration-panel" />
   ),
+}));
+vi.mock("./PlatformLocalStorePanel", () => ({
+  PlatformLocalStorePanel: () => <div data-testid="local-store-panel" />,
 }));
 vi.mock("./PlatformPaymentRoutingPanel", () => ({
   PlatformPaymentRoutingPanel: () => (
@@ -136,65 +160,43 @@ const dashboardProps = {
 };
 
 beforeEach(() => {
-  api.registerSubplatform.mockReset();
   dashboardProps.onNotice.mockReset();
   invoiceConfigurationMock.use.mockClear();
+  localStoreMock.use.mockClear();
   paymentRoutingMock.use.mockClear();
 });
 
-describe("PlatformDashboard local store onboarding", () => {
-  it("does not expose local onboarding when independent domain verification failed", async () => {
-    bootstrapMock.current = resources({
-      status: "error",
-      message: "数据范围暂时不可用",
-      previous: [domain("domain-a")],
-    });
-    const user = userEvent.setup();
-    render(<PlatformDashboard {...dashboardProps} />);
-
-    await user.click(screen.getByRole("tab", { name: "店铺与商品" }));
-
-    const action = screen.getByRole("button", { name: "接入本地店铺" });
-    expect(action).toBeDisabled();
-    expect(action).toHaveAttribute("title", "商城数据范围尚未验证");
-    expect(screen.queryByLabelText("接入本地店铺")).not.toBeInTheDocument();
-  });
-
-  it("invalidates stale selection and only auto-selects a recovered single fresh domain", async () => {
-    const user = userEvent.setup();
-    bootstrapMock.current = resources({
-      status: "ready",
-      data: [domain("domain-a"), domain("domain-b")],
-    });
+describe("PlatformDashboard local store boundary", () => {
+  it("passes role plus raw setup and domain authority to the extracted controller", () => {
+    const initial = resources({ status: "ready", data: [domain("a")] });
+    bootstrapMock.current = initial;
     const { rerender } = render(<PlatformDashboard {...dashboardProps} />);
-    await user.click(screen.getByRole("tab", { name: "店铺与商品" }));
-    await user.click(screen.getByRole("button", { name: "接入本地店铺" }));
 
-    const select = screen.getByLabelText("商城数据范围");
-    expect(select).toHaveValue("");
-    await user.selectOptions(select, "domain-a");
-    expect(select).toHaveValue("domain-a");
+    expect(screen.getByTestId("local-store-panel")).toBeInTheDocument();
+    expect(localStoreMock.use).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        authorized: true,
+        apiAvailable: false,
+        rootRole: "rootSuperAdmin",
+        setup: initial.setup,
+        domains: initial.domains,
+      }),
+    );
 
-    bootstrapMock.current = resources({
-      status: "error",
-      message: "数据范围重新验证失败",
-      previous: [domain("domain-a"), domain("domain-b")],
-    });
+    const stale = {
+      ...resources({ status: "error", message: "数据范围不可用" }),
+      setup: {
+        status: "error",
+        message: "初始化状态不可用",
+        previous: setup,
+      },
+    };
+    bootstrapMock.current = stale;
     rerender(<PlatformDashboard {...dashboardProps} />);
 
-    await waitFor(() => expect(select).toHaveValue(""));
-    expect(select).toBeDisabled();
-    expect(screen.getByRole("button", { name: "构建本地店铺" })).toBeDisabled();
-    expect(api.registerSubplatform).not.toHaveBeenCalled();
-
-    bootstrapMock.current = resources({
-      status: "ready",
-      data: [domain("domain-b")],
-    });
-    rerender(<PlatformDashboard {...dashboardProps} />);
-
-    await waitFor(() => expect(select).toHaveValue("domain-b"));
-    expect(select).toBeEnabled();
+    expect(localStoreMock.use).toHaveBeenLastCalledWith(
+      expect.objectContaining({ setup: stale.setup, domains: stale.domains }),
+    );
   });
 });
 

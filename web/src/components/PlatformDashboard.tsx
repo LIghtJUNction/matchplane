@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
-  Archive,
   Bot,
   ChevronLeft,
   CreditCard,
@@ -9,18 +8,10 @@ import {
   Palette,
   ReceiptText,
   ShieldCheck,
-  Upload,
 } from "lucide-react";
 
 import {
-  getSubplatformOrganizations,
   isLiveMarketplaceEnabled,
-  activateSubplatform,
-  discoverSubplatformSource,
-  getSubplatformSourceIntake,
-  registerSubplatform,
-  uploadSubplatformArchive,
-  type SubplatformArchiveUpload,
   type SubplatformOrganizationRecord,
 } from "../api";
 import { LoginMethodsPanel } from "./LoginMethodsPanel";
@@ -28,6 +19,7 @@ import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformBootstrapNotice } from "./PlatformBootstrapNotice";
 import { PlatformFinanceRecordsPanel } from "./PlatformFinanceRecordsPanel";
 import { PlatformInvoiceConfigurationPanel } from "./PlatformInvoiceConfigurationPanel";
+import { PlatformLocalStorePanel } from "./PlatformLocalStorePanel";
 import { PlatformPaymentRoutingPanel } from "./PlatformPaymentRoutingPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
 import {
@@ -35,6 +27,7 @@ import {
   usePlatformBootstrapResources,
 } from "../hooks/usePlatformBootstrapResources";
 import { usePlatformInvoiceConfigurationResources } from "../hooks/usePlatformInvoiceConfigurationResources";
+import { usePlatformLocalStoreResources } from "../hooks/usePlatformLocalStoreResources";
 import { usePlatformPaymentRoutingResources } from "../hooks/usePlatformPaymentRoutingResources";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
@@ -80,7 +73,6 @@ export function PlatformDashboard({
     onNotice,
   });
   const verifiedSetup = freshBootstrapResourceData(bootstrap.setup);
-  const verifiedDomains = freshBootstrapResourceData(bootstrap.domains);
   const marketplaceApiAvailable = isLiveMarketplaceEnabled();
   const paymentRouting = usePlatformPaymentRoutingResources({
     authorized: bootstrapAuthorized,
@@ -106,35 +98,19 @@ export function PlatformDashboard({
         : { status: "unverified" },
     onNotice,
   });
+  const localStores = usePlatformLocalStoreResources({
+    authorized: bootstrapAuthorized,
+    apiAvailable: marketplaceApiAvailable,
+    rootRole,
+    setup: bootstrap.setup,
+    domains: bootstrap.domains,
+    onNotice,
+  });
   const [activeSection, setActiveSection] = useState<PlatformSection>("home");
-  const [subplatforms, setSubplatforms] = useState<
-    SubplatformOrganizationRecord[]
-  >([]);
-  const [saving, setSaving] = useState(false);
-  const [subplatformEditorOpen, setSubplatformEditorOpen] = useState(false);
-  const [subplatformSourceKind, setSubplatformSourceKind] = useState<
-    "git" | "archive"
-  >("git");
-  const [subplatformDomainId, setSubplatformDomainId] = useState("");
-  const [subplatformPackageId, setSubplatformPackageId] = useState("");
-  const [subplatformSlug, setSubplatformSlug] = useState("");
-  const [subplatformSourceLocator, setSubplatformSourceLocator] = useState("");
-  const [subplatformPinnedRevision, setSubplatformPinnedRevision] =
-    useState("");
-  const [subplatformSourceDigest, setSubplatformSourceDigest] = useState("");
-  // The root platform never ships a sample market manifest. Operators paste or upload the
-  // manifest that belongs to the package they are registering; domain data stays in that package.
-  const [subplatformManifest, setSubplatformManifest] = useState("");
-  const [subplatformScopes, setSubplatformScopes] = useState("");
-  const [subplatformMembershipPolicy, setSubplatformMembershipPolicy] =
-    useState<"public" | "invite">("public");
-  const [subplatformArchive, setSubplatformArchive] = useState<File | null>(
-    null,
-  );
-  const [subplatformUpload, setSubplatformUpload] =
-    useState<SubplatformArchiveUpload | null>(null);
-  const [subplatformDiscoveryState, setSubplatformDiscoveryState] =
-    useState("");
+  const freshSubplatforms =
+    localStores.organizations.status === "ready"
+      ? localStores.organizations.data
+      : [];
   const accessOrganizations: SubplatformOrganizationRecord[] = [
     ...(verifiedSetup?.root.organization
       ? [
@@ -155,319 +131,11 @@ export function PlatformDashboard({
           } satisfies SubplatformOrganizationRecord,
         ]
       : []),
-    ...subplatforms.filter(
+    ...freshSubplatforms.filter(
       (organization) =>
         organization.id !== verifiedSetup?.root.organization?.id,
     ),
   ];
-
-  useEffect(() => {
-    if (!rootRole || !marketplaceApiAvailable) return;
-    let mounted = true;
-    void Promise.allSettled([getSubplatformOrganizations()]).then(
-      ([subplatformResult]) => {
-        if (mounted && subplatformResult.status === "fulfilled")
-          setSubplatforms(subplatformResult.value);
-      },
-    );
-    return () => {
-      mounted = false;
-    };
-  }, [marketplaceApiAvailable, rootRole]);
-
-  useEffect(() => {
-    const currentDomains = verifiedDomains ?? [];
-    setSubplatformDomainId((current) => {
-      if (current && !currentDomains.some((domain) => domain.id === current))
-        return "";
-      if (!current && currentDomains.length === 1)
-        return currentDomains[0]?.id ?? "";
-      return current;
-    });
-  }, [verifiedDomains]);
-
-  const refreshSubplatforms = async () => {
-    setSubplatforms(await getSubplatformOrganizations());
-  };
-
-  const resetSubplatformEditor = () => {
-    setSubplatformSourceKind("git");
-    setSubplatformPackageId("");
-    setSubplatformSlug("");
-    setSubplatformSourceLocator("");
-    setSubplatformPinnedRevision("");
-    setSubplatformSourceDigest("");
-    setSubplatformManifest("");
-    setSubplatformScopes("");
-    setSubplatformMembershipPolicy("public");
-    setSubplatformArchive(null);
-    setSubplatformUpload(null);
-    setSubplatformDiscoveryState("");
-  };
-
-  const submitSubplatform = async () => {
-    if (bootstrap.setup.status !== "ready") {
-      onNotice("商城初始化状态尚未验证，请重新读取后再接入店铺");
-      return;
-    }
-    const currentSetup = bootstrap.setup.data;
-    if (!currentSetup.root.tenantId) {
-      onNotice("商城已确认尚未完成初始化，暂时不能接入店铺");
-      return;
-    }
-    if (bootstrap.domains.status !== "ready") {
-      onNotice("商城数据范围尚未验证，请重新读取后再接入店铺");
-      return;
-    }
-    const selectedDomain = bootstrap.domains.data.find(
-      (domain) => domain.id === subplatformDomainId,
-    );
-    if (!selectedDomain) {
-      onNotice("请选择一个已验证的商城数据范围后再接入店铺");
-      return;
-    }
-    let packageId = subplatformPackageId.trim();
-    let slug = subplatformSlug.trim();
-    let manifest: Record<string, unknown> | null = null;
-    let sourceLocator = subplatformSourceLocator.trim();
-    let sourceDigest = subplatformSourceDigest.trim().toLowerCase();
-    let pinnedRevision = subplatformPinnedRevision.trim().toLowerCase();
-    const requestedScopes = [
-      ...new Set(
-        subplatformScopes
-          .split(",")
-          .map((scope) => scope.trim())
-          .filter(Boolean),
-      ),
-    ];
-    // Supplying the source URL/archive is enough. The isolated builder will read and validate
-    // package id, slug, immutable revision, digest and manifest. Manual metadata remains
-    // supported for operators who already have a builder-verified package record.
-    const hasManualRegistration = Boolean(
-      packageId &&
-        slug &&
-        subplatformManifest.trim() &&
-        pinnedRevision &&
-        sourceDigest,
-    );
-    setSubplatformDiscoveryState("");
-    setSaving(true);
-    try {
-      if (subplatformSourceKind === "archive") {
-        if (!subplatformArchive) {
-          onNotice("请选择 .tar.gz、.tgz、.tar.zst 或 .tzst 店铺接入包");
-          return;
-        }
-        const uploaded = await uploadSubplatformArchive(subplatformArchive);
-        sourceLocator = uploaded.sourceLocator;
-        sourceDigest = uploaded.sourceDigest;
-        pinnedRevision = pinnedRevision || uploaded.sourceDigest;
-        setSubplatformUpload(uploaded);
-        setSubplatformSourceLocator(sourceLocator);
-        setSubplatformSourceDigest(sourceDigest);
-        setSubplatformPinnedRevision(pinnedRevision);
-      }
-      if (!sourceLocator) {
-        onNotice("请填写 Git HTTPS 地址或先上传压缩包");
-        return;
-      }
-
-      if (hasManualRegistration) {
-        try {
-          const parsed = JSON.parse(subplatformManifest);
-          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-            throw new Error();
-          manifest = parsed as Record<string, unknown>;
-        } catch {
-          onNotice("manifest 必须是 JSON 对象");
-          return;
-        }
-      } else {
-        setSubplatformDiscoveryState("正在提交到隔离构建器…");
-        const intake = await discoverSubplatformSource({
-          domainId: selectedDomain.id,
-          sourceKind: subplatformSourceKind,
-          sourceLocator,
-          sourceDigest: sourceDigest || undefined,
-          requestedScopes: requestedScopes.length ? requestedScopes : undefined,
-          membershipPolicy: subplatformMembershipPolicy,
-        });
-        let discovered = null;
-        for (let attempt = 0; attempt < 90; attempt += 1) {
-          discovered = await getSubplatformSourceIntake(intake.intakeId);
-          if (discovered.state === "ready") break;
-          if (discovered.state === "rejected") {
-            throw new Error(discovered.error || "隔离构建器拒绝了这个店铺来源");
-          }
-          setSubplatformDiscoveryState(
-            discovered.state === "discovering"
-              ? "隔离构建器正在读取 manifest…"
-              : "等待隔离构建器接单…",
-          );
-          await new Promise((resolve) => window.setTimeout(resolve, 2_000));
-        }
-        if (!discovered || discovered.state !== "ready") {
-          throw new Error(
-            `隔离构建器尚未完成，请稍后重试（任务 ${intake.intakeId}）`,
-          );
-        }
-        if (
-          !discovered.manifest ||
-          typeof discovered.manifest !== "object" ||
-          Array.isArray(discovered.manifest)
-        ) {
-          throw new Error("隔离构建器没有返回有效 manifest");
-        }
-        manifest = discovered.manifest;
-        packageId = discovered.packageId || String(manifest.id || "");
-        slug = discovered.slug || String(manifest.slug || "");
-        sourceDigest = discovered.sourceDigest?.toLowerCase() || sourceDigest;
-        pinnedRevision =
-          discovered.pinnedRevision?.toLowerCase() || pinnedRevision;
-        setSubplatformDiscoveryState("manifest 已验证，正在登记店铺…");
-      }
-
-      if (!/^[a-z0-9][a-z0-9._-]{1,127}$/.test(packageId)) {
-        onNotice("package id 只能使用小写字母、数字、点、下划线或短横线");
-        return;
-      }
-      if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(slug)) {
-        onNotice("slug 只能使用小写字母、数字和短横线");
-        return;
-      }
-      if (!manifest || manifest.id !== packageId || manifest.slug !== slug) {
-        onNotice("构建器返回的 manifest.id/slug 与店铺不一致");
-        return;
-      }
-      if (!/^[0-9a-f]{7,128}$/i.test(pinnedRevision)) {
-        onNotice("pinned revision 必须是不可变的 commit 或 digest");
-        return;
-      }
-      if (!/^[0-9a-f]{64}$/i.test(sourceDigest)) {
-        onNotice("source digest 必须是 64 位 SHA-256；不要提交未经验证的来源");
-        return;
-      }
-      const result = await registerSubplatform({
-        tenantId: currentSetup.root.tenantId,
-        domainId: selectedDomain.id,
-        packageId,
-        slug,
-        sourceKind: subplatformSourceKind,
-        sourceLocator,
-        pinnedRevision,
-        sourceDigest,
-        manifest,
-        requestedScopes: requestedScopes.length ? requestedScopes : undefined,
-        membershipPolicy: subplatformMembershipPolicy,
-      });
-      await refreshSubplatforms();
-      setSubplatformEditorOpen(false);
-      resetSubplatformEditor();
-      onNotice(`店铺 ${result.slug} 已登记，等待隔离构建器完成构建`);
-    } catch (error) {
-      setSubplatformDiscoveryState(
-        error instanceof Error ? error.message : "店铺来源读取失败",
-      );
-      onNotice(error instanceof Error ? error.message : "店铺接入失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const activateRegisteredSubplatform = async (
-    organization: SubplatformOrganizationRecord,
-  ) => {
-    if (bootstrap.domains.status !== "ready") {
-      onNotice("商城数据范围尚未验证，请重新读取后再上线店铺");
-      return;
-    }
-    if (
-      !organization.domainId ||
-      !bootstrap.domains.data.some(
-        (domain) => domain.id === organization.domainId,
-      )
-    ) {
-      onNotice("店铺关联的数据范围已变化，请重新验证后再上线");
-      return;
-    }
-    if (!organization.registrationId || !organization.buildDigest) {
-      onNotice("该版本还没有隔离构建器签发的 build digest");
-      return;
-    }
-    setSaving(true);
-    try {
-      await activateSubplatform({
-        registrationId: organization.registrationId,
-        buildDigest: organization.buildDigest,
-      });
-      await refreshSubplatforms();
-      onNotice(`${organization.name} 已激活并加入平台路由`);
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "店铺启用失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateLocalStore = (organization: SubplatformOrganizationRecord) => {
-    if (bootstrap.setup.status !== "ready") {
-      onNotice("商城初始化状态尚未验证，请重新读取后再更新店铺");
-      return;
-    }
-    if (bootstrap.domains.status !== "ready") {
-      onNotice("商城数据范围尚未验证，请重新读取后再更新店铺");
-      return;
-    }
-    if (
-      !organization.domainId ||
-      !bootstrap.domains.data.some(
-        (domain) => domain.id === organization.domainId,
-      )
-    ) {
-      onNotice("店铺关联的数据范围已变化，请重新验证后再更新");
-      return;
-    }
-    const sourceKind =
-      organization.sourceKind === "archive"
-        ? "archive"
-        : organization.sourceKind === "git"
-          ? "git"
-          : null;
-    if (!sourceKind) {
-      onNotice("只有本地部署的 Git 或压缩包店铺可以在这里更新");
-      return;
-    }
-    setSubplatformEditorOpen(true);
-    setSubplatformSourceKind(sourceKind);
-    setSubplatformDomainId(organization.domainId);
-    setSubplatformPackageId("");
-    setSubplatformSlug("");
-    setSubplatformManifest("");
-    setSubplatformPinnedRevision("");
-    setSubplatformSourceDigest("");
-    setSubplatformScopes("");
-    setSubplatformMembershipPolicy("public");
-    setSubplatformArchive(null);
-    setSubplatformUpload(null);
-    setSubplatformSourceLocator(
-      sourceKind === "git"
-        ? organization.sourceLocator || organization.sourceRepository || ""
-        : "",
-    );
-    setSubplatformDiscoveryState(
-      sourceKind === "git"
-        ? `准备检查 ${organization.name} 的 Git 更新`
-        : `请选择 ${organization.name} 的新版本压缩包`,
-    );
-  };
-
-  const subplatformStateLabel: Record<string, string> = {
-    active: "已激活",
-    ready: "构建完成",
-    building: "构建中",
-    validated: "已登记，待构建",
-    rejected: "构建失败",
-  };
 
   return (
     <div className="dashboard platform-dashboard">
@@ -595,7 +263,7 @@ export function PlatformDashboard({
                 domainsResource={bootstrap.domains}
                 aiResource={bootstrap.ai}
                 rootRole={rootRole}
-                saving={saving || bootstrap.rootInitializing}
+                saving={Boolean(bootstrap.rootInitializing)}
                 onInitializeRoot={() =>
                   void bootstrap.initializeRootOrganization()
                 }
@@ -654,261 +322,12 @@ export function PlatformDashboard({
               <PlatformAiConfigPanel rootRole={rootRole} onNotice={onNotice} />
             </section>
 
-            <section
-              id="platform-panel-tree"
-              className="surface subplatform-panel"
-              role="tabpanel"
-              aria-labelledby="platform-tab-tree"
+            <PlatformLocalStorePanel
+              controller={localStores}
+              domainsResource={bootstrap.domains}
               hidden={activeSection !== "tree"}
-            >
-              <div className="subplatform-header">
-                <div>
-                  <h2 id="subplatform-title">本地店铺</h2>
-                  <p className="subplatform-intro">
-                    从 Git 仓库或压缩包下载、构建并托管在商城服务器上的店铺。
-                  </p>
-                </div>
-                <button
-                  className="button button-dark"
-                  type="button"
-                  disabled={
-                    saving ||
-                    !verifiedSetup?.root.organization?.id ||
-                    !verifiedDomains?.length
-                  }
-                  title={
-                    bootstrap.setup.status !== "ready"
-                      ? "商城初始化状态尚未验证"
-                      : !verifiedSetup?.root.organization?.id
-                        ? "商城尚未完成初始化"
-                        : bootstrap.domains.status !== "ready"
-                          ? "商城数据范围尚未验证"
-                          : verifiedDomains?.length
-                            ? undefined
-                            : "商城数据尚未准备好"
-                  }
-                  onClick={() => setSubplatformEditorOpen((open) => !open)}
-                >
-                  {subplatformEditorOpen ? "关闭" : "接入本地店铺"}
-                </button>
-              </div>
-              {subplatforms.length ? (
-                <div className="subplatform-list" aria-label="本地店铺列表">
-                  {subplatforms.map((organization) => (
-                    <div className="subplatform-row" key={organization.id}>
-                      <span className="subplatform-row-icon" aria-hidden="true">
-                        <Archive size={18} />
-                      </span>
-                      <span className="subplatform-row-copy">
-                        <strong>{organization.name}</strong>
-                        <small>
-                          /{organization.slug} ·{" "}
-                          {organization.sourceKind === "git"
-                            ? "Git 本地部署"
-                            : organization.sourceKind === "archive"
-                              ? "压缩包本地部署"
-                              : "其他接入"}
-                        </small>
-                      </span>
-                      <span
-                        className={`subplatform-state state-${organization.registrationState || "unknown"}`}
-                      >
-                        {subplatformStateLabel[
-                          organization.registrationState || ""
-                        ] || "未登记"}
-                      </span>
-                      {organization.buildError ? (
-                        <small
-                          className="subplatform-build-error"
-                          title={organization.buildError}
-                        >
-                          最近失败：{organization.buildError.slice(0, 120)}
-                        </small>
-                      ) : null}
-                      {organization.registrationState === "ready" &&
-                      organization.buildDigest ? (
-                        <button
-                          className="button button-dark subplatform-activate"
-                          type="button"
-                          disabled={
-                            saving ||
-                            !organization.domainId ||
-                            !verifiedDomains?.some(
-                              (domain) => domain.id === organization.domainId,
-                            )
-                          }
-                          onClick={() =>
-                            void activateRegisteredSubplatform(organization)
-                          }
-                        >
-                          上线店铺
-                        </button>
-                      ) : null}
-                      {organization.registrationState === "active" &&
-                      (organization.sourceKind === "git" ||
-                        organization.sourceKind === "archive") ? (
-                        <button
-                          className="button button-light subplatform-activate"
-                          type="button"
-                          disabled={
-                            saving ||
-                            !organization.domainId ||
-                            !verifiedDomains?.some(
-                              (domain) => domain.id === organization.domainId,
-                            )
-                          }
-                          onClick={() => updateLocalStore(organization)}
-                        >
-                          {organization.sourceKind === "git"
-                            ? "检查更新"
-                            : "上传新版本"}
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="subplatform-empty">
-                  <GitBranch size={22} aria-hidden="true" />
-                  <p>还没有本地店铺。</p>
-                </div>
-              )}
-              {subplatformEditorOpen ? (
-                <div
-                  className="admin-editor subplatform-editor"
-                  aria-label="接入本地店铺"
-                >
-                  <div className="admin-editor-heading">
-                    <div>
-                      <strong>接入本地店铺</strong>
-                      <small>
-                        填写 Git 地址或上传压缩包，商城会在本地构建并托管它。
-                      </small>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSubplatformEditorOpen(false)}
-                    >
-                      关闭
-                    </button>
-                  </div>
-                  <div
-                    className="subplatform-source-switch"
-                    role="group"
-                    aria-label="本地店铺来源"
-                  >
-                    <button
-                      type="button"
-                      className={
-                        subplatformSourceKind === "git" ? "is-selected" : ""
-                      }
-                      aria-pressed={subplatformSourceKind === "git"}
-                      onClick={() => setSubplatformSourceKind("git")}
-                    >
-                      <GitBranch size={16} aria-hidden="true" />
-                      Git 仓库
-                    </button>
-                    <button
-                      type="button"
-                      className={
-                        subplatformSourceKind === "archive" ? "is-selected" : ""
-                      }
-                      aria-pressed={subplatformSourceKind === "archive"}
-                      onClick={() => setSubplatformSourceKind("archive")}
-                    >
-                      <Upload size={16} aria-hidden="true" />
-                      上传压缩包
-                    </button>
-                  </div>
-                  <div className="subplatform-form-grid">
-                    <label className="subplatform-form-wide">
-                      <span>商城数据范围</span>
-                      <select
-                        required
-                        value={subplatformDomainId}
-                        disabled={bootstrap.domains.status !== "ready"}
-                        onChange={(event) =>
-                          setSubplatformDomainId(event.target.value)
-                        }
-                      >
-                        <option value="">明确选择数据范围</option>
-                        {(verifiedDomains ?? []).map((domain) => (
-                          <option key={domain.id} value={domain.id}>
-                            {domain.name} · /{domain.slug}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  {subplatformSourceKind === "git" ? (
-                    <div className="subplatform-form-grid">
-                      <label className="subplatform-form-wide">
-                        <span>Git HTTPS 地址（不含凭据）</span>
-                        <input
-                          value={subplatformSourceLocator}
-                          onChange={(event) =>
-                            setSubplatformSourceLocator(event.target.value)
-                          }
-                          placeholder="https://github.com/example/market.git"
-                          inputMode="url"
-                        />
-                      </label>
-                    </div>
-                  ) : (
-                    <div className="subplatform-upload-box">
-                      <label className="file-picker">
-                        <Upload size={18} aria-hidden="true" />
-                        <span>
-                          {subplatformArchive?.name || "选择本地店铺压缩包"}
-                        </span>
-                        <input
-                          type="file"
-                          accept=".tar.gz,.tgz,.tar.zst,.tzst"
-                          onChange={(event) =>
-                            setSubplatformArchive(
-                              event.target.files?.[0] ?? null,
-                            )
-                          }
-                        />
-                      </label>
-                      <p>
-                        {subplatformUpload
-                          ? `已上传 ${subplatformUpload.originalName} · ${(subplatformUpload.size / 1024 / 1024).toFixed(1)} MiB · digest ${subplatformUpload.sourceDigest.slice(0, 12)}…`
-                          : "限制 64 MiB；服务端只保存随机 locator，隔离构建器负责解包与验证。"}
-                      </p>
-                    </div>
-                  )}
-                  <div className="subplatform-editor-footer">
-                    <p>
-                      <ShieldCheck size={16} aria-hidden="true" />
-                      本地店铺通过隔离构建与校验后上线。
-                    </p>
-                    {subplatformDiscoveryState ? (
-                      <small
-                        className="subplatform-discovery-state"
-                        role="status"
-                      >
-                        {subplatformDiscoveryState}
-                      </small>
-                    ) : null}
-                    <button
-                      className="button button-dark"
-                      type="button"
-                      disabled={
-                        saving ||
-                        bootstrap.domains.status !== "ready" ||
-                        !verifiedSetup?.root.tenantId ||
-                        !verifiedSetup.root.organization?.id ||
-                        !subplatformDomainId
-                      }
-                      onClick={() => void submitSubplatform()}
-                    >
-                      {saving ? "处理中…" : "构建本地店铺"}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </section>
+              onNotice={onNotice}
+            />
 
             <div
               className="platform-component-panel"
