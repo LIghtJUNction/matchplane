@@ -119,10 +119,10 @@ export function AuthProvidersPanel({
                   {provider.hint}
                 </p>
               ) : null}
-              {provider.envKeys && !provider.configured ? (
+              {provider.envKeys ? (
                 <p className="ml-6 break-all text-xs text-foreground-muted">
                   <span className="font-medium">
-                    {locale === "en" ? "Set: " : "需设置："}
+                    {locale === "en" ? "Env keys: " : "环境变量："}
                   </span>
                   <code>{provider.envKeys.join(", ")}</code>
                 </p>
