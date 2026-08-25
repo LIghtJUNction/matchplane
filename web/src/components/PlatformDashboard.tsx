@@ -54,6 +54,7 @@ import { LoginMethodsPanel } from "./LoginMethodsPanel";
 import { ModeDialog } from "./Overlays";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformSiteSettingsPanel } from "./PlatformSiteSettingsPanel";
+import { AuthProvidersPanel } from "./AuthProvidersPanel";
 import { RootEmailConfigPanel } from "./RootEmailConfigPanel";
 import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
 import { NationalIdentityConfigPanel } from "./NationalIdentityConfigPanel";
@@ -907,6 +908,12 @@ export function PlatformDashboard({
                 onNotice={onNotice}
               />
               <PhoneLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
+              <section
+                className="platform-component-panel"
+                aria-label="服务端登录提供方总览"
+              >
+                <AuthProvidersPanel />
+              </section>
               <PlatformSiteSettingsPanel
                 organizationId={setup?.root.organization?.id}
                 platformPath="/"
