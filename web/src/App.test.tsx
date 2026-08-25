@@ -116,6 +116,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -140,7 +141,9 @@ describe("MatchPlane workspaces", () => {
     expect(
       screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "说需求" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "说需求" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("tab", { name: "卖方供给" }),
     ).not.toBeInTheDocument();
@@ -494,7 +497,8 @@ describe("MatchPlane workspaces", () => {
     expect(screen.getByText("第一家店铺")).toBeInTheDocument();
   });
 
-  it("requires an explicit administrator confirmation before changing payment mode", async () => {
+  it("does not fake a saved payment mode when the live API is disabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_MATCHPLANE_LIVE_MODE", "false");
     const user = userEvent.setup();
     window.history.replaceState(null, "", "/?role=platform");
     window.sessionStorage.setItem("matchplane.test-auth", "true");
@@ -510,7 +514,86 @@ describe("MatchPlane workspaces", () => {
     expect(dialog).toHaveTextContent("未决订单检查");
     await user.click(screen.getByRole("button", { name: "确认切换" }));
 
+    expect(screen.getByText("测试模式")).toBeInTheDocument();
+    expect(screen.queryByText("生产模式")).not.toBeInTheDocument();
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveTextContent(
+      "支付模式未保存：当前部署未启用平台 API。启用后刷新页面再重试。",
+    );
+    expect(notice).not.toHaveTextContent("支付系统已切换");
+    expect(
+      vi.mocked(globalThis.fetch).mock.calls.some(([input, init]) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return url === "/api/admin/payment-mode" && init?.method === "POST";
+      }),
+    ).toBe(false);
+  });
+
+  it("persists a live payment switch with the server version and response-owned mode", async () => {
+    vi.stubEnv("NEXT_PUBLIC_MATCHPLANE_LIVE_MODE", "true");
+    const fallbackFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    const paymentPosts: RequestInit[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.startsWith("/api/admin/payment-mode")) {
+        if (init?.method === "POST") {
+          paymentPosts.push(init);
+          return new Response(
+            JSON.stringify({
+              tenant_id: "11111111-1111-4111-8111-111111111111",
+              active_mode: "production",
+              updated_by: "root-admin",
+              version: 8,
+              updated_at: "2026-08-26T00:00:00.000Z",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            tenant_id: "11111111-1111-4111-8111-111111111111",
+            active_mode: "production",
+            updated_by: "root-admin",
+            version: 7,
+            updated_at: "2026-08-26T00:00:00.000Z",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return fallbackFetch(input, init);
+    });
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/?role=platform");
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "商城后台" });
+    await user.click(screen.getByRole("tab", { name: "支付（可选）" }));
+    expect(await screen.findByText("生产模式")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "切换支付模式" }));
+    expect(
+      screen.getByRole("alertdialog", { name: "切换到测试模式？" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确认切换" }));
+
+    await waitFor(() => expect(paymentPosts).toHaveLength(1));
+    expect(paymentPosts[0]?.body).toEqual(expect.any(String));
+    expect(JSON.parse(paymentPosts[0]!.body as string)).toMatchObject({
+      mode: "test",
+      expected_version: 7,
+    });
     expect(screen.getByText("生产模式")).toBeInTheDocument();
+    expect(screen.queryByText("测试模式")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
       "支付系统已切换为生产模式",
     );

@@ -230,34 +230,36 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   }, [hydrated, role, subplatform.tenantId]);
 
   const confirmModeChange = useCallback(() => {
-    const nextMode = paymentMode === "test" ? "production" : "test";
-    if (isLiveMarketplaceEnabled()) {
-      void switchPaymentMode({
-        tenantId: subplatform.tenantId,
-        mode: nextMode,
-        expectedVersion: paymentModeVersion,
-        reason: `web-admin switch to ${nextMode}`,
-      })
-        .then((setting) => {
-          setPaymentMode(setting.active_mode);
-          setPaymentModeVersion(setting.version);
-          setModeDialogOpen(false);
-          setNotice(
-            `支付系统已切换为${setting.active_mode === "test" ? "测试" : "生产"}模式`,
-          );
-        })
-        .catch((error) => {
-          setModeDialogOpen(false);
-          setNotice(
-            error instanceof Error ? error.message : "支付模式切换失败",
-          );
-        });
+    if (!isLiveMarketplaceEnabled()) {
+      setModeDialogOpen(false);
+      setNotice(
+        locale === "en"
+          ? "Payment mode was not saved because the platform API is disabled for this deployment. Enable it, refresh, and try again."
+          : "支付模式未保存：当前部署未启用平台 API。启用后刷新页面再重试。",
+      );
       return;
     }
-    setPaymentMode(nextMode);
-    setModeDialogOpen(false);
-    setNotice(`支付系统已切换为${nextMode === "test" ? "测试" : "生产"}模式`);
-  }, [paymentMode, paymentModeVersion, subplatform.tenantId]);
+
+    const nextMode = paymentMode === "test" ? "production" : "test";
+    void switchPaymentMode({
+      tenantId: subplatform.tenantId,
+      mode: nextMode,
+      expectedVersion: paymentModeVersion,
+      reason: `web-admin switch to ${nextMode}`,
+    })
+      .then((setting) => {
+        setPaymentMode(setting.active_mode);
+        setPaymentModeVersion(setting.version);
+        setModeDialogOpen(false);
+        setNotice(
+          `支付系统已切换为${setting.active_mode === "test" ? "测试" : "生产"}模式`,
+        );
+      })
+      .catch((error) => {
+        setModeDialogOpen(false);
+        setNotice(error instanceof Error ? error.message : "支付模式切换失败");
+      });
+  }, [locale, paymentMode, paymentModeVersion, subplatform.tenantId]);
 
   const openStoreCenter = useCallback(() => {
     if (!authUser) {
@@ -370,7 +372,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       onOpenDemand={() => setBuyerAssistantOpen(true)}
       onAuthRequired={() => openSignIn(role)}
       authStatus={
-        !authResolved ? "pending" : authUser ? "authenticated" : "anonymous"
+        authResolved ? (authUser ? "authenticated" : "anonymous") : "pending"
       }
       fallback={genericWorkspace}
     />
