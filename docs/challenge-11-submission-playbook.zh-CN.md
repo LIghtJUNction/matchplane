@@ -98,22 +98,33 @@
 
 `git push origin` 直接推送 `https://github.com/LIghtJUNction/matchplane.git` 返回 403：当前凭据对上游仓库**只有读权限**。这是开源协作的常态——贡献者应推送到自己的 Fork，再向上游发起 PR。
 
-### 3.2 路线 A：把现有本地分支推到 Fork（推荐）
+### 3.2 路线 A：把现有本地分支推到 Fork（推荐，当前选定）
 
-适用于继续使用 `/workspace/matchplane` 这个克隆：
+本次提交使用 **pashippercode** 账号的 Fork（https://github.com/pashippercode/matchplane）。
+PR 走 **`pashippercode:main` → `LIghtJUNction/matchplane:main`**：挑战分支先推到 fork 备份，
+再合入 fork 的 `main`，用 `main` 作为 PR head。
 
 ```sh
 # 1. 在 GitHub 网页上 Fork：打开 https://github.com/LIghtJUNction/matchplane 点击 Fork；
-#    或用你自己已认证的 gh CLI：
+#    或用 pashippercode 已认证的 gh CLI：
 gh repo fork LIghtJUNction/matchplane --clone=false
 
-# 2. 添加 fork 远端（HTTPS 需使用你自己的凭据/PAT，或改用 SSH 地址）
+# 2. 添加 fork 远端（HTTPS 需使用 pashippercode 的凭据/PAT，或改用 SSH 地址）
 cd /workspace/matchplane
-git remote add fork https://github.com/<你的用户名>/matchplane.git
+git remote add fork https://github.com/pashippercode/matchplane.git
 
-# 3. 推送工作分支到 fork
+# 3. 推送工作分支到 fork 备份
 git push -u fork cursor/challenge-11-participation-897f
+
+# 4. 合入 fork main 作为 PR head
+git fetch fork main
+git checkout -B fork-main fork/main
+git merge --no-edit cursor/challenge-11-participation-897f
+git push fork fork-main:main
 ```
+
+一键脚本（拉 bundle、推 fork、合 main、开 PR 一步到位）：`ChunchunOwO/api.lmm.best`
+分支 `cursor/matchplane-challenge-11-897f` 下 `challenge-11/push-to-fork.sh`。
 
 ### 3.3 路线 B：用导出的补丁在全新克隆上重放
 
@@ -121,11 +132,16 @@ git push -u fork cursor/challenge-11-participation-897f
 `/workspace/matchplane-challenge-11.patch.dir/`：
 
 ```sh
-git clone https://github.com/<你的用户名>/matchplane.git
+git clone https://github.com/pashippercode/matchplane.git
 cd matchplane
 git checkout -b cursor/challenge-11-participation-897f
 git am /workspace/matchplane-challenge-11.patch.dir/*.patch
 git push -u origin cursor/challenge-11-participation-897f
+
+# 同样要合入 fork main 作为 PR head
+git checkout main
+git merge --no-edit cursor/challenge-11-participation-897f
+git push origin main
 ```
 
 > 若本地分支后来又有新提交，先重新导出补丁再重放：
@@ -136,7 +152,7 @@ git push -u origin cursor/challenge-11-participation-897f
 网页方式：打开
 
 ```text
-https://github.com/LIghtJUNction/matchplane/compare/main...<你的用户名>:matchplane:cursor/challenge-11-participation-897f
+https://github.com/LIghtJUNction/matchplane/compare/main...pashippercode:matchplane:main
 ```
 
 或命令行：
@@ -145,10 +161,14 @@ https://github.com/LIghtJUNction/matchplane/compare/main...<你的用户名>:mat
 gh pr create \
   --repo LIghtJUNction/matchplane \
   --base main \
-  --head <你的用户名>:cursor/challenge-11-participation-897f \
-  --title "feat(web): add hero need prompt for challenge #11" \
-  --body "针对 api.lmm.best 挑战 #11 的提交。改动摘要与验收路径见 PR 描述。Closes #<Issue 编号（如有）>"
+  --head pashippercode:main \
+  --title "挑战11：首页改成「帮我找」、卡片抄了瓜子的作业、后台能配微信和短信登录了" \
+  --body-file docs/challenge-11-pr-selected-body.md
 ```
+
+选定的 PR 标题与正文见 `docs/challenge-11-pr-selected.zh-CN.md`。验收截图（13 张关键页面加
+索引 README）在 `docs/challenge-11-screenshots/`，随分支一起提交，PR 正文末段已引用，
+评审可直接看图对照验收点。
 
 PR 必须满足悬赏规则 §4.3（Submit Focused Fixes）：
 
@@ -189,7 +209,7 @@ PR 必须满足悬赏规则 §4.3（Submit Focused Fixes）：
 - [ ] 已发模板 A 邮件完成对接
 - [ ] 本地验收路径全部亲自点通（见 `docs/challenge-11-participation.zh-CN.md` 第 3 节）
 - [ ] 测试通过（`cd web && bun test` 等，按仓库 README 执行）
-- [ ] 分支已推送到自己的 Fork（路线 A 或 B）
-- [ ] PR 已向 `LIghtJUNction/matchplane:main` 发起，描述含改动摘要、测试与验收步骤，diff 只含必要文件
+- [ ] 分支已推送到 pashippercode fork 并合入 fork `main`（路线 A 或 B）
+- [ ] PR 已以 `pashippercode:main` 为 head 向 `LIghtJUNction/matchplane:main` 发起，描述含改动摘要、测试与验收步骤（含 `docs/challenge-11-screenshots/` 截图），diff 只含必要文件
 - [ ] 平台「已接受的挑战」中已提交 PR/Issue 链接与完成说明
 - [ ] 已发模板 B 邮件展示成果
