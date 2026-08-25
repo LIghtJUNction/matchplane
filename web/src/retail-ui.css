@@ -632,14 +632,14 @@ select {
 
 /* Keep Path-to-Hope near-black CTA even if a color palette is active. */
 .root-marketplace-page .marketplace-hero-cta .root-marketplace-need-prompt > button,
-.root-marketplace-page .floating-clerk-toggle {
+.root-marketplace-page .root-marketplace-clerk-toggle {
   background: #141413;
   color: #faf9f5;
   border-color: #141413;
 }
 
 .root-marketplace-page .marketplace-hero-cta .root-marketplace-need-prompt > button:hover,
-.root-marketplace-page .floating-clerk-toggle:hover {
+.root-marketplace-page .root-marketplace-clerk-toggle:hover {
   background: #000000;
   color: #faf9f5;
 }
