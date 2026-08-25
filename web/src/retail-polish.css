@@ -4,7 +4,7 @@
   width: min(100%, 82rem);
   min-height: auto;
   margin-inline: auto;
-  padding: clamp(1.25rem, 3.5vw, 2.6rem) clamp(1rem, 3vw, 2.5rem) 3.25rem;
+  padding: clamp(1.25rem, 3.5vw, 2.6rem) clamp(1rem, 3vw, 2.5rem) 1.75rem;
   gap: 1.1rem;
 }
 
@@ -40,7 +40,15 @@
 }
 
 .root-marketplace-catalog {
-  padding: clamp(1.75rem, 4vw, 3rem) clamp(0.75rem, 3vw, 2rem) 4rem;
+  padding: clamp(1.25rem, 3vw, 2rem) clamp(0.75rem, 3vw, 2rem) 4rem;
+}
+
+.root-marketplace-content {
+  margin-top: 0;
+}
+
+.root-marketplace-inline-categories + .root-marketplace-content {
+  margin-top: 1.25rem;
 }
 
 .root-marketplace-entry:has(.home-chat.has-conversation) {
