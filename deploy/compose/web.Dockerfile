@@ -75,6 +75,8 @@ RUN set -eux; \
       echo 'Next standalone server.js was not produced' >&2; \
       exit 1; \
     fi
+RUN rm -rf /app/standalone/app /app/standalone/src
+RUN node /app/scripts/validate-standalone-output.mjs /app/standalone
 
 FROM node:22-trixie-slim@sha256:f4c1b09232a0ae8f765093968ec82107a1be65cb0bfb36fc831195794f139568 AS runner
 

@@ -1,18 +1,41 @@
 #!/usr/bin/env node
 
 import {
-  existsSync,
   lstatSync,
+  readFileSync,
   readdirSync,
 } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const IGNORED_DIRECTORY_NAMES = new Set([".next", "node_modules"]);
-const SOURCE_DIRECTORY_NAMES = new Set(["app", "src"]);
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx"]);
+const APP_ENTRIES = new Map([
+  [".next", "directory"],
+  ["node_modules", "directory"],
+  ["package.json", "file"],
+  ["server.js", "file"],
+]);
+const WRAPPER_ENTRIES = new Map([
+  ["node_modules", "directory"],
+  ["web", "directory"],
+]);
+const RAW_SOURCE_EXTENSIONS = new Set([
+  ".cts",
+  ".jsx",
+  ".mts",
+  ".ts",
+  ".tsx",
+]);
+const FORBIDDEN_SOURCE_DIRECTORIES = new Set([
+  "__fixtures__",
+  "__tests__",
+  "fixture",
+  "fixtures",
+  "source",
+  "sources",
+  "src",
+]);
 const TEST_SOURCE_PATTERN = /\.(?:spec|test)\.[^/]+$/i;
-const FIXTURE_NAME_PATTERN = /(?:^|[._-])fixtures?(?:[._-]|$)/i;
+const FIXTURE_FILE_PATTERN = /(?:^|[._-])fixtures?(?:[._-]|$)/i;
 
 export class StandaloneValidationError extends Error {
   constructor(message) {
@@ -25,26 +48,46 @@ export function validateStandaloneOutput(
   standaloneRoot = path.resolve(process.cwd(), ".next/standalone"),
 ) {
   const root = path.resolve(standaloneRoot);
-  assertDirectory(root, "standalone output is missing");
+  assertRealDirectory(root, "standalone output is missing");
 
-  const serverCandidates = [
-    path.join(root, "server.js"),
-    path.join(root, "web", "server.js"),
-  ];
-  const servers = serverCandidates.filter(isRegularFile);
-  if (servers.length === 0) {
+  const rootNames = new Set(readDirectory(root).map((entry) => entry.name));
+  const flatLayout = rootNames.has("server.js");
+  const monorepoLayout = rootNames.has("web");
+  if (flatLayout && monorepoLayout) {
     throw new StandaloneValidationError(
-      `standalone server output is missing (expected ${serverCandidates
-        .map((candidate) => path.relative(root, candidate))
-        .join(" or ")})`,
+      "standalone output mixes package-local and monorepo layouts",
+    );
+  }
+  if (!flatLayout && !monorepoLayout) {
+    throw new StandaloneValidationError(
+      "standalone server output is missing (expected server.js or web/server.js)",
     );
   }
 
   const leaks = [];
-  walkApplicationFiles(root, root, leaks);
+  let appRoot;
+  let layout;
+  if (flatLayout) {
+    appRoot = root;
+    layout = "package-local";
+  } else {
+    inspectAllowedEntries(root, WRAPPER_ENTRIES, ["web"], leaks);
+    appRoot = path.join(root, "web");
+    assertRealDirectory(appRoot, "monorepo app directory is missing");
+    layout = "monorepo";
+  }
+
+  inspectAllowedEntries(
+    appRoot,
+    APP_ENTRIES,
+    [".next", "package.json", "server.js"],
+    leaks,
+  );
+  inspectCompiledTree(path.join(appRoot, ".next"), root, leaks);
+
   if (leaks.length > 0) {
     throw new StandaloneValidationError(
-      `standalone output contains application source leaks:\n${leaks
+      `standalone output contains invalid application entries:\n${leaks
         .sort((left, right) => left.localeCompare(right))
         .map((entry) => `- ${entry}`)
         .join("\n")}`,
@@ -52,59 +95,172 @@ export function validateStandaloneOutput(
   }
 
   return {
+    layout,
     root,
-    servers: servers.map((server) => path.relative(root, server)),
+    servers: [path.relative(root, path.join(appRoot, "server.js"))],
   };
 }
 
-function walkApplicationFiles(root, directory, leaks) {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const absolute = path.join(directory, entry.name);
-    const relative = path.relative(root, absolute);
+function inspectAllowedEntries(directory, allowed, required, leaks) {
+  const entries = readDirectory(directory);
+  const names = new Set(entries.map((entry) => entry.name));
+  for (const requiredName of required) {
+    if (!names.has(requiredName)) {
+      leaks.push(`${relativeTo(directory, requiredName)} (required entry missing)`);
+    }
+  }
 
-    if (entry.isDirectory()) {
-      if (IGNORED_DIRECTORY_NAMES.has(entry.name)) continue;
-      if (
-        SOURCE_DIRECTORY_NAMES.has(entry.name) ||
-        FIXTURE_NAME_PATTERN.test(entry.name)
-      ) {
-        leaks.push(relative);
-        continue;
-      }
-      walkApplicationFiles(root, absolute, leaks);
+  for (const entry of entries) {
+    const absolute = path.join(directory, entry.name);
+    const relative = relativeToRoot(directory, absolute);
+    if (entry.isSymbolicLink()) {
+      leaks.push(`${relative} (symlink outside dependency tree)`);
       continue;
     }
-    if (!entry.isFile()) continue;
 
-    const extension = path.extname(entry.name).toLowerCase();
+    const expectedType = allowed.get(entry.name);
+    if (!expectedType) {
+      leaks.push(`${relative} (unexpected app-layout entry)`);
+      continue;
+    }
     if (
-      SOURCE_EXTENSIONS.has(extension) ||
-      TEST_SOURCE_PATTERN.test(entry.name) ||
-      FIXTURE_NAME_PATTERN.test(entry.name)
+      (expectedType === "directory" && !entry.isDirectory()) ||
+      (expectedType === "file" && !entry.isFile())
     ) {
-      leaks.push(relative);
+      leaks.push(`${relative} (expected ${expectedType})`);
     }
   }
 }
 
-function assertDirectory(candidate, message) {
-  if (!existsSync(candidate) || !lstatSync(candidate).isDirectory()) {
+function inspectCompiledTree(directory, outputRoot, leaks) {
+  if (!isRealDirectory(directory)) return;
+  let entries;
+  try {
+    entries = readDirectory(directory);
+  } catch (error) {
+    leaks.push(`${path.relative(outputRoot, directory)} (${errorMessage(error)})`);
+    return;
+  }
+
+  for (const entry of entries) {
+    const absolute = path.join(directory, entry.name);
+    const relative = path.relative(outputRoot, absolute);
+    if (entry.isSymbolicLink()) {
+      leaks.push(`${relative} (symlink outside dependency tree)`);
+      continue;
+    }
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules") continue;
+      if (FORBIDDEN_SOURCE_DIRECTORIES.has(entry.name.toLowerCase())) {
+        leaks.push(`${relative} (source/fixture directory)`);
+        continue;
+      }
+      inspectCompiledTree(absolute, outputRoot, leaks);
+      continue;
+    }
+    if (!entry.isFile()) {
+      leaks.push(`${relative} (unsupported filesystem entry)`);
+      continue;
+    }
+
+    const extension = path.extname(entry.name).toLowerCase();
+    if (RAW_SOURCE_EXTENSIONS.has(extension)) {
+      leaks.push(`${relative} (raw source file)`);
+      continue;
+    }
+    if (
+      TEST_SOURCE_PATTERN.test(entry.name) ||
+      FIXTURE_FILE_PATTERN.test(entry.name)
+    ) {
+      leaks.push(`${relative} (test/fixture file)`);
+      continue;
+    }
+    if (extension === ".map") inspectSourceMap(absolute, relative, leaks);
+  }
+}
+
+function inspectSourceMap(filename, relative, leaks) {
+  let sourceMap;
+  try {
+    sourceMap = JSON.parse(readFileSync(filename, "utf8"));
+  } catch (error) {
+    leaks.push(`${relative} (source map cannot be parsed: ${errorMessage(error)})`);
+    return;
+  }
+
+  const stack = [sourceMap];
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (!value || typeof value !== "object") continue;
+    if (Object.hasOwn(value, "sourcesContent")) {
+      const sourcesContent = value.sourcesContent;
+      if (!Array.isArray(sourcesContent)) {
+        if (sourcesContent !== null) {
+          leaks.push(`${relative} (invalid sourcesContent)`);
+          return;
+        }
+      } else if (
+        sourcesContent.some(
+          (source) =>
+            (typeof source === "string" && source.length > 0) ||
+            (source !== null && typeof source !== "string"),
+        )
+      ) {
+        leaks.push(`${relative} (embedded sourcesContent)`);
+        return;
+      }
+    }
+    if (Array.isArray(value)) stack.push(...value);
+    else stack.push(...Object.values(value));
+  }
+}
+
+function readDirectory(directory) {
+  try {
+    return readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    throw new StandaloneValidationError(
+      `standalone directory cannot be read: ${directory} (${errorMessage(error)})`,
+    );
+  }
+}
+
+function assertRealDirectory(candidate, message) {
+  if (!isRealDirectory(candidate)) {
     throw new StandaloneValidationError(`${message}: ${candidate}`);
   }
 }
 
-function isRegularFile(candidate) {
-  return existsSync(candidate) && lstatSync(candidate).isFile();
+function isRealDirectory(candidate) {
+  try {
+    const stat = lstatSync(candidate);
+    return !stat.isSymbolicLink() && stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function relativeTo(directory, name) {
+  return path.join(path.basename(directory), name);
+}
+
+function relativeToRoot(directory, absolute) {
+  const parent = path.basename(directory) === "web" ? path.dirname(directory) : directory;
+  return path.relative(parent, absolute);
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function runCli() {
   try {
     const result = validateStandaloneOutput(process.argv[2]);
     console.log(
-      `Standalone output validated at ${result.root} (${result.servers.join(", ")})`,
+      `Standalone output validated at ${result.root} (${result.layout}: ${result.servers.join(", ")})`,
     );
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(errorMessage(error));
     process.exitCode = 1;
   }
 }
