@@ -54,8 +54,8 @@ function probeRouter(
 
 const candidates: PlatformRouteCandidate[] = [
   {
-    slug: "used-car",
-    path: "/used-car",
+    slug: "store-a",
+    path: "/store-a",
     displayName: "二手车商城",
     description: "车辆交易",
     capabilities: ["demand", "supply"],
@@ -459,7 +459,7 @@ describe("platform Agent router", () => {
                     functionCall: {
                       name: "matchplane_platform_select_children",
                       args: {
-                        selectedSlugs: ["used-car"],
+                        selectedSlugs: ["store-a"],
                         rationale: "车辆",
                         confidence: 0.86,
                       },
@@ -490,7 +490,7 @@ describe("platform Agent router", () => {
       candidates,
     });
 
-    expect(decision.selectedSlugs).toEqual(["used-car"]);
+    expect(decision.selectedSlugs).toEqual(["store-a"]);
     expect(decision.routeMechanism).toBe("mcp_tool");
     expect(decision.usage).toEqual({ promptTokens: 11, completionTokens: 6, totalTokens: 17 });
   });
@@ -579,7 +579,7 @@ describe("platform Agent router", () => {
       candidates,
     });
 
-    expect(decision.selectedSlugs).toEqual(["used-car", "electronics"]);
+    expect(decision.selectedSlugs).toEqual(["store-a", "electronics"]);
     expect(decision.source).toBe("policy_fallback");
     expect(decision.degraded).toBe(true);
     expect(decision.costBearer).toBe("platform");
@@ -611,7 +611,7 @@ describe("platform Agent router", () => {
     process.env.MATCHPLANE_ROUTER_AI_MODEL = "router-test";
     const admitCall = vi.fn(async () => undefined);
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ selectedSlugs: ["used-car"] }) } }],
+      choices: [{ message: { content: JSON.stringify({ selectedSlugs: ["store-a"] }) } }],
     }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -683,7 +683,7 @@ describe("platform Agent router", () => {
       return new Response(
         JSON.stringify(
           openAiTextCompletion(
-            JSON.stringify({ selectedSlugs: ["used-car"] }),
+            JSON.stringify({ selectedSlugs: ["store-a"] }),
           ),
         ),
         { status: 200, headers: { "content-type": "application/json" } },
@@ -746,7 +746,7 @@ describe("platform Agent router", () => {
         new Response(
           JSON.stringify(
             openAiTextCompletion(
-              JSON.stringify({ selectedSlugs: ["used-car"] }),
+              JSON.stringify({ selectedSlugs: ["store-a"] }),
             ),
           ),
           { status: 200, headers: { "content-type": "application/json" } },
@@ -803,7 +803,7 @@ describe("platform Agent router", () => {
         JSON.stringify(
           openAiTextCompletion(
             JSON.stringify({
-              selectedSlugs: ["used-car"],
+              selectedSlugs: ["store-a"],
               rationale: "受控候选",
               confidence: 0.5,
             }),

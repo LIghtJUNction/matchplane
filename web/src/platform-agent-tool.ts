@@ -44,9 +44,9 @@ export interface SubplatformMcpProbeResult {
  *
  * Supported shape:
  * {
- *   "used-car": {
+ *   "store-a": {
  *     "url": "https://agent.example/mcp",
- *     "tokenEnv": "MATCHPLANE_USED_CAR_MCP_TOKEN"
+ *     "tokenEnv": "MATCHPLANE_STORE_A_MCP_TOKEN"
  *   }
  * }
  *

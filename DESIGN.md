@@ -50,6 +50,7 @@ colors:
 - [confirmed] 路径只说明 `用户需求 → MatchPlane → 实际结果店铺 → 商品`，不得冒充完整模型推理、全部候选、授权链或递归平台拓扑。
 - [confirmed] 首次互动后的密度增长必须是内容驱动：回答、实际店铺和商品出现才占用空间；加载态不得以假 skeleton 节点预演不存在的路由。
 - [confirmed] 移动端把路径转换为纵向语义列表；连接线只是辅助视觉，不承载唯一顺序或状态信息。
+- [confirmed] canonical store path 只来自 active registry/manifest/API；根核心、默认基础设施和 UI 不得包含任何真实部署实例的 slug 或 path。
 
 ## Component Styling
 
@@ -89,7 +90,7 @@ colors:
 ## Source Evidence & Confidence
 
 - [observed] path: `PRODUCT.md`
-  sha256: `afc189da5636d6b7dc480dc44c8e64cef6e40e6feed8cf42dfcd6180e3b7638d`
+  sha256: `18c7b613d1470429eee568e9e6e79d997c2e98f36f2199c3d753449d3eafdb23`
   confidence: high
 - [observed] path: `web/src/components/PalettePicker.tsx`
   sha256: `2998f459fbf8d2a4e840030020125b6d4a176a3a20b6d7e2a7a4a8c1a65d48bc`

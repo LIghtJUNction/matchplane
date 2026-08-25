@@ -20,10 +20,10 @@ describe("marketplace capability cache", () => {
         accessToken: "expired",
         accessTokenExpiresAt: new Date(Date.now() - 1_000).toISOString(),
       },
-      "used-car",
+      "store-a",
     );
 
-    expect(readPartySession("buyer", "used-car")).toBeNull();
+    expect(readPartySession("buyer", "store-a")).toBeNull();
   });
 
   it("accepts only a capability whose deadline is still in the future", () => {
@@ -36,10 +36,10 @@ describe("marketplace capability cache", () => {
         accessToken: "active",
         accessTokenExpiresAt: expiresAt,
       },
-      "used-car",
+      "store-a",
     );
 
-    expect(readPartySession("buyer", "used-car")?.accessToken).toBe("active");
+    expect(readPartySession("buyer", "store-a")?.accessToken).toBe("active");
   });
 
   it("shares a dual-role store capability between buyer and seller surfaces", () => {
@@ -51,13 +51,13 @@ describe("marketplace capability cache", () => {
       accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       platformPath: "/store-a",
     };
-    savePartySession(session, "used-car", "seller", "/store-a");
+    savePartySession(session, "store-a", "seller", "/store-a");
 
     expect(
-      readPartySession("buyer", "used-car", "/store-a")?.accessToken,
+      readPartySession("buyer", "store-a", "/store-a")?.accessToken,
     ).toBe("shared");
     expect(
-      readPartySession("seller", "used-car", "/store-a")?.accessToken,
+      readPartySession("seller", "store-a", "/store-a")?.accessToken,
     ).toBe("shared");
   });
 
@@ -73,7 +73,7 @@ describe("marketplace capability cache", () => {
         accessToken: "expired",
         accessTokenExpiresAt: new Date(Date.now() - 1_000).toISOString(),
       },
-      "used-car",
+      "store-a",
       "admin",
     );
     savePartySession(
@@ -82,11 +82,11 @@ describe("marketplace capability cache", () => {
         accessToken: "active",
         accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       },
-      "used-car",
+      "store-a",
       "both",
     );
 
-    expect(readPartySession("admin", "used-car")?.accessToken).toBe("active");
+    expect(readPartySession("admin", "store-a")?.accessToken).toBe("active");
   });
 
   it("does not reuse a capability after the Better Auth user changes", () => {
@@ -99,14 +99,14 @@ describe("marketplace capability cache", () => {
         accessToken: "alice",
         accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       },
-      "used-car",
+      "store-a",
       "buyer",
     );
 
     expect(
       readPartySession(
         "buyer",
-        "used-car",
+        "store-a",
         undefined,
         "444e4567-e89b-12d3-a456-426614174000",
       ),
@@ -122,7 +122,7 @@ describe("marketplace capability cache", () => {
         accessToken: "memory-only",
         accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
       },
-      "used-car",
+      "store-a",
     );
 
     expect(window.localStorage.length).toBe(0);

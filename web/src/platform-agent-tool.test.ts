@@ -13,15 +13,15 @@ describe("subplatform MCP endpoint boundary", () => {
     const environment: NodeJS.ProcessEnv = {
       NODE_ENV: "production",
       MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON: JSON.stringify({
-        "used-car": {
+        "store-a": {
           url: "https://agent.example/mcp",
-          tokenEnv: "MATCHPLANE_USED_CAR_MCP_TOKEN",
+          tokenEnv: "MATCHPLANE_STORE_A_MCP_TOKEN",
           token: "must-not-be-read",
         },
       }),
-      MATCHPLANE_USED_CAR_MCP_TOKEN: "server-secret",
+      MATCHPLANE_STORE_A_MCP_TOKEN: "server-secret",
     };
-    expect(readSubplatformMcpEndpoint("used-car", environment)?.bearerToken).toBe("server-secret");
+    expect(readSubplatformMcpEndpoint("store-a", environment)?.bearerToken).toBe("server-secret");
     expect(readSubplatformMcpEndpoint("missing", environment)).toBeNull();
   });
 
@@ -57,7 +57,7 @@ describe("subplatform MCP endpoint boundary", () => {
       const headers = new Headers(init?.headers);
       expect(init?.redirect).toBe("error");
       expect(headers.get("authorization")).toBe("Bearer child-secret");
-      expect(headers.get("x-matchplane-platform-path")).toBe("/used-car");
+      expect(headers.get("x-matchplane-platform-path")).toBe("/store-a");
       expect(headers.get("x-matchplane-agent-subject")).toBe("agent-subject");
       expect(headers.get("x-matchplane-api-key")).toBeNull();
       return new Response(JSON.stringify({
@@ -67,11 +67,11 @@ describe("subplatform MCP endpoint boundary", () => {
       }), { status: 200, headers: { "content-type": "application/json" } });
     });
     const result = await invokeSubplatformMcpTool({
-      endpoint: { serverKey: "used-car", url: "https://agent.example/mcp", bearerToken: "child-secret", timeoutMs: 1_000 },
+      endpoint: { serverKey: "store-a", url: "https://agent.example/mcp", bearerToken: "child-secret", timeoutMs: 1_000 },
       toolName: "inventory.search",
       arguments: { narrative: "通勤" },
       requestId: "request-1",
-      platformPath: "/used-car",
+      platformPath: "/store-a",
       actorSubject: "agent-subject",
       fetcher,
     });
@@ -81,11 +81,11 @@ describe("subplatform MCP endpoint boundary", () => {
 
   it("accepts a bounded streamable-HTTP SSE response", async () => {
     const result = await invokeSubplatformMcpTool({
-      endpoint: { serverKey: "used-car", url: "https://agent.example/mcp", bearerToken: null, timeoutMs: 1_000 },
+      endpoint: { serverKey: "store-a", url: "https://agent.example/mcp", bearerToken: null, timeoutMs: 1_000 },
       toolName: "catalog.explain",
       arguments: {},
       requestId: "request-2",
-      platformPath: "/used-car",
+      platformPath: "/store-a",
       actorSubject: "agent-subject",
       fetcher: vi.fn<typeof fetch>(async () => new Response(
         "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"request-2\",\"result\":{\"content\":[]}}\n\n",
@@ -100,11 +100,11 @@ describe("subplatform MCP endpoint boundary", () => {
     const oversized = new Uint8Array(256 * 1024 + 1);
     oversized.fill(65);
     const result = await invokeSubplatformMcpTool({
-      endpoint: { serverKey: "used-car", url: "https://agent.example/mcp", bearerToken: null, timeoutMs: 1_000 },
+      endpoint: { serverKey: "store-a", url: "https://agent.example/mcp", bearerToken: null, timeoutMs: 1_000 },
       toolName: "catalog.explain",
       arguments: {},
       requestId: "request-oversized",
-      platformPath: "/used-car",
+      platformPath: "/store-a",
       actorSubject: "agent-subject",
       fetcher: vi.fn<typeof fetch>(async () => new Response(new ReadableStream({
         start(controller) {
@@ -130,14 +130,14 @@ describe("subplatform MCP endpoint boundary", () => {
       });
     });
     await expect(probeSubplatformMcpEndpoint({
-      endpoint: { serverKey: "used-car", url: "https://agent.example/mcp", bearerToken: "child-secret", timeoutMs: 1_000 },
+      endpoint: { serverKey: "store-a", url: "https://agent.example/mcp", bearerToken: "child-secret", timeoutMs: 1_000 },
       fetcher,
     })).resolves.toMatchObject({ ok: true, status: 200 });
   });
 
   it("rejects an HTTP 200 response that is not an MCP initialize result", async () => {
     await expect(probeSubplatformMcpEndpoint({
-      endpoint: { serverKey: "used-car", url: "https://agent.example/mcp", bearerToken: null, timeoutMs: 1_000 },
+      endpoint: { serverKey: "store-a", url: "https://agent.example/mcp", bearerToken: null, timeoutMs: 1_000 },
       fetcher: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: "matchplane-health" }), {
         status: 200,
         headers: { "content-type": "application/json" },

@@ -271,13 +271,13 @@ mod tests {
 
     #[test]
     fn validate_slug_rejects_uppercase_and_punctuation() {
-        assert!(validate_slug("slug", "Used-Car").is_err());
-        assert!(validate_slug("slug", "used_car").is_err());
+        assert!(validate_slug("slug", "Store_A").is_err());
+        assert!(validate_slug("slug", "store_a").is_err());
     }
 
     #[test]
     fn validate_slug_accepts_operator_supplied_slug() {
-        assert!(validate_slug("slug", "used-car").is_ok());
+        assert!(validate_slug("slug", "store-a").is_ok());
         assert!(validate_slug("slug", "2nd-hand").is_ok());
     }
 

@@ -97,21 +97,21 @@ describe("StorefrontView", () => {
         canManageStore
         onOpenStoreConsole={onOpenStoreConsole}
         subplatform={{
-          ...resolveSubplatform("/used-car"),
-          brandName: "Matx Auto",
-          label: "Matx Auto",
+          ...resolveSubplatform("/store-a"),
+          brandName: "Store A",
+          label: "Store A",
           ui: {
             copy: {
-              emptyManagerTitle: "还没有发布车辆",
-              emptyManagerAction: "发布第一辆车",
+              emptyManagerTitle: "还没有发布商品",
+              emptyManagerAction: "发布第一个商品",
             },
           },
         }}
       />,
     );
 
-    expect(screen.getByText("还没有发布车辆")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "发布第一辆车" }));
+    expect(screen.getByText("还没有发布商品")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "发布第一个商品" }));
     expect(onOpenStoreConsole).toHaveBeenCalledTimes(1);
   });
 

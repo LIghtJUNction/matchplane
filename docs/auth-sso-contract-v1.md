@@ -10,7 +10,7 @@ MatchPlane 不要求用户为每个子平台重复注册。Better Auth 是唯一
 4. 只有注册记录 `membership_policy=public` 的 active 子平台，用户第一次以买家/卖家访问时才会自动写入 Better Auth `member` 关系。这个认领是幂等的，不会创建第二个用户，也不会授予管理权限；`invite` 节点必须接受邀请。
 5. 未开放公开认领的子平台返回邀请提示；用户仍使用同一个账号接受邀请即可加入。
 
-同一部署下的路径（例如 `/` 与 `/used-car`）直接复用根平台的 Better Auth cookie。子平台若部署到
+同一部署下的路径（例如 `/` 与 `/store-a`）直接复用根平台的 Better Auth cookie。子平台若部署到
 不同域名，也不复制用户表或要求再次注册：根平台的 Better Auth OAuth Provider（OIDC）是唯一授权中心，
 子平台是 OIDC relying party。子平台必须使用 Authorization Code + PKCE (S256)、`state`、`nonce`，把
 回调收到的一次性 code 在服务端兑换，并以 `(issuer, sub)` 建立本地 member 投影；不得把 email 当作

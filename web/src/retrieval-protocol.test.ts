@@ -16,7 +16,7 @@ function query() {
   return {
     protocol: "matchplane.retrieval/v1",
     request_id: requestId,
-    scope: { tenant_id: tenantId, domain_id: domainId, platform_path: "/used-car" },
+    scope: { tenant_id: tenantId, domain_id: domainId, platform_path: "/store-a" },
     input: { narrative: "找适合城市通勤的供给", requirements: { energy: "electric" } },
     limit: 10,
   };
@@ -27,7 +27,7 @@ describe("retrieval protocol v1", () => {
     const parsed = parseRetrievalQuery(query());
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
-      expect(parsed.value.platformPath).toBe("/used-car");
+      expect(parsed.value.platformPath).toBe("/store-a");
       expect(parsed.value.input.requirements).toEqual({ energy: "electric" });
     }
   });

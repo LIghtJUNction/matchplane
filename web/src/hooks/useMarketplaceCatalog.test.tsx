@@ -26,7 +26,7 @@ import {
 const listing: AssetListing = {
   id: "listing-1",
   offerId: "offer-1",
-  platformPath: "/used-car",
+  platformPath: "/store-a",
   title: "二手车",
   subtitle: "认证车商",
   price: "¥100,000",
@@ -37,8 +37,8 @@ const listing: AssetListing = {
 };
 
 const subplatform = {
-  slug: "used-car",
-  path: "/used-car",
+  slug: "store-a",
+  path: "/store-a",
   label: "二手车",
   ui: {},
 };
@@ -46,7 +46,7 @@ const subplatform = {
 describe("useMarketplaceCatalog pending likes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    window.history.replaceState(null, "", "/used-car");
+    window.history.replaceState(null, "", "/store-a");
     window.sessionStorage.removeItem(PENDING_MARKETPLACE_LIKE_KEY);
   });
 
@@ -74,7 +74,7 @@ describe("useMarketplaceCatalog pending likes", () => {
 
     expect(onAuthRequired).toHaveBeenCalledTimes(1);
     expect(readPendingMarketplaceLike()).toMatchObject({
-      platformPath: "/used-car",
+      platformPath: "/store-a",
       listingId: "listing-1",
       offerId: "offer-1",
     });
@@ -92,7 +92,7 @@ describe("useMarketplaceCatalog pending likes", () => {
     expect(
       window.sessionStorage.getItem(PENDING_MARKETPLACE_LIKE_KEY),
     ).toBeNull();
-    expect(window.location.pathname).toBe("/used-car");
+    expect(window.location.pathname).toBe("/store-a");
     expect(onNotice).not.toHaveBeenCalled();
   });
 

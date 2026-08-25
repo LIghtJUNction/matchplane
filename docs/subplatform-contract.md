@@ -208,6 +208,6 @@ Discovery 进入 `queued → discovering → ready/rejected` 状态；只有 `re
   生产环境下，web 页面和清单接口会独立校验完整的递归路径是否解析到活跃不可变注册；`public/` 下静态文件不构成激活授权。
 - 清单与插件资产读取与 Agent 路由共享 `membership_policy` 可见性检查。公开注册可在未认领成员关系时获取；邀请制发布在调用方 Better Auth 用户或带作用域的 Agent key 未被授权该组织子树时，返回相同的未找到（not-found）响应。
 
-## 本仓库内布局
+## 仓库边界
 
-汽车适配器是 Git 子模块，位于 `subplatforms/auto`。其他垂直应在各自仓库遵循同一合约；根仓库仅保存 gitlink 与注册元数据，不会拷贝第二套实现。
+商店包在各自独立仓库中遵循本合约。核心仓库不保存商店 gitlink、不递归签出实例，也不复制任何商店实现；canonical path 始终来自活动 registry/manifest 记录。运营方可对外部签出运行 `just subplatform-package-check <path>` 或 `just subplatform-package-build-check <path>`。

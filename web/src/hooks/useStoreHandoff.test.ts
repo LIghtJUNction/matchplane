@@ -114,8 +114,8 @@ describe("buyer contact retrieval", () => {
     const { result } = renderHook(() =>
       useStoreHandoff({
         subplatform: {
-          slug: "used-car",
-          path: "/used-car",
+          slug: "store-a",
+          path: "/store-a",
           label: "二手车",
           tenantId: partySession.tenantId,
           domainId: "00000000-0000-7000-8000-000000000014",

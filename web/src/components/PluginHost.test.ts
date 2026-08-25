@@ -47,14 +47,14 @@ describe("PluginHost role capabilities", () => {
     render(
       createElement(PluginHost, {
         subplatform: {
-          slug: "used-car",
-          path: "/used-car",
+          slug: "store-a",
+          path: "/store-a",
           label: "二手车",
           brandName: "二手车",
           ui: {},
           pluginArtifact: {
             entry: "index.html",
-            url: "/api/platform/plugin-assets/used-car/index.html",
+            url: "/api/platform/plugin-assets/store-a/index.html",
             digest: "a".repeat(64),
           },
         } as never,

@@ -8,7 +8,7 @@ const common = {
   scope: {
     tenant_id: "11111111-1111-4111-8111-111111111111",
     domain_id: "22222222-2222-4222-8222-222222222222",
-    platform_path: "/used-car",
+    platform_path: "/store-a",
   },
   offer_id: "33333333-3333-4333-8333-333333333333",
 };
@@ -17,7 +17,7 @@ describe("catalog sync protocol", () => {
   it("accepts the minimal canonical offer reference", () => {
     const result = parseCatalogSyncRequest(common);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.platformPath).toBe("/used-car");
+    if (result.ok) expect(result.value.platformPath).toBe("/store-a");
   });
 
   it("rejects client-supplied catalog fields and root scope", () => {

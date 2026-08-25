@@ -96,9 +96,9 @@ beforeEach(() => {
           stores: [
             {
               id: "33333333-3333-4333-8333-333333333333",
-              slug: "used-car",
-              path: "/used-car",
-              displayName: "Matx Auto",
+              slug: "store-a",
+              path: "/store-a",
+              displayName: "Store A",
               description: "二手车",
               integrationKind: "package",
               status: "active",
@@ -119,11 +119,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function openUsedCarConversation(
+async function openStoreAConversation(
   user: ReturnType<typeof userEvent.setup>,
 ) {
-  window.history.replaceState(null, "", "/used-car");
-  render(<App initialPath="/used-car" />);
+  window.history.replaceState(null, "", "/store-a");
+  render(<App initialPath="/store-a" />);
   await user.click(await screen.findByRole("button", { name: "与店长对话" }));
   return screen.findByRole("textbox", {
     name: "告诉 MatchPlane 你的需求",
@@ -222,7 +222,7 @@ describe("MatchPlane workspaces", () => {
       screen.queryByRole("button", { name: "发布商品" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("dialog", { name: /^我的店铺|Matx Auto/ }),
+      screen.queryByRole("dialog", { name: /^我的店铺|Store A/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -241,14 +241,14 @@ describe("MatchPlane workspaces", () => {
     expect(screen.queryByLabelText("店铺名称")).not.toBeInTheDocument();
     await user.click(manageProducts);
     expect(
-      await screen.findByRole("dialog", { name: "Matx Auto" }),
+      await screen.findByRole("dialog", { name: "Store A" }),
     ).toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
     expect(window.location.href).not.toContain("/login");
   });
 
   it("opens the product console over a fullscreen store from an explicit account link", async () => {
-    window.history.replaceState(null, "", "/used-car?console=products");
+    window.history.replaceState(null, "", "/store-a?console=products");
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
       const url =
@@ -260,11 +260,11 @@ describe("MatchPlane workspaces", () => {
       if (url.startsWith("/api/platform/manifest?path=")) {
         return new Response(
           JSON.stringify({
-            displayName: "Matx Auto",
+            displayName: "Store A",
             assets: {
               hosted: {
                 entry: "index.html",
-                url: "/api/platform/plugin-assets/used-car/index.html?build=test",
+                url: "/api/platform/plugin-assets/store-a/index.html?build=test",
                 digest: "a".repeat(64),
               },
             },
@@ -278,9 +278,9 @@ describe("MatchPlane workspaces", () => {
             stores: [
               {
                 id: "33333333-3333-4333-8333-333333333333",
-                slug: "used-car",
-                path: "/used-car",
-                displayName: "Matx Auto",
+                slug: "store-a",
+                path: "/store-a",
+                displayName: "Store A",
                 description: "二手车",
                 integrationKind: "package",
                 status: "active",
@@ -296,19 +296,19 @@ describe("MatchPlane workspaces", () => {
       );
     });
 
-    render(<App initialPath="/used-car" />);
+    render(<App initialPath="/store-a" />);
 
     expect(
-      await screen.findByRole("dialog", { name: "Matx Auto" }),
+      await screen.findByRole("dialog", { name: "Store A" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Matx Auto" }),
+      screen.getByRole("heading", { name: "Store A" }),
     ).toBeInTheDocument();
     expect(window.location.search).not.toContain("console");
   });
 
   it("does not expose store management from a copied product-console link", async () => {
-    window.history.replaceState(null, "", "/used-car?console=products");
+    window.history.replaceState(null, "", "/store-a?console=products");
     window.sessionStorage.setItem("matchplane.test-auth", "true");
     vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
       const url =
@@ -320,11 +320,11 @@ describe("MatchPlane workspaces", () => {
       if (url.startsWith("/api/platform/manifest?path=")) {
         return new Response(
           JSON.stringify({
-            displayName: "Matx Auto",
+            displayName: "Store A",
             assets: {
               hosted: {
                 entry: "index.html",
-                url: "/api/platform/plugin-assets/used-car/index.html?build=test",
+                url: "/api/platform/plugin-assets/store-a/index.html?build=test",
                 digest: "a".repeat(64),
               },
             },
@@ -344,10 +344,10 @@ describe("MatchPlane workspaces", () => {
       );
     });
 
-    render(<App initialPath="/used-car" />);
+    render(<App initialPath="/store-a" />);
 
     expect(
-      await screen.findByTitle("Matx Auto buyer 工作台"),
+      await screen.findByTitle("Store A buyer 工作台"),
     ).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent(
@@ -529,10 +529,10 @@ describe("MatchPlane workspaces", () => {
           Date.now() + 15 * 60 * 1000,
         ).toISOString(),
       },
-      "used-car",
+      "store-a",
       "buyer",
     );
-    const input = await openUsedCarConversation(user);
+    const input = await openStoreAConversation(user);
     await user.type(input, "我有一个需要被认真匹配的问题");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
@@ -560,10 +560,10 @@ describe("MatchPlane workspaces", () => {
           Date.now() + 15 * 60 * 1000,
         ).toISOString(),
       },
-      "used-car",
+      "store-a",
       "buyer",
     );
-    const input = await openUsedCarConversation(user);
+    const input = await openStoreAConversation(user);
     await user.type(input, "第一行");
     await user.keyboard("{Shift>}{Enter}{/Shift}");
     await user.type(input, "第二行");
@@ -590,10 +590,10 @@ describe("MatchPlane workspaces", () => {
           Date.now() + 15 * 60 * 1000,
         ).toISOString(),
       },
-      "used-car",
+      "store-a",
       "buyer",
     );
-    const input = await openUsedCarConversation(user);
+    const input = await openStoreAConversation(user);
     await user.type(input, "把这段需求整理一下");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
     await user.click(await screen.findByRole("button", { name: "对话选项" }));

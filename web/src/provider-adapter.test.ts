@@ -69,7 +69,7 @@ function textResponse(protocol: ProviderProtocol): Record<string, unknown> {
 
 function toolResponse(protocol: ProviderProtocol): Record<string, unknown> {
   const input = {
-    selectedSlugs: ["used-car"],
+    selectedSlugs: ["store-a"],
     rationale: "车辆",
     confidence: 0.9,
   };
@@ -233,7 +233,7 @@ describe("provider adapter official SDK models", () => {
       expect(result.toolCalls[0]).toMatchObject({
         toolName: "select",
         input: {
-          selectedSlugs: ["used-car"],
+          selectedSlugs: ["store-a"],
           rationale: "车辆",
           confidence: 0.9,
         },

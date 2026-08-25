@@ -31,9 +31,9 @@ until a root administrator activates it; active nodes and embedded subplatforms 
 organization, manifest, MCP allowlist, and path-routing model.
 
 The repository is a Rust 2024 modular monorepo with independently deployable services. The root
-engine is domain-neutral; every vertical is a mounted adapter that supplies its own manifest, UI,
-Agent Skill, MCP tools, and optional retrieval implementation. The repository includes an
-automotive compatibility adapter only as an example; it is not root-platform data.
+engine is domain-neutral; every store supplies its own manifest, UI, Agent Skill, MCP tools, and
+optional retrieval implementation from an independently owned checkout or deployment. The core
+repository does not vendor or bundle any store instance.
 
 ## Prerequisites
 
@@ -121,9 +121,9 @@ The generic marketplace kernel supports neutral demand/supply participants, expl
 recommendations, consent-controlled introductions, and bounded source references for the separate
 payment service without assuming what is being matched. Register a participant through
 `POST /v1/marketplace/participants` with `marketplace_sides`, then publish opaque
-`attributes`/`terms` supplied by the vertical or participant. The package under `subplatforms/auto`
-is only a compatibility adapter: it supplies its own schema and UI and is not seeded into a clean
-root deployment. Its legacy HTTP routes are disabled unless an operator explicitly sets
+`attributes`/`terms` supplied by the store or participant. Store packages and Agents are built,
+deployed, and bound independently; the core Compose deliberately bundles none. Legacy HTTP routes
+remain disabled unless an operator explicitly sets
 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true`; new packages use the manifest-declared generic contract. See
 [docs/marketplace-payments.md](docs/marketplace-payments.md) for the payment and commission
 boundary.

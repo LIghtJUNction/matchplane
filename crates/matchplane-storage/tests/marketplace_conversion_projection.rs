@@ -599,7 +599,7 @@ async fn notifications_should_remain_scoped_across_tenants(
         &pool,
         Some(first.seller_user_id),
         Some(first.buyer_user_id),
-        "used-car",
+        "store-a",
     )
     .await?;
     let first_handoff = insert_handoff(&pool, first).await?;
@@ -631,7 +631,7 @@ async fn notifications_should_remain_scoped_across_tenants(
         } else {
             panic!("unexpected notification source {source_id}");
         }
-        assert_eq!(row.get::<String, _>("platform_path"), "/used-car");
+        assert_eq!(row.get::<String, _>("platform_path"), "/store-a");
         assert!(row.get::<i64, _>("title_chars") <= 200);
     }
     Ok(())
@@ -961,7 +961,7 @@ async fn setup(pool: &PgPool) -> Result<Fixture, StorageError> {
     ))
     .execute(pool)
     .await?;
-    seed_fixture(pool, None, None, "used-car").await
+    seed_fixture(pool, None, None, "store-a").await
 }
 
 async fn seed_fixture(

@@ -19,7 +19,7 @@ describe("pending conversion", () => {
   it("persists the store, offer and action with a bounded expiry", () => {
     const pending = savePendingConversion(
       {
-        storePath: "/used-car",
+        storePath: "/store-a",
         offerId: "00000000-0000-7000-8000-000000000001",
         action: "contact_listing",
         conversionAttemptId: "attempt-0001",
@@ -28,7 +28,7 @@ describe("pending conversion", () => {
     );
 
     expect(pending).toMatchObject({
-      storePath: "/used-car",
+      storePath: "/store-a",
       offerId: "00000000-0000-7000-8000-000000000001",
       action: "contact_listing",
       conversionAttemptId: "attempt-0001",
@@ -41,7 +41,7 @@ describe("pending conversion", () => {
   it("expires and removes a stale conversion instead of restoring it", () => {
     savePendingConversion(
       {
-        storePath: "/used-car",
+        storePath: "/store-a",
         offerId: "offer-1",
         action: "store_ai_contact_consent",
         conversionAttemptId: "attempt-0002",
@@ -57,7 +57,7 @@ describe("pending conversion", () => {
 
   it("keeps the stable actor and idempotency state until success or cancellation", () => {
     savePendingConversion({
-      storePath: "/used-car",
+      storePath: "/store-a",
       offerId: "offer-1",
       action: "contact_listing",
       conversionAttemptId: "attempt-0003",
@@ -80,7 +80,7 @@ describe("pending conversion", () => {
       PENDING_CONVERSION_KEY,
       JSON.stringify({
         version: 1,
-        storePath: "/used-car",
+        storePath: "/store-a",
         offerId: "offer-1",
         action: "contact_listing",
         conversionAttemptId: "attempt-0004",
@@ -94,20 +94,20 @@ describe("pending conversion", () => {
 
   it("reuses one attempt across retries and creates a new attempt after cancellation", () => {
     const first = ensurePendingConversion({
-      storePath: "/used-car",
+      storePath: "/store-a",
       offerId: "offer-1",
       action: "contact_listing",
       conversionAttemptId: "attempt-retry-1",
     });
     const retry = ensurePendingConversion({
-      storePath: "/used-car",
+      storePath: "/store-a",
       offerId: "offer-1",
       action: "contact_listing",
       conversionAttemptId: "attempt-ignored",
     });
     clearPendingConversion("offer-1");
     const next = ensurePendingConversion({
-      storePath: "/used-car",
+      storePath: "/store-a",
       offerId: "offer-1",
       action: "contact_listing",
       conversionAttemptId: "attempt-retry-2",
@@ -123,7 +123,7 @@ describe("pending conversion", () => {
     });
     expect(() =>
       savePendingConversion({
-        storePath: "/used-car",
+        storePath: "/store-a",
         offerId: "offer-1",
         action: "contact_listing",
         conversionAttemptId: "attempt-store-1",
@@ -131,7 +131,7 @@ describe("pending conversion", () => {
     ).not.toThrow();
     expect(
       savePendingConversion({
-        storePath: "/used-car",
+        storePath: "/store-a",
         offerId: "offer-1",
         action: "contact_listing",
         conversionAttemptId: "attempt-store-1",

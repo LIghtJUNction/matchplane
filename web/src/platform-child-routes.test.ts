@@ -13,10 +13,10 @@ describe("platform child route visibility", () => {
     query.mockReset();
     query.mockResolvedValue({
       rows: [{
-        slug: "used-car",
-        path: "/used-car",
-        displayName: "二手车平台",
-        description: "车辆交易",
+        slug: "store-a",
+        path: "/store-a",
+        displayName: "合成商店 A",
+        description: "合成商品交易",
         tenantId: "00000000-0000-4000-8000-000000000001",
         domainId: "00000000-0000-4000-8000-000000000002",
         capabilities: ["demand", "supply"],
@@ -37,7 +37,7 @@ describe("platform child route visibility", () => {
       },
     );
 
-    expect(routes[0]?.slug).toBe("used-car");
+    expect(routes[0]?.slug).toBe("store-a");
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining("FROM stores store"),
       [
@@ -51,13 +51,13 @@ describe("platform child route visibility", () => {
 
   it("does not pass a browser identity for machine-only routing", async () => {
     await readActiveDirectChildRoutes(
-      "/used-car",
+      "/store-a",
       "00000000-0000-4000-8000-000000000001",
       { organizationId: "00000000-0000-4000-8000-000000000004" },
     );
 
     expect(query.mock.calls[0]?.[1]).toEqual([
-      "/used-car",
+      "/store-a",
       "00000000-0000-4000-8000-000000000001",
       null,
       "00000000-0000-4000-8000-000000000004",

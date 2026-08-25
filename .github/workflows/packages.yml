@@ -26,7 +26,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
       - name: Normalize version
         run: echo "VERSION=${VERSION#v}" >> "$GITHUB_ENV"
       - name: Install native build dependencies
@@ -87,7 +86,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
       - name: Install pinned Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -123,7 +121,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
       - name: Normalize version
         run: echo "VERSION=${VERSION#v}" >> "$GITHUB_ENV"
       - name: Build Fedora RPM and SRPM
@@ -150,7 +147,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
       - name: Normalize image names
         run: |
           owner=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
@@ -276,7 +272,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
       - name: Download immutable portable release asset
         run: |
           set -euo pipefail
