@@ -46,7 +46,10 @@ export function MallInitializationPanel({
           <h2 id="mall-initialization-title">开始配置商城</h2>
           <p>按顺序完成必要配置，让访客可以浏览店铺并获得选购帮助。</p>
         </div>
-        <div className="mall-initialization-next" aria-label={`下一步：${nextStep}`}>
+        <div
+          className="mall-initialization-next"
+          aria-label={`下一步：${nextStep}`}
+        >
           <span>下一步</span>
           <strong>{nextStep}</strong>
         </div>
@@ -75,7 +78,9 @@ export function MallInitializationPanel({
           <div>
             <strong>商城数据</strong>
             <small>
-              {scopeReady ? "店铺与商品数据已准备好" : "完成初始化后即可接入店铺"}
+              {scopeReady
+                ? "店铺与商品数据已准备好"
+                : "完成初始化后即可接入店铺"}
             </small>
           </div>
           <button
@@ -98,7 +103,9 @@ export function MallInitializationPanel({
         <li className={aiReady ? "is-complete" : ""}>
           <div>
             <strong>AI 导购</strong>
-            <small>{aiReady ? "已连接模型服务" : "连接模型后，访客即可询问和选购"}</small>
+            <small>
+              {aiReady ? "已连接模型服务" : "连接模型后，访客即可询问和选购"}
+            </small>
           </div>
           <button type="button" onClick={onOpenAi}>
             {aiReady ? "查看" : "配置"}

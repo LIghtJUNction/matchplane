@@ -426,7 +426,17 @@ export function PlatformDashboard({
         return;
       }
 
-      if (!hasManualRegistration) {
+      if (hasManualRegistration) {
+        try {
+          const parsed = JSON.parse(subplatformManifest);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+            throw new Error();
+          manifest = parsed as Record<string, unknown>;
+        } catch {
+          onNotice("manifest 必须是 JSON 对象");
+          return;
+        }
+      } else {
         setSubplatformDiscoveryState("正在提交到隔离构建器…");
         const intake = await discoverSubplatformSource({
           domainId: subplatformDomainId,
@@ -469,16 +479,6 @@ export function PlatformDashboard({
         pinnedRevision =
           discovered.pinnedRevision?.toLowerCase() || pinnedRevision;
         setSubplatformDiscoveryState("manifest 已验证，正在登记店铺…");
-      } else {
-        try {
-          const parsed = JSON.parse(subplatformManifest);
-          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-            throw new Error();
-          manifest = parsed as Record<string, unknown>;
-        } catch {
-          onNotice("manifest 必须是 JSON 对象");
-          return;
-        }
       }
 
       if (!/^[a-z0-9][a-z0-9._-]{1,127}$/.test(packageId)) {
@@ -903,10 +903,7 @@ export function PlatformDashboard({
                 rootRole={rootRole}
                 onNotice={onNotice}
               />
-              <WeChatLoginConfigPanel
-                rootRole={rootRole}
-                onNotice={onNotice}
-              />
+              <WeChatLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
               <PhoneLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
               <PlatformSiteSettingsPanel
                 organizationId={setup?.root.organization?.id}
@@ -948,11 +945,11 @@ export function PlatformDashboard({
                     !setup.domains.length
                   }
                   title={
-                    !setup?.root.organization?.id
-                      ? "商城尚未完成初始化"
-                      : !setup.domains.length
-                        ? "商城数据尚未准备好"
-                        : undefined
+                    setup?.root.organization?.id
+                      ? setup.domains.length
+                        ? undefined
+                        : "商城数据尚未准备好"
+                      : "商城尚未完成初始化"
                   }
                   onClick={() => setSubplatformEditorOpen((open) => !open)}
                 >
