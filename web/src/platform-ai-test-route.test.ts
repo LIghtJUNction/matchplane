@@ -35,8 +35,8 @@ vi.mock("./lib/platform-router-config", async (importOriginal) => ({
 import { POST } from "../app/api/platform/ai/test/route";
 
 const draft = {
-  endpoint: "https://api.lmm.best/v1",
-  model: "gpt-5.6-sol",
+  endpoint: "https://tokenrhythm.studio",
+  model: "deepseek-v4-flash-0731",
   protocol: "openai-compatible" as const,
   enabled: true,
   credentialConfigured: true,
@@ -65,7 +65,7 @@ const readyProbe = {
   status: "ready" as const,
   outcome: "ready" as const,
   phase: "response" as const,
-  model: "gpt-5.6-sol",
+  model: "deepseek-v4-flash-0731",
   responseStatus: 200,
   latencyMs: 800,
   firstByteLatencyMs: 700,
@@ -254,12 +254,12 @@ describe("platform AI transactional probe route", () => {
     expect((await POST(candidateRequest())).status).toBe(409);
     expect(mocks.probePlatformRouter).not.toHaveBeenCalled();
 
-    mocks.platformRouterPolicyIssues.mockReturnValue(["model_mismatch"]);
+    mocks.platformRouterPolicyIssues.mockReturnValue(["model_invalid"]);
     const invalid = await POST(candidateRequest());
     expect(invalid.status).toBe(451);
     await expect(invalid.json()).resolves.toMatchObject({
       code: "upstream_configuration",
-      issues: ["model_mismatch"],
+      issues: ["model_invalid"],
     });
     expect(mocks.probePlatformRouter).not.toHaveBeenCalled();
     expect(mocks.markTransactionalManagedPlatformRouterDraftTested).not.toHaveBeenCalled();
@@ -268,7 +268,7 @@ describe("platform AI transactional probe route", () => {
   it("preserves active policy blocking without touching candidate state", async () => {
     mocks.getPlatformRouterEffectiveStatus.mockReturnValue({
       ready: false,
-      issues: ["model_mismatch"],
+      issues: ["model_invalid"],
     });
     const response = await POST(
       new Request("http://localhost/api/platform/ai/test", {

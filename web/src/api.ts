@@ -218,8 +218,7 @@ export interface PlatformAiStatus {
     credentialConfigured: boolean;
     policyCode: "ready" | "upstream_configuration";
     policyIssues: string[];
-    requiredEndpoint: string;
-    requiredModel: string;
+    originAllowlistApplied: boolean;
     toolMode: "auto" | "required" | "disabled";
     maxInputCharacters: number;
     maxOutputTokens: number;
@@ -1527,11 +1526,7 @@ export interface PlatformRouterEffectiveStatus {
   protocol: ManagedPlatformRouterConfig["protocol"] | null;
   enabled: boolean;
   credentialConfigured: boolean;
-  endpointMatchesRequired: boolean | null;
-  modelMatchesRequired: boolean | null;
-  protocolMatchesRequired: boolean | null;
-  requiredEndpoint: string;
-  requiredModel: string;
+  originAllowlistApplied: boolean;
   issues: string[];
 }
 
@@ -1549,11 +1544,6 @@ export interface ManagedPlatformRouterMutationState
   auditPending: boolean;
   maintenancePending: boolean;
   generationId: string;
-}
-
-export interface ManagedPlatformRouterModel {
-  id: string;
-  reasoningEfforts: string[];
 }
 
 /** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
@@ -2651,29 +2641,6 @@ export async function activateManagedPlatformRouterConfig(): Promise<ManagedPlat
       body?.error || "AI 待测配置激活失败",
     );
   return body;
-}
-
-export async function listManagedPlatformRouterModels(input: {
-  endpoint: string;
-  protocol: ManagedPlatformRouterConfig["protocol"];
-  apiKey?: string;
-}): Promise<ManagedPlatformRouterModel[]> {
-  const response = await fetch("/api/platform/ai/models", {
-    method: "POST",
-    credentials: "include",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const body = (await response.json().catch(() => null)) as {
-    models?: ManagedPlatformRouterModel[];
-    error?: string;
-  } | null;
-  if (!response.ok || !body?.models)
-    throw new MarketplaceApiError(
-      response.status,
-      body?.error || "模型列表读取失败",
-    );
-  return body.models;
 }
 
 export async function getRootEmailConfig(): Promise<RootEmailConfig | null> {

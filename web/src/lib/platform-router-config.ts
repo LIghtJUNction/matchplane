@@ -16,7 +16,6 @@ export type {
   ManagedPlatformRouterDraftConfig,
   ManagedPlatformRouterInput,
   ManagedPlatformRouterState,
-  ManagedRouterModel,
   ManagedRouterProtocol,
   PlatformRouterAuditEvent,
   PlatformRouterEffectiveStatus,
@@ -89,11 +88,6 @@ export {
   readManagedPlatformRouterDraftConfig,
   stageManagedPlatformRouterConfig,
 } from "./platform-router-config/lifecycle";
-export {
-  listManagedPlatformRouterModels,
-  modelReasoningEffortsFromRecord,
-} from "./platform-router-config/models";
-
 export function managedPlatformRouterStateFromTransactionalState(
   state: TransactionalManagedPlatformRouterPublicState,
   environment: EnvironmentProviderStatus = readEnvironmentProviderStatus(),

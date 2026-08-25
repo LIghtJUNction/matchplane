@@ -105,7 +105,7 @@ describe("mall assistant provider failure mapping", () => {
     mocks.getPlatformRouterEffectiveStatus.mockReturnValue({
       ready: false,
       source: "managed",
-      issues: ["model_mismatch"],
+      issues: ["model_invalid"],
       credentialConfigured: true,
     });
 
@@ -119,7 +119,7 @@ describe("mall assistant provider failure mapping", () => {
       retryable: false,
       provider: {
         source: "managed",
-        issues: ["model_mismatch"],
+        issues: ["model_invalid"],
         credentialConfigured: true,
       },
     });

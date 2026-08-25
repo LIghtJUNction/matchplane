@@ -12,6 +12,7 @@ import type { ManagedPlatformRouterConfig } from "./contract";
 import {
   platformRouterEffectiveStatusFrom,
   platformRouterEffectiveStatusFromReader,
+  platformRouterPolicyIssues,
   readEnvironmentProviderStatus,
 } from "./effective-source";
 import { createTransactionalManagedPlatformRouterLifecycle } from "./transactional-lifecycle";
@@ -38,8 +39,8 @@ function managed(
   overrides: Partial<ManagedPlatformRouterConfig> = {},
 ): ManagedPlatformRouterConfig {
   return {
-    endpoint: "https://api.lmm.best/v1",
-    model: "gpt-5.6-sol",
+    endpoint: "https://tokenrhythm.studio",
+    model: "deepseek-v4-flash-0731",
     protocol: "openai-compatible",
     enabled: true,
     credentialConfigured: true,
@@ -54,31 +55,189 @@ function managed(
   };
 }
 
-function readyEnvironment() {
+function readyEnvironment(
+  overrides: Record<string, string | undefined> = {},
+) {
   return readEnvironmentProviderStatus({
     NODE_ENV: "test",
-    MATCHPLANE_ROUTER_AI_URL: "https://api.lmm.best/v1",
+    MATCHPLANE_ROUTER_AI_URL: "https://environment.example/v1",
     MATCHPLANE_ROUTER_AI_KEY: "environment-key",
-    MATCHPLANE_ROUTER_AI_MODEL: "gpt-5.6-sol",
+    MATCHPLANE_ROUTER_AI_MODEL: "environment-model",
     MATCHPLANE_ROUTER_AI_PROTOCOL: "openai-compatible",
+    ...overrides,
   });
 }
 
-describe("platform router effective source", () => {
-  it("keeps a policy-blocked managed config ahead of a ready environment config", () => {
+const emptyEnvironment = () => readEnvironmentProviderStatus({});
+
+describe("provider-neutral router policy", () => {
+  it.each([
+    ["openai-compatible", "https://tokenrhythm.studio", "deepseek-v4-flash-0731"],
+    ["anthropic-messages", "https://api.anthropic.com", "claude-sonnet-4-6"],
+    [
+      "gemini-generate-content",
+      "https://generativelanguage.googleapis.com",
+      "gemini-2.5-flash",
+    ],
+  ] as const)("accepts %s with a bounded manual model", (protocol, endpoint, model) => {
     const status = platformRouterEffectiveStatusFrom(
-      managed({ model: "deepseek-v4-flash-0731" }),
+      managed({ protocol, endpoint, model }),
+      emptyEnvironment(),
+    );
+
+    expect(status).toMatchObject({
+      ready: true,
+      protocol,
+      endpointOrigin: new URL(endpoint).origin,
+      model,
+      originAllowlistApplied: false,
+      issues: [],
+    });
+    expect(status).not.toHaveProperty("requiredEndpoint");
+    expect(status).not.toHaveProperty("requiredModel");
+    expect(status).not.toHaveProperty("endpointMatchesRequired");
+  });
+
+  it("rejects unknown protocols, invalid model bounds, and unsafe URLs", () => {
+    expect(
+      platformRouterPolicyIssues({
+        endpoint: "https://provider.example",
+        model: "model",
+        protocol: "unknown" as ManagedPlatformRouterConfig["protocol"],
+        enabled: true,
+        credentialConfigured: true,
+      }),
+    ).toContain("protocol_invalid");
+    expect(
+      platformRouterPolicyIssues({
+        endpoint: "https://provider.example",
+        model: " ",
+        protocol: "openai-compatible",
+        enabled: true,
+        credentialConfigured: true,
+      }),
+    ).toContain("model_invalid");
+    for (const [model, protocol] of [
+      ["x".repeat(257), "openai-compatible"],
+      ["model with spaces", "openai-compatible"],
+      ["model\nheader", "anthropic-messages"],
+      ["models/gemini-2.5-flash", "gemini-generate-content"],
+      ["gemini:latest", "gemini-generate-content"],
+    ] as const) {
+      expect(
+        platformRouterPolicyIssues({
+          endpoint: "https://provider.example",
+          model,
+          protocol,
+          enabled: true,
+          credentialConfigured: true,
+        }),
+      ).toContain("model_invalid");
+    }
+    for (const endpoint of [
+      "http://provider.example",
+      "https://user@provider.example",
+      "https://provider.example/v1?secret=value",
+      "https://provider.example/v1#fragment",
+      "https://127.0.0.1/v1",
+    ]) {
+      expect(
+        platformRouterPolicyIssues({
+          endpoint,
+          model: "model",
+          protocol: "openai-compatible",
+          enabled: true,
+          credentialConfigured: true,
+        }),
+      ).toContain("endpoint_invalid");
+    }
+  });
+
+  it("permits any safe HTTPS origin when the allowlist is unset", () => {
+    const status = platformRouterEffectiveStatusFrom(
+      managed({ endpoint: "https://provider.example/custom/v1" }),
+      readEnvironmentProviderStatus({}),
+    );
+
+    expect(status.ready).toBe(true);
+    expect(status.originAllowlistApplied).toBe(false);
+  });
+
+  it("applies exact HTTPS origins to managed and environment providers", () => {
+    const managedStatus = platformRouterEffectiveStatusFrom(
+      managed({ endpoint: "https://allowed.example/custom/v1" }),
+      readEnvironmentProviderStatus({
+        MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS:
+          "https://allowed.example, https://other.example/",
+      }),
+    );
+    const environmentStatus = platformRouterEffectiveStatusFrom(
+      null,
+      readyEnvironment({
+        MATCHPLANE_ROUTER_AI_URL: "https://allowed.example/v1",
+        MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS: "https://allowed.example",
+      }),
+    );
+
+    expect(managedStatus).toMatchObject({
+      ready: true,
+      originAllowlistApplied: true,
+    });
+    expect(environmentStatus).toMatchObject({
+      ready: true,
+      source: "environment",
+      originAllowlistApplied: true,
+    });
+  });
+
+  it.each([
+    "https://allowed.example/path",
+    "https://allowed.example?query=1",
+    "https://user@allowed.example",
+    "http://allowed.example",
+    "https://allowed.example,,https://other.example",
+  ])("fails closed for a malformed allowlist entry: %s", (allowlist) => {
+    const status = platformRouterEffectiveStatusFrom(
+      managed({ endpoint: "https://allowed.example/v1" }),
+      readEnvironmentProviderStatus({
+        MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS: allowlist,
+      }),
+    );
+
+    expect(status.ready).toBe(false);
+    expect(status.originAllowlistApplied).toBe(true);
+    expect(status.issues).toContain("origin_allowlist_invalid");
+  });
+
+  it("rejects an endpoint whose exact origin is absent from the allowlist", () => {
+    const status = platformRouterEffectiveStatusFrom(
+      managed({ endpoint: "https://blocked.example/v1" }),
+      readEnvironmentProviderStatus({
+        MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS: "https://allowed.example",
+      }),
+    );
+
+    expect(status.ready).toBe(false);
+    expect(status.issues).toContain("endpoint_origin_not_allowed");
+  });
+});
+
+describe("platform router effective source", () => {
+  it("keeps managed config authoritative and reports env conflicts informationally", () => {
+    const status = platformRouterEffectiveStatusFrom(
+      managed(),
       readyEnvironment(),
     );
 
-    expect(status.source).toBe("managed");
-    expect(status.managedOverridesEnvironment).toBe(true);
-    expect(status.model).toBe("deepseek-v4-flash-0731");
-    expect(status.issues).toContain("model_mismatch");
-    expect(status.ready).toBe(false);
+    expect(status).toMatchObject({
+      source: "managed",
+      managedOverridesEnvironment: true,
+      ready: true,
+      conflicts: { endpoint: true, model: true, protocol: false },
+    });
   });
 
-  it("does not implicitly fall back to env when managed is disabled or missing a credential", () => {
+  it("does not fall back to env when managed is disabled or missing a credential", () => {
     const status = platformRouterEffectiveStatusFrom(
       managed({ enabled: false, credentialConfigured: false }),
       readyEnvironment(),
@@ -94,12 +253,44 @@ describe("platform router effective source", () => {
     expect(status.ready).toBe(false);
   });
 
-  it("uses the environment only when no managed config exists", () => {
-    const status = platformRouterEffectiveStatusFrom(null, readyEnvironment());
+  it("treats a protocol-only environment override as present and incomplete", () => {
+    const status = platformRouterEffectiveStatusFrom(
+      null,
+      readEnvironmentProviderStatus({
+        MATCHPLANE_ROUTER_AI_PROTOCOL: "unsupported",
+      }),
+    );
 
     expect(status.source).toBe("environment");
-    expect(status.ready).toBe(true);
-    expect(status.managedOverridesEnvironment).toBe(false);
+    expect(status.ready).toBe(false);
+    expect(status.issues).toEqual(
+      expect.arrayContaining([
+        "credential_not_configured",
+        "endpoint_invalid",
+        "model_invalid",
+        "protocol_invalid",
+      ]),
+    );
+  });
+
+  it("uses incomplete environment state truthfully when no managed config exists", () => {
+    const status = platformRouterEffectiveStatusFrom(
+      null,
+      readEnvironmentProviderStatus({
+        MATCHPLANE_ROUTER_AI_URL: "https://environment.example/v1",
+        MATCHPLANE_ROUTER_AI_PROTOCOL: "unsupported",
+      }),
+    );
+
+    expect(status.source).toBe("environment");
+    expect(status.ready).toBe(false);
+    expect(status.issues).toEqual(
+      expect.arrayContaining([
+        "credential_not_configured",
+        "model_invalid",
+        "protocol_invalid",
+      ]),
+    );
   });
 
   it("maps a real corrupt managed pointer to explicit bounded unavailability", () => {
@@ -141,13 +332,19 @@ describe("platform router effective source", () => {
     );
   });
 
-  it("blocks ready environment fallback when a referenced credential is missing", async () => {
+  it("blocks env fallback when a referenced credential is missing", async () => {
     const lifecycle = lifecycleFixture("missing-credential");
     await activateFixture(lifecycle);
     const snapshot = readCurrentSnapshot({
       root: path.join(TEST_ROOT, "missing-credential"),
     });
-    unlinkSync(path.join(TEST_ROOT, "missing-credential", snapshot.active!.credentialFile));
+    unlinkSync(
+      path.join(
+        TEST_ROOT,
+        "missing-credential",
+        snapshot.active!.credentialFile,
+      ),
+    );
 
     expectUnreadableManagedStatus(
       platformRouterEffectiveStatusFromReader(
@@ -157,7 +354,7 @@ describe("platform router effective source", () => {
     );
   });
 
-  it("blocks ready environment fallback when a referenced credential is corrupt", async () => {
+  it("blocks env fallback when a referenced credential is corrupt", async () => {
     const root = path.join(TEST_ROOT, "corrupt-credential");
     const lifecycle = lifecycleFixture("corrupt-credential");
     await activateFixture(lifecycle);
@@ -189,8 +386,8 @@ async function activateFixture(
 ): Promise<void> {
   await lifecycle.stage(
     {
-      endpoint: "https://api.lmm.best/v1",
-      model: "gpt-5.6-sol",
+      endpoint: "https://tokenrhythm.studio",
+      model: "deepseek-v4-flash-0731",
       protocol: "openai-compatible",
       enabled: true,
       apiKey: "managed-key",
@@ -222,9 +419,8 @@ function expectUnreadableManagedStatus(
     protocol: null,
     enabled: false,
     credentialConfigured: false,
-    endpointMatchesRequired: null,
-    modelMatchesRequired: null,
-    protocolMatchesRequired: null,
+    originAllowlistApplied: false,
     issues: ["managed_configuration_unreadable"],
   });
+  expect(status).not.toHaveProperty("requiredEndpoint");
 }

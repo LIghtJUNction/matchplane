@@ -40,8 +40,8 @@ vi.mock("./lib/platform-router-config", async (importOriginal) => ({
 import { GET, PATCH } from "../app/api/platform/ai/config/route";
 
 const config = {
-  endpoint: "https://api.lmm.best/v1",
-  model: "gpt-5.6-sol",
+  endpoint: "https://tokenrhythm.studio",
+  model: "deepseek-v4-flash-0731",
   protocol: "openai-compatible" as const,
   enabled: true,
   credentialConfigured: true,
@@ -69,16 +69,12 @@ const state = {
     source: "managed" as const,
     managedOverridesEnvironment: true,
     conflicts: { endpoint: true, model: true, protocol: false },
-    endpointOrigin: "https://api.lmm.best",
-    model: "gpt-5.6-sol",
+    endpointOrigin: "https://tokenrhythm.studio",
+    model: "deepseek-v4-flash-0731",
     protocol: "openai-compatible" as const,
     enabled: true,
     credentialConfigured: true,
-    endpointMatchesRequired: true,
-    modelMatchesRequired: true,
-    protocolMatchesRequired: true,
-    requiredEndpoint: "https://api.lmm.best/v1",
-    requiredModel: "gpt-5.6-sol",
+    originAllowlistApplied: false,
     issues: [],
   },
 };

@@ -15,12 +15,10 @@ import { Input } from "@appica/ui-react/input";
 import {
   activateManagedPlatformRouterConfig,
   getManagedPlatformRouterState,
-  listManagedPlatformRouterModels,
   saveManagedPlatformRouterConfig,
   testPlatformAi,
   type ManagedPlatformRouterConfig,
   type ManagedPlatformRouterDraftConfig,
-  type ManagedPlatformRouterModel,
   type PlatformRouterEffectiveStatus,
 } from "../api";
 import { SectionHeading } from "./Primitives";
@@ -46,8 +44,6 @@ export function PlatformAiConfigPanel({
   const [protocol, setProtocol] =
     useState<ManagedPlatformRouterConfig["protocol"]>("openai-compatible");
   const [apiKey, setApiKey] = useState("");
-  const [models, setModels] = useState<ManagedPlatformRouterModel[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [assistantInstructions, setAssistantInstructions] = useState("");
   const [assistantMaxOutputTokens, setAssistantMaxOutputTokens] =
@@ -63,13 +59,9 @@ export function PlatformAiConfigPanel({
   const [activating, setActivating] = useState(false);
   const interactionLocked = loading || saving || testing || activating;
   const reasoningEfforts = useMemo(() => {
-    const listed = models.find(
-      (candidate) => candidate.id === model,
-    )?.reasoningEfforts;
-    if (listed) return listed;
     const saved = draft ?? config;
     return saved?.model === model ? saved.modelReasoningEfforts : [];
-  }, [config, draft, model, models]);
+  }, [config, draft, model]);
 
   useEffect(() => {
     let mounted = true;
@@ -79,7 +71,6 @@ export function PlatformAiConfigPanel({
         applyState(state);
         const editable = state.draft ?? state.config;
         if (editable) apply(editable);
-        else applyRequiredDefaults(state.effective);
       })
       .catch((error) => {
         if (mounted)
@@ -168,27 +159,6 @@ export function PlatformAiConfigPanel({
     }
   };
 
-  const loadModels = async () => {
-    setModelsLoading(true);
-    try {
-      const loaded = await listManagedPlatformRouterModels({
-        endpoint,
-        protocol,
-        apiKey: apiKey || undefined,
-      });
-      setModels(loaded);
-      if (!loaded.some((candidate) => candidate.id === model)) {
-        setModel(loaded[0]?.id ?? "");
-        setAssistantReasoningEffort("none");
-      }
-      onNotice(`已获取 ${loaded.length} 个模型`);
-    } catch (error) {
-      onNotice(error instanceof Error ? error.message : "模型列表读取失败");
-    } finally {
-      setModelsLoading(false);
-    }
-  };
-
   function applyState(state: {
     config: ManagedPlatformRouterConfig | null;
     draft: ManagedPlatformRouterDraftConfig | null;
@@ -199,21 +169,9 @@ export function PlatformAiConfigPanel({
     setEffective(state.effective);
   }
 
-  function applyRequiredDefaults(status: PlatformRouterEffectiveStatus) {
-    setEndpoint(status.requiredEndpoint);
-    setModel(status.requiredModel);
-    setModels([{ id: status.requiredModel, reasoningEfforts: [] }]);
-    setProtocol("openai-compatible");
-    setEnabled(true);
-  }
-
   function apply(current: ManagedPlatformRouterConfig) {
-    setConfig(current);
     setEndpoint(current.endpoint);
     setModel(current.model);
-    setModels([
-      { id: current.model, reasoningEfforts: current.modelReasoningEfforts },
-    ]);
     setProtocol(current.protocol);
     setEnabled(current.enabled);
     setAssistantInstructions(current.assistantInstructions ?? "");
@@ -253,9 +211,14 @@ export function PlatformAiConfigPanel({
                 : "AI 流量已阻塞，后台配置仍可用"}
             </strong>
             <p>
-              生效来源：{sourceLabel(effective.source)}；要求：
-              {effective.requiredEndpoint} + {effective.requiredModel}
+              生效来源：{sourceLabel(effective.source)}；协议：
+              {effective.protocol ?? "未配置"}；模型：
+              {effective.model ?? "未配置"}
             </p>
+            <span>
+              供应商来源限制：
+              {effective.originAllowlistApplied ? "已应用" : "未配置"}
+            </span>
             {!effective.ready ? (
               <span>{effective.issues.map(issueLabel).join("、")}</span>
             ) : null}
@@ -274,20 +237,21 @@ export function PlatformAiConfigPanel({
         </div>
       ) : null}
       <div className="seller-upload-form">
-        <label
-          className="platform-ai-endpoint-field"
-          htmlFor="platform-ai-endpoint"
-        >
-          <span>模型网关 API 基址</span>
-          <Input
-            id="platform-ai-endpoint"
-            value={endpoint}
-            disabled={!canEdit || interactionLocked}
-            onChange={(event) => setEndpoint(event.target.value)}
-            placeholder="https://api.lmm.best/v1"
-            inputMode="url"
-          />
-        </label>
+        <div className="platform-ai-endpoint-field">
+          <label htmlFor="platform-ai-endpoint">
+            <span>模型网关 API 基址</span>
+            <Input
+              id="platform-ai-endpoint"
+              value={endpoint}
+              disabled={!canEdit || interactionLocked}
+              onChange={(event) => setEndpoint(event.target.value)}
+              placeholder={endpointPlaceholder(protocol)}
+              inputMode="url"
+              required
+            />
+          </label>
+          <small>{protocolHelp(protocol)}</small>
+        </div>
         <label htmlFor="platform-ai-protocol">
           <span>协议</span>
           <select
@@ -298,7 +262,6 @@ export function PlatformAiConfigPanel({
               setProtocol(
                 event.target.value as ManagedPlatformRouterConfig["protocol"],
               );
-              setModels([]);
               setModel("");
               setAssistantReasoningEffort("none");
             }}
@@ -322,46 +285,27 @@ export function PlatformAiConfigPanel({
             placeholder={
               draft?.credentialConfigured || config?.credentialConfigured
                 ? "留空则保持服务器中的待测/生效 API Key"
-                : "粘贴由 api.lmm.best 生成的专用 API Key"
+                : "粘贴供应商签发的专用 API Key"
             }
           />
         </label>
         <div className="platform-ai-model-picker seller-upload-wide">
-          <button
-            className="root-email-test"
-            type="button"
-            disabled={!canEdit || modelsLoading || interactionLocked}
-            onClick={() => void loadModels()}
-          >
-            {modelsLoading ? "获取中…" : "获取模型列表"}
-          </button>
           <label htmlFor="platform-ai-model">
-            <span>模型</span>
-            <select
+            <span>模型 ID</span>
+            <Input
               id="platform-ai-model"
               value={model}
-              disabled={!canEdit || interactionLocked || !models.length}
+              disabled={!canEdit || interactionLocked}
+              maxLength={256}
+              required
               onChange={(event) => {
-                const next = event.target.value;
-                setModel(next);
-                const supported =
-                  models.find((candidate) => candidate.id === next)
-                    ?.reasoningEfforts ?? [];
-                if (
-                  assistantReasoningEffort !== "none" &&
-                  !supported.includes(assistantReasoningEffort)
-                )
-                  setAssistantReasoningEffort("none");
+                setModel(event.target.value);
+                setAssistantReasoningEffort("none");
               }}
-            >
-              <option value="">选择模型</option>
-              {models.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.id}
-                </option>
-              ))}
-            </select>
+              placeholder={modelPlaceholder(protocol)}
+            />
           </label>
+          <small>{modelHelp(protocol)}</small>
         </div>
         <label className="email-enabled">
           <input
@@ -458,15 +402,13 @@ export function PlatformAiConfigPanel({
                   </option>
                 ))}
               </select>
-              <small>
-                完全来自模型服务返回的能力元数据，不按模型名称猜测。
-              </small>
+              <small>来自已保存的供应商能力元数据，不按模型名称猜测。</small>
             </label>
           ) : (
             <div className="platform-ai-capability-note">
               <span>思考等级</span>
               <strong>
-                {model ? "模型服务未返回可选等级" : "选择模型后读取能力"}
+                {model ? "未保存可选等级" : "填写模型后检查已保存能力"}
               </strong>
               <small>未声明时不发送该参数，避免错误配置。</small>
             </div>
@@ -566,13 +508,56 @@ function sourceLabel(source: PlatformRouterEffectiveStatus["source"]): string {
   return "未配置";
 }
 
+function endpointPlaceholder(
+  protocol: ManagedPlatformRouterConfig["protocol"],
+): string {
+  if (protocol === "anthropic-messages") return "https://api.anthropic.com";
+  if (protocol === "gemini-generate-content")
+    return "https://generativelanguage.googleapis.com";
+  return "https://provider.example/v1";
+}
+
+function modelPlaceholder(
+  protocol: ManagedPlatformRouterConfig["protocol"],
+): string {
+  if (protocol === "anthropic-messages") return "claude-…";
+  if (protocol === "gemini-generate-content") return "gemini-…";
+  return "供应商文档中的模型 ID";
+}
+
+function protocolHelp(
+  protocol: ManagedPlatformRouterConfig["protocol"],
+): string {
+  if (protocol === "anthropic-messages")
+    return "Anthropic 官方 API 使用 https://api.anthropic.com；也可填写实现 Messages 协议的 HTTPS 基址。";
+  if (protocol === "gemini-generate-content")
+    return "Gemini 官方 API 使用 https://generativelanguage.googleapis.com；也可填写实现 Generate Content 协议的 HTTPS 基址。";
+  return "填写 OpenAI-compatible 供应商给出的 HTTPS API 基址，可包含供应商要求的基路径。";
+}
+
+function modelHelp(
+  protocol: ManagedPlatformRouterConfig["protocol"],
+): string {
+  const provider =
+    protocol === "anthropic-messages"
+      ? "Anthropic"
+      : protocol === "gemini-generate-content"
+        ? "Gemini"
+        : "OpenAI-compatible 供应商";
+  return `没有跨供应商通用的模型列表接口。请从 ${provider} 文档复制准确模型 ID，并在启用前测试。`;
+}
+
 function issueLabel(issue: string): string {
   const labels: Record<string, string> = {
+    provider_not_configured: "供应商未配置",
     provider_not_enabled: "尚未启用",
     credential_not_configured: "凭据未配置",
-    endpoint_mismatch: "API 基址不符合 M0 要求",
-    model_mismatch: "模型不符合 M0 要求",
-    protocol_mismatch: "协议不符合 M0 要求",
+    endpoint_invalid: "API 基址必须是安全的 HTTPS URL",
+    model_invalid: "模型 ID 必须为 1–256 个字符",
+    protocol_invalid: "协议不受支持",
+    origin_allowlist_invalid: "供应商来源限制格式无效",
+    endpoint_origin_not_allowed: "API 基址不在允许的供应商来源中",
+    managed_configuration_unreadable: "托管配置无法安全读取",
   };
   return labels[issue] ?? "配置不符合要求";
 }

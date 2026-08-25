@@ -7,8 +7,8 @@ import {
 } from "./api";
 
 const config = {
-  endpoint: "https://api.lmm.best/v1",
-  model: "gpt-5.6-sol",
+  endpoint: "https://tokenrhythm.studio",
+  model: "deepseek-v4-flash-0731",
   protocol: "openai-compatible" as const,
   enabled: true,
   credentialConfigured: true,
@@ -33,16 +33,12 @@ const effective = {
   source: "managed" as const,
   managedOverridesEnvironment: false,
   conflicts: { endpoint: false, model: false, protocol: false },
-  endpointOrigin: "https://api.lmm.best",
-  model: "gpt-5.6-sol",
+  endpointOrigin: "https://tokenrhythm.studio",
+  model: "deepseek-v4-flash-0731",
   protocol: "openai-compatible" as const,
   enabled: true,
   credentialConfigured: true,
-  endpointMatchesRequired: true,
-  modelMatchesRequired: true,
-  protocolMatchesRequired: true,
-  requiredEndpoint: "https://api.lmm.best/v1",
-  requiredModel: "gpt-5.6-sol",
+  originAllowlistApplied: false,
   issues: [],
 };
 
@@ -115,7 +111,7 @@ describe("platform AI mutation client", () => {
     status: "ready",
     outcome: "ready",
     phase: "response",
-    model: "gpt-5.6-sol",
+    model: "deepseek-v4-flash-0731",
     responseStatus: 200,
     latencyMs: 800,
     firstByteLatencyMs: 700,

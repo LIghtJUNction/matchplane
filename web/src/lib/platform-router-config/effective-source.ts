@@ -1,7 +1,5 @@
 import {
-  M0_REQUIRED_ROUTER_ENDPOINT,
-  M0_REQUIRED_ROUTER_MODEL,
-  M0_REQUIRED_ROUTER_PROTOCOL,
+  isValidProviderModel,
   normalizeEndpoint,
   normalizeProtocol,
   PlatformRouterConfigValidationError,
@@ -11,6 +9,21 @@ import {
 } from "./contract";
 import { getManagedPlatformRouterConfig } from "./lifecycle";
 
+interface OriginAllowlistPolicy {
+  configured: boolean;
+  valid: boolean;
+  origins: string[] | null;
+}
+
+export interface PlatformRouterProviderEnvironment {
+  NODE_ENV?: string;
+  MATCHPLANE_ROUTER_AI_URL?: string;
+  MATCHPLANE_ROUTER_AI_MODEL?: string;
+  MATCHPLANE_ROUTER_AI_KEY?: string;
+  MATCHPLANE_ROUTER_AI_PROTOCOL?: string;
+  MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS?: string;
+}
+
 export interface EnvironmentProviderStatus {
   endpoint: string | null;
   model: string | null;
@@ -18,6 +31,7 @@ export interface EnvironmentProviderStatus {
   credentialConfigured: boolean;
   present: boolean;
   configured: boolean;
+  originAllowlist: OriginAllowlistPolicy;
 }
 
 interface SelectedProviderStatus {
@@ -28,6 +42,15 @@ interface SelectedProviderStatus {
   enabled: boolean;
   credentialConfigured: boolean;
 }
+
+type PolicyCandidate = Pick<
+  PlatformRouterEffectiveStatus,
+  "model" | "protocol" | "enabled" | "credentialConfigured"
+> & {
+  source?: PlatformRouterEffectiveStatus["source"];
+  endpoint?: string | null;
+  endpointOrigin?: string | null;
+};
 
 export function getPlatformRouterEffectiveStatus(): PlatformRouterEffectiveStatus {
   return platformRouterEffectiveStatusFromReader(
@@ -64,11 +87,7 @@ export function unreadableManagedPlatformRouterEffectiveStatus(
     protocol: null,
     enabled: false,
     credentialConfigured: false,
-    endpointMatchesRequired: null,
-    modelMatchesRequired: null,
-    protocolMatchesRequired: null,
-    requiredEndpoint: M0_REQUIRED_ROUTER_ENDPOINT,
-    requiredModel: M0_REQUIRED_ROUTER_MODEL,
+    originAllowlistApplied: environment.originAllowlist.configured,
     issues: ["managed_configuration_unreadable"],
   };
 }
@@ -78,7 +97,10 @@ export function platformRouterEffectiveStatusFrom(
   environment: EnvironmentProviderStatus,
 ): PlatformRouterEffectiveStatus {
   const selected = selectEffectiveProvider(managed, environment);
-  const issues = platformRouterPolicyIssues(selected);
+  const issues = platformRouterPolicyIssues(
+    selected,
+    environment.originAllowlist,
+  );
   const ready = issues.length === 0;
   return {
     ready,
@@ -93,66 +115,74 @@ export function platformRouterEffectiveStatusFrom(
     protocol: selected.protocol,
     enabled: selected.enabled,
     credentialConfigured: selected.credentialConfigured,
-    endpointMatchesRequired:
-      endpointForComparison(selected.endpoint) === M0_REQUIRED_ROUTER_ENDPOINT,
-    modelMatchesRequired: selected.model === M0_REQUIRED_ROUTER_MODEL,
-    protocolMatchesRequired:
-      selected.protocol === M0_REQUIRED_ROUTER_PROTOCOL,
-    requiredEndpoint: M0_REQUIRED_ROUTER_ENDPOINT,
-    requiredModel: M0_REQUIRED_ROUTER_MODEL,
+    originAllowlistApplied: environment.originAllowlist.configured,
     issues,
   };
 }
 
 export function platformRouterPolicyIssues(
-  value: Pick<
-    PlatformRouterEffectiveStatus,
-    "model" | "protocol" | "enabled" | "credentialConfigured"
-  > & {
-    source?: PlatformRouterEffectiveStatus["source"];
-    endpoint?: string | null;
-    endpointOrigin?: string | null;
-  },
+  value: PolicyCandidate,
+  originAllowlist: OriginAllowlistPolicy = readOriginAllowlistPolicy(
+    process.env.MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS,
+  ),
 ): string[] {
   const endpoint = value.endpoint ?? value.endpointOrigin ?? null;
+  const normalizedEndpoint = endpoint ? safeNormalizedEndpoint(endpoint) : null;
   const issues: string[] = [];
   if (value.source === "unconfigured") issues.push("provider_not_configured");
   if (!value.enabled) issues.push("provider_not_enabled");
   if (!value.credentialConfigured) issues.push("credential_not_configured");
-  if (!isSafeHttpsEndpoint(endpoint)) issues.push("endpoint_invalid");
-  if (endpointForComparison(endpoint) !== M0_REQUIRED_ROUTER_ENDPOINT) {
-    issues.push("endpoint_mismatch");
-  }
-  if (value.model !== M0_REQUIRED_ROUTER_MODEL) issues.push("model_mismatch");
-  if (value.protocol !== M0_REQUIRED_ROUTER_PROTOCOL) {
-    issues.push("protocol_mismatch");
+  if (!normalizedEndpoint) issues.push("endpoint_invalid");
+  if (!isValidProviderModel(value.model, value.protocol))
+    issues.push("model_invalid");
+  if (!isKnownProtocol(value.protocol)) issues.push("protocol_invalid");
+  if (!originAllowlist.valid) {
+    issues.push("origin_allowlist_invalid");
+  } else if (
+    normalizedEndpoint &&
+    originAllowlist.origins &&
+    !originAllowlist.origins.includes(new URL(normalizedEndpoint).origin)
+  ) {
+    issues.push("endpoint_origin_not_allowed");
   }
   return [...new Set(issues)];
 }
 
 export function readEnvironmentProviderStatus(
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: PlatformRouterProviderEnvironment =
+    process.env as PlatformRouterProviderEnvironment,
 ): EnvironmentProviderStatus {
   const endpoint = environment.MATCHPLANE_ROUTER_AI_URL?.trim() || null;
   const model = environment.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
   const credentialConfigured = Boolean(
     environment.MATCHPLANE_ROUTER_AI_KEY?.trim(),
   );
-  const protocol = safeProtocol(environment.MATCHPLANE_ROUTER_AI_PROTOCOL);
-  const present = Boolean(endpoint || model || credentialConfigured);
+  const rawProtocol =
+    environment.MATCHPLANE_ROUTER_AI_PROTOCOL?.trim() || undefined;
+  const protocol = safeProtocol(rawProtocol);
+  const present = Boolean(
+    endpoint || model || credentialConfigured || rawProtocol,
+  );
+  const originAllowlist = readOriginAllowlistPolicy(
+    environment.MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS,
+  );
+  const candidate: SelectedProviderStatus = {
+    source: present ? "environment" : "unconfigured",
+    endpoint,
+    model,
+    protocol,
+    enabled: present,
+    credentialConfigured,
+  };
   return {
     endpoint,
     model,
     credentialConfigured,
     protocol,
     present,
-    configured: Boolean(
-      endpoint &&
-        model &&
-        credentialConfigured &&
-        protocol &&
-        isSafeHttpsEndpoint(endpoint),
-    ),
+    configured:
+      present && platformRouterPolicyIssues(candidate, originAllowlist).length === 0,
+    originAllowlist,
   };
 }
 
@@ -170,7 +200,7 @@ function selectEffectiveProvider(
       credentialConfigured: managed.credentialConfigured,
     };
   }
-  if (environment.configured) {
+  if (environment.present) {
     return {
       source: "environment",
       endpoint: environment.endpoint,
@@ -210,27 +240,71 @@ function managedEnvironmentConflicts(
   };
 }
 
+function readOriginAllowlistPolicy(
+  value: string | undefined,
+): OriginAllowlistPolicy {
+  const candidate = value?.trim();
+  if (!candidate) return { configured: false, valid: true, origins: null };
+  const entries = candidate.split(",").map((entry) => entry.trim());
+  if (entries.some((entry) => !entry)) {
+    return { configured: true, valid: false, origins: null };
+  }
+  const origins: string[] = [];
+  for (const entry of entries) {
+    const origin = safeExactHttpsOrigin(entry);
+    if (!origin) return { configured: true, valid: false, origins: null };
+    origins.push(origin);
+  }
+  return {
+    configured: true,
+    valid: true,
+    origins: [...new Set(origins)],
+  };
+}
+
+function safeExactHttpsOrigin(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    (url.pathname !== "" && url.pathname !== "/")
+  ) {
+    return null;
+  }
+  return safeNormalizedEndpoint(url.origin) ? url.origin : null;
+}
+
 function safeProtocol(value: string | undefined): ManagedRouterProtocol | null {
   try {
-    return normalizeProtocol(value?.trim() || M0_REQUIRED_ROUTER_PROTOCOL);
+    return normalizeProtocol(value?.trim() || "openai-compatible");
   } catch (cause) {
     if (cause instanceof PlatformRouterConfigValidationError) return null;
     throw cause;
   }
 }
 
-function isSafeHttpsEndpoint(value: string | null): boolean {
-  return value !== null && safeNormalizedEndpoint(value) !== null;
+function isKnownProtocol(
+  value: ManagedRouterProtocol | null,
+): value is ManagedRouterProtocol {
+  return (
+    value === "openai-compatible" ||
+    value === "anthropic-messages" ||
+    value === "gemini-generate-content"
+  );
 }
 
 function safeEndpointOrigin(value: string | null): string | null {
   const endpoint = value ? safeNormalizedEndpoint(value) : null;
   if (!endpoint) return null;
-  try {
-    return new URL(endpoint).origin;
-  } catch {
-    return null;
-  }
+  return new URL(endpoint).origin;
 }
 
 function endpointForComparison(value: string | null): string | null {

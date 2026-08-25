@@ -4,21 +4,11 @@ export const LEGACY_ROUTER_KEY_FILE = "platform-router.key";
 export const MANAGED_ROUTER_KEY_FILE =
   /^platform-router-key-[0-9a-f-]{36}\.key$/;
 
-export const M0_REQUIRED_ROUTER_ENDPOINT = "https://api.lmm.best/v1";
-export const M0_REQUIRED_ROUTER_MODEL = "gpt-5.6-sol";
-export const M0_REQUIRED_ROUTER_PROTOCOL: ManagedRouterProtocol =
-  "openai-compatible";
-
 export type ManagedRouterProtocol =
   | "openai-compatible"
   | "anthropic-messages"
   | "gemini-generate-content";
 type ManagedReasoningEffort = string;
-
-export interface ManagedRouterModel {
-  id: string;
-  reasoningEfforts: string[];
-}
 
 export interface ManagedPlatformRouterConfig {
   endpoint: string;
@@ -58,11 +48,7 @@ export interface PlatformRouterEffectiveStatus {
   protocol: ManagedRouterProtocol | null;
   enabled: boolean;
   credentialConfigured: boolean;
-  endpointMatchesRequired: boolean | null;
-  modelMatchesRequired: boolean | null;
-  protocolMatchesRequired: boolean | null;
-  requiredEndpoint: string;
-  requiredModel: string;
+  originAllowlistApplied: boolean;
   issues: string[];
 }
 
@@ -194,10 +180,11 @@ export function normalizeManagedRouterInput(
   const reasoningEfforts = normalizeReasoningEfforts(
     input.modelReasoningEfforts,
   );
+  const protocol = normalizeProtocol(input.protocol);
   return normalizeStoredRouterConfig({
     endpoint: normalizeEndpoint(input.endpoint),
-    model: boundedText(input.model, "模型", 256),
-    protocol: normalizeProtocol(input.protocol),
+    model: normalizeProviderModel(input.model, protocol),
+    protocol,
     enabled: input.enabled,
     credentialFile,
     assistantInstructions: boundedOptionalText(
@@ -233,10 +220,11 @@ export function normalizeStoredRouterConfig(
   const reasoningEfforts = normalizeReasoningEfforts(
     value.modelReasoningEfforts,
   );
+  const protocol = normalizeProtocol(value.protocol);
   return {
     endpoint: normalizeEndpoint(value.endpoint),
-    model: boundedText(value.model, "模型", 256),
-    protocol: normalizeProtocol(value.protocol),
+    model: normalizeProviderModel(value.model, protocol),
+    protocol,
     enabled: requiredBoolean(value.enabled, "启用状态"),
     credentialFile: normalizeCredentialFile(value.credentialFile),
     assistantInstructions: boundedOptionalText(
@@ -311,6 +299,36 @@ export function normalizeProtocol(value: unknown): ManagedRouterProtocol {
     return value;
   }
   throw new PlatformRouterConfigValidationError("模型协议无效");
+}
+
+export function isValidProviderModel(
+  value: unknown,
+  protocol: unknown,
+): boolean {
+  if (
+    typeof value !== "string" ||
+    value !== value.trim() ||
+    value.length === 0 ||
+    value.length > 256 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value)
+  ) {
+    return false;
+  }
+  if (protocol === "gemini-generate-content") {
+    return !value.includes("/") && !value.includes(":");
+  }
+  return protocol === "openai-compatible" || protocol === "anthropic-messages";
+}
+
+function normalizeProviderModel(
+  value: unknown,
+  protocol: ManagedRouterProtocol,
+): string {
+  const model = boundedText(value, "模型", 256);
+  if (!isValidProviderModel(model, protocol)) {
+    throw new PlatformRouterConfigValidationError("模型 ID 格式无效");
+  }
+  return model;
 }
 
 export function boundedText(

@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { getManagedPlatformRouterState } from "./platform-router-config";
-import { M0_REQUIRED_ROUTER_ENDPOINT, M0_REQUIRED_ROUTER_MODEL } from "./platform-router-config/contract";
 import {
   PLATFORM_ROUTER_GENERATION_DIRECTORY,
   readCurrentSnapshot,
@@ -17,6 +16,8 @@ const ENVIRONMENT_KEYS = [
   "MATCHPLANE_ROUTER_AI_URL",
   "MATCHPLANE_ROUTER_AI_KEY",
   "MATCHPLANE_ROUTER_AI_MODEL",
+  "MATCHPLANE_ROUTER_AI_PROTOCOL",
+  "MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS",
 ] as const;
 const originalEnvironment = Object.fromEntries(
   ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]),
@@ -48,8 +49,8 @@ describe("managed platform router public state", () => {
     });
     await lifecycle.stage(
       {
-        endpoint: M0_REQUIRED_ROUTER_ENDPOINT,
-        model: M0_REQUIRED_ROUTER_MODEL,
+        endpoint: "https://tokenrhythm.studio",
+        model: "deepseek-v4-flash-0731",
         protocol: "openai-compatible",
         enabled: true,
         apiKey: "state-test-secret",
@@ -78,9 +79,10 @@ describe("managed platform router public state", () => {
       "{}\n",
       { mode: 0o640 },
     );
-    process.env.MATCHPLANE_ROUTER_AI_URL = M0_REQUIRED_ROUTER_ENDPOINT;
+    process.env.MATCHPLANE_ROUTER_AI_URL = "https://api.anthropic.com";
     process.env.MATCHPLANE_ROUTER_AI_KEY = "ready-environment-key";
-    process.env.MATCHPLANE_ROUTER_AI_MODEL = M0_REQUIRED_ROUTER_MODEL;
+    process.env.MATCHPLANE_ROUTER_AI_MODEL = "claude-sonnet-4-6";
+    process.env.MATCHPLANE_ROUTER_AI_PROTOCOL = "anthropic-messages";
 
     const state = getManagedPlatformRouterState({ root });
 
@@ -94,9 +96,7 @@ describe("managed platform router public state", () => {
       model: null,
       protocol: null,
       conflicts: { endpoint: null, model: null, protocol: null },
-      endpointMatchesRequired: null,
-      modelMatchesRequired: null,
-      protocolMatchesRequired: null,
+      originAllowlistApplied: false,
       issues: ["managed_configuration_unreadable"],
     });
     expect(JSON.stringify(state)).not.toContain("state-test-secret");

@@ -62,8 +62,8 @@ export async function GET(request: Request): Promise<Response> {
                 credentialConfigured: state.effective.credentialConfigured,
                 policyCode: state.effective.code,
                 policyIssues: state.effective.issues,
-                requiredEndpoint: state.effective.requiredEndpoint,
-                requiredModel: state.effective.requiredModel,
+                originAllowlistApplied:
+                    state.effective.originAllowlistApplied,
                 toolMode,
                 maxInputCharacters: 24_000,
                 maxOutputTokens: boundedInteger(

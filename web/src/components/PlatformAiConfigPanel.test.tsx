@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   activateManagedPlatformRouterConfig: vi.fn(),
   getManagedPlatformRouterState: vi.fn(),
-  listManagedPlatformRouterModels: vi.fn(),
   saveManagedPlatformRouterConfig: vi.fn(),
   testPlatformAi: vi.fn(),
 }));
@@ -45,12 +44,8 @@ const effective = {
   protocol: "openai-compatible" as const,
   enabled: true,
   credentialConfigured: true,
-  endpointMatchesRequired: false,
-  modelMatchesRequired: false,
-  protocolMatchesRequired: true,
-  requiredEndpoint: "https://api.lmm.best/v1",
-  requiredModel: "gpt-5.6-sol",
-  issues: ["endpoint_mismatch", "model_mismatch"],
+  originAllowlistApplied: false,
+  issues: [],
 };
 
 beforeEach(() => {
@@ -236,7 +231,7 @@ describe("PlatformAiConfigPanel staged cutover", () => {
     const onNotice = vi.fn();
     const committedDraft = {
       ...config,
-      endpoint: "https://api.lmm.best/v1",
+      endpoint: "https://tokenrhythm.studio",
       testedReady: false,
       testedAt: null,
       keyChanged: true,
@@ -261,7 +256,7 @@ describe("PlatformAiConfigPanel staged cutover", () => {
     await waitFor(() =>
       expect(onNotice).toHaveBeenCalledWith("已提交，审计待重放"),
     );
-    expect(screen.getByDisplayValue("https://api.lmm.best/v1")).toBeEnabled();
+    expect(screen.getByDisplayValue("https://tokenrhythm.studio")).toBeEnabled();
     expect(onNotice).not.toHaveBeenCalledWith(expect.stringContaining("失败"));
   });
 
@@ -332,9 +327,7 @@ describe("PlatformAiConfigPanel staged cutover", () => {
         endpointOrigin: null,
         model: null,
         protocol: null,
-        endpointMatchesRequired: null,
-        modelMatchesRequired: null,
-        protocolMatchesRequired: null,
+        originAllowlistApplied: false,
         issues: ["managed_configuration_unreadable"],
       },
     });
@@ -346,13 +339,69 @@ describe("PlatformAiConfigPanel staged cutover", () => {
     expect(screen.queryByText(/非秘密配置存在冲突/)).not.toBeInTheDocument();
   });
 
+  it("requires manual model entry, shows protocol-specific help, and never offers model discovery", async () => {
+    const user = userEvent.setup();
+    render(
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={vi.fn()} />,
+    );
+
+    const modelInput = await screen.findByLabelText("模型 ID");
+    const endpointInput = screen.getByLabelText("模型网关 API 基址");
+    expect(modelInput).toHaveValue("test-model");
+    expect(modelInput).toBeRequired();
+    expect(endpointInput).toBeRequired();
+    expect(
+      screen.queryByRole("button", { name: /获取模型列表/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "模型 ID" })).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("协议"), "anthropic-messages");
+    expect(
+      screen.getByText(/Anthropic 官方 API 使用 https:\/\/api\.anthropic\.com/),
+    ).toBeVisible();
+    expect(screen.getByLabelText("模型 ID")).toHaveAttribute(
+      "placeholder",
+      "claude-…",
+    );
+  });
+
+  it("keeps the API key write-only while saving the manually entered model", async () => {
+    const user = userEvent.setup();
+    api.saveManagedPlatformRouterConfig.mockResolvedValue({
+      config,
+      draft: { ...config, model: "manual-provider-model", testedReady: false },
+      effective,
+    });
+    render(
+      <PlatformAiConfigPanel rootRole="rootSuperAdmin" onNotice={vi.fn()} />,
+    );
+
+    const keyInput = await screen.findByLabelText("API Key");
+    const modelInput = screen.getByLabelText("模型 ID");
+    expect(keyInput).toHaveValue("");
+    await user.clear(modelInput);
+    await user.type(modelInput, "manual-provider-model");
+    await user.type(keyInput, "write-only-new-key");
+    await user.click(screen.getByRole("button", { name: "保存待测配置" }));
+
+    await waitFor(() =>
+      expect(api.saveManagedPlatformRouterConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "manual-provider-model",
+          apiKey: "write-only-new-key",
+        }),
+      ),
+    );
+    expect(keyInput).toHaveValue("");
+  });
+
   it("stages without replacing active config and enables only an attested draft", async () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();
     const testedDraft = {
       ...config,
-      endpoint: "https://api.lmm.best/v1",
-      model: "gpt-5.6-sol",
+      endpoint: "https://tokenrhythm.studio",
+      model: "deepseek-v4-flash-0731",
       testedReady: true,
       testedAt: "2026-08-24T00:00:00.000Z",
       keyChanged: true,
