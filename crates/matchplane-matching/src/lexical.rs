@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     MATCHING_ADVISORY_NOTICE, MatchingError, TokenPolicy,
-    token::{bounded_join, bounded_prefixed, truncate_chars},
+    token::{bounded_join, bounded_prefixed, bounded_trim, truncate_chars},
     tokenize,
 };
 
@@ -17,9 +17,10 @@ pub struct LexicalCandidate {
     pub description: String,
     /// Whether domain policy permits this candidate to participate.
     pub eligible: bool,
-    /// Caller-computed intent boost. Non-finite values are treated as zero.
+    /// Caller-computed intent boost. Only finite positive values are match evidence by themselves;
+    /// non-finite values are treated as zero.
     pub intent_boost: f64,
-    /// Caller-computed, public intent explanations.
+    /// Caller-computed, public intent explanations. A non-empty bounded reason is match evidence.
     pub intent_reasons: Vec<String>,
 }
 
@@ -82,13 +83,19 @@ pub struct RankedLexicalCandidate {
     pub overlap_count: usize,
     /// Bounded matching labels in query-token order.
     pub overlap_labels: Vec<String>,
-    /// Bounded public explanation fragments.
+    /// Bounded caller-computed intent reasons followed by generated lexical-overlap reasons.
     pub explanations: Vec<String>,
     /// Reminder that ranking grants no authority or consent.
     pub advisory: &'static str,
 }
 
-/// Ranks eligible candidates by overlap, score, then original row order under explicit budgets.
+/// Ranks evidenced, eligible candidates by overlap, score, then original row order.
+///
+/// Lexical score is zero for an empty query or zero overlap. Only a positive overlap receives
+/// `0.35 + overlap_count / max(query_token_count, 4)`. A zero-overlap candidate is omitted unless
+/// it has a finite positive caller-computed intent boost or a non-empty bounded caller-computed
+/// intent reason. Reasons are trimmed, empty reasons are dropped, and duplicates retain their
+/// first occurrence; no intent reason is invented by this function.
 ///
 /// Inputs over `max_input_candidates` return an error before ranking. Candidate name and
 /// description are copied only into a token-policy-bounded temporary buffer, and at most
@@ -113,7 +120,7 @@ pub fn rank_lexical_candidates(
         .iter()
         .enumerate()
         .filter(|(_, candidate)| candidate.eligible)
-        .map(|(candidate_index, candidate)| {
+        .filter_map(|(candidate_index, candidate)| {
             let haystack = bounded_join(
                 [
                     candidate.display_name.as_str(),
@@ -129,36 +136,56 @@ pub fn rank_lexical_candidates(
                 .iter()
                 .filter(|token| haystack_tokens.contains(*token))
                 .collect();
-            let lexical_score = if query_tokens.is_empty() {
-                0.35
+            let overlap_count = overlaps.len();
+            let lexical_score = if overlap_count > 0 {
+                0.35 + overlap_count as f64 / query_tokens.len().max(4) as f64
             } else {
-                0.35 + overlaps.len() as f64 / query_tokens.len().max(4) as f64
+                0.0
             };
             let boost = if candidate.intent_boost.is_finite() {
                 candidate.intent_boost
             } else {
                 0.0
             };
-            let mut explanations: Vec<String> = candidate
+            let mut explanations = Vec::new();
+            let mut seen_explanations = HashSet::new();
+            for reason in candidate
                 .intent_reasons
                 .iter()
                 .take(policy.max_explanations)
-                .map(|reason| truncate_chars(reason, policy.max_explanation_characters))
-                .collect();
+            {
+                if explanations.len() >= policy.max_explanations {
+                    break;
+                }
+                push_explanation(
+                    &mut explanations,
+                    &mut seen_explanations,
+                    bounded_trim(reason, policy.max_explanation_characters),
+                    policy.max_explanations,
+                );
+            }
+            if overlap_count == 0 && boost <= 0.0 && explanations.is_empty() {
+                return None;
+            }
             for token in &overlaps {
                 if explanations.len() >= policy.max_explanations {
                     break;
                 }
-                explanations.push(bounded_prefixed(
-                    "lexical overlap: ",
-                    token,
-                    policy.max_explanation_characters,
-                ));
+                push_explanation(
+                    &mut explanations,
+                    &mut seen_explanations,
+                    bounded_prefixed(
+                        "lexical overlap: ",
+                        token,
+                        policy.max_explanation_characters,
+                    ),
+                    policy.max_explanations,
+                );
             }
-            RankedLexicalCandidate {
+            Some(RankedLexicalCandidate {
                 candidate_index,
                 score: (lexical_score + boost).clamp(0.0, 0.99),
-                overlap_count: overlaps.len(),
+                overlap_count,
                 overlap_labels: overlaps
                     .into_iter()
                     .take(policy.max_explanations)
@@ -166,7 +193,7 @@ pub fn rank_lexical_candidates(
                     .collect(),
                 explanations,
                 advisory: MATCHING_ADVISORY_NOTICE,
-            }
+            })
         })
         .collect::<Vec<_>>();
     ranked.sort_by(|left, right| {
@@ -178,4 +205,18 @@ pub fn rank_lexical_candidates(
     });
     ranked.truncate(policy.max_results);
     Ok(ranked)
+}
+
+fn push_explanation(
+    explanations: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+    explanation: String,
+    maximum: usize,
+) {
+    if explanation.is_empty() || explanations.len() >= maximum {
+        return;
+    }
+    if seen.insert(explanation.clone()) {
+        explanations.push(explanation);
+    }
 }

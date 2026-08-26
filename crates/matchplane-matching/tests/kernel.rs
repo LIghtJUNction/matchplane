@@ -235,7 +235,8 @@ fn storefront_lexical_rank_keeps_eligibility_formula_and_row_order() -> TestResu
     assert_eq!(ranked[0].overlap_labels, ["cargo", "bike"]);
 
     let empty = rank_lexical_candidates(&candidates[..1], "", LexicalRankPolicy::default())?;
-    assert!((empty[0].score - 0.45).abs() < f64::EPSILON);
+    assert_eq!(empty.len(), 1);
+    assert!((empty[0].score - 0.1).abs() < f64::EPSILON);
     Ok(())
 }
 

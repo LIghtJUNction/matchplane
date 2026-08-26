@@ -23,7 +23,7 @@ replace or depend on it.
   and bounded observable rejection of unknown candidates.
 - Detailed and compact provider payload structures that are serialized whole; JSON strings are
   never cut after serialization.
-- Storefront-style lexical ranking with eligibility and caller-supplied intent boosts.
+- Truthful storefront lexical ranking with eligibility and bounded caller-supplied intent evidence.
 
 ## BYO-model example
 
@@ -147,6 +147,14 @@ a new compact object and serializes it. It never truncates serialized JSON.
 Structured scoring does not serialize the complete supplied JSON. `StructuredDataBudget` limits the
 number of demand attributes and aggregate key/value bytes, nodes, and nesting depth inspected.
 Supply fields are walked directly into a token-policy-sized buffer.
+
+Storefront lexical ranking makes no match claim for an empty query or for zero token overlap: its
+lexical component is `0`. The existing `0.35 + overlap_count / max(query_token_count, 4)` formula
+applies only when `overlap_count > 0`. A zero-overlap candidate is returned only when the caller
+supplies a positive finite intent boost or a non-empty bounded intent reason. Its score is then the
+bounded structured contribution alone. Caller intent reasons are trimmed, empty values are dropped,
+and first occurrences are retained; generated lexical reasons remain explicitly labeled. Scores are
+clamped to `0.99`, and ranking never invents structured intent evidence.
 
 Every public candidate-ranking policy separates `max_input_candidates` from `max_results`.
 `select_candidate_window`, `rank_fallback_candidates`, and `rank_lexical_candidates` return
