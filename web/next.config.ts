@@ -3,12 +3,16 @@ import type { NextConfig } from "next";
 
 // The Docker builder copies `web/` into `/app`, while the repository keeps it
 // at `<monorepo>/web`. Keep one config valid in both layouts.
-const workspaceRoot = path.basename(__dirname) === "web" ? path.resolve(__dirname, "..") : __dirname;
+const workspaceRoot =
+  path.basename(__dirname) === "web"
+    ? path.resolve(__dirname, "..")
+    : __dirname;
 
 const nextConfig: NextConfig = {
   // Better Auth mounts a server route at /api/auth. A static export cannot execute
   // authentication handlers or keep HTTP-only sessions, so package the Next runtime.
   output: "standalone",
+  poweredByHeader: false,
   // Keep file tracing aligned with the Turbopack boundary. Next 16 may place
   // the standalone app at `.next/standalone/web` for this monorepo layout; the
   // packaging and container stages normalize that directory to their runtime
@@ -19,6 +23,10 @@ const nextConfig: NextConfig = {
   },
   agentRules: false,
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  experimental: {
+    // Avoid one page-data worker per host core overwhelming memory-bounded builders.
+    cpus: 2,
+  },
   turbopack: {
     // Bun's isolated workspace linker stores packages in the monorepo root and
     // links them into `web/node_modules`. Turbopack must therefore use the
