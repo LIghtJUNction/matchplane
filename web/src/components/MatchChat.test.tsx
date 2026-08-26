@@ -155,7 +155,7 @@ describe("MatchChat sending state", () => {
   it("keeps a failed request retryable without turning the error into an assistant message", async () => {
     const user = userEvent.setup();
     askMallShoppingAssistant.mockRejectedValueOnce(
-      new Error("商城 AI 暂时没有完成回复"),
+      new Error("商品搜索暂时不可用"),
     );
     render(<MatchChat home onNotice={vi.fn()} subplatform={subplatform} />);
     const input = screen.getByRole("textbox", {
@@ -166,7 +166,7 @@ describe("MatchChat sending state", () => {
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("商城 AI 暂时没有完成回复");
+    expect(alert).toHaveTextContent("商品搜索暂时不可用");
     expect(input).toHaveValue("帮我找啊");
     expect(
       document.querySelector(".match-chat-message.is-assistant"),

@@ -6,6 +6,9 @@
 *.pid
 *.swp
 deploy/compose/data/
+deploy/compose/var/
+capture-*.mjs
+capture-*.py
 /var/
 dist/
 result/

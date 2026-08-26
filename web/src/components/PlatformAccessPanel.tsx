@@ -373,7 +373,7 @@ export function PlatformAccessPanel({ organizations, rootRole, onNotice }: Platf
         membershipPolicy: "invite",
       });
       await refreshFederation();
-      onNotice(`店铺 /${binding.slug} 已上线，现在可以被商城 AI 检索`);
+      onNotice(`店铺 /${binding.slug} 已上线，现在可以被商品搜索检索`);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "联邦节点激活失败");
     } finally {

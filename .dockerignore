@@ -15,6 +15,24 @@ output
 ci-artifacts-*
 subplatforms/auto/node_modules
 deploy/compose/data
+deploy/compose/var
+# PR / challenge documentation and screenshots — keep in git for review, omit from image context
+docs/acceptance-screenshots/
+docs/path-to-hope-screenshots/
+docs/challenge-11-screenshots/
+docs/challenge-11-pr-*.md
+docs/challenge-11-*-body.md
+docs/challenge-11-pr-selected*.md
+docs/challenge-11-pr-variants*.md
+docs/challenge-11-demo-script*.md
+docs/challenge-11-delivery-roadmap*.md
+docs/challenge-11-participation*.md
+docs/challenge-11-qa-checklist*.md
+docs/challenge-11-submission-playbook*.md
+docs/path-to-hope-design*.md
+# Local screenshot capture tooling (agent artifacts, not runtime inputs)
+capture-*.mjs
+capture-*.py
 **/*.pkg.tar.*
 **/*.rpm
 **/*.deb

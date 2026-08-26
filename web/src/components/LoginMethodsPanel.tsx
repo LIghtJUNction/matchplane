@@ -106,7 +106,7 @@ export function LoginMethodsPanel() {
                 },
                 {
                   name: "MATCHPLANE_WECHAT_OAUTH_SCOPES",
-                  note: "可选，逗号分隔，默认 openid,profile,email",
+                  note: "可选，逗号分隔，默认 snsapi_login（微信开放平台网站扫码登录）",
                 },
               ]}
             />
