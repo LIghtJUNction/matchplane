@@ -1,105 +1,5 @@
 /* Surface polish: denser first viewport, truthful recovery, and calmer workspaces. */
 
-.root-marketplace-entry {
-  width: min(100%, 82rem);
-  min-height: auto;
-  margin-inline: auto;
-  padding: clamp(1.25rem, 3.5vw, 2.6rem) clamp(1rem, 3vw, 2.5rem) 1.75rem;
-  gap: 1.1rem;
-}
-
-.root-marketplace-catalog-intro {
-  width: 100%;
-  max-width: none;
-  padding-bottom: 1rem;
-}
-
-.root-marketplace-catalog-intro h1 {
-  max-width: 18ch;
-  font-size: clamp(2rem, 3.5vw, 2.85rem);
-  line-height: 1.08;
-}
-
-.root-marketplace-catalog-intro > span {
-  max-width: 42rem;
-  margin-top: 0.7rem;
-  line-height: 1.55;
-}
-
-.root-marketplace-entry-facts {
-  margin-top: 0.9rem;
-}
-
-.root-marketplace-concierge {
-  width: min(100%, 62rem);
-  margin-inline: auto;
-}
-
-.root-marketplace-chat-shell {
-  width: 100%;
-}
-
-.root-marketplace-catalog {
-  padding: clamp(1.25rem, 3vw, 2rem) clamp(0.75rem, 3vw, 2rem) 4rem;
-}
-
-.root-marketplace-content {
-  margin-top: 0;
-}
-
-.root-marketplace-inline-categories + .root-marketplace-content {
-  margin-top: 1.25rem;
-}
-
-.root-marketplace-entry:has(.home-chat.has-conversation) {
-  width: min(100%, 70rem);
-  padding-top: 1rem;
-}
-
-.root-marketplace-entry:has(.home-chat.has-conversation)
-  .root-marketplace-catalog-intro {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 0.75rem 2rem;
-  padding-bottom: 0.8rem;
-}
-
-.root-marketplace-entry:has(.home-chat.has-conversation)
-  .root-marketplace-catalog-intro
-  > span,
-.root-marketplace-entry:has(.home-chat.has-conversation)
-  .root-marketplace-entry-facts {
-  grid-column: 1 / -1;
-}
-
-.root-marketplace-entry:has(.home-chat.has-conversation)
-  .root-marketplace-catalog-intro
-  h1 {
-  font-size: clamp(1.45rem, 3vw, 2.15rem);
-}
-
-.root-marketplace-entry:has(.home-chat.has-conversation)
-  .root-marketplace-concierge {
-  width: min(100%, 58rem);
-}
-
-.home-chat-error {
-  border-left-width: 3px;
-  background: color-mix(
-    in srgb,
-    var(--retail-clay-soft) 60%,
-    var(--retail-surface)
-  );
-}
-
-.home-chat-error button {
-  border: 1px solid var(--retail-line-strong);
-  border-radius: 0.65rem;
-  background: var(--retail-surface);
-  color: var(--retail-ink);
-}
-
 .platform-dashboard {
   width: min(100%, 84rem);
   margin-inline: auto;
@@ -279,42 +179,7 @@
   font-size: 0.7rem;
 }
 
-@media (min-width: 64rem) {
-  .root-marketplace-entry:not(:has(.home-chat.has-conversation)) {
-    display: grid;
-    grid-template-columns: minmax(14rem, 0.68fr) minmax(0, 1.32fr);
-    align-items: start;
-    column-gap: clamp(2rem, 5vw, 6rem);
-  }
-
-  .root-marketplace-entry:not(:has(.home-chat.has-conversation))
-    .root-marketplace-catalog-intro {
-    position: sticky;
-    top: 4.5rem;
-    padding-top: 1.1rem;
-    border-bottom: 0;
-  }
-
-  .root-marketplace-entry:not(:has(.home-chat.has-conversation))
-    .root-marketplace-concierge {
-    width: 100%;
-    padding-top: 1.1rem;
-  }
-
-  .root-marketplace-entry:not(:has(.home-chat.has-conversation))
-    .root-marketplace-scroll-cue,
-  .root-marketplace-entry:not(:has(.home-chat.has-conversation))
-    .root-marketplace-search-trace {
-    grid-column: 1 / -1;
-  }
-}
-
 @media (max-width: 48rem) {
-  .root-marketplace-entry:has(.home-chat.has-conversation)
-    .root-marketplace-catalog-intro {
-    display: block;
-  }
-
   .platform-dashboard {
     padding-inline: 0.75rem;
   }
@@ -351,8 +216,6 @@
   }
 }
 
-.match-chat-starter-card:focus-visible,
-.home-chat-form:focus-within,
 .match-chat-form:focus-within,
 .match-chat-more-trigger:focus-visible,
 .login-password-visibility:focus-visible,

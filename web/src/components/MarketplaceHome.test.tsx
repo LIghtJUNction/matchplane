@@ -129,6 +129,30 @@ describe("MarketplaceHome actions", () => {
     expect(screen.queryByText("这些结果来自哪里")).not.toBeInTheDocument();
   });
 
+  it.each([
+    [[]],
+    [[listing]],
+  ])("keeps products and stores in one editorial flow", (listings) => {
+    renderHome({ listings });
+
+    const content = document.querySelector(".root-marketplace-content");
+    expect(content).not.toBeNull();
+    expect(content).not.toHaveClass("is-sparse");
+    expect(content?.children).toHaveLength(2);
+  });
+
+  it("keeps the truthful empty product status ahead of the store directory", () => {
+    renderHome();
+
+    expect(screen.getByText("暂时还没有通过审核的商品")).toBeInTheDocument();
+    expect(
+      screen.getByText("可以修改上方需求，也可以浏览下方已营业店铺。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "店铺", level: 2 }),
+    ).toBeInTheDocument();
+  });
+
   it("renders only the current real result stores and opens the selected store", async () => {
     const user = userEvent.setup();
     const { onOpenStore } = renderHome({

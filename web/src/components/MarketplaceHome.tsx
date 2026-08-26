@@ -218,8 +218,6 @@ export function MarketplaceHome({
       : listings.filter(
           (listing) => listingCategory(listing) === effectiveCategory,
         );
-  const sparseCatalog = catalogResolved && visibleListings.length <= 2;
-
   return (
     <div
       className="root-marketplace-page min-h-screen bg-background-subtle text-foreground"
@@ -301,9 +299,7 @@ export function MarketplaceHome({
               ))}
             </ToggleGroup>
           ) : null}
-          <div
-            className={`root-marketplace-content${sparseCatalog ? " is-sparse" : ""}`}
-          >
+          <div className="root-marketplace-content">
             <MarketplaceProducts
               catalogResolved={catalogResolved}
               catalogError={catalogError}

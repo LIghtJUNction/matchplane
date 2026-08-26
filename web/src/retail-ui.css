@@ -722,39 +722,6 @@ select {
   margin-top: 0;
 }
 
-.root-marketplace-content.is-sparse {
-  display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(18rem, 0.85fr);
-  align-items: start;
-  gap: clamp(2.5rem, 6vw, 6rem);
-}
-
-.root-marketplace-content.is-sparse > .root-marketplace-products,
-.root-marketplace-content.is-sparse > .root-marketplace-stores {
-  width: 100%;
-  margin-inline: 0;
-}
-
-.root-marketplace-content.is-sparse .root-marketplace-products-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.root-marketplace-content.is-sparse .root-marketplace-stores {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.root-marketplace-content.is-sparse .root-marketplace-stores section > div {
-  grid-template-columns: 1fr;
-  gap: 0.75rem;
-}
-
-.root-marketplace-content.is-sparse .root-marketplace-stores section > div > a {
-  min-height: 8.5rem;
-  padding: 1rem;
-}
-
 .root-marketplace-products-heading {
   margin-bottom: 1.4rem;
   display: flex;
@@ -2414,18 +2381,6 @@ select {
   }
 }
 
-@media (max-width: 48rem) {
-  .root-marketplace-content.is-sparse {
-    grid-template-columns: 1fr;
-    gap: 3rem;
-  }
-
-  .root-marketplace-content.is-sparse .root-marketplace-stores {
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--retail-line);
-  }
-}
-
 @media (max-width: 42rem) {
   .login-layout {
     width: min(100% - 1rem, 34rem);
@@ -2503,7 +2458,6 @@ select {
   }
 
   .root-marketplace-products-grid,
-  .root-marketplace-content.is-sparse .root-marketplace-products-grid,
   .storefront-view-products > .grid,
   .root-marketplace-loading {
     grid-template-columns: 1fr;
