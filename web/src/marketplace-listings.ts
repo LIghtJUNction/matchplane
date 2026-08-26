@@ -1,6 +1,6 @@
 import type { RecommendedBackendListing } from "./api";
 import { localizedSubplatformCopy } from "./lib/localized-copy";
-import { boundedMatchReasons } from "./storefront-ranking";
+import { boundedMatchReasons } from "./storefront-ranking-shared";
 import {
   subplatformFieldLabel,
   subplatformFieldValue,

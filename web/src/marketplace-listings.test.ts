@@ -5,7 +5,7 @@ import { mapRecommendations } from "./marketplace-listings";
 import {
   MAX_PUBLIC_MATCH_REASON_CHARACTERS,
   MAX_PUBLIC_MATCH_REASONS,
-} from "./storefront-ranking";
+} from "./storefront-ranking-shared";
 import type { SubplatformConfig } from "./subplatform";
 
 const subplatform: SubplatformConfig = {

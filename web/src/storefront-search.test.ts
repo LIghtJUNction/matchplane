@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { query } = vi.hoisted(() => ({ query: vi.fn() }));
+const { gatewayRank, query } = vi.hoisted(() => ({
+  gatewayRank: vi.fn(),
+  query: vi.fn(),
+}));
 
 vi.mock("./lib/auth", () => ({ authDatabase: { query } }));
+vi.mock("./storefront-ranking-gateway", () => ({
+  rankWithRustLexicalGateway: gatewayRank,
+}));
 
 import {
   MAX_PUBLIC_MATCH_REASON_CHARACTERS,
@@ -14,68 +20,18 @@ import {
   searchPublicStoreOfferPage,
   searchPublicStoreOffers,
 } from "./storefront-search";
-import type { PublicStore } from "./store-directory";
-
-const store: PublicStore = {
-  id: "10000000-0000-4000-8000-000000000001",
-  slug: "camera-house",
-  path: "/camera-house",
-  displayName: "相机屋",
-  description: "相机与镜头",
-  integrationKind: "hosted",
-  capabilities: [],
-  agentStages: [],
-  agentSkills: [],
-  tenantId: "20000000-0000-4000-8000-000000000001",
-  domainId: "30000000-0000-4000-8000-000000000001",
-};
-
-function completeProductRow(
-  input: {
-    id?: string;
-    displayName?: string;
-    description?: string;
-    amountMinor?: string;
-    attributes?: Record<string, unknown>;
-  } = {},
-) {
-  const id = input.id ?? "40000000-0000-4000-8000-000000000099";
-  return {
-    id,
-    tenantId: store.tenantId,
-    domainId: store.domainId,
-    displayName: input.displayName ?? "轻便旅行相机",
-    attributes: {
-      description: input.description ?? "适合旅行拍摄",
-      stock_quantity: 2,
-      ...input.attributes,
-      attachments: [
-        {
-          kind: "image",
-          attachment_ref: `media://hosted/${id}`,
-          file_name: `${id}.webp`,
-          media_type: "image/webp",
-        },
-      ],
-    },
-    terms: {
-      pricing_mode: "fixed",
-      amount_minor: input.amountMinor ?? "129900",
-      currency: "CNY",
-      currency_scale: 2,
-    },
-    storeName: store.displayName,
-    storeSlug: store.slug,
-    storePath: store.path,
-    integrationKind: store.integrationKind,
-    supplyFields: [],
-    publishedAt: "2026-08-21T00:00:00Z",
-    likeTotal: "0",
-  };
-}
+import {
+  completeProductRow,
+  fakeRustRank,
+  store,
+} from "./storefront-search.test-helpers";
 
 describe("public storefront search", () => {
-  beforeEach(() => query.mockReset());
+  beforeEach(() => {
+    query.mockReset();
+    gatewayRank.mockReset();
+    gatewayRank.mockImplementation(fakeRustRank);
+  });
 
   it("returns no recommendations when a nonempty request has zero explainable overlap", async () => {
     query.mockResolvedValue({
@@ -110,6 +66,8 @@ describe("public storefront search", () => {
       "名称或公开属性与“旅、行、相、机”相关",
     ]);
     expect(first[0]?.match_reasons?.join(" ")).not.toContain(store.displayName);
+    expect(first[0]).not.toHaveProperty("advisory");
+    expect(first[0]).not.toHaveProperty("confidence");
     expect(first[0]?.store_name).toBe(store.displayName);
   });
 
@@ -167,6 +125,7 @@ describe("public storefront search", () => {
     expect(products[0]).not.toHaveProperty("match_score");
     expect(products[0]).not.toHaveProperty("match_reasons");
     expect(products[0]?.store_name).toBe(store.displayName);
+    expect(gatewayRank).not.toHaveBeenCalled();
   });
 
   it("rejects an over-budget store input before querying PostgreSQL", async () => {
@@ -236,6 +195,11 @@ describe("public storefront search", () => {
             description: "适合旅行拍摄",
             brand: "Example",
             seller_phone: "13800000000",
+            contactPhone: "13900000000",
+            authorization: "Bearer private-authorization",
+            cookie: "session=private-cookie",
+            provider_hints: "private provider advice",
+            raw_manifest: "private manifest",
             attachments: [
               {
                 kind: "image",
@@ -261,6 +225,15 @@ describe("public storefront search", () => {
           storeSlug: "camera-house",
           storePath: "/camera-house",
           integrationKind: "hosted",
+          supplyFields: [
+            { key: "brand" },
+            { key: "seller_phone" },
+            { key: "contactPhone" },
+            { key: "authorization" },
+            { key: "cookie" },
+            { key: "provider_hints" },
+            { key: "raw_manifest" },
+          ],
           publishedAt: "2026-08-21T00:00:00Z",
         },
         {
@@ -309,11 +282,39 @@ describe("public storefront search", () => {
         },
       }),
     ]);
-    expect(query.mock.calls[0]?.[0]).not.toContain("contact");
-    expect(query.mock.calls[0]?.[0]).not.toContain("supply_party_id");
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).not.toContain("contact");
+    expect(sql).not.toContain("supply_party_id");
+    expect(sql).not.toContain("row_number");
+    expect(sql).not.toContain("store_rank");
+    expect(sql).not.toContain("ts_rank");
+    expect(sql).toContain("LIMIT 2001");
+    expect(gatewayRank.mock.calls[0]?.[0]).toBe("旅行相机");
+    expect(gatewayRank.mock.calls[0]?.[1]).toEqual([
+      {
+        displayName: "轻便全画幅相机",
+        description: "Example\n适合旅行拍摄",
+        eligible: true,
+        intentBoost: 0,
+        intentReasons: [],
+      },
+      {
+        displayName: "没有图片的草率商品",
+        description: "不会公开",
+        eligible: true,
+        intentBoost: 0,
+        intentReasons: [],
+      },
+    ]);
+    const rustPayload = JSON.stringify(gatewayRank.mock.calls[0]?.[1]);
+    expect(rustPayload).not.toMatch(
+      /provider|13900000000|secret|private-authorization|private-cookie/,
+    );
+    expect(JSON.stringify(products)).not.toMatch(
+      /private-authorization|private-cookie/,
+    );
     expect(query.mock.calls[0]?.[1]).toEqual([
       [store.id],
-      "旅行相机",
       [store.tenantId],
       [store.domainId],
     ]);
@@ -453,7 +454,6 @@ describe("public storefront search", () => {
     });
     expect(query.mock.calls[0]?.[1]).toEqual([
       [store.id],
-      "公开商品",
       [store.tenantId],
       [store.domainId],
     ]);

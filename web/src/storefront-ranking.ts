@@ -1,10 +1,27 @@
 import {
+  MAX_LEXICAL_RANK_DESCRIPTION_CHARACTERS,
+  MAX_LEXICAL_RANK_INTENT_REASONS,
+  MAX_LEXICAL_RANK_NAME_CHARACTERS,
+  MAX_LEXICAL_RANK_REASON_CHARACTERS,
+  type GatewayLexicalRankedCandidate,
+  type PreparedLexicalRankCandidate,
+  PublicStorefrontRankingError,
+} from "./storefront-ranking-contract";
+import { rankWithRustLexicalGateway } from "./storefront-ranking-gateway";
+import {
   evaluateShoppingIntent,
   type PublicShoppingIntent,
 } from "./shopping-intent";
+import {
+  boundedMatchReasons,
+  isSafePublicAttributeKey,
+} from "./storefront-ranking-shared";
 
-export const MAX_PUBLIC_MATCH_REASONS = 8;
-export const MAX_PUBLIC_MATCH_REASON_CHARACTERS = 500;
+export {
+  boundedMatchReasons,
+  MAX_PUBLIC_MATCH_REASON_CHARACTERS,
+  MAX_PUBLIC_MATCH_REASONS,
+} from "./storefront-ranking-shared";
 
 export type PublicOfferSearchSort =
   | "relevance"
@@ -23,8 +40,10 @@ export interface PublicStorefrontRankingCandidate<Row> {
 export interface RankedPublicStorefrontCandidate<Row>
   extends PublicStorefrontRankingCandidate<Row> {
   score: number | undefined;
+  overlapCount: number;
   overlapLabels: string[];
   intentReasons: string[];
+  originalIndex: number;
 }
 
 export interface PublicStorefrontSortCandidate {
@@ -33,75 +52,90 @@ export interface PublicStorefrontSortCandidate {
   terms: unknown;
 }
 
-/** Rank only positive, explainable request matches; an empty browse carries no match claim. */
-export function rankPublicStorefrontCandidates<Row>(
+type RustLexicalRanker = (
+  narrative: string,
+  candidates: PreparedLexicalRankCandidate[],
+) => Promise<GatewayLexicalRankedCandidate[]>;
+
+/**
+ * Keep structured eligibility in Web, then delegate every real match claim to Rust.
+ * Empty browse remains the existing unscored catalogue and loads no gateway token.
+ */
+export async function rankPublicStorefrontCandidates<Row>(
   candidates: PublicStorefrontRankingCandidate<Row>[],
   narrative: string,
   intent?: PublicShoppingIntent,
-): RankedPublicStorefrontCandidate<Row>[] {
-  const queryTokens = tokenize(narrative);
-  const hasRequestCriteria =
-    narrative.trim().length > 0 || hasStructuredIntentCriteria(intent);
-  return candidates
-    .flatMap((candidate, index) => {
-      const evaluation = evaluateShoppingIntent(
-        candidate.attributes,
-        candidate.terms,
-        intent,
-      );
-      if (!evaluation.eligible) return [];
-      const publicAttributeValues = Object.values(candidate.attributes)
-        .filter(isPrimitive)
-        .map((value) => String(value));
-      const haystackTokens = new Set(
-        tokenize([candidate.displayName, ...publicAttributeValues].join("\n")),
-      );
-      const overlapLabels = queryTokens.filter((token) =>
-        haystackTokens.has(token),
-      );
-      const hasExplainableMatch =
-        overlapLabels.length > 0 || evaluation.reasons.length > 0;
-      if (hasRequestCriteria && !hasExplainableMatch) return [];
-      const lexicalScore =
-        overlapLabels.length / Math.max(4, queryTokens.length);
-      const score = hasRequestCriteria
-        ? Math.min(0.99, lexicalScore + evaluation.boost)
-        : undefined;
-      return [
-        {
-          ...candidate,
-          score,
-          overlapLabels,
-          intentReasons: evaluation.reasons,
-          index,
-        },
-      ];
-    })
-    .sort(
-      (left, right) =>
-        right.overlapLabels.length - left.overlapLabels.length ||
-        (right.score ?? 0) - (left.score ?? 0) ||
-        left.index - right.index,
+  rustRanker: RustLexicalRanker = rankWithRustLexicalGateway,
+): Promise<RankedPublicStorefrontCandidate<Row>[]> {
+  const prepared = candidates.map((candidate, originalIndex) => {
+    const evaluation = evaluateShoppingIntent(
+      candidate.attributes,
+      candidate.terms,
+      intent,
     );
+    return {
+      candidate,
+      originalIndex,
+      intentReasons: boundedMatchReasons(evaluation.reasons).slice(
+        0,
+        MAX_LEXICAL_RANK_INTENT_REASONS,
+      ),
+      request: {
+        displayName: truncateScalars(
+          candidate.displayName.trim(),
+          MAX_LEXICAL_RANK_NAME_CHARACTERS,
+        ),
+        description: publicPrimitiveAttributeDescription(candidate.attributes),
+        eligible: evaluation.eligible,
+        intentBoost: evaluation.boost,
+        intentReasons: boundedMatchReasons(evaluation.reasons).map((reason) =>
+          truncateScalars(reason, MAX_LEXICAL_RANK_REASON_CHARACTERS),
+        ),
+      } satisfies PreparedLexicalRankCandidate,
+    };
+  });
+
+  if (!hasPublicStorefrontRequestCriteria(narrative, intent)) {
+    return prepared.map(({ candidate, originalIndex }) => ({
+      ...candidate,
+      score: undefined,
+      overlapCount: 0,
+      overlapLabels: [],
+      intentReasons: [],
+      originalIndex,
+    }));
+  }
+
+  const rankedRows = await rustRanker(
+    narrative,
+    prepared.map(({ request }) => request),
+  );
+  return mergeRustRankedCandidates(prepared, rankedRows);
 }
 
-/** Deduplicate and bound explanations without cutting a UTF-16 surrogate pair. */
-export function boundedMatchReasons(values: string[]): string[] {
-  const reasons: string[] = [];
-  const seen = new Set<string>();
-  for (const value of values) {
-    const normalized = value.trim();
-    let reason = normalized.slice(0, MAX_PUBLIC_MATCH_REASON_CHARACTERS);
-    const trailingCodeUnit = reason.charCodeAt(reason.length - 1);
-    if (trailingCodeUnit >= 0xd800 && trailingCodeUnit <= 0xdbff) {
-      reason = reason.slice(0, -1);
-    }
-    if (!reason || seen.has(reason)) continue;
-    seen.add(reason);
-    reasons.push(reason);
-    if (reasons.length === MAX_PUBLIC_MATCH_REASONS) break;
-  }
-  return reasons;
+export function hasPublicStorefrontRequestCriteria(
+  narrative: string,
+  intent: PublicShoppingIntent | undefined,
+): boolean {
+  return narrative.trim().length > 0 || hasStructuredIntentCriteria(intent);
+}
+
+/** Use only stable, canonical primitive values; nested/public-provider metadata is excluded. */
+export function publicPrimitiveAttributeDescription(
+  attributes: Record<string, unknown>,
+): string {
+  const values = Object.entries(attributes)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .flatMap(([key, value]): string[] => {
+      if (!isSafePublicAttributeKey(key) || !isPrimitive(value)) return [];
+      if (typeof value === "number" && !Number.isFinite(value)) return [];
+      const normalized = String(value).trim();
+      return normalized ? [normalized] : [];
+    });
+  return truncateScalars(
+    values.join("\n"),
+    MAX_LEXICAL_RANK_DESCRIPTION_CHARACTERS,
+  );
 }
 
 export function comparePublicStorefrontOffers(
@@ -132,10 +166,47 @@ export function comparePublicStorefrontOffers(
   return direction * compareBigInt(leftAmount, rightAmount);
 }
 
+function mergeRustRankedCandidates<Row>(
+  prepared: Array<{
+    candidate: PublicStorefrontRankingCandidate<Row>;
+    originalIndex: number;
+    intentReasons: string[];
+    request: PreparedLexicalRankCandidate;
+  }>,
+  rankedRows: GatewayLexicalRankedCandidate[],
+): RankedPublicStorefrontCandidate<Row>[] {
+  const seen = new Set<number>();
+  const merged = rankedRows.map((ranked) => {
+    const item = prepared[ranked.candidateIndex];
+    if (!item || seen.has(ranked.candidateIndex) || !item.request.eligible) {
+      throw new PublicStorefrontRankingError("malformed_response");
+    }
+    seen.add(ranked.candidateIndex);
+    return {
+      ...item.candidate,
+      score: ranked.score,
+      overlapCount: ranked.overlapCount,
+      overlapLabels: ranked.overlapLabels,
+      intentReasons: item.intentReasons,
+      originalIndex: item.originalIndex,
+    };
+  });
+  return merged.sort(
+    (left, right) =>
+      right.overlapCount - left.overlapCount ||
+      (right.score ?? 0) - (left.score ?? 0) ||
+      left.originalIndex - right.originalIndex,
+  );
+}
+
 function hasStructuredIntentCriteria(
   intent: PublicShoppingIntent | undefined,
 ): boolean {
   return Boolean(intent?.budget) || Boolean(intent?.requirements.length);
+}
+
+function truncateScalars(value: string, maximum: number): string {
+  return [...value].slice(0, maximum).join("");
 }
 
 function publicPrice(value: unknown): {
@@ -159,15 +230,6 @@ function integerText(value: unknown): bigint {
 
 function compareBigInt(left: bigint, right: bigint): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function tokenize(value: string): string[] {
-  const normalized = value.toLocaleLowerCase().slice(0, 8_000);
-  const words = normalized.match(/[a-z0-9][a-z0-9._:-]*/g) ?? [];
-  const cjk = [...normalized.matchAll(/[\u3400-\u9fff]/g)].map(
-    ([character]) => character,
-  );
-  return [...new Set([...words, ...cjk])].slice(0, 512);
 }
 
 function isPrimitive(value: unknown): value is string | number | boolean {

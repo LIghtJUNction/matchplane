@@ -183,7 +183,8 @@ async function assertVisible(database: Pool): Promise<PublicStore> {
   assert.equal(stores.length, 1, "active scoped store must be public");
   const offers = await searchPublicStoreOffersFromDatabase(database, {
     stores,
-    narrative: "camera",
+    // This harness owns lifecycle SQL; empty browse deliberately skips Rust ranking.
+    narrative: "",
   });
   assert.deepEqual(
     offers.map((offer) => offer.offer_id),
@@ -204,7 +205,7 @@ async function assertStoreAndOfferHidden(
   assert.equal(stores.length, 0, `${transition}: store must disappear`);
   const offers = await searchPublicStoreOffersFromDatabase(database, {
     stores: [staleStore],
-    narrative: "camera",
+    narrative: "",
   });
   assert.equal(offers.length, 0, `${transition}: stale offer must disappear`);
 }
@@ -220,7 +221,7 @@ async function assertOnlyOfferHidden(
   assert.equal(stores.length, 1, `${transition}: store should remain visible`);
   const offers = await searchPublicStoreOffersFromDatabase(database, {
     stores: [store],
-    narrative: "camera",
+    narrative: "",
   });
   assert.equal(offers.length, 0, `${transition}: offer must disappear`);
 }

@@ -35,9 +35,7 @@ describe("public offer lifecycle SQL contract", () => {
     await searchPublicStoreOffers({ stores: [store], narrative: "" });
 
     const sql = String(query.mock.calls[0]?.[0]).replaceAll(/\s+/g, " ");
-    expect(sql).toContain(
-      "JOIN unnest($1::uuid[], $3::uuid[], $4::uuid[])",
-    );
+    expect(sql).toContain("JOIN unnest($1::uuid[], $2::uuid[], $3::uuid[])");
     expect(sql).toContain("requested_store.tenant_id = offer.tenant_id");
     expect(sql).toContain("requested_store.domain_id = offer.domain_id");
     expect(sql).toContain("store.status = 'active'");
@@ -64,10 +62,13 @@ describe("public offer lifecycle SQL contract", () => {
     expect(sql).toContain(
       "registration.source_kind <> 'remote' OR binding.id IS NOT NULL",
     );
+    expect(sql).not.toContain("row_number");
+    expect(sql).not.toContain("store_rank");
+    expect(sql).not.toContain("ts_rank");
     expect(sql).toContain("LIMIT 2001");
   });
 
-  it("rejects the candidate sentinel before deterministic ranking", async () => {
+  it("rejects the candidate sentinel before Rust ranking", async () => {
     query.mockResolvedValue({
       rows: Array.from(
         { length: MAX_PUBLIC_OFFER_SEARCH_CANDIDATES + 1 },

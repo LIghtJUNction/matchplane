@@ -99,7 +99,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
   const narrative = input.narrative?.trim() ?? "";
-  if (!narrative || narrative.length > MAX_NARRATIVE_LENGTH) {
+  if (!narrative || [...narrative].length > MAX_NARRATIVE_LENGTH) {
     return jsonError("请用 1 到 8000 个字符描述想买的商品", 400);
   }
   const requestedStorePath = normalizeStorePath(input.storePath);

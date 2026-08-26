@@ -3,7 +3,7 @@ import type {
   RecommendedBackendListing,
 } from "./api";
 import type { RetrievalCandidate } from "./retrieval-protocol";
-import { boundedMatchReasons } from "./storefront-ranking";
+import { boundedMatchReasons } from "./storefront-ranking-shared";
 
 interface RecommendationContext {
   tenantId?: string;

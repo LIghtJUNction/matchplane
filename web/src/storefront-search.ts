@@ -7,6 +7,8 @@ import {
   rankPublicStorefrontCandidates,
   type PublicOfferSearchSort,
 } from "./storefront-ranking";
+import { MAX_LEXICAL_RANK_TOTAL_CANDIDATES } from "./storefront-ranking-contract";
+import { isSafePublicAttributeKey } from "./storefront-ranking-shared";
 import type { PublicShoppingIntent } from "./shopping-intent";
 
 export type { PublicOfferSearchSort } from "./storefront-ranking";
@@ -33,7 +35,8 @@ const HOSTED_MEDIA_REFERENCE =
 /** Maximum store scopes admitted to one public-offer SQL query; excess fails closed. */
 export const MAX_PUBLIC_OFFER_SEARCH_STORE_IDS = MAX_PUBLIC_STORES;
 export const MAX_PUBLIC_OFFER_SEARCH_NARRATIVE_CHARACTERS = 8_000;
-export const MAX_PUBLIC_OFFER_SEARCH_CANDIDATES = 2_000;
+export const MAX_PUBLIC_OFFER_SEARCH_CANDIDATES =
+  MAX_LEXICAL_RANK_TOTAL_CANDIDATES;
 
 const MAX_PUBLIC_OFFER_SEARCH_STORE_PATHS = MAX_PUBLIC_OFFER_SEARCH_STORE_IDS;
 const PUBLIC_OFFER_SEARCH_CANDIDATE_SENTINEL =
@@ -118,7 +121,7 @@ export async function searchPublicStoreOfferPageFromDatabase(
   );
   assertPublicOfferSearchBudget(
     "narrative_characters",
-    input.narrative.length,
+    [...input.narrative].length,
     MAX_PUBLIC_OFFER_SEARCH_NARRATIVE_CHARACTERS,
   );
 
@@ -159,25 +162,9 @@ export async function searchPublicStoreOfferPageFromDatabase(
                 WHERE like_row.tenant_id = offer.tenant_id
                   AND like_row.offer_id = offer.id),
               0
-            )::text AS "likeTotal",
-            CASE WHEN length(trim($2::text)) = 0 THEN 0::real
-                 ELSE ts_rank_cd(
-                   to_tsvector('simple', offer.display_name || ' ' || coalesce(offer.attributes ->> 'description', '')),
-                   websearch_to_tsquery('simple', $2::text)
-                 ) END AS relevance,
-            row_number() OVER (
-              PARTITION BY store.id
-              ORDER BY
-                CASE WHEN length(trim($2::text)) = 0 THEN 0::real
-                     ELSE ts_rank_cd(
-                       to_tsvector('simple', offer.display_name || ' ' || coalesce(offer.attributes ->> 'description', '')),
-                       websearch_to_tsquery('simple', $2::text)
-                     ) END DESC,
-                offer.published_at DESC NULLS LAST,
-                offer.id
-            ) AS store_rank
+            )::text AS "likeTotal"
        FROM marketplace_offers offer
-       JOIN unnest($1::uuid[], $3::uuid[], $4::uuid[])
+       JOIN unnest($1::uuid[], $2::uuid[], $3::uuid[])
          AS requested_store(store_id, tenant_id, domain_id)
          ON requested_store.store_id = offer.store_id
         AND requested_store.tenant_id = offer.tenant_id
@@ -224,10 +211,9 @@ export async function searchPublicStoreOfferPageFromDatabase(
             "storeName", "storeSlug", "storePath", "integrationKind", "supplyFields",
             "publishedAt", "likeTotal"
        FROM ranked_offers
-      WHERE store_rank <= 100
-      ORDER BY relevance DESC, "publishedAt" DESC NULLS LAST, id
+      ORDER BY "publishedAt" DESC NULLS LAST, id
       LIMIT ${PUBLIC_OFFER_SEARCH_CANDIDATE_SENTINEL}`,
-    [storeIds, input.narrative, tenantIds, domainIds],
+    [storeIds, tenantIds, domainIds],
   )) as { rows: PublicOfferRow[] };
   if (result.rows.length > MAX_PUBLIC_OFFER_SEARCH_CANDIDATES) {
     throw new PublicOfferSearchBudgetExceededError(
@@ -237,7 +223,7 @@ export async function searchPublicStoreOfferPageFromDatabase(
     );
   }
 
-  const ranked = rankPublicStorefrontCandidates(
+  const ranked = await rankPublicStorefrontCandidates(
     result.rows.map((row) => ({
       row,
       displayName: row.displayName,
@@ -338,7 +324,8 @@ function publicAttributes(
     ? supplyFields.flatMap((field): string[] => {
         const item = record(field);
         return typeof item.key === "string" &&
-          /^[A-Za-z0-9_.-]{1,128}$/.test(item.key)
+          /^[A-Za-z0-9_.-]{1,128}$/.test(item.key) &&
+          isSafePublicAttributeKey(item.key)
           ? [item.key]
           : [];
       })
