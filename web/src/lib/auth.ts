@@ -52,6 +52,7 @@ const configuredBaseURL =
   process.env.NEXT_PUBLIC_BETTER_AUTH_URL?.trim() ||
   "http://localhost:4173";
 const baseURL = configuredBaseURL.replace(/\/$/, "");
+export const authBaseURL = baseURL;
 const parsedBaseURL = requiredAbsoluteUrl(baseURL, "BETTER_AUTH_URL");
 
 const configuredRootAdminEmail =

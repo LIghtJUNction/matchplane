@@ -34,6 +34,7 @@ import { PlatformAiConfigPanel } from "./PlatformAiConfigPanel";
 import { NationalIdentityConfigPanel } from "./NationalIdentityConfigPanel";
 import { WeChatLoginConfigPanel } from "./WeChatLoginConfigPanel";
 import { PhoneLoginConfigPanel } from "./PhoneLoginConfigPanel";
+import { AuthProvidersPanel } from "./AuthProvidersPanel";
 import { MallCatalogModeration } from "./MallCatalogModeration";
 import { MallBrandPanel } from "./MallBrandPanel";
 import { MallInitializationPanel } from "./MallInitializationPanel";
@@ -297,6 +298,12 @@ export function PlatformDashboard({
               />
               <WeChatLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
               <PhoneLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
+              <section
+                className="platform-component-panel"
+                aria-label="服务端登录提供方总览"
+              >
+                <AuthProvidersPanel />
+              </section>
               {verifiedSetup?.root.organization?.id ? (
                 <PlatformSiteSettingsPanel
                   organizationId={verifiedSetup.root.organization.id}
