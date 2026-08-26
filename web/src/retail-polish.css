@@ -352,6 +352,7 @@
 }
 
 .match-chat-starter-card:focus-visible,
+.home-chat-form:focus-within,
 .match-chat-form:focus-within,
 .match-chat-more-trigger:focus-visible,
 .login-password-visibility:focus-visible,

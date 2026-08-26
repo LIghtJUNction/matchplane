@@ -28,9 +28,11 @@ describe("public retail P1 style contract", () => {
   });
 
   it("retains explicit focus rings and coarse-pointer target sizing", () => {
-    expect(polishCss).toMatch(
-      /\.match-chat-starter-card:focus-visible,[\s\S]*\.match-chat-form:focus-within[\s\S]*outline:\s*3px solid var\(--retail-focus\) !important;/,
-    );
+    const focusRingRule = polishCss.match(
+      /\.match-chat-starter-card:focus-visible,[^{]+\{[^}]*outline:\s*3px solid var\(--retail-focus\) !important;[^}]*\}/s,
+    )?.[0];
+    expect(focusRingRule).toContain(".home-chat-form:focus-within");
+    expect(focusRingRule).toContain(".match-chat-form:focus-within");
     expect(polishCss).toMatch(
       /@media \(pointer: coarse\)[\s\S]*\.match-chat-more-trigger,[\s\S]*\.login-password-visibility[\s\S]*min-width:\s*44px !important;[\s\S]*min-height:\s*44px !important;/,
     );
