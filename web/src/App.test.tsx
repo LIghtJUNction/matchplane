@@ -779,6 +779,24 @@ describe("MatchPlane workspaces", () => {
     ).toBeInTheDocument();
   });
 
+  it("passes English locale through overlays into the profile panel", async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "显示与语言" }));
+    await user.click(screen.getByRole("button", { name: "English" }));
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Profile" }));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Profile" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Profile could not load",
+    );
+  });
+
   it("applies and persists a curated palette", async () => {
     const user = userEvent.setup();
     render(<App />);

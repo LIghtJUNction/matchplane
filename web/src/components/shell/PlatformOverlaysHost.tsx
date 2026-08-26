@@ -312,7 +312,7 @@ export function PlatformOverlaysHost({
             </div>
           ) : (
             <PersonalProfilePanel
-              onNotice={setNotice}
+              locale={locale}
               onAvatarChanged={(image) =>
                 setAuthUser((current) =>
                   current ? { ...current, image } : current,
