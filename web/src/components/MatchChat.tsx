@@ -74,6 +74,10 @@ import {
 import type { InterfaceLocale } from "../lib/preferences";
 import { mapRecommendations } from "../marketplace-listings";
 import {
+  buildCanonicalRecommendations,
+  buildProviderSelectedRecommendations,
+} from "../recommendation-provenance";
+import {
   clearPendingConversion,
   readPendingConversion,
 } from "../pending-conversion";
@@ -1514,6 +1518,15 @@ export function MatchChat({
                 let canonicalCandidates: Awaited<
                   ReturnType<typeof getMarketplaceOfferMatches>
                 > | null = null;
+                const recommendationContext = {
+                  tenantId: target.tenantId,
+                  domainId: targetDomainId,
+                  platformPath: target.path,
+                  subplatform: target.slug,
+                  intentId: intent.intent_id,
+                  fieldLabels: (attributes: Record<string, unknown>) =>
+                    fieldLabelsFor(target, attributes, locale),
+                };
                 if (target.agentMcpTools?.includes("retrieval.query")) {
                   try {
                     const retrieval = await querySubplatformRetrieval({
@@ -1527,50 +1540,17 @@ export function MatchChat({
                     });
                     // The child result is only a ranking hint. Re-read the canonical active offers
                     // from the root gateway before displaying anything, so a remote adapter cannot
-                    // replace title, attributes, terms, tenant, or offer ownership in the UI.
+                    // replace public offer fields or matcher evidence. Its explanations remain
+                    // advisory provider_hints, and its score is never used.
                     canonicalCandidates = await getMarketplaceOfferMatches({
                       session: targetSession,
                       domainId: targetDomainId,
                       intentId: intent.intent_id,
                     });
-                    const remoteByOffer = new Map(
-                      retrieval.candidates
-                        .filter((candidate) => candidate.offerId)
-                        .map((candidate) => [candidate.offerId!, candidate]),
-                    );
-                    retrievalCandidates = canonicalCandidates.flatMap(
-                      (candidate) => {
-                        const remote = remoteByOffer.get(candidate.offer_id);
-                        if (!remote) return [];
-                        const reasons = [
-                          ...new Set([...candidate.reasons, ...remote.reasons]),
-                        ].slice(0, 32);
-                        const risks = [
-                          ...new Set([
-                            ...(candidate.risks ?? []),
-                            ...(remote.risks ?? []),
-                          ]),
-                        ].slice(0, 32);
-                        return [
-                          {
-                            ...candidate,
-                            field_labels: fieldLabelsFor(
-                              target,
-                              candidate.attributes,
-                              locale,
-                            ),
-                            tenant_id:
-                              target.tenantId ?? targetSession.tenantId,
-                            domain_id: targetDomainId,
-                            platform_path: target.path,
-                            subplatform: target.slug,
-                            match_score: candidate.score,
-                            match_reasons: reasons,
-                            match_risks: risks,
-                            intent_id: intent.intent_id,
-                          } satisfies RecommendedBackendListing,
-                        ];
-                      },
+                    retrievalCandidates = buildProviderSelectedRecommendations(
+                      canonicalCandidates,
+                      retrieval.candidates,
+                      recommendationContext,
                     );
                   } catch {
                     // An unavailable child index is a bounded degradation. The kernel matcher
@@ -1590,23 +1570,10 @@ export function MatchChat({
                       intentId: intent.intent_id,
                     }));
                   routedRecommendations.push(
-                    ...candidates.map((candidate) => ({
-                      ...candidate,
-                      field_labels: fieldLabelsFor(
-                        target,
-                        candidate.attributes,
-                        locale,
-                      ),
-                      tenant_id: target.tenantId ?? candidate.tenant_id,
-                      domain_id: targetDomainId,
-                      platform_path: target.path,
-                      subplatform: target.slug,
-                      offer_id: candidate.offer_id,
-                      match_score: candidate.score,
-                      match_reasons: candidate.reasons,
-                      match_risks: candidate.risks,
-                      intent_id: intent.intent_id,
-                    })),
+                    ...buildCanonicalRecommendations(
+                      candidates,
+                      recommendationContext,
+                    ),
                   );
                 }
               }

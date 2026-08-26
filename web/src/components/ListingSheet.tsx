@@ -263,6 +263,23 @@ export function ListingSheet({
               </section>
             ) : null}
 
+            {listing.providerHints?.length ? (
+              <section className="sheet-section provider-hint-section">
+                <h3>
+                  {copy(
+                    "storeRetrievalHintsTitle",
+                    "店铺检索线索",
+                    "Store retrieval hints",
+                  )}
+                </h3>
+                <ul className="provider-hint-list">
+                  {listing.providerHints.map((hint) => (
+                    <li key={hint}>{hint}</li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
             {listing.seller ? (
               <section className="sheet-section trust-section">
                 <div className="seller-line">

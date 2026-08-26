@@ -1719,6 +1719,8 @@ export interface RecommendedBackendListing {
   match_score?: number;
   match_reasons?: string[];
   match_risks?: string[];
+  /** Advisory store retrieval hints; never canonical match reasons or score evidence. */
+  provider_hints?: string[];
   [key: string]: unknown;
 }
 

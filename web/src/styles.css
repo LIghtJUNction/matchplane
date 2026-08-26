@@ -527,6 +527,9 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .reason-list li, .trust-section li { display: flex; align-items: center; gap: 0.55rem; color: var(--ink-soft); font-size: 0.74rem; }
 .reason-list li > span { width: 1.5rem; height: 1.5rem; display: grid; place-items: center; border-radius: 0.5rem; background: var(--cactus); }
 .risk-section .reason-list li > span { background: var(--clay); color: var(--ink); font-weight: 800; }
+.provider-hint-section h3 { color: var(--ink-soft); }
+.provider-hint-list { margin: 0.65rem 0 0; padding-inline-start: 1.1rem; display: grid; gap: 0.42rem; color: var(--muted); font-size: 0.74rem; }
+.provider-hint-list li { padding-inline-start: 0.12rem; overflow-wrap: anywhere; }
 .trust-section { padding: 1rem; border-radius: 1.25rem; background: var(--paper); }
 .seller-line { gap: 0.65rem; }
 .seller-avatar { width: 2.65rem; height: 2.65rem; display: grid; place-items: center; border-radius: 0.92rem; background: var(--heather); font-weight: 720; }
