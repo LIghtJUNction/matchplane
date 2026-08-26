@@ -52,6 +52,8 @@ const configuredBaseURL =
   process.env.NEXT_PUBLIC_BETTER_AUTH_URL?.trim() ||
   "http://localhost:4173";
 const baseURL = configuredBaseURL.replace(/\/$/, "");
+/** Canonical server-configured Better Auth base used for redirects and public callback metadata. */
+export const authBaseURL = baseURL;
 const parsedBaseURL = requiredAbsoluteUrl(baseURL, "BETTER_AUTH_URL");
 
 const configuredRootAdminEmail =
