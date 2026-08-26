@@ -59,6 +59,12 @@ import {
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { authClient, authFetchOptions } from "../lib/auth-client";
 import {
+  clearChatDraft,
+  readChatDraft,
+  writeChatDraft,
+  type ChatDraftScope,
+} from "../lib/chat-draft-session";
+import {
   conversationHistoryStorageKey,
   deleteConversationHistory,
   readConversationHistory,
@@ -728,14 +734,37 @@ export function MatchChat({
   const submitMessageRef = useRef<
     ((rawText: string, session?: PartySession) => Promise<void>) | null
   >(null);
+  const draftScope = useCallback(
+    () => ({
+      route: window.location.pathname,
+      subplatform: subplatform.slug,
+      role,
+    }),
+    [role, subplatform.slug],
+  );
+  const persistDraft = useCallback(
+    (text: string, scope: ChatDraftScope = draftScope()) =>
+      writeChatDraft(window.sessionStorage, scope, text),
+    [draftScope],
+  );
+  const clearStoredDraft = useCallback(
+    (scope: ChatDraftScope = draftScope()) =>
+      clearChatDraft(window.sessionStorage, scope),
+    [draftScope],
+  );
+
+  useEffect(() => {
+    setMessage(readChatDraft(window.sessionStorage, draftScope()) ?? "");
+  }, [draftScope]);
 
   useEffect(() => {
     const next = draftMessage?.trim();
     if (!next) return;
     setMessage(next);
+    persistDraft(next);
     onDraftMessageApplied?.();
     window.requestAnimationFrame(() => inputRef.current?.focus());
-  }, [draftMessage, onDraftMessageApplied]);
+  }, [draftMessage, onDraftMessageApplied, persistDraft]);
 
   const [sellerRouteChoices, setSellerRouteChoices] = useState<
     PlatformRouteHop[]
@@ -901,6 +930,7 @@ export function MatchChat({
 
   const applyQuickPrompt = (value: string) => {
     setMessage(value);
+    persistDraft(value);
     window.requestAnimationFrame(() => {
       inputRef.current?.focus();
       resizeInput(inputRef.current);
@@ -1059,7 +1089,11 @@ export function MatchChat({
   );
 
   const submitMessage = useCallback(
-    async (rawText: string, session?: PartySession) => {
+    async (
+      rawText: string,
+      session?: PartySession,
+      operationDraftScope: ChatDraftScope = draftScope(),
+    ) => {
       const text = rawText.trim();
       if ((!text && !conversationAttachments.length) || sending) return;
 
@@ -1107,6 +1141,7 @@ export function MatchChat({
             prompt: text,
           });
           setMessage(text);
+          persistDraft(text, operationDraftScope);
           setConversationAttachments(submittedAttachments);
           focusInputAfterErrorRef.current = true;
           onNotice(detail);
@@ -1158,6 +1193,7 @@ export function MatchChat({
               },
             ]);
             onNotice(runtime.choosePlatform);
+            clearStoredDraft(operationDraftScope);
             return;
           }
           const target = terminals[0] ?? route.routePlan.at(-1) ?? null;
@@ -1177,6 +1213,7 @@ export function MatchChat({
             },
           ]);
           onNotice(runtime.sellerSwitched(selectedName));
+          clearStoredDraft(operationDraftScope);
           return;
         }
         const routedRecommendations: RecommendedBackendListing[] = [];
@@ -1640,6 +1677,7 @@ export function MatchChat({
           successNotice = runtime.retrievalDegradedNotice;
         }
         onNotice(successNotice);
+        clearStoredDraft(operationDraftScope);
         if (isSeller)
           window.setTimeout(
             () => document.getElementById("seller-display-name")?.focus(),
@@ -1657,6 +1695,7 @@ export function MatchChat({
             : {}),
         });
         setMessage(text);
+        persistDraft(text, operationDraftScope);
         setConversationAttachments(submittedAttachments);
         focusInputAfterErrorRef.current = true;
       } finally {
@@ -1665,9 +1704,11 @@ export function MatchChat({
     },
     [
       chatError,
+      clearStoredDraft,
       conversationAttachments,
       copy.buyerSuccess,
       copy.sellerSuccess,
+      draftScope,
       isSeller,
       locale,
       messages,
@@ -1675,6 +1716,7 @@ export function MatchChat({
       onRecommendations,
       onSellerDraft,
       onSellerPlatformSelected,
+      persistDraft,
       resizeInput,
       role,
       sending,
@@ -1696,6 +1738,7 @@ export function MatchChat({
         choiceId: string;
         value: string;
       },
+      operationDraftScope: ChatDraftScope = draftScope(),
     ) => {
       const text = rawText.trim();
       if (!text || sending) return;
@@ -1787,6 +1830,7 @@ export function MatchChat({
             ...(contactConsent ? { contactConsent } : {}),
           },
         ]);
+        clearStoredDraft(operationDraftScope);
       } catch (error) {
         const detail =
           error instanceof Error ? error.message : runtime.sendFailed;
@@ -1799,6 +1843,7 @@ export function MatchChat({
             : {}),
         });
         setMessage(text);
+        persistDraft(text, operationDraftScope);
         focusInputAfterErrorRef.current = true;
       } finally {
         setSending(false);
@@ -1806,11 +1851,14 @@ export function MatchChat({
     },
     [
       chatError,
+      clearStoredDraft,
+      draftScope,
       locale,
       messages,
       onNotice,
       onRecommendations,
       onSearchTrace,
+      persistDraft,
       runtime.sendFailed,
       sending,
       subplatform,
@@ -2018,6 +2066,7 @@ export function MatchChat({
     event.preventDefault();
     const text = message.trim();
     if ((!text && !conversationAttachments.length) || sending) return;
+    const operationDraftScope = draftScope();
 
     void (async () => {
       const scopedMarketplace =
@@ -2038,7 +2087,7 @@ export function MatchChat({
           });
       if (!isSeller) {
         setSignedIn(Boolean(session || authState?.data));
-        void submitGuestMessage(text);
+        void submitGuestMessage(text, undefined, operationDraftScope);
         return;
       }
       if (!session && !authState?.data) {
@@ -2051,7 +2100,7 @@ export function MatchChat({
         return;
       }
       setSignedIn(true);
-      void submitMessage(text, session ?? undefined);
+      void submitMessage(text, session ?? undefined, operationDraftScope);
     })().catch((error) =>
       onNotice(error instanceof Error ? error.message : runtime.authFailed),
     );
@@ -2071,6 +2120,7 @@ export function MatchChat({
   const startNewConversation = useCallback(() => {
     if (sending) return;
     window.sessionStorage.removeItem(conversationStorageKey);
+    clearStoredDraft();
     setActiveHistoryId(crypto.randomUUID());
     setChatError(null);
     setMessage("");
@@ -2080,7 +2130,7 @@ export function MatchChat({
     onSearchTrace?.(null);
     conversationIdRef.current = null;
     window.requestAnimationFrame(() => inputRef.current?.focus());
-  }, [conversationStorageKey, onSearchTrace, sending]);
+  }, [clearStoredDraft, conversationStorageKey, onSearchTrace, sending]);
 
   const clearConversation = () => {
     if (sending) return;
@@ -2556,7 +2606,9 @@ export function MatchChat({
           }
           value={message}
           onChange={(event) => {
-            setMessage(event.target.value);
+            const next = event.target.value;
+            setMessage(next);
+            persistDraft(next);
             resizeInput(event.currentTarget);
           }}
           onFocus={() => setComposerFocused(true)}

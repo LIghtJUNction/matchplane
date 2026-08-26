@@ -68,6 +68,28 @@ afterEach(() => {
 });
 
 describe("LoginScreen", () => {
+  it("keeps every compact authentication action addressable by its polish selector", async () => {
+    window.history.replaceState(null, "", "/login");
+    render(<LoginScreen intent="sign-in" />);
+
+    expect(await screen.findByRole("button", { name: "显示密码" })).toHaveClass(
+      "login-password-visibility",
+    );
+    expect(
+      (await screen.findByRole("button", { name: "使用 Passkey" }))
+        .parentElement,
+    ).toHaveClass("login-passkey-action");
+    expect(screen.getByRole("link", { name: "返回" })).toHaveClass(
+      "login-back",
+    );
+    expect(
+      screen.getByRole("link", { name: "注册" }).parentElement,
+    ).toHaveClass("login-registration-link");
+    expect(screen.getByRole("button", { name: "忘记密码？" })).toHaveClass(
+      "login-link-button",
+    );
+  });
+
   it("opens the password reset flow directly from account settings", async () => {
     window.history.replaceState(
       null,

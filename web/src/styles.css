@@ -1457,7 +1457,7 @@ main { padding: 0.75rem 0.9rem 5rem; }
 .seller-settings-nav, .match-chat-message.is-assistant { background: var(--ivory); }
 }
 .login-page { position: relative; min-height: 100svh; padding: 5.5rem 1rem 1.5rem; display: grid; place-items: center; background: var(--paper); }
-.login-layout, :root[data-theme="dark"] .login-layout { width: min(100%, 31rem); min-height: 0; display: block; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.login-layout { width: min(100%, 31rem); min-height: 0; display: block; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .login-card { position: relative; width: 100%; padding: clamp(1.6rem, 4vw, 2.4rem); border-radius: 1.25rem; background: var(--ivory); box-shadow: 0 1.25rem 3.6rem rgba(20, 20, 19, 0.1); border: 1px solid var(--line); display: block; flex-direction: column; justify-content: center; }
 .login-card-header { display: block; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 1.15rem; border-bottom: 1px solid var(--line); padding: 0; border: 0; }
 .login-card-header .brand { font-size: 0.9rem; margin-bottom: 2.1rem; }

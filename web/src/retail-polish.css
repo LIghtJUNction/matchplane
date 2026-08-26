@@ -350,3 +350,41 @@
     grid-template-columns: 1fr;
   }
 }
+
+.match-chat-starter-card:focus-visible,
+.match-chat-form:focus-within,
+.match-chat-more-trigger:focus-visible,
+.login-password-visibility:focus-visible,
+.login-methods button:focus-visible,
+.login-passkey-action > button:focus-visible,
+.login-back:focus-visible,
+.login-registration-link a:focus-visible,
+.login-link-button:focus-visible {
+  outline: 3px solid var(--retail-focus) !important;
+  outline-offset: 3px !important;
+}
+
+@media (pointer: coarse) {
+  .match-chat-more-trigger,
+  .login-password-visibility {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .login-methods button,
+  .login-passkey-action > button {
+    min-height: 44px !important;
+  }
+
+  .login-back,
+  .login-registration-link a,
+  .login-link-button {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
