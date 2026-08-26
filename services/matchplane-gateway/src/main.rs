@@ -31,6 +31,7 @@ use tower_http::{
 use tracing::{info, warn};
 
 mod generic_marketplace;
+mod lexical_rank;
 mod marketplace;
 mod privacy;
 
@@ -132,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
     let cache = ValkeyCache::connect_with_ca(&config.valkey_url, valkey_ca_file)
         .await
         .context("gateway could not connect to Valkey")?;
+    let lexical_rank_router = lexical_rank::router(operator_auth.clone());
     let state = Arc::new(AppState {
         orders: OrderService::new(store.clone(), config.node_id),
         marketplace: MarketplaceService::new(store.clone()),
@@ -323,6 +325,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = app
         .with_state(state)
+        .merge(lexical_rank_router)
         .layer(CatchPanicLayer::new())
         .layer(CompressionLayer::new())
         .layer(RequestBodyLimitLayer::new(1_048_576))
