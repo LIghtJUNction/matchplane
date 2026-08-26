@@ -1,10 +1,33 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getStores } from "../api";
 import type { AssetListing } from "../types";
+import {
+  MARKETPLACE_WEBMCP_METADATA,
+  type WebMcpModelContext,
+  type WebMcpTool,
+} from "../webmcp/marketplace-tools";
 import { MarketplaceHome } from "./MarketplaceHome";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
+
+vi.mock("../api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../api")>();
+  return { ...original, getStores: vi.fn() };
+});
+
+const getStoresMock = vi.mocked(getStores);
+
+const directoryStore = {
+  id: "store-1",
+  slug: "useful-store",
+  path: "/useful-store",
+  displayName: "有用店铺",
+  description: "真实营业店铺",
+  integrationKind: "hosted" as const,
+  status: "active" as const,
+};
 
 const listing: AssetListing = {
   id: "11111111-1111-7111-8111-111111111111",
@@ -23,7 +46,8 @@ function renderHome(
   overrides: Partial<React.ComponentProps<typeof MarketplaceHome>> = {},
 ) {
   const onOpenStore = vi.fn();
-  render(
+  const onOpenListing = vi.fn();
+  const view = render(
     <MarketplaceHome
       catalogResolved
       listings={[]}
@@ -34,15 +58,59 @@ function renderHome(
           <textarea />
         </label>
       }
+      onWebMcpDescribeNeed={vi.fn()}
       onOpenStore={onOpenStore}
       onLikeListing={vi.fn(async () => undefined)}
-      onOpenListing={vi.fn()}
+      onOpenListing={onOpenListing}
       onRetryCatalog={vi.fn()}
       {...overrides}
     />,
   );
-  return { onOpenStore };
+  return { ...view, onOpenListing, onOpenStore };
 }
+
+function installWebMcp() {
+  vi.stubGlobal("isSecureContext", true);
+  const registrations: Array<{ tool: WebMcpTool; signal: AbortSignal }> = [];
+  const modelContext: WebMcpModelContext = {
+    registerTool: vi.fn(async (tool, options) => {
+      registrations.push({ tool, signal: options.signal });
+    }),
+  };
+  Object.defineProperty(document, "modelContext", {
+    configurable: true,
+    value: modelContext,
+  });
+  return registrations;
+}
+
+function activeWebMcpTools(
+  registrations: Array<{ tool: WebMcpTool; signal: AbortSignal }>,
+) {
+  return registrations.filter(({ signal }) => !signal.aborted);
+}
+
+function activeWebMcpTool(
+  registrations: Array<{ tool: WebMcpTool; signal: AbortSignal }>,
+  name: string,
+) {
+  const registration = activeWebMcpTools(registrations).find(
+    ({ tool }) => tool.name === name,
+  );
+  if (!registration) throw new Error(`missing active WebMCP tool: ${name}`);
+  return registration.tool;
+}
+
+beforeEach(() => {
+  getStoresMock.mockReset();
+  getStoresMock.mockResolvedValue([]);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  Reflect.deleteProperty(document, "modelContext");
+});
 
 describe("MarketplaceListingCard likes", () => {
   it("shows the total and lets the viewer add another like", async () => {
@@ -234,6 +302,100 @@ describe("MarketplaceHome actions", () => {
     expect(
       screen.queryByRole("button", { name: "日光便携音箱" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("adds the loaded directory store to WebMCP and aborts prior registrations", async () => {
+    getStoresMock.mockResolvedValueOnce([directoryStore]);
+    const registrations = installWebMcp();
+    const { onOpenStore, unmount } = renderHome();
+    const initialSignal = registrations[0]?.signal;
+
+    await waitFor(() =>
+      expect(
+        activeWebMcpTools(registrations).map(({ tool }) => tool.name),
+      ).toContain(MARKETPLACE_WEBMCP_METADATA.openStore.name),
+    );
+    expect(initialSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      await activeWebMcpTool(
+        registrations,
+        MARKETPLACE_WEBMCP_METADATA.openStore.name,
+      ).execute({ platform_path: directoryStore.path });
+    });
+    expect(onOpenStore).toHaveBeenCalledWith(directoryStore.path);
+
+    const activeSignal = activeWebMcpTools(registrations)[0]?.signal;
+    unmount();
+    expect(activeSignal?.aborted).toBe(true);
+  });
+
+  it.each([
+    "empty",
+    "failure",
+  ] as const)("does not expose an open-store tool when the directory is %s", async (result) => {
+    if (result === "failure") {
+      getStoresMock.mockRejectedValueOnce(new Error("directory failed"));
+    }
+    const registrations = installWebMcp();
+    renderHome();
+
+    await waitFor(() => expect(getStoresMock).toHaveBeenCalledTimes(1));
+    if (result === "failure") {
+      await screen.findByRole("alert");
+    } else {
+      await screen.findByText("暂时还没有营业中的店铺。");
+    }
+    expect(
+      activeWebMcpTools(registrations).map(({ tool }) => tool.name),
+    ).not.toContain(MARKETPLACE_WEBMCP_METADATA.openStore.name);
+  });
+
+  it("refuses a category-hidden listing while opening the filtered visible listing", async () => {
+    const user = userEvent.setup();
+    const registrations = installWebMcp();
+    const homeListing: AssetListing = {
+      ...listing,
+      id: "home-listing",
+      title: "云朵羊毛毯",
+      facts: [{ key: "category", label: "分类", value: "家居" }],
+    };
+    const digitalListing: AssetListing = {
+      ...listing,
+      id: "digital-listing",
+      title: "日光便携音箱",
+      facts: [{ key: "category", label: "分类", value: "数码" }],
+    };
+    const { onOpenListing } = renderHome({
+      listings: [homeListing, digitalListing],
+    });
+
+    await waitFor(() =>
+      expect(
+        activeWebMcpTools(registrations).map(({ tool }) => tool.name),
+      ).toContain(MARKETPLACE_WEBMCP_METADATA.openListing.name),
+    );
+    await user.click(screen.getByRole("button", { name: "家居" }));
+    const openListing = activeWebMcpTool(
+      registrations,
+      MARKETPLACE_WEBMCP_METADATA.openListing.name,
+    );
+
+    await expect(
+      openListing.execute({ listing_id: digitalListing.id }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "not_visible" },
+    });
+    await expect(
+      openListing.execute({ listing_id: homeListing.id }),
+    ).resolves.toEqual({
+      ok: true,
+      action: "listing_opened",
+      listing_id: homeListing.id,
+    });
+    expect(onOpenListing).toHaveBeenCalledTimes(1);
+    expect(onOpenListing).toHaveBeenCalledWith(homeListing);
   });
 
   it("offers a real retry action when the catalog request fails", async () => {

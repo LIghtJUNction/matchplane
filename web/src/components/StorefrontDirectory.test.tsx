@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,7 @@ vi.mock("../api", async (importOriginal) => {
 const getStoresMock = vi.mocked(getStores);
 
 beforeEach(() => {
+  getStoresMock.mockReset();
   getStoresMock.mockResolvedValue([
     {
       id: "store-1",
@@ -42,6 +43,46 @@ describe("StorefrontDirectory", () => {
       document.querySelectorAll(".storefront-directory-card"),
     ).toHaveLength(1);
     expect(screen.getByText("1 家在营业")).toBeInTheDocument();
+  });
+
+  it("reports successful API paths and clears them on cleanup", async () => {
+    const onVisibleStorePathsChange = vi.fn();
+    const { unmount } = render(
+      <StorefrontDirectory
+        locale="zh"
+        onVisibleStorePathsChange={onVisibleStorePathsChange}
+      />,
+    );
+
+    expect(onVisibleStorePathsChange).toHaveBeenCalledWith([]);
+    await waitFor(() =>
+      expect(onVisibleStorePathsChange).toHaveBeenLastCalledWith([
+        "/useful-store",
+      ]),
+    );
+
+    unmount();
+    expect(onVisibleStorePathsChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it.each([
+    "empty",
+    "failure",
+  ] as const)("reports no API paths when the directory is %s", async (result) => {
+    if (result === "empty") getStoresMock.mockResolvedValueOnce([]);
+    else getStoresMock.mockRejectedValueOnce(new Error("directory failed"));
+    const onVisibleStorePathsChange = vi.fn();
+    render(
+      <StorefrontDirectory
+        locale="zh"
+        onVisibleStorePathsChange={onVisibleStorePathsChange}
+      />,
+    );
+
+    await waitFor(() => expect(getStoresMock).toHaveBeenCalledTimes(1));
+    if (result === "failure") await screen.findByRole("alert");
+    else await screen.findByText("暂时还没有营业中的店铺。");
+    expect(onVisibleStorePathsChange).toHaveBeenLastCalledWith([]);
   });
 
   it("preserves the real describe-need action when it is supplied", async () => {

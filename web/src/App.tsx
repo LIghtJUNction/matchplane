@@ -56,6 +56,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [buyerAssistantOpen, setBuyerAssistantOpen] = useState(false);
   const [rootSearchTrace, setRootSearchTrace] =
     useState<MallAssistantSearchTrace | null>(null);
+  const [webMcpDraftMessage, setWebMcpDraftMessage] = useState<string>();
 
   // Subplatform routing and URL sync
   const {
@@ -303,6 +304,17 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     ],
   );
 
+  const openMarketplaceStore = useCallback(
+    async (platformPath: string) => {
+      await navigateToSubplatform(platformPath);
+    },
+    [navigateToSubplatform],
+  );
+
+  const describeMarketplaceNeed = useCallback((narrative: string) => {
+    setWebMcpDraftMessage(narrative);
+  }, []);
+
   const genericWorkspace: ReactNode =
     role === "platform" ? (
       <PlatformDashboard
@@ -477,12 +489,15 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
                         onContactConsent={requestStoreContactConsent}
                         onContactRetrieve={retrieveStoreContact}
                         subplatform={subplatform}
+                        draftMessage={webMcpDraftMessage}
+                        onDraftMessageApplied={() =>
+                          setWebMcpDraftMessage(undefined)
+                        }
                       />
                     }
                     searchTrace={rootSearchTrace}
-                    onOpenStore={(path) => {
-                      void navigateToSubplatform(path);
-                    }}
+                    onWebMcpDescribeNeed={describeMarketplaceNeed}
+                    onOpenStore={openMarketplaceStore}
                     onOpenListing={openMarketplaceListing}
                     onLikeListing={likeListing}
                   />

@@ -9,9 +9,11 @@ import type { InterfaceLocale } from "../lib/preferences";
 export function StorefrontDirectory({
   locale,
   onDescribeNeed,
+  onVisibleStorePathsChange,
 }: {
   locale: InterfaceLocale;
   onDescribeNeed?: (platformPath: string) => void;
+  onVisibleStorePathsChange?: (paths: readonly string[]) => void;
 }) {
   const [stores, setStores] = useState<StoreSummary[]>([]);
   const [resolved, setResolved] = useState(false);
@@ -39,6 +41,15 @@ export function StorefrontDirectory({
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const paths =
+      resolved && !failed
+        ? Array.from(new Set(stores.map((store) => store.path)))
+        : [];
+    onVisibleStorePathsChange?.(paths);
+    return () => onVisibleStorePathsChange?.([]);
+  }, [failed, onVisibleStorePathsChange, resolved, stores]);
 
   return (
     <section

@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { MallAssistantSearchTrace } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 import type { AssetListing } from "../types";
+import { useMarketplaceWebMcp } from "../webmcp/useMarketplaceWebMcp";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
 import { MarketplaceSearchTrace } from "./MarketplaceSearchTrace";
 import { StorefrontDirectory } from "./StorefrontDirectory";
@@ -28,8 +29,9 @@ interface MarketplaceHomeProps {
   locale: InterfaceLocale;
   assistant: ReactNode;
   searchTrace?: MallAssistantSearchTrace | null;
-  onOpenStore: (path: string) => void;
-  onOpenListing: (listing: AssetListing) => void;
+  onWebMcpDescribeNeed: (narrative: string) => void;
+  onOpenStore: (path: string) => void | Promise<void>;
+  onOpenListing: (listing: AssetListing) => void | Promise<void>;
   onLikeListing: (listing: AssetListing) => Promise<void>;
   onRetryCatalog: () => void;
 }
@@ -197,6 +199,7 @@ export function MarketplaceHome({
   locale,
   assistant,
   searchTrace,
+  onWebMcpDescribeNeed,
   onOpenStore,
   onOpenListing,
   onLikeListing,
@@ -204,6 +207,9 @@ export function MarketplaceHome({
 }: MarketplaceHomeProps) {
   const allLabel = locale === "en" ? "All" : "全部";
   const [category, setCategory] = useState(allLabel);
+  const [directoryStorePaths, setDirectoryStorePaths] = useState<
+    readonly string[]
+  >([]);
   const categories = useMemo(
     () => [
       allLabel,
@@ -218,6 +224,26 @@ export function MarketplaceHome({
       : listings.filter(
           (listing) => listingCategory(listing) === effectiveCategory,
         );
+  const visibleStorePaths = Array.from(
+    new Set([
+      ...visibleListings.flatMap((listing) =>
+        listing.platformPath ? [listing.platformPath] : [],
+      ),
+      ...(searchTrace?.stores.map((store) => store.path) ?? []),
+      ...directoryStorePaths,
+    ]),
+  );
+
+  useMarketplaceWebMcp({
+    enabled: true,
+    scopeKey: "buyer:/",
+    visibleListings,
+    visibleStorePaths,
+    describeNeed: onWebMcpDescribeNeed,
+    openStore: onOpenStore,
+    openListing: onOpenListing,
+  });
+
   return (
     <div
       className="root-marketplace-page min-h-screen bg-background-subtle text-foreground"
@@ -310,7 +336,10 @@ export function MarketplaceHome({
               onRetryCatalog={onRetryCatalog}
             />
             <div className="root-marketplace-stores" id="stores">
-              <StorefrontDirectory locale={locale} />
+              <StorefrontDirectory
+                locale={locale}
+                onVisibleStorePathsChange={setDirectoryStorePaths}
+              />
             </div>
           </div>
         </div>
