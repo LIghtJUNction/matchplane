@@ -35,8 +35,7 @@ export const MAX_PUBLIC_OFFER_SEARCH_STORE_IDS = MAX_PUBLIC_STORES;
 export const MAX_PUBLIC_OFFER_SEARCH_NARRATIVE_CHARACTERS = 8_000;
 export const MAX_PUBLIC_OFFER_SEARCH_CANDIDATES = 2_000;
 
-const MAX_PUBLIC_OFFER_SEARCH_STORE_PATHS =
-  MAX_PUBLIC_OFFER_SEARCH_STORE_IDS;
+const MAX_PUBLIC_OFFER_SEARCH_STORE_PATHS = MAX_PUBLIC_OFFER_SEARCH_STORE_IDS;
 const PUBLIC_OFFER_SEARCH_CANDIDATE_SENTINEL =
   MAX_PUBLIC_OFFER_SEARCH_CANDIDATES + 1;
 
@@ -84,11 +83,27 @@ export interface PublicOfferSearchPage {
 export async function searchPublicStoreOffers(
   input: PublicOfferSearchInput,
 ): Promise<RecommendedBackendListing[]> {
-  return (await searchPublicStoreOfferPage(input)).items;
+  return searchPublicStoreOffersFromDatabase(authDatabase, input);
+}
+
+/** Database reader seam used by the production offer path and PostgreSQL contract tests. */
+export async function searchPublicStoreOffersFromDatabase(
+  database: Pick<typeof authDatabase, "query">,
+  input: PublicOfferSearchInput,
+): Promise<RecommendedBackendListing[]> {
+  return (await searchPublicStoreOfferPageFromDatabase(database, input)).items;
 }
 
 /** Read a bounded, deterministic page that can be safely exposed to an AI retrieval tool. */
 export async function searchPublicStoreOfferPage(
+  input: PublicOfferSearchInput,
+): Promise<PublicOfferSearchPage> {
+  return searchPublicStoreOfferPageFromDatabase(authDatabase, input);
+}
+
+/** Database reader seam for the bounded production offer page. */
+export async function searchPublicStoreOfferPageFromDatabase(
+  database: Pick<typeof authDatabase, "query">,
   input: PublicOfferSearchInput,
 ): Promise<PublicOfferSearchPage> {
   assertPublicOfferSearchBudget(
@@ -107,6 +122,7 @@ export async function searchPublicStoreOfferPage(
     MAX_PUBLIC_OFFER_SEARCH_NARRATIVE_CHARACTERS,
   );
 
+  const executeQuery = database.query.bind(database);
   const limit = Math.max(1, Math.min(48, input.limit ?? 24));
   const offset = Math.max(0, Math.min(500, input.offset ?? 0));
   const requestedPaths = new Set(
@@ -123,7 +139,7 @@ export async function searchPublicStoreOfferPage(
   const storeIds = uniqueStores.map((store) => store.id);
   const tenantIds = uniqueStores.map((store) => store.tenantId);
   const domainIds = uniqueStores.map((store) => store.domainId);
-  const result = await authDatabase.query<PublicOfferRow>(
+  const result = (await executeQuery(
     `WITH ranked_offers AS (
        SELECT offer.id::text,
             offer.tenant_id::text AS "tenantId",
@@ -212,7 +228,7 @@ export async function searchPublicStoreOfferPage(
       ORDER BY relevance DESC, "publishedAt" DESC NULLS LAST, id
       LIMIT ${PUBLIC_OFFER_SEARCH_CANDIDATE_SENTINEL}`,
     [storeIds, input.narrative, tenantIds, domainIds],
-  );
+  )) as { rows: PublicOfferRow[] };
   if (result.rows.length > MAX_PUBLIC_OFFER_SEARCH_CANDIDATES) {
     throw new PublicOfferSearchBudgetExceededError(
       "candidates",
@@ -250,7 +266,6 @@ export async function searchPublicStoreOfferPage(
       overlapLabels,
       intentReasons,
     }): RecommendedBackendListing[] => {
-
       const imageUrl = firstPublicImageUrl(attributes.attachments);
       if (
         !text(attributes.description) ||

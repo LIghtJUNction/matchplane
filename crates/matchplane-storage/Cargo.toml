@@ -27,6 +27,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

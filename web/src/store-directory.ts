@@ -16,7 +16,9 @@ export class PublicStoreDirectoryBudgetExceededError extends Error {
   readonly maximum = MAX_PUBLIC_STORES;
 
   constructor(readonly actual: number) {
-    super(`public store directory budget exceeded: ${actual} > ${MAX_PUBLIC_STORES}`);
+    super(
+      `public store directory budget exceeded: ${actual} > ${MAX_PUBLIC_STORES}`,
+    );
     this.name = "PublicStoreDirectoryBudgetExceededError";
   }
 }
@@ -44,21 +46,36 @@ export async function readPublicStores(
   rootTenantId: string,
   options: ReadPublicStoresOptions = {},
 ): Promise<PublicStore[]> {
+  return readPublicStoresFromDatabase(authDatabase, rootTenantId, options);
+}
+
+/** Database reader seam used by the production directory path and PostgreSQL contract tests. */
+export async function readPublicStoresFromDatabase(
+  database: Pick<typeof authDatabase, "query">,
+  rootTenantId: string,
+  options: ReadPublicStoresOptions = {},
+): Promise<PublicStore[]> {
+  const executeQuery = database.query.bind(database);
   const requestedLimit = validatedDirectoryLimit(options.limit);
   const path = validatedDirectoryPath(options.path);
-  if (path !== undefined && requestedLimit !== undefined && requestedLimit !== 1) {
+  if (
+    path !== undefined &&
+    requestedLimit !== undefined &&
+    requestedLimit !== 1
+  ) {
     throw new RangeError("an exact public store path lookup must use limit 1");
   }
   const limit = path === undefined ? requestedLimit : 1;
   if (!isUuid(rootTenantId)) return [];
-  const pathClause = path === undefined ? "" : "\n        AND alias.path = $2::text";
+  const pathClause =
+    path === undefined ? "" : "\n        AND alias.path = $2::text";
   const limitParameter = path === undefined ? 2 : 3;
   const limitClause =
     limit === undefined ? "" : `\n      LIMIT $${limitParameter}::integer`;
   const parameters: Array<string | number> = [rootTenantId];
   if (path !== undefined) parameters.push(path);
   if (limit !== undefined) parameters.push(limit);
-  const result = await authDatabase.query(
+  const result = (await executeQuery(
     `SELECT store.id::text,
             store.slug,
             alias.path,
@@ -106,7 +123,7 @@ export async function readPublicStores(
         )
       ORDER BY store.display_name ASC, store.id ASC${limitClause}`,
     parameters,
-  );
+  )) as { rows: Record<string, unknown>[] };
 
   return result.rows.flatMap((row): PublicStore[] => {
     const id = text(row.id);
@@ -115,24 +132,35 @@ export async function readPublicStores(
     const displayName = text(row.displayName);
     const tenantId = text(row.tenantId);
     const domainId = text(row.domainId);
-    if (!isUuid(id) || !isUuid(tenantId) || !isUuid(domainId) || !isStoreSlug(slug) || path !== `/${slug}` || !displayName) return [];
-    const integrationKind = row.integrationKind === "hosted" || row.integrationKind === "external"
-      ? row.integrationKind
-      : "package";
-    return [{
-      id,
-      slug,
-      path,
-      displayName,
-      description: text(row.description).slice(0, 2_000),
-      integrationKind,
-      capabilities: boundedStrings(row.capabilities, 64),
-      agentStages: boundedStrings(row.agentStages, 8),
-      agentSkills: boundedStrings(row.agentSkills, 32),
-      publicFields: boundedFieldKeys(row.publicFields, 32),
-      tenantId,
-      domainId,
-    }];
+    if (
+      !isUuid(id) ||
+      !isUuid(tenantId) ||
+      !isUuid(domainId) ||
+      !isStoreSlug(slug) ||
+      path !== `/${slug}` ||
+      !displayName
+    )
+      return [];
+    const integrationKind =
+      row.integrationKind === "hosted" || row.integrationKind === "external"
+        ? row.integrationKind
+        : "package";
+    return [
+      {
+        id,
+        slug,
+        path,
+        displayName,
+        description: text(row.description).slice(0, 2_000),
+        integrationKind,
+        capabilities: boundedStrings(row.capabilities, 64),
+        agentStages: boundedStrings(row.agentStages, 8),
+        agentSkills: boundedStrings(row.agentSkills, 32),
+        publicFields: boundedFieldKeys(row.publicFields, 32),
+        tenantId,
+        domainId,
+      },
+    ];
   });
 }
 
@@ -145,7 +173,9 @@ function validatedDirectoryPath(value: string | undefined): string | undefined {
   return value;
 }
 
-function validatedDirectoryLimit(value: number | undefined): number | undefined {
+function validatedDirectoryLimit(
+  value: number | undefined,
+): number | undefined {
   if (value === undefined) return undefined;
   if (
     !Number.isSafeInteger(value) ||
@@ -161,14 +191,22 @@ function validatedDirectoryLimit(value: number | undefined): number | undefined 
 
 function boundedFieldKeys(value: unknown, maximum: number): string[] {
   if (!Array.isArray(value)) return [];
-  return [...new Set(value.flatMap((item): string[] => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const key = (item as { key?: unknown }).key;
-    return typeof key === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(key) ? [key] : [];
-  }))].slice(0, maximum);
+  return [
+    ...new Set(
+      value.flatMap((item): string[] => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const key = (item as { key?: unknown }).key;
+        return typeof key === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(key)
+          ? [key]
+          : [];
+      }),
+    ),
+  ].slice(0, maximum);
 }
 
-export function storeRouteCandidates(stores: PublicStore[]): PlatformRouteCandidate[] {
+export function storeRouteCandidates(
+  stores: PublicStore[],
+): PlatformRouteCandidate[] {
   return stores.map((store) => ({
     slug: store.slug,
     path: store.path,
@@ -185,9 +223,13 @@ export function storeRouteCandidates(stores: PublicStore[]): PlatformRouteCandid
 
 function boundedStrings(value: unknown, maximum: number): string[] {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      .map((item) => item.trim())
-      .slice(0, maximum)
+    ? value
+        .filter(
+          (item): item is string =>
+            typeof item === "string" && item.trim().length > 0,
+        )
+        .map((item) => item.trim())
+        .slice(0, maximum)
     : [];
 }
 
