@@ -10,7 +10,12 @@ import {
   PlatformRouterQuotaExceededError,
   type ShoppingConversationMessage,
 } from "../../../../src/platform-router";
-import { readPublicStores } from "../../../../src/store-directory";
+import {
+  MAX_PUBLIC_STORES,
+  PublicStoreDirectoryBudgetExceededError,
+  readPublicStores,
+} from "../../../../src/store-directory";
+import { PublicOfferSearchBudgetExceededError } from "../../../../src/storefront-search";
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import {
   readJsonBody,
@@ -81,10 +86,14 @@ export async function POST(request: Request): Promise<Response> {
   if (!tenantId) return error("商城尚未完成初始化", 503);
   const identity = await shoppingIdentity(request);
   try {
-    let stores = await readPublicStores(tenantId);
-    if (requestedStorePath) {
-      stores = stores.filter((store) => store.path === requestedStorePath);
-      if (!stores.length) return error("没有找到这个店铺", 404);
+    const stores = requestedStorePath
+      ? await readPublicStores(tenantId, { path: requestedStorePath })
+      : await readPublicStores(tenantId, { limit: MAX_PUBLIC_STORES + 1 });
+    if (!requestedStorePath && stores.length > MAX_PUBLIC_STORES) {
+      throw new PublicStoreDirectoryBudgetExceededError(stores.length);
+    }
+    if (requestedStorePath && !stores.length) {
+      return error("没有找到这个店铺", 404);
     }
     let memory = identity.authUserId
       ? await readShoppingMemory(tenantId, identity.authUserId).catch(() => {
@@ -173,6 +182,39 @@ export async function POST(request: Request): Promise<Response> {
       response.cookies.set(GUEST_COOKIE, identity.newCookie, guestCookie());
     return response;
   } catch (cause) {
+    if (cause instanceof PublicStoreDirectoryBudgetExceededError) {
+      process.stderr.write(
+        `[mall-assistant] ${JSON.stringify({
+          requestId,
+          status: cause.code,
+          actual: cause.actual,
+          maximum: cause.maximum,
+        })}\n`,
+      );
+      return error(
+        "商城店铺目录超过导购处理上限。",
+        503,
+        { "x-request-id": requestId },
+        { code: cause.code, retryable: false, requestId },
+      );
+    }
+    if (cause instanceof PublicOfferSearchBudgetExceededError) {
+      process.stderr.write(
+        `[mall-assistant] ${JSON.stringify({
+          requestId,
+          status: cause.code,
+          budget: cause.budget,
+          actual: cause.actual,
+          maximum: cause.maximum,
+        })}\n`,
+      );
+      return error(
+        "商品检索超过导购处理上限。",
+        503,
+        { "x-request-id": requestId },
+        { code: cause.code, retryable: false, requestId },
+      );
+    }
     if (cause instanceof PlatformRouterQuotaExceededError)
       return error(
         cause.message,

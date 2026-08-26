@@ -5,6 +5,12 @@ const { query } = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock("./lib/auth", () => ({ authDatabase: { query } }));
 
 import {
+  MAX_PUBLIC_MATCH_REASON_CHARACTERS,
+  MAX_PUBLIC_MATCH_REASONS,
+} from "./storefront-ranking";
+import {
+  MAX_PUBLIC_OFFER_SEARCH_STORE_IDS,
+  PublicOfferSearchBudgetExceededError,
   searchPublicStoreOfferPage,
   searchPublicStoreOffers,
 } from "./storefront-search";
@@ -24,8 +30,201 @@ const store: PublicStore = {
   domainId: "30000000-0000-4000-8000-000000000001",
 };
 
+function completeProductRow(
+  input: {
+    id?: string;
+    displayName?: string;
+    description?: string;
+    amountMinor?: string;
+    attributes?: Record<string, unknown>;
+  } = {},
+) {
+  const id = input.id ?? "40000000-0000-4000-8000-000000000099";
+  return {
+    id,
+    tenantId: store.tenantId,
+    domainId: store.domainId,
+    displayName: input.displayName ?? "轻便旅行相机",
+    attributes: {
+      description: input.description ?? "适合旅行拍摄",
+      stock_quantity: 2,
+      ...input.attributes,
+      attachments: [
+        {
+          kind: "image",
+          attachment_ref: `media://hosted/${id}`,
+          file_name: `${id}.webp`,
+          media_type: "image/webp",
+        },
+      ],
+    },
+    terms: {
+      pricing_mode: "fixed",
+      amount_minor: input.amountMinor ?? "129900",
+      currency: "CNY",
+      currency_scale: 2,
+    },
+    storeName: store.displayName,
+    storeSlug: store.slug,
+    storePath: store.path,
+    integrationKind: store.integrationKind,
+    supplyFields: [],
+    publishedAt: "2026-08-21T00:00:00Z",
+    likeTotal: "0",
+  };
+}
+
 describe("public storefront search", () => {
   beforeEach(() => query.mockReset());
+
+  it("returns no recommendations when a nonempty request has zero explainable overlap", async () => {
+    query.mockResolvedValue({
+      rows: [
+        completeProductRow({
+          displayName: "专业摄影设备",
+          description: "适合影棚人像拍摄",
+        }),
+      ],
+    });
+
+    await expect(
+      searchPublicStoreOffers({ stores: [store], narrative: "登山帐篷" }),
+    ).resolves.toEqual([]);
+  });
+
+  it("emits only positive lexical evidence and remains deterministic", async () => {
+    query.mockResolvedValue({ rows: [completeProductRow()] });
+
+    const first = await searchPublicStoreOffers({
+      stores: [store],
+      narrative: "旅行相机",
+    });
+    const second = await searchPublicStoreOffers({
+      stores: [store],
+      narrative: "旅行相机",
+    });
+
+    expect(second).toEqual(first);
+    expect(first[0]?.match_score).toBeGreaterThan(0);
+    expect(first[0]?.match_reasons).toEqual([
+      "名称或公开属性与“旅、行、相、机”相关",
+    ]);
+    expect(first[0]?.match_reasons?.join(" ")).not.toContain(store.displayName);
+    expect(first[0]?.store_name).toBe(store.displayName);
+  });
+
+  it("matches a canonical public attribute without prose duplication", async () => {
+    query.mockResolvedValue({
+      rows: [
+        completeProductRow({
+          displayName: "标准商品",
+          description: "常规公开说明",
+          attributes: { brand: "Aurora" },
+        }),
+      ],
+    });
+
+    const products = await searchPublicStoreOffers({
+      stores: [store],
+      narrative: "aurora",
+    });
+
+    expect(products[0]?.match_score).toBe(0.25);
+    expect(products[0]?.match_reasons).toEqual([
+      "名称或公开属性与“aurora”相关",
+    ]);
+  });
+
+  it("accepts an explainable structured match without lexical overlap", async () => {
+    query.mockResolvedValue({ rows: [completeProductRow()] });
+
+    const products = await searchPublicStoreOffers({
+      stores: [store],
+      narrative: "zzzz",
+      intent: {
+        budget: { maximum: 2_000, currency: "CNY" },
+        requirements: [],
+      },
+    });
+
+    expect(products).toEqual([
+      expect.objectContaining({
+        match_score: 0.32,
+        match_reasons: ["币种符合 CNY", "价格符合预算"],
+      }),
+    ]);
+  });
+
+  it("returns an empty browse without making any match claim", async () => {
+    query.mockResolvedValue({ rows: [completeProductRow()] });
+
+    const products = await searchPublicStoreOffers({
+      stores: [store],
+      narrative: "   ",
+    });
+
+    expect(products).toHaveLength(1);
+    expect(products[0]).not.toHaveProperty("match_score");
+    expect(products[0]).not.toHaveProperty("match_reasons");
+    expect(products[0]?.store_name).toBe(store.displayName);
+  });
+
+  it("rejects an over-budget store input before querying PostgreSQL", async () => {
+    const stores = Array.from(
+      { length: MAX_PUBLIC_OFFER_SEARCH_STORE_IDS + 1 },
+      () => store,
+    );
+
+    await expect(
+      searchPublicStoreOffers({ stores, narrative: "旅行相机" }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        name: PublicOfferSearchBudgetExceededError.name,
+        code: "public_offer_search_budget_exceeded",
+        budget: "store_ids",
+        actual: MAX_PUBLIC_OFFER_SEARCH_STORE_IDS + 1,
+        maximum: MAX_PUBLIC_OFFER_SEARCH_STORE_IDS,
+      }),
+    );
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("bounds structured reasons by count and per-reason length", async () => {
+    const longValue = "a".repeat(600);
+    const values = [
+      longValue,
+      ...Array.from({ length: 7 }, (_, i) => `needle${i}`),
+    ];
+    query.mockResolvedValue({
+      rows: [
+        completeProductRow({
+          description: values.join(" "),
+        }),
+      ],
+    });
+
+    const products = await searchPublicStoreOffers({
+      stores: [store],
+      narrative: "",
+      intent: {
+        budget: { maximum: 2_000, currency: "CNY" },
+        requirements: values.map((value) => ({
+          value,
+          mode: "prefer" as const,
+          operator: "contains" as const,
+        })),
+      },
+    });
+    const reasons = products[0]?.match_reasons ?? [];
+
+    expect(reasons).toHaveLength(MAX_PUBLIC_MATCH_REASONS);
+    expect(
+      reasons.every(
+        (reason) => reason.length <= MAX_PUBLIC_MATCH_REASON_CHARACTERS,
+      ),
+    ).toBe(true);
+    expect(reasons.join(" ")).not.toContain(store.displayName);
+  });
 
   it("returns only complete canonical products and strips private fields", async () => {
     query.mockResolvedValue({
@@ -112,7 +311,12 @@ describe("public storefront search", () => {
     ]);
     expect(query.mock.calls[0]?.[0]).not.toContain("contact");
     expect(query.mock.calls[0]?.[0]).not.toContain("supply_party_id");
-    expect(query.mock.calls[0]?.[1]).toEqual([[store.id], "旅行相机"]);
+    expect(query.mock.calls[0]?.[1]).toEqual([
+      [store.id],
+      "旅行相机",
+      [store.tenantId],
+      [store.domainId],
+    ]);
   });
 
   it("indexes multiple products and keeps only exact budget and attribute matches", async () => {
@@ -247,7 +451,12 @@ describe("public storefront search", () => {
       limit: 1,
       hasMore: true,
     });
-    expect(query.mock.calls[0]?.[1]).toEqual([[store.id], "公开商品"]);
+    expect(query.mock.calls[0]?.[1]).toEqual([
+      [store.id],
+      "公开商品",
+      [store.tenantId],
+      [store.domainId],
+    ]);
   });
 
   it("rejects unsafe image URLs instead of presenting a fabricated product card", async () => {

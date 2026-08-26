@@ -23,6 +23,9 @@ export interface ShoppingIntentEvaluation {
   reasons: string[];
 }
 
+const MAX_INTENT_REASONS = 8;
+const MAX_INTENT_REASON_CHARACTERS = 500;
+
 /** Apply model-extracted intent only to canonical public attributes and terms. */
 export function evaluateShoppingIntent(
   attributes: Record<string, unknown>,
@@ -33,32 +36,79 @@ export function evaluateShoppingIntent(
   const reasons: string[] = [];
   let boost = 0;
   const amount = majorPrice(terms);
-  const currency = typeof terms.currency === "string" ? terms.currency : null;
-  if (intent.budget?.currency && currency && intent.budget.currency !== currency) {
-    return { eligible: false, boost: 0, reasons: [] };
+  const requestedCurrency = intent.budget?.currency;
+  if (requestedCurrency !== undefined) {
+    const canonicalCurrency =
+      typeof terms.currency === "string" && /^[A-Z]{3}$/.test(terms.currency)
+        ? terms.currency
+        : null;
+    if (canonicalCurrency === null || requestedCurrency !== canonicalCurrency) {
+      return { eligible: false, boost: 0, reasons: [] };
+    }
+    boost += 0.08;
+    addReason(reasons, `币种符合 ${canonicalCurrency}`);
   }
   if (intent.budget?.minimum !== undefined || intent.budget?.maximum !== undefined) {
     if (amount === null) return { eligible: false, boost: 0, reasons: [] };
     if (intent.budget.minimum !== undefined && amount < intent.budget.minimum) return { eligible: false, boost: 0, reasons: [] };
     if (intent.budget.maximum !== undefined && amount > intent.budget.maximum) return { eligible: false, boost: 0, reasons: [] };
     boost += 0.24;
-    reasons.push("价格符合预算");
+    addReason(reasons, "价格符合预算");
   }
 
   const allValues = Object.values(attributes).filter(isPrimitive).map(normalizedValue);
   for (const requirement of intent.requirements.slice(0, 16)) {
-    const values = requirement.field && Object.hasOwn(attributes, requirement.field)
-      ? [normalizedValue(attributes[requirement.field])]
-      : allValues;
+    const field = requirement.field;
+    let values: string[];
+    if (field !== undefined) {
+      const fieldValue = attributes[field];
+      const normalizedFieldValue = isPrimitive(fieldValue)
+        ? normalizedValue(fieldValue)
+        : "";
+      if (!Object.hasOwn(attributes, field) || !normalizedFieldValue) {
+        if (requirement.mode === "prefer") continue;
+        return { eligible: false, boost: 0, reasons: [] };
+      }
+      values = [normalizedFieldValue];
+    } else {
+      values = allValues;
+    }
     const matched = values.some((candidate) => matchesRequirement(candidate, requirement.value, requirement.operator));
-    if (requirement.mode === "exclude" && matched) return { eligible: false, boost: 0, reasons: [] };
+    if (requirement.mode === "exclude") {
+      if (matched) return { eligible: false, boost: 0, reasons: [] };
+      if (requirement.value.trim()) {
+        boost += 0.08;
+        addReason(
+          reasons,
+          field === undefined
+            ? `公开属性未命中排除项：${requirement.value}`
+            : `公开属性 ${field} 未命中排除项：${requirement.value}`,
+        );
+      }
+      continue;
+    }
     if (requirement.mode === "must" && !matched) return { eligible: false, boost: 0, reasons: [] };
     if (matched) {
       boost += requirement.mode === "must" ? 0.16 : 0.08;
-      reasons.push(requirement.field ? `${requirement.field} 符合 ${requirement.value}` : `符合 ${requirement.value}`);
+      addReason(
+        reasons,
+        requirement.field
+          ? `${requirement.field} 符合 ${requirement.value}`
+          : `符合 ${requirement.value}`,
+      );
     }
   }
-  return { eligible: true, boost: Math.min(0.7, boost), reasons: reasons.slice(0, 8) };
+  return { eligible: true, boost: Math.min(0.7, boost), reasons };
+}
+
+function addReason(reasons: string[], value: string): void {
+  if (reasons.length >= MAX_INTENT_REASONS) return;
+  let reason = value.trim().slice(0, MAX_INTENT_REASON_CHARACTERS);
+  const trailingCodeUnit = reason.charCodeAt(reason.length - 1);
+  if (trailingCodeUnit >= 0xd800 && trailingCodeUnit <= 0xdbff) {
+    reason = reason.slice(0, -1);
+  }
+  if (reason) reasons.push(reason);
 }
 
 function majorPrice(terms: Record<string, unknown>): number | null {

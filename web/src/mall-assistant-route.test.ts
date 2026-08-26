@@ -2,6 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   class PlatformRouterQuotaExceededError extends Error {}
+  class PublicStoreDirectoryBudgetExceededError extends Error {
+    readonly code = "public_store_directory_budget_exceeded";
+    readonly maximum = 500;
+
+    constructor(readonly actual: number) {
+      super(`public store directory budget exceeded: ${actual} > 500`);
+    }
+  }
+  class PublicOfferSearchBudgetExceededError extends Error {
+    readonly code = "public_offer_search_budget_exceeded";
+
+    constructor(
+      readonly budget: string,
+      readonly actual: number,
+      readonly maximum: number,
+    ) {
+      super(`public storefront search ${budget} budget exceeded`);
+    }
+  }
   class PlatformAssistantUnavailableError extends Error {
     readonly kind: string;
     readonly phase: string;
@@ -31,6 +50,8 @@ const mocks = vi.hoisted(() => {
     writeShoppingMemory: vi.fn(),
     PlatformAssistantUnavailableError,
     PlatformRouterQuotaExceededError,
+    PublicOfferSearchBudgetExceededError,
+    PublicStoreDirectoryBudgetExceededError,
   };
 });
 
@@ -44,7 +65,14 @@ vi.mock("./platform-router", () => ({
   PlatformRouterQuotaExceededError: mocks.PlatformRouterQuotaExceededError,
 }));
 vi.mock("./store-directory", () => ({
+  MAX_PUBLIC_STORES: 500,
+  PublicStoreDirectoryBudgetExceededError:
+    mocks.PublicStoreDirectoryBudgetExceededError,
   readPublicStores: mocks.readPublicStores,
+}));
+vi.mock("./storefront-search", () => ({
+  PublicOfferSearchBudgetExceededError:
+    mocks.PublicOfferSearchBudgetExceededError,
 }));
 vi.mock("./lib/auth", () => ({
   auth: { api: { getSession: mocks.getSession } },
@@ -89,16 +117,138 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function assistantRequest(): Request {
+function assistantRequest(
+  body: Record<string, unknown> = { question: "帮我找一款商品" },
+): Request {
   return new Request("http://localhost/api/mall/assistant", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       origin: "http://localhost",
     },
-    body: JSON.stringify({ question: "帮我找一款商品" }),
+    body: JSON.stringify(body),
   });
 }
+
+function successfulReply() {
+  return {
+    text: "找到一件公开商品。",
+    model: "deterministic",
+    usage: null,
+    modelCalls: 0,
+    recommendations: [],
+    toolCalls: [],
+    uiActions: [],
+  };
+}
+
+describe("mall assistant store directory budget", () => {
+  it("requests the overflow sentinel for an unscoped mall search", async () => {
+    mocks.answerPlatformShoppingQuestion.mockResolvedValue(successfulReply());
+
+    const response = await POST(assistantRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.readPublicStores).toHaveBeenCalledWith(tenantId, {
+      limit: 501,
+    });
+  });
+
+  it("rejects the 501st global store before assistant scoring", async () => {
+    mocks.readPublicStores.mockResolvedValue(Array.from({ length: 501 }, () => ({})));
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    try {
+      const response = await POST(assistantRequest());
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        code: "public_store_directory_budget_exceeded",
+        retryable: false,
+        requestId: expect.any(String),
+      });
+      expect(mocks.answerPlatformShoppingQuestion).not.toHaveBeenCalled();
+      expect(stderr).toHaveBeenCalledWith(
+        expect.stringContaining("public_store_directory_budget_exceeded"),
+      );
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("maps candidate overflow to a typed non-retryable 503", async () => {
+    mocks.answerPlatformShoppingQuestion.mockRejectedValue(
+      new mocks.PublicOfferSearchBudgetExceededError(
+        "candidates",
+        2_001,
+        2_000,
+      ),
+    );
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    try {
+      const response = await POST(assistantRequest());
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        code: "public_offer_search_budget_exceeded",
+        retryable: false,
+        requestId: expect.any(String),
+      });
+      expect(stderr).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '"budget":"candidates","actual":2001,"maximum":2000',
+        ),
+      );
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("uses an exact SQL-scoped path even when the global directory exceeds 500", async () => {
+    const target = {
+      path: "/target-store",
+      displayName: "目标店铺",
+    };
+    const globalStores = Array.from({ length: 501 }, () => ({}));
+    mocks.readPublicStores.mockImplementation(async (_tenant, options) =>
+      options?.path === target.path ? [target] : globalStores,
+    );
+    mocks.answerPlatformShoppingQuestion.mockResolvedValue(successfulReply());
+
+    const response = await POST(
+      assistantRequest({ question: "找商品", storePath: target.path }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.readPublicStores).toHaveBeenCalledTimes(1);
+    expect(mocks.readPublicStores).toHaveBeenCalledWith(tenantId, {
+      path: target.path,
+    });
+    expect(mocks.answerPlatformShoppingQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stores: [target],
+        storeContext: { path: target.path, name: target.displayName },
+      }),
+    );
+  });
+
+  it("keeps an unknown exact store path as a 404", async () => {
+    mocks.readPublicStores.mockResolvedValue([]);
+
+    const response = await POST(
+      assistantRequest({ question: "找商品", storePath: "/missing-store" }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.readPublicStores).toHaveBeenCalledWith(tenantId, {
+      path: "/missing-store",
+    });
+    expect(mocks.answerPlatformShoppingQuestion).not.toHaveBeenCalled();
+  });
+});
 
 describe("mall assistant provider failure mapping", () => {
   it("blocks public AI safely while managed configuration is degraded", async () => {
