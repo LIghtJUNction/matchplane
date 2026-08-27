@@ -400,6 +400,7 @@ export function StorefrontView({
                     <Button
                       variant="primary"
                       size="sm"
+                      className="min-h-11"
                       type="button"
                       onClick={onOpenStoreConsole}
                     >
@@ -414,6 +415,7 @@ export function StorefrontView({
                       <Button
                         variant="primary"
                         size="sm"
+                        className="min-h-11"
                         type="button"
                         onClick={() => setManagerOpen(true)}
                       >

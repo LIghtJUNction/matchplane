@@ -893,14 +893,10 @@ main.subplatform-fullscreen-main { min-height: 0; padding: 0; overflow: hidden; 
 .owned-store-inactive-content { padding-top: 0.45rem; }
 .owned-store-card { display: grid; gap: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 1rem; background: var(--paper); box-shadow: var(--shadow-small); }
 .owned-store-card.is-secondary { background: color-mix(in srgb, var(--paper) 72%, var(--ivory)); box-shadow: none; }
-.owned-store-card.is-secondary .owned-store-enter { border: 1px solid var(--line-strong); background: transparent; color: var(--ink-soft) !important; }
-.owned-store-card.is-secondary .owned-store-enter:hover, .owned-store-card.is-secondary .owned-store-enter:focus-visible { background: var(--paper); color: var(--ink) !important; }
 .owned-store-card-main { padding: 1rem 1.05rem; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1rem; }
 .owned-store-card-copy { min-width: 0; display: grid; gap: 0.28rem; }
 .owned-store-card-copy strong { overflow: hidden; color: var(--ink); font-size: 0.98rem; font-weight: 560; letter-spacing: -0.02em; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .owned-store-card-copy p { overflow: hidden; margin: 0; color: var(--muted); font-size: 0.8rem; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
-.owned-store-enter { min-height: 2.75rem; padding: 0 0.95rem; display: inline-flex; flex: 0 0 auto; align-items: center; gap: 0.35rem; border: 0; border-radius: 0.78rem; background: var(--primary); color: var(--primary-foreground) !important; cursor: pointer; font: inherit; font-size: 0.78rem; font-weight: 560; text-decoration: none; white-space: nowrap; }
-.owned-store-enter:hover, .owned-store-enter:focus-visible { background: var(--primary-strong); }
 .owned-store-card-toolbar { padding: 0.62rem 1.05rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.85rem; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--ivory) 42%, var(--paper)); }
 .owned-store-secondary-action { min-height: 2.55rem; padding: 0 0.15rem; display: inline-flex; align-items: center; gap: 0.35rem; border: 0; background: transparent; color: var(--ink-soft) !important; cursor: pointer; font: inherit; font-size: 0.78rem; text-decoration: none; white-space: nowrap; }
 .owned-store-secondary-action:hover, .owned-store-secondary-action:focus-visible { color: var(--ink) !important; text-decoration: underline; text-underline-offset: 0.16em; }
@@ -1959,7 +1955,6 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .match-chat-handoff strong { color: var(--ink); font-size: 0.74rem; }
 .match-chat-handoff span { color: var(--muted); font-size: 0.68rem; line-height: 1.5; }
 .match-chat-handoff.is-failed { border-color: color-mix(in srgb, var(--danger) 38%, var(--line)); background: color-mix(in srgb, var(--danger) 6%, var(--paper)); }
-.storefront-view-empty-actions [data-slot="button"] { min-height: 2.75rem; }
 .storefront-manager-trigger { min-height: 2.75rem; margin-top: 1.25rem; padding: 0 0.9rem; display: inline-flex; align-items: center; gap: 0.5rem; border: 1px solid var(--ink); border-radius: 999px; background: var(--ink); color: var(--paper); font: inherit; font-size: 0.74rem; font-weight: 720; cursor: pointer; }
 .storefront-manager-trigger:hover { transform: translateY(-1px); }
 @media (max-width: 760px) {
