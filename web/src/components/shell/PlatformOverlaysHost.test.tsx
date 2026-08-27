@@ -137,8 +137,18 @@ function Marker({ children }: { children: ReactNode }) {
   return <p>{children}</p>;
 }
 
+function StatefulMarker({ children }: { children: ReactNode }) {
+  const [count, setCount] = useState(0);
+  return (
+    <button type="button" onClick={() => setCount((value) => value + 1)}>
+      {children} · {count}
+    </button>
+  );
+}
+
 function AccountSettingsHarness() {
   const [section, setSection] = useState<AccountSettingsSection | null>(null);
+  const [locale, setLocale] = useState<"en" | "zh">("en");
   return (
     <>
       <button
@@ -150,6 +160,9 @@ function AccountSettingsHarness() {
       </button>
       <PlatformOverlaysHost
         {...baseProps({
+          locale,
+          ui: appCopy(locale),
+          onLocaleChange: setLocale,
           accountSettingsSection: section,
           setAccountSettingsSection: setSection,
         })}
@@ -188,9 +201,18 @@ describe("PlatformOverlaysHost deferred panels", () => {
     expect(await screen.findByText("Profile panel ready")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Account" }));
+    expect(
+      screen.getByRole("tab", { name: "Security", selected: true }),
+    ).toHaveClass("min-h-11");
+    expect(
+      screen.queryByRole("tab", { name: "Appearance", selected: true }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Display and language")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByRole("status")).toHaveLength(4));
     deferredModules.password.resolve({
-      ChangePasswordPanel: () => <Marker>Password panel ready</Marker>,
+      ChangePasswordPanel: () => (
+        <StatefulMarker>Password panel ready</StatefulMarker>
+      ),
     });
     deferredModules.identities.resolve({
       IdentityBindingsPanel: () => <Marker>Identity panel ready</Marker>,
@@ -201,10 +223,44 @@ describe("PlatformOverlaysHost deferred panels", () => {
     deferredModules.sessions.resolve({
       SessionPanel: () => <Marker>Session panel ready</Marker>,
     });
-    expect(await screen.findByText("Password panel ready")).toBeInTheDocument();
+    const passwordPanel = await screen.findByRole("button", {
+      name: "Password panel ready · 0",
+    });
     expect(screen.getByText("Identity panel ready")).toBeInTheDocument();
     expect(screen.getByText("Passkey panel ready")).toBeInTheDocument();
     expect(screen.getByText("Session panel ready")).toBeInTheDocument();
+    await user.click(passwordPanel);
+    expect(passwordPanel).toHaveAccessibleName("Password panel ready · 1");
+
+    await user.click(screen.getByRole("tab", { name: "Appearance" }));
+    expect(
+      screen.getByRole("tab", { name: "Appearance", selected: true }),
+    ).toHaveClass("min-h-11");
+    expect(screen.getByText("Display and language")).toBeInTheDocument();
+    expect(
+      document.getElementById("workspace-account-security-panel"),
+    ).not.toBeVisible();
+    expect(
+      [
+        deferredModules.password,
+        deferredModules.identities,
+        deferredModules.passkeys,
+        deferredModules.sessions,
+      ].map((module) => module.requests()),
+    ).toEqual([1, 1, 1, 1]);
+
+    await user.click(screen.getByRole("button", { name: "中文" }));
+    expect(
+      screen.getByRole("tab", { name: "外观", selected: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("显示与语言")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "安全" }));
+    expect(passwordPanel).toBeVisible();
+    expect(passwordPanel).toHaveAccessibleName("Password panel ready · 1");
+
+    await user.click(screen.getByRole("tab", { name: "外观" }));
+    await user.click(screen.getByRole("button", { name: "English" }));
+    expect(screen.getByRole("tab", { name: "Security" })).toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: /^My stores/ }),

@@ -1,8 +1,14 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, useState } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@appica/ui-react/tabs";
 import { LogOut, ShieldCheck, Store, UserRound, X } from "lucide-react";
 
 import { ModeDialog } from "../Overlays";
@@ -174,6 +180,12 @@ export function PlatformOverlaysHost({
   setNotice,
   ui,
 }: PlatformOverlaysHostProps) {
+  const [accountTask, setAccountTask] = useState<"security" | "appearance">(
+    "security",
+  );
+  const [visitedAccountTasks, setVisitedAccountTasks] = useState<
+    ReadonlySet<"security" | "appearance">
+  >(() => new Set(["security"]));
   const selectedManagedStore = listing
     ? (ownedStores.find(
         (store) =>
@@ -181,6 +193,13 @@ export function PlatformOverlaysHost({
           store.path === listing.platformPath,
       ) ?? null)
     : null;
+
+  const activateAccountTask = (task: "security" | "appearance") => {
+    setVisitedAccountTasks((visited) =>
+      visited.has(task) ? visited : new Set(visited).add(task),
+    );
+    setAccountTask(task);
+  };
 
   return (
     <DeferredOverlayLocaleContext.Provider value={locale}>
@@ -322,48 +341,97 @@ export function PlatformOverlaysHost({
                   </button>
                 </div>
               </section>
-              <section
-                className="workspace-settings-section"
-                aria-labelledby="workspace-preferences-title"
+              <Tabs
+                value={accountTask}
+                onValueChange={(value) =>
+                  activateAccountTask(value as "security" | "appearance")
+                }
+                variant="pill"
+                size="md"
+                className="min-w-0"
               >
-                <div className="workspace-settings-section-heading">
-                  <h3 id="workspace-preferences-title">
-                    {locale === "en" ? "Display and language" : "显示与语言"}
-                  </h3>
-                </div>
-                <PreferenceControls
-                  mode="panel"
-                  theme={theme}
-                  locale={locale}
-                  palette={palette}
-                  textSize={textSize}
-                  onThemeChange={onThemeChange}
-                  onLocaleChange={onLocaleChange}
-                  onPaletteChange={onPaletteChange}
-                  onTextSizeChange={onTextSizeChange}
-                />
-              </section>
-              <DeferredChangePasswordPanel
-                email={authUser.email}
-                locale={locale}
-                onNotice={setNotice}
-              />
-              <DeferredIdentityBindingsPanel
-                locale={locale}
-                subplatform={subplatform}
-                onNotice={setNotice}
-              />
-              <DeferredPasskeyPanel
-                locale={locale}
-                subplatform={subplatform}
-                accountLabel={authUser.email}
-                onNotice={setNotice}
-              />
-              <DeferredSessionPanel
-                locale={locale}
-                subplatform={subplatform}
-                onNotice={setNotice}
-              />
+                <TabsList
+                  aria-label={
+                    locale === "en" ? "Account sections" : "账号二级分区"
+                  }
+                  className="w-full min-w-max overflow-x-auto"
+                >
+                  <TabsTrigger
+                    id="workspace-account-security-tab"
+                    value="security"
+                    className="min-h-11"
+                  >
+                    {locale === "en" ? "Security" : "安全"}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    id="workspace-account-appearance-tab"
+                    value="appearance"
+                    className="min-h-11"
+                  >
+                    {locale === "en" ? "Appearance" : "外观"}
+                  </TabsTrigger>
+                </TabsList>
+                {visitedAccountTasks.has("security") ? (
+                  <TabsContent
+                    id="workspace-account-security-panel"
+                    value="security"
+                    keepMounted
+                  >
+                    <DeferredChangePasswordPanel
+                      email={authUser.email}
+                      locale={locale}
+                      onNotice={setNotice}
+                    />
+                    <DeferredIdentityBindingsPanel
+                      locale={locale}
+                      subplatform={subplatform}
+                      onNotice={setNotice}
+                    />
+                    <DeferredPasskeyPanel
+                      locale={locale}
+                      subplatform={subplatform}
+                      accountLabel={authUser.email}
+                      onNotice={setNotice}
+                    />
+                    <DeferredSessionPanel
+                      locale={locale}
+                      subplatform={subplatform}
+                      onNotice={setNotice}
+                    />
+                  </TabsContent>
+                ) : null}
+                {visitedAccountTasks.has("appearance") ? (
+                  <TabsContent
+                    id="workspace-account-appearance-panel"
+                    value="appearance"
+                    keepMounted
+                  >
+                    <section
+                      className="workspace-settings-section"
+                      aria-labelledby="workspace-preferences-title"
+                    >
+                      <div className="workspace-settings-section-heading">
+                        <h3 id="workspace-preferences-title">
+                          {locale === "en"
+                            ? "Display and language"
+                            : "显示与语言"}
+                        </h3>
+                      </div>
+                      <PreferenceControls
+                        mode="panel"
+                        theme={theme}
+                        locale={locale}
+                        palette={palette}
+                        textSize={textSize}
+                        onThemeChange={onThemeChange}
+                        onLocaleChange={onLocaleChange}
+                        onPaletteChange={onPaletteChange}
+                        onTextSizeChange={onTextSizeChange}
+                      />
+                    </section>
+                  </TabsContent>
+                ) : null}
+              </Tabs>
             </div>
           ) : accountSettingsSection === "stores" ? (
             <div className="workspace-settings-overview">
