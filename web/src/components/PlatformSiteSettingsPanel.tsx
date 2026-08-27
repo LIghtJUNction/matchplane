@@ -127,7 +127,7 @@ export function PlatformSiteSettingsPanel({
       <div className="site-settings-heading">
         <SectionHeading eyebrow="网站与合规" title="备案信息" />
         <Button
-          className="site-settings-lookup min-h-11!"
+          className="site-settings-lookup min-h-11"
           variant="outline"
           size="md"
           type="button"
