@@ -116,6 +116,37 @@ describe("SubplatformAdminDashboard", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
+  it.each([320, 390])(
+    "contains the store tabs without document overflow at %ipx",
+    (width) => {
+      const { container } = render(
+        <div style={{ width }}>
+          <SubplatformAdminDashboard
+            locale="zh"
+            onNotice={vi.fn()}
+            subplatform={subplatform}
+            store={store}
+            canManageStore
+            onStoreUpdated={vi.fn()}
+          />
+        </div>,
+      );
+
+      const scroller = container.querySelector(
+        '[data-horizontal-tab-scroller="true"]',
+      );
+      const viewport = container.querySelector(
+        '[data-horizontal-tab-scroller-viewport="true"]',
+      );
+      expect(scroller).toHaveClass("min-w-0", "w-full");
+      expect(viewport).toHaveClass("min-w-0", "overflow-x-auto");
+      expect(viewport).toContainElement(
+        screen.getByRole("tablist", { name: "店铺管理分区" }),
+      );
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    },
+  );
+
   it("keeps mall email infrastructure out of a store owner's workspace", () => {
     renderDashboard();
 

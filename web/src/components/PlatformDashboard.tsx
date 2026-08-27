@@ -14,6 +14,7 @@ import {
   isLiveMarketplaceEnabled,
   type SubplatformOrganizationRecord,
 } from "../api";
+import { HorizontalTabScroller } from "./HorizontalTabScroller";
 import { LoginMethodsPanel } from "./LoginMethodsPanel";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { PlatformBootstrapNotice } from "./PlatformBootstrapNotice";
@@ -165,96 +166,102 @@ export function PlatformDashboard({
       </section>
 
       <div className="platform-admin-shell">
-        <nav
-          className="platform-admin-nav"
-          role="tablist"
-          aria-label="商城管理分区"
+        <HorizontalTabScroller
+          activeKey={activeSection}
+          className="w-full min-[48.0625rem]:sticky min-[48.0625rem]:top-[4.75rem]"
+          locale="zh"
         >
-          <button
-            id="platform-tab-home"
-            type="button"
-            role="tab"
-            aria-selected={activeSection === "home"}
-            aria-controls="platform-panel-home"
-            className={activeSection === "home" ? "is-active" : ""}
-            onClick={() => activateSection("home")}
+          <nav
+            className="platform-admin-nav !static min-w-max !overflow-visible"
+            role="tablist"
+            aria-label="商城管理分区"
           >
-            <ShieldCheck size={17} aria-hidden="true" />
-            <span>首页</span>
-          </button>
-          <button
-            id="platform-tab-tree"
-            type="button"
-            role="tab"
-            aria-selected={activeSection === "tree"}
-            aria-controls="platform-panel-tree"
-            className={activeSection === "tree" ? "is-active" : ""}
-            onClick={() => activateSection("tree")}
-          >
-            <GitBranch size={17} aria-hidden="true" />
-            <span>店铺与商品</span>
-          </button>
-          <button
-            id="platform-tab-access"
-            type="button"
-            role="tab"
-            aria-selected={activeSection === "access"}
-            aria-controls="platform-panel-access"
-            className={activeSection === "access" ? "is-active" : ""}
-            onClick={() => activateSection("access")}
-          >
-            <ShieldCheck size={17} aria-hidden="true" />
-            <span>用户与团队</span>
-          </button>
-          <button
-            id="platform-tab-ai"
-            type="button"
-            role="tab"
-            aria-selected={activeSection === "ai"}
-            aria-controls="platform-panel-ai"
-            className={activeSection === "ai" ? "is-active" : ""}
-            onClick={() => activateSection("ai")}
-          >
-            <Bot size={17} aria-hidden="true" />
-            <span>AI</span>
-          </button>
-          <button
-            id="platform-tab-brand"
-            type="button"
-            role="tab"
-            aria-selected={activeSection === "brand"}
-            aria-controls="platform-panel-brand"
-            className={activeSection === "brand" ? "is-active" : ""}
-            onClick={() => activateSection("brand")}
-          >
-            <Palette size={17} aria-hidden="true" />
-            <span>商城设置</span>
-          </button>
-          <button
-            id="platform-tab-payments"
-            type="button"
-            role="tab"
-            aria-selected={activeSection === "payments"}
-            aria-controls="platform-panel-payments"
-            className={activeSection === "payments" ? "is-active" : ""}
-            onClick={() => activateSection("payments")}
-          >
-            <CreditCard size={17} aria-hidden="true" />
-            <span>支付（可选）</span>
-          </button>
-          <button
-            id="platform-tab-finance"
-            type="button"
-            role="tab"
-            aria-selected={activeSection === "finance"}
-            aria-controls="platform-panel-finance"
-            className={activeSection === "finance" ? "is-active" : ""}
-            onClick={() => activateSection("finance")}
-          >
-            <ReceiptText size={17} aria-hidden="true" />
-            <span>财务与退款</span>
-          </button>
-        </nav>
+            <button
+              id="platform-tab-home"
+              type="button"
+              role="tab"
+              aria-selected={activeSection === "home"}
+              aria-controls="platform-panel-home"
+              className={activeSection === "home" ? "is-active" : ""}
+              onClick={() => activateSection("home")}
+            >
+              <ShieldCheck size={17} aria-hidden="true" />
+              <span>首页</span>
+            </button>
+            <button
+              id="platform-tab-tree"
+              type="button"
+              role="tab"
+              aria-selected={activeSection === "tree"}
+              aria-controls="platform-panel-tree"
+              className={activeSection === "tree" ? "is-active" : ""}
+              onClick={() => activateSection("tree")}
+            >
+              <GitBranch size={17} aria-hidden="true" />
+              <span>店铺与商品</span>
+            </button>
+            <button
+              id="platform-tab-access"
+              type="button"
+              role="tab"
+              aria-selected={activeSection === "access"}
+              aria-controls="platform-panel-access"
+              className={activeSection === "access" ? "is-active" : ""}
+              onClick={() => activateSection("access")}
+            >
+              <ShieldCheck size={17} aria-hidden="true" />
+              <span>用户与团队</span>
+            </button>
+            <button
+              id="platform-tab-ai"
+              type="button"
+              role="tab"
+              aria-selected={activeSection === "ai"}
+              aria-controls="platform-panel-ai"
+              className={activeSection === "ai" ? "is-active" : ""}
+              onClick={() => activateSection("ai")}
+            >
+              <Bot size={17} aria-hidden="true" />
+              <span>AI</span>
+            </button>
+            <button
+              id="platform-tab-brand"
+              type="button"
+              role="tab"
+              aria-selected={activeSection === "brand"}
+              aria-controls="platform-panel-brand"
+              className={activeSection === "brand" ? "is-active" : ""}
+              onClick={() => activateSection("brand")}
+            >
+              <Palette size={17} aria-hidden="true" />
+              <span>商城设置</span>
+            </button>
+            <button
+              id="platform-tab-payments"
+              type="button"
+              role="tab"
+              aria-selected={activeSection === "payments"}
+              aria-controls="platform-panel-payments"
+              className={activeSection === "payments" ? "is-active" : ""}
+              onClick={() => activateSection("payments")}
+            >
+              <CreditCard size={17} aria-hidden="true" />
+              <span>支付（可选）</span>
+            </button>
+            <button
+              id="platform-tab-finance"
+              type="button"
+              role="tab"
+              aria-selected={activeSection === "finance"}
+              aria-controls="platform-panel-finance"
+              className={activeSection === "finance" ? "is-active" : ""}
+              onClick={() => activateSection("finance")}
+            >
+              <ReceiptText size={17} aria-hidden="true" />
+              <span>财务与退款</span>
+            </button>
+          </nav>
+        </HorizontalTabScroller>
 
         <div className="platform-admin-content">
           <PlatformBootstrapNotice

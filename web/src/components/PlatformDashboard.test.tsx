@@ -150,6 +150,30 @@ beforeEach(() => {
 });
 
 describe("PlatformDashboard deferred sections", () => {
+  it.each([320, 390])(
+    "contains the tab strip without document overflow at %ipx",
+    (width) => {
+      const { container } = render(
+        <div style={{ width }}>
+          <PlatformDashboard {...dashboardProps} />
+        </div>,
+      );
+
+      const scroller = container.querySelector(
+        '[data-horizontal-tab-scroller="true"]',
+      );
+      const viewport = container.querySelector(
+        '[data-horizontal-tab-scroller-viewport="true"]',
+      );
+      expect(scroller).toHaveClass("min-w-0", "w-full");
+      expect(viewport).toHaveClass("min-w-0", "overflow-x-auto");
+      expect(viewport).toContainElement(
+        screen.getByRole("tablist", { name: "商城管理分区" }),
+      );
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    },
+  );
+
   it("defers the 11 identified offscreen GETs and loads each resource group once", async () => {
     const user = userEvent.setup();
     render(<PlatformDashboard {...dashboardProps} />);

@@ -15,6 +15,7 @@ import {
 import type { StoreSummary, SubplatformOrganizationRecord } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 import type { SubplatformConfig } from "../subplatform";
+import { HorizontalTabScroller } from "./HorizontalTabScroller";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { SellerDashboard } from "./SellerDashboard";
 import { StoreCustomersPanel } from "./StoreCustomersPanel";
@@ -92,47 +93,55 @@ export function SubplatformAdminDashboard({
       )}
 
       <div className="store-console-toolbar">
-        <Tabs
-          value={section}
-          onValueChange={(value) =>
-            activateSection(value as StoreConsoleSection)
-          }
-          variant="pill"
-          size="md"
-          className="store-management-tabs min-w-0 flex-1"
+        <HorizontalTabScroller
+          activeKey={section}
+          className="w-full min-w-0 flex-1"
+          locale={locale}
         >
-          <TabsList
-            aria-label={english ? "Store management sections" : "店铺管理分区"}
-            className="w-full min-w-max overflow-x-auto"
+          <Tabs
+            value={section}
+            onValueChange={(value) =>
+              activateSection(value as StoreConsoleSection)
+            }
+            variant="pill"
+            size="md"
+            className="store-management-tabs min-w-max"
           >
-            <TabsTrigger value="products" className="min-h-11">
-              <Package size={16} aria-hidden="true" />
-              {english ? "Products" : "商品"}
-            </TabsTrigger>
-            <TabsTrigger value="customers" className="min-h-11">
-              <UserSearch size={16} aria-hidden="true" />
-              {english ? "Customer management" : "客户管理"}
-            </TabsTrigger>
-            {canManageStore ? (
-              <TabsTrigger value="finance" className="min-h-11">
-                <ReceiptText size={16} aria-hidden="true" />
-                {english ? "Finance" : "财务"}
+            <TabsList
+              aria-label={
+                english ? "Store management sections" : "店铺管理分区"
+              }
+              className="w-max min-w-max"
+            >
+              <TabsTrigger value="products" className="min-h-11">
+                <Package size={16} aria-hidden="true" />
+                {english ? "Products" : "商品"}
               </TabsTrigger>
-            ) : null}
-            {canManageStore ? (
-              <TabsTrigger value="store" className="min-h-11">
-                <Store size={16} aria-hidden="true" />
-                {english ? "Store details" : "店铺资料"}
+              <TabsTrigger value="customers" className="min-h-11">
+                <UserSearch size={16} aria-hidden="true" />
+                {english ? "Customer management" : "客户管理"}
               </TabsTrigger>
-            ) : null}
-            {canManageStore ? (
-              <TabsTrigger value="team" className="min-h-11">
-                <UsersRound size={16} aria-hidden="true" />
-                {english ? "Team" : "店员"}
-              </TabsTrigger>
-            ) : null}
-          </TabsList>
-        </Tabs>
+              {canManageStore ? (
+                <TabsTrigger value="finance" className="min-h-11">
+                  <ReceiptText size={16} aria-hidden="true" />
+                  {english ? "Finance" : "财务"}
+                </TabsTrigger>
+              ) : null}
+              {canManageStore ? (
+                <TabsTrigger value="store" className="min-h-11">
+                  <Store size={16} aria-hidden="true" />
+                  {english ? "Store details" : "店铺资料"}
+                </TabsTrigger>
+              ) : null}
+              {canManageStore ? (
+                <TabsTrigger value="team" className="min-h-11">
+                  <UsersRound size={16} aria-hidden="true" />
+                  {english ? "Team" : "店员"}
+                </TabsTrigger>
+              ) : null}
+            </TabsList>
+          </Tabs>
+        </HorizontalTabScroller>
         <span className="store-console-scope">
           <ShieldCheck size={16} aria-hidden="true" />
           {canManageStore
