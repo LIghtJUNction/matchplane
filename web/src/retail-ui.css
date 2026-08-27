@@ -1695,12 +1695,6 @@ select {
   box-shadow: var(--shadow-small);
 }
 
-.storefront-view-back {
-  color: var(--retail-blue);
-  font-size: 0.74rem;
-  font-weight: 650;
-}
-
 .storefront-view-mark {
   border: 0;
   border-radius: 0.8rem;
@@ -1715,15 +1709,6 @@ select {
 .storefront-view-identity h1 {
   font-size: clamp(1.8rem, 3.4vw, 2.85rem);
   line-height: 1.06;
-}
-
-.storefront-manager-trigger {
-  border: 1px solid var(--retail-blue);
-  border-radius: 0.75rem;
-  background: var(--retail-blue);
-  color: var(--retail-accent-contrast);
-  box-shadow: none;
-  font-weight: 680;
 }
 
 .storefront-view-products {
@@ -1832,16 +1817,6 @@ select {
   align-items: center;
   justify-content: flex-end;
   gap: 0.6rem;
-}
-
-.storefront-view-empty-actions a {
-  min-height: 2.75rem;
-  padding: 0 0.8rem;
-  display: inline-flex;
-  align-items: center;
-  color: var(--retail-blue);
-  font-size: 0.76rem;
-  font-weight: 680;
 }
 
 .storefront-catalog-error {

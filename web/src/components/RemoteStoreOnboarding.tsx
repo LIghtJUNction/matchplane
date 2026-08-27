@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@appica/ui-react/button";
 import {
   CheckCircle2,
   Clipboard,
@@ -217,15 +218,17 @@ export function RemoteStoreOnboarding({
                 <option value="168">7 天（推荐）</option>
               </select>
             </label>
-            <button
-              className="button button-dark"
+            <Button
+              variant="primary"
+              size="md"
+              className="min-h-11 w-full justify-center sm:w-auto"
               type="button"
               disabled={loading || !domainId}
               onClick={() => void createInvite()}
             >
               <Globe2 size={16} aria-hidden="true" />
               生成一次性连接链接
-            </button>
+            </Button>
           </div>
         ) : (
           <p className="platform-access-empty" role="status">
@@ -255,13 +258,25 @@ export function RemoteStoreOnboarding({
             </small>
             <code>{invite.token}</code>
           </div>
-          <button type="button" onClick={() => void copyInvite()}>
+          <Button
+            variant="outline"
+            size="md"
+            className="min-h-11"
+            type="button"
+            onClick={() => void copyInvite()}
+          >
             <Clipboard size={15} aria-hidden="true" />
             复制凭据
-          </button>
-          <button type="button" onClick={() => setInvite(null)}>
+          </Button>
+          <Button
+            variant="ghost"
+            size="md"
+            className="min-h-11"
+            type="button"
+            onClick={() => setInvite(null)}
+          >
             关闭
-          </button>
+          </Button>
         </div>
       ) : null}
       <div className="remote-store-list-heading">
@@ -313,33 +328,42 @@ export function RemoteStoreOnboarding({
                       }
                     />
                   </label>
-                  <button
+                  <Button
+                    variant="primary"
+                    size="md"
+                    className="min-h-11"
                     type="button"
                     disabled={loading}
                     onClick={() => void activate(binding)}
                   >
                     确认接入
-                  </button>
+                  </Button>
                 </div>
               ) : binding.status === "revoked" ? (
                 <small>已断开</small>
               ) : (
                 <div className="remote-store-actions">
-                  <button
+                  <Button
+                    variant="outline"
+                    size="md"
+                    className="min-h-11"
                     type="button"
                     disabled={loading}
                     onClick={() => void probe(binding)}
                   >
                     <RefreshCw size={14} aria-hidden="true" />
                     检查连接
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="md"
+                    className="min-h-11"
                     type="button"
                     disabled={loading}
                     onClick={() => void revoke(binding)}
                   >
                     断开
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>

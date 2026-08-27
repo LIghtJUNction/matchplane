@@ -101,10 +101,15 @@ export function StorefrontView({
   return (
     <div className="storefront-view root-storefront-page">
       <header className="storefront-view-header">
-        <a className="storefront-view-back" href="/">
+        <Button
+          render={<a href="/" />}
+          variant="ghost"
+          size="md"
+          className="min-h-11 justify-start px-0 text-[var(--retail-blue)] text-sm font-semibold"
+        >
           <ArrowLeft size={17} aria-hidden="true" />
           {english ? "Back to mall" : "返回商城"}
-        </a>
+        </Button>
         <div className="storefront-view-identity">
           <span className="storefront-view-mark" aria-hidden="true">
             {subplatform.brandLogoUrl ? (
@@ -144,18 +149,31 @@ export function StorefrontView({
             </span>
           </div>
         </div>
-        {!isInactive ? (
+        {isInactive ? canManageStore && onOpenStoreConsole ? (
+          <Button
+            variant="primary"
+            size="md"
+            className="mt-5 min-h-11 w-full justify-center gap-2 rounded-full px-4 text-sm font-semibold sm:w-auto"
+            type="button"
+            onClick={onOpenStoreConsole}
+          >
+            <Store size={17} aria-hidden="true" />
+            {english ? "Store console" : "管理店铺 / 恢复营业"}
+          </Button>
+        ) : null : (
           <Dialog open={managerOpen} onOpenChange={setManagerOpen}>
             <DialogTrigger
               render={
-                <button
-                  className="storefront-manager-trigger"
+                <Button
+                  variant="primary"
+                  size="md"
+                  className="mt-5 min-h-11 w-full justify-center gap-2 rounded-full px-4 text-sm font-semibold sm:w-auto"
                   type="button"
                   aria-controls="store-manager-chat"
                 >
                   <MessageCircle size={17} aria-hidden="true" />
                   {english ? "Chat with store manager" : "与店长对话"}
-                </button>
+                </Button>
               }
             />
             <DialogContent
@@ -212,16 +230,7 @@ export function StorefrontView({
               </DialogBody>
             </DialogContent>
           </Dialog>
-        ) : canManageStore && onOpenStoreConsole ? (
-          <button
-            className="storefront-manager-trigger"
-            type="button"
-            onClick={onOpenStoreConsole}
-          >
-            <Store size={17} aria-hidden="true" />
-            {english ? "Store console" : "管理店铺 / 恢复营业"}
-          </button>
-        ) : null}
+        )}
       </header>
 
       {/* When the store is closed or suspended, show a prominent status explanation panel */}
@@ -239,21 +248,28 @@ export function StorefrontView({
               : "店主已暂时暂停对外营业，暂不接受新的咨询和下单。所有商品数据与客户记录均完整保留。您可以返回商城选购其他好物。"}
           </p>
           <div className="storefront-closed-actions">
-            <a href="/" className="button button-dark">
+            <Button
+              render={<a href="/" />}
+              variant="primary"
+              size="md"
+              className="min-h-11"
+            >
               <ArrowLeft size={16} aria-hidden="true" />
               {english ? "Back to mall home" : "返回商城首页"}
-            </a>
+            </Button>
             {canManageStore && onOpenStoreConsole ? (
-              <button
+              <Button
+                variant="outline"
+                size="md"
+                className="min-h-11"
                 type="button"
-                className="button button-secondary"
                 onClick={onOpenStoreConsole}
               >
                 <Store size={16} aria-hidden="true" />
                 {english
                   ? "Open store console (Reopen)"
                   : "进入店铺工作台（恢复营业）"}
-              </button>
+              </Button>
             ) : null}
           </div>
         </div>
@@ -273,10 +289,15 @@ export function StorefrontView({
               : "该店铺已被商城管理暂停营业，暂时无法公开访问。如有疑问请联系商城管理员。"}
           </p>
           <div className="storefront-closed-actions">
-            <a href="/" className="button button-dark">
+            <Button
+              render={<a href="/" />}
+              variant="primary"
+              size="md"
+              className="min-h-11"
+            >
               <ArrowLeft size={16} aria-hidden="true" />
               {english ? "Back to mall home" : "返回商城首页"}
-            </a>
+            </Button>
           </div>
         </div>
       )}
@@ -293,15 +314,20 @@ export function StorefrontView({
               : "该店铺接入资料正在审核中，审核通过后将正式开放营业。"}
           </p>
           <div className="storefront-closed-actions">
-            <a href="/" className="button button-dark">
+            <Button
+              render={<a href="/" />}
+              variant="primary"
+              size="md"
+              className="min-h-11"
+            >
               <ArrowLeft size={16} aria-hidden="true" />
               {english ? "Back to mall home" : "返回商城首页"}
-            </a>
+            </Button>
           </div>
         </div>
       )}
 
-      {!isInactive ? (
+      {isInactive ? null : (
         <main className="storefront-view-products" id="store-products">
           <div className="storefront-view-products-heading">
             <h2>{english ? "Products" : "商品"}</h2>
@@ -426,13 +452,18 @@ export function StorefrontView({
                           "Ask the store manager",
                         )}
                       </Button>
-                      <a href="/">
+                      <Button
+                        render={<a href="/" />}
+                        variant="ghost"
+                        size="md"
+                        className="min-h-11 text-[var(--retail-blue)]"
+                      >
                         {verticalCopy(
                           "emptyBrowseAction",
                           "浏览其他店铺",
                           "Browse other stores",
                         )}
-                      </a>
+                      </Button>
                     </>
                   )}
                 </div>
@@ -444,7 +475,7 @@ export function StorefrontView({
             </div>
           )}
         </main>
-      ) : null}
+      )}
     </div>
   );
 }

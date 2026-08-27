@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@appica/ui-react/button";
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -105,23 +106,27 @@ export function OAuthConsentScreen() {
           </p>
         ) : null}
         <div className="oauth-consent-actions">
-          <button
-            className="button button-quiet"
+          <Button
+            variant="soft"
+            size="md"
+            className="min-h-11"
             type="button"
             disabled={submitting}
             onClick={() => void decide(false)}
           >
             拒绝
-          </button>
-          <button
-            className="button button-dark"
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            className="min-h-11"
             type="button"
             disabled={submitting}
             onClick={() => void decide(true)}
           >
             {submitting ? "正在继续…" : "同意并继续"}
-            {!submitting ? <ArrowRight size={17} aria-hidden="true" /> : null}
-          </button>
+            {submitting ? null : <ArrowRight size={17} aria-hidden="true" />}
+          </Button>
         </div>
         <p className="login-footnote">
           授权可随时在商城账户页撤销；店铺会话也会在短期内失效。

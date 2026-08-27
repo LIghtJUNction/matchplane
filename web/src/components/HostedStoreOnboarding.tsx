@@ -1,3 +1,4 @@
+import { Button } from "@appica/ui-react/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -187,12 +188,15 @@ export function HostedStoreOnboarding({
             </strong>
             <p>{loadError}</p>
           </div>
-          <button
+          <Button
+            variant="outline"
+            size="md"
+            className="min-h-11"
             type="button"
             onClick={() => setReloadKey((value) => value + 1)}
           >
             {locale === "en" ? "Try again" : "重新加载"}
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -211,7 +215,10 @@ export function HostedStoreOnboarding({
           </div>
           <div className="hosted-store-success-actions">
             {invite?.storeId === createdStore.id ? null : (
-              <button
+              <Button
+                variant="outline"
+                size="md"
+                className="min-h-11"
                 type="button"
                 onClick={() => void generateInvite(createdStore.id)}
                 disabled={invitingStoreId !== null}
@@ -224,25 +231,29 @@ export function HostedStoreOnboarding({
                   : locale === "en"
                     ? "Invite a partner"
                     : "邀请伙伴协作"}
-              </button>
+              </Button>
             )}
             {onManageStore ? (
-              <button
-                className="button button-dark"
+              <Button
+                variant="primary"
+                size="md"
+                className="min-h-11"
                 type="button"
                 onClick={() => onManageStore(createdStore)}
               >
                 {locale === "en" ? "Add products" : "开始添加商品"}
                 <ArrowRight size={17} aria-hidden="true" />
-              </button>
+              </Button>
             ) : (
-              <a
-                className="button button-dark"
-                href={`${createdStore.path}?console=products`}
+              <Button
+                render={<a href={`${createdStore.path}?console=products`} />}
+                variant="primary"
+                size="md"
+                className="min-h-11"
               >
                 {locale === "en" ? "Add products" : "开始添加商品"}
                 <ArrowRight size={17} aria-hidden="true" />
-              </a>
+              </Button>
             )}
           </div>
         </div>
@@ -334,25 +345,29 @@ export function HostedStoreOnboarding({
                 ? "A name and short introduction are enough to begin."
                 : "填写名称和简介即可开店。"}
             </p>
-            <button
-              className="button button-dark hosted-store-empty-action"
+            <Button
+              variant="primary"
+              size="md"
+              className="min-h-11"
               type="button"
               onClick={openForm}
             >
               <Plus size={16} aria-hidden="true" />
               {locale === "en" ? "Open a store" : "开一家店"}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="hosted-store-add-row">
-            <button
-              className="hosted-store-add"
+            <Button
+              variant="outline"
+              size="md"
+              className="min-h-11"
               type="button"
               onClick={openForm}
             >
               <Plus size={16} aria-hidden="true" />
               {locale === "en" ? "Open another store" : "再开一家店"}
-            </button>
+            </Button>
           </div>
         )
       ) : null}
@@ -363,9 +378,15 @@ export function HostedStoreOnboarding({
             <strong>
               {locale === "en" ? "Store details" : "填写店铺资料"}
             </strong>
-            <button type="button" onClick={() => setOpening(false)}>
+            <Button
+              variant="ghost"
+              size="md"
+              className="min-h-11"
+              type="button"
+              onClick={() => setOpening(false)}
+            >
               {locale === "en" ? "Cancel" : "取消"}
-            </button>
+            </Button>
           </div>
           <label htmlFor="hosted-store-name">
             <span>{locale === "en" ? "Store name" : "店铺名称"}</span>
@@ -400,8 +421,10 @@ export function HostedStoreOnboarding({
               ? "The public address is assigned automatically. You can update store details later."
               : "访问地址会自动生成；店铺资料之后仍可修改。"}
           </p>
-          <button
-            className="button button-dark"
+          <Button
+            variant="primary"
+            size="md"
+            className="min-h-11"
             type="submit"
             disabled={submitting}
           >
@@ -413,7 +436,7 @@ export function HostedStoreOnboarding({
                 ? "Create store"
                 : "创建店铺"}
             <ArrowRight size={18} aria-hidden="true" />
-          </button>
+          </Button>
         </form>
       ) : null}
     </section>
