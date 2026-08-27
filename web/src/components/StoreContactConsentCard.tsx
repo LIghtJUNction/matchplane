@@ -1,3 +1,4 @@
+import { Button } from "@appica/ui-react/button";
 import {
   CheckCircle2,
   LoaderCircle,
@@ -6,7 +7,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useState } from "react";
 
 import {
   getVerifiedContactChannels,
@@ -139,8 +140,10 @@ export function StoreContactConsentCard({
               )}
             </dl>
           ) : accepted && onRetrieve ? (
-            <button
-              className="button button-muted store-contact-check"
+            <Button
+              variant="outline"
+              size="md"
+              className="store-contact-check min-h-11"
               type="button"
               disabled={status === "checking"}
               onClick={async () => {
@@ -178,7 +181,7 @@ export function StoreContactConsentCard({
                 : english
                   ? "Check store approval"
                   : "检查店员是否同意"}
-            </button>
+            </Button>
           ) : null}
           {checkMessage ? (
             <span className="store-contact-check-message">{checkMessage}</span>
@@ -212,18 +215,31 @@ export function StoreContactConsentCard({
         <div className="store-contact-consent-error" role="alert">
           <span>{error}</span>
           {signInRequired ? (
-            <a
-              href={(() => {
-                const { pathname, search } = currentLocation();
-                return `/login?next=${encodeURIComponent(`${pathname}${search}`)}`;
-              })()}
+            <Button
+              render={
+                <a
+                  href={(() => {
+                    const { pathname, search } = currentLocation();
+                    return `/login?next=${encodeURIComponent(`${pathname}${search}`)}`;
+                  })()}
+                />
+              }
+              variant="outline"
+              size="md"
+              className="min-h-11"
             >
               {english ? "Sign in" : "前往登录"}
-            </a>
+            </Button>
           ) : (
-            <button type="button" onClick={() => void load()}>
+            <Button
+              variant="outline"
+              size="md"
+              className="min-h-11"
+              type="button"
+              onClick={() => void load()}
+            >
               {english ? "Retry" : "重试"}
-            </button>
+            </Button>
           )}
         </div>
       ) : channels.length ? (
@@ -257,8 +273,10 @@ export function StoreContactConsentCard({
             ))}
           </ul>
           <div className="store-contact-consent-actions">
-            <button
-              className="button button-dark"
+            <Button
+              variant="primary"
+              size="md"
+              className="min-h-11"
               type="button"
               disabled={status === "agreeing" || !onAgree}
               onClick={async () => {
@@ -287,15 +305,17 @@ export function StoreContactConsentCard({
                 : english
                   ? "Agree and request contact"
                   : "同意并申请联系"}
-            </button>
-            <button
-              className="button button-muted"
+            </Button>
+            <Button
+              variant="soft"
+              size="md"
+              className="min-h-11"
               type="button"
               disabled={status === "agreeing"}
               onClick={() => setStatus("declined")}
             >
               {english ? "Decline" : "拒绝"}
-            </button>
+            </Button>
           </div>
         </>
       ) : (
@@ -309,9 +329,12 @@ export function StoreContactConsentCard({
               : "请先在账号中绑定并验证联系方式；平台不支持手填。"}
           </span>
           <div className="store-contact-consent-empty-actions">
-            <a
-              href={`${currentLocation().pathname}?account=identity`}
-              onClick={(event) => {
+            <Button
+              render={<a href={`${currentLocation().pathname}?account=identity`} />}
+              variant="outline"
+              size="md"
+              className="min-h-11"
+              onClick={(event: MouseEvent<HTMLButtonElement>) => {
                 // The app shell opens the account dialog in place (and cancels this
                 // event) so the ongoing store chat is not lost to a full navigation.
                 const handledInApp = !window.dispatchEvent(
@@ -323,10 +346,16 @@ export function StoreContactConsentCard({
               }}
             >
               {english ? "Open account bindings" : "前往账号绑定"}
-            </a>
-            <button type="button" onClick={() => void load()}>
+            </Button>
+            <Button
+              variant="outline"
+              size="md"
+              className="min-h-11"
+              type="button"
+              onClick={() => void load()}
+            >
               {english ? "I bound one — check again" : "我已完成绑定，重新检测"}
-            </button>
+            </Button>
           </div>
         </div>
       )}

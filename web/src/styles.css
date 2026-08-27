@@ -2005,7 +2005,6 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .store-contact-consent-heading span, .store-contact-consent-explain { margin: 0; color: var(--muted); font-size: 0.67rem; line-height: 1.52; }
 .store-contact-consent-loading, .store-contact-consent-error { min-height: 2.75rem; display: flex; align-items: center; gap: 0.45rem; color: var(--muted); font-size: 0.68rem; }
 .store-contact-consent-error span { flex: 1; }
-.store-contact-consent-error button, .store-contact-consent-error a, .store-contact-consent-empty a, .store-contact-consent-empty-actions button { min-height: 2.5rem; padding: 0 0.72rem; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: 0.55rem; background: var(--paper); color: var(--ink-soft); font: inherit; font-size: 0.66rem; font-weight: 680; text-decoration: none; cursor: pointer; }
 .store-contact-consent-channels { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.4rem; }
 .store-contact-consent-channels li { min-height: 3.2rem; padding: 0.48rem 0.6rem; display: flex; align-items: center; gap: 0.55rem; border: 1px solid var(--line); border-radius: 0.58rem; background: var(--paper); }
 .store-contact-consent-channels li > svg { flex: 0 0 auto; color: var(--muted); }
