@@ -60,6 +60,18 @@ describe("admin control target contract", () => {
       /\.subplatform-back-link \{ width: 2\.75rem; height: 2\.75rem;/,
     );
     expect(css).toMatch(
+      /\.platform-back-link \{[^}]*min-height: 2\.75rem;/,
+    );
+    expect(css).toMatch(
+      /\.mall-brand-fields input:not\(\[type="file"\]\) \{[^}]*min-height: 2\.75rem;/,
+    );
+    expect(css).toMatch(
+      /\.mall-brand-upload \.button \{ min-height: 2\.75rem;/,
+    );
+    expect(css).toMatch(
+      /\.mall-brand-legal-heading a \{ min-width: 2\.75rem; min-height: 2\.75rem;/,
+    );
+    expect(css).toMatch(
       /\.workspace-account-action \{ min-height: 2\.75rem;/,
     );
     expect(css).toMatch(/\.password-settings-revoke \{ min-height: 44px;/);
