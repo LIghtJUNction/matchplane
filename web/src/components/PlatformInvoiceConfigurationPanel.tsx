@@ -143,6 +143,7 @@ export function PlatformInvoiceConfigurationPanel({
       <SectionHeading
         eyebrow="Invoice configuration"
         title="发票配置"
+        actionClassName="invoice-provider-toggle min-h-11 min-w-11"
         action={
           providerEditorOpen
             ? "关闭配置"
@@ -204,6 +205,7 @@ export function PlatformInvoiceConfigurationPanel({
           <label>
             <span>名称</span>
             <input
+              className="min-h-11"
               required
               value={providerName}
               onChange={(event) => setProviderName(event.target.value)}
@@ -213,6 +215,7 @@ export function PlatformInvoiceConfigurationPanel({
           <label>
             <span>provider</span>
             <select
+              className="min-h-11"
               required
               value={providerKey}
               onChange={(event) => setProviderKey(event.target.value)}
@@ -226,6 +229,7 @@ export function PlatformInvoiceConfigurationPanel({
           <label>
             <span>模式</span>
             <select
+              className="min-h-11"
               required
               value={providerMode}
               onChange={(event) =>
@@ -241,6 +245,7 @@ export function PlatformInvoiceConfigurationPanel({
           <label>
             <span>secret reference</span>
             <input
+              className="min-h-11"
               required={providerMode === "production"}
               value={providerCredentialRef}
               onChange={(event) => setProviderCredentialRef(event.target.value)}
@@ -303,6 +308,7 @@ export function PlatformInvoiceConfigurationPanel({
             <label>
               <span>{targetMode === "test" ? "测试" : "生产"} provider</span>
               <select
+                className="min-h-11"
                 required
                 value={targetProviderId}
                 disabled={!modeWritable}

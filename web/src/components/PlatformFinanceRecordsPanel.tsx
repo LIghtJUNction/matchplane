@@ -306,20 +306,20 @@ export function PlatformFinanceRecordsPanel({
         aria-label="财务记录类型"
       >
         <Button
-          className="min-h-11 sm:min-h-9"
-          size="sm"
+          className="min-h-11"
+          size="md"
           type="button"
-          variant={view === "invoices" ? "secondary" : "ghost"}
+          variant={view === "invoices" ? "primary" : "ghost"}
           aria-pressed={view === "invoices"}
           onClick={() => setView("invoices")}
         >
           发票记录
         </Button>
         <Button
-          className="min-h-11 sm:min-h-9"
-          size="sm"
+          className="min-h-11"
+          size="md"
           type="button"
-          variant={view === "refunds" ? "secondary" : "ghost"}
+          variant={view === "refunds" ? "primary" : "ghost"}
           aria-pressed={view === "refunds"}
           onClick={() => setView("refunds")}
         >

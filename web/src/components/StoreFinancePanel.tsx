@@ -201,16 +201,16 @@ export function StoreFinancePanel({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div
-            className="flex rounded-lg bg-background-muted p-1"
+            className="store-finance-periods flex rounded-lg bg-background-muted p-1"
             aria-label={locale === "en" ? "Report period" : "报表周期"}
           >
             {(["month", "ninetyDays", "year"] as const).map((value) => (
               <Button
-                className="min-h-11 sm:min-h-9"
+                className="min-h-11"
                 key={value}
-                size="sm"
+                size="md"
                 type="button"
-                variant={period === value ? "secondary" : "ghost"}
+                variant={period === value ? "primary" : "ghost"}
                 aria-pressed={period === value}
                 onClick={() => setPeriod(value)}
               >
@@ -219,10 +219,10 @@ export function StoreFinancePanel({
             ))}
           </div>
           <Button
-            className="min-h-11 sm:min-h-9"
+            className="min-h-11"
             type="button"
             variant="outline"
-            size="sm"
+            size="md"
             onClick={() => setRefreshVersion((value) => value + 1)}
             disabled={loading}
           >
@@ -233,10 +233,10 @@ export function StoreFinancePanel({
             {text.refresh}
           </Button>
           <Button
-            className="min-h-11 sm:min-h-9"
+            className="min-h-11"
             type="button"
             variant="outline"
-            size="sm"
+            size="md"
             onClick={exportReport}
             disabled={!report || details.length === 0}
           >

@@ -229,6 +229,8 @@ export function ChangePasswordPanel({
             {copy.forgot}
           </a>
           <Button
+            className="min-h-11"
+            size="md"
             type="submit"
             disabled={
               saving || !currentPassword || !newPassword || !confirmPassword

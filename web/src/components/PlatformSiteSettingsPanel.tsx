@@ -146,6 +146,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-icp-number">
           <span>ICP备案号</span>
           <input
+            className="min-h-11"
             id="site-icp-number"
             value={icpNumber}
             onChange={(event) => setIcpNumber(event.target.value)}
@@ -156,6 +157,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-icp-subject">
           <span>备案主体</span>
           <input
+            className="min-h-11"
             id="site-icp-subject"
             value={icpSubject}
             onChange={(event) => setIcpSubject(event.target.value)}
@@ -166,6 +168,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-icp-url">
           <span>备案查询链接（可选）</span>
           <input
+            className="min-h-11"
             id="site-icp-url"
             type="url"
             value={icpRecordUrl}
@@ -177,6 +180,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-psb-number">
           <span>公安备案号（可选）</span>
           <input
+            className="min-h-11"
             id="site-psb-number"
             value={publicSecurityNumber}
             onChange={(event) => setPublicSecurityNumber(event.target.value)}
@@ -187,6 +191,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-psb-url">
           <span>公安备案链接（可选）</span>
           <input
+            className="min-h-11"
             id="site-psb-url"
             type="url"
             value={publicSecurityUrl}
