@@ -1,12 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import dynamic from "next/dynamic";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 
 import { spring } from "./components/Primitives";
 import { FloatingMarketplaceClerk } from "./components/FloatingMarketplaceClerk";
 import { MatchChat } from "./components/MatchChat";
-import { PlatformDashboard } from "./components/PlatformDashboard";
 import { PluginHost } from "./components/PluginHost";
 import { MarketplaceHome } from "./components/MarketplaceHome";
 import { PlatformFooter } from "./components/PlatformFooter";
@@ -35,6 +42,36 @@ import {
   clearPendingConversion,
   readPendingConversion,
 } from "./pending-conversion";
+
+const PlatformDashboardLocaleContext = createContext<"zh" | "en">("zh");
+
+function PlatformDashboardLoading() {
+  const locale = useContext(PlatformDashboardLocaleContext);
+  const message =
+    locale === "en"
+      ? "Loading the mall console…"
+      : "正在加载商城后台…";
+
+  return (
+    <section
+      className="surface root-marketplace-loading-state"
+      role="status"
+      aria-label={message}
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <p>{message}</p>
+    </section>
+  );
+}
+
+const PlatformDashboard = dynamic(
+  () =>
+    import("./components/PlatformDashboard").then(
+      (module) => module.PlatformDashboard,
+    ),
+  { loading: PlatformDashboardLoading },
+);
 
 export function App({ initialPath = "/" }: { initialPath?: string }) {
   const {
@@ -322,24 +359,26 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
 
   const genericWorkspace: ReactNode =
     role === "platform" ? (
-      <PlatformDashboard
-        paymentMode={paymentMode}
-        rootRole={authUser?.role}
-        onRequestModeChange={() => setModeDialogOpen(true)}
-        onBrandUpdated={(brand) =>
-          setSubplatform((current) =>
-            current.slug === "root"
-              ? {
-                  ...current,
-                  brandName: brand.name,
-                  label: brand.name,
-                  brandLogoUrl: brand.logoUrl ?? undefined,
-                }
-              : current,
-          )
-        }
-        onNotice={setNotice}
-      />
+      <PlatformDashboardLocaleContext.Provider value={locale}>
+        <PlatformDashboard
+          paymentMode={paymentMode}
+          rootRole={authUser?.role}
+          onRequestModeChange={() => setModeDialogOpen(true)}
+          onBrandUpdated={(brand) =>
+            setSubplatform((current) =>
+              current.slug === "root"
+                ? {
+                    ...current,
+                    brandName: brand.name,
+                    label: brand.name,
+                    brandLogoUrl: brand.logoUrl ?? undefined,
+                  }
+                : current,
+            )
+          }
+          onNotice={setNotice}
+        />
+      </PlatformDashboardLocaleContext.Provider>
     ) : (
       <StorefrontView
         catalogResolved={catalogResolved}

@@ -2,6 +2,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const platformDashboardModule = vi.hoisted(() => ({ loads: 0 }));
+
+vi.mock("./components/PlatformDashboard", async (importOriginal) => {
+  platformDashboardModule.loads += 1;
+  return importOriginal();
+});
+
 vi.mock("./lib/auth-client", () => ({
   authClient: {
     getSession: vi.fn(async () => {
@@ -132,6 +139,47 @@ async function openStoreAConversation(
 }
 
 describe("MatchPlane workspaces", () => {
+  it("loads the platform dashboard only for the platform role across role round trips", async () => {
+    const buyer = render(<App />);
+
+    await screen.findByRole("heading", { name: "说说你想找什么。", level: 1 });
+    expect(screen.queryByText("正在加载商城后台…")).not.toBeInTheDocument();
+    expect(platformDashboardModule.loads).toBe(0);
+    buyer.unmount();
+
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    window.history.replaceState(null, "", "/?role=platform");
+    const platform = render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "商城后台" }),
+    ).toBeInTheDocument();
+    expect(platformDashboardModule.loads).toBe(1);
+    platform.unmount();
+
+    window.history.replaceState(null, "", "/");
+    const returnedBuyer = render(<App />);
+
+    expect(
+      await screen.findByRole("textbox", {
+        name: "告诉 MatchPlane 你的需求",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("正在加载商城后台…")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "商城后台" }),
+    ).not.toBeInTheDocument();
+    returnedBuyer.unmount();
+
+    window.history.replaceState(null, "", "/?role=platform");
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "商城后台" }),
+    ).toBeInTheDocument();
+    expect(platformDashboardModule.loads).toBe(1);
+  });
+
   it("keeps the root as browse plus one inline shopping conversation", async () => {
     render(<App />);
 
