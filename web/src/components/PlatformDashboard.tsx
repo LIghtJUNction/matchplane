@@ -1,5 +1,11 @@
 import { useCallback, useState } from "react";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@appica/ui-react/tabs";
+import {
   Bot,
   ChevronLeft,
   CreditCard,
@@ -58,6 +64,21 @@ type PlatformSection =
   | "access"
   | "payments"
   | "finance";
+
+type MarketplaceSettingsModule =
+  | "brand"
+  | "email"
+  | "identity"
+  | "filing";
+
+interface MarketplaceSettingsModulesProps {
+  organizationId?: string;
+  platformName?: string;
+  rootRole?: string | null;
+  setupStatus: string;
+  onBrandUpdated?: (brand: { name: string; logoUrl: string | null }) => void;
+  onNotice: (message: string) => void;
+}
 
 export function PlatformDashboard({
   paymentMode,
@@ -301,47 +322,14 @@ export function PlatformDashboard({
                 aria-labelledby="platform-tab-brand"
                 hidden={activeSection !== "brand"}
               >
-                <MallBrandPanel
+                <MarketplaceSettingsModules
+                  organizationId={verifiedSetup?.root.organization?.id}
+                  platformName={verifiedSetup?.root.organization?.name}
                   rootRole={rootRole}
+                  setupStatus={bootstrap.setup.status}
                   onBrandUpdated={onBrandUpdated}
                   onNotice={onNotice}
                 />
-                <LoginMethodsPanel />
-                <section
-                  className="platform-component-panel"
-                  aria-label="商城账号邮件服务"
-                >
-                  <RootEmailConfigPanel
-                    rootRole={rootRole}
-                    onNotice={onNotice}
-                  />
-                </section>
-                <NationalIdentityConfigPanel
-                  rootRole={rootRole}
-                  onNotice={onNotice}
-                />
-                <WeChatLoginConfigPanel
-                  rootRole={rootRole}
-                  onNotice={onNotice}
-                />
-                <PhoneLoginConfigPanel
-                  rootRole={rootRole}
-                  onNotice={onNotice}
-                />
-                {verifiedSetup?.root.organization?.id ? (
-                  <PlatformSiteSettingsPanel
-                    organizationId={verifiedSetup.root.organization.id}
-                    platformPath="/"
-                    platformName={verifiedSetup.root.organization.name}
-                    onNotice={onNotice}
-                  />
-                ) : (
-                  <p className="platform-access-empty" role="status">
-                    {bootstrap.setup.status === "ready"
-                      ? "商城组织已确认为未创建；创建后才能保存站点设置。"
-                      : "商城组织状态尚未验证，站点设置保存已暂停。"}
-                  </p>
-                )}
               </div>
             ) : null}
             {visitedSections.has("ai") ? (
@@ -495,5 +483,153 @@ export function PlatformDashboard({
         </div>
       </div>
     </div>
+  );
+}
+
+function MarketplaceSettingsModules({
+  organizationId,
+  platformName,
+  rootRole,
+  setupStatus,
+  onBrandUpdated,
+  onNotice,
+}: MarketplaceSettingsModulesProps) {
+  const [activeModule, setActiveModule] =
+    useState<MarketplaceSettingsModule>("brand");
+  const [visitedModules, setVisitedModules] = useState<
+    ReadonlySet<MarketplaceSettingsModule>
+  >(() => new Set(["brand"]));
+  const activateModule = useCallback((module: MarketplaceSettingsModule) => {
+    setActiveModule(module);
+    setVisitedModules((current) => {
+      if (current.has(module)) return current;
+      const next = new Set(current);
+      next.add(module);
+      return next;
+    });
+  }, []);
+
+  return (
+    <Tabs
+      value={activeModule}
+      onValueChange={(value) =>
+        activateModule(value as MarketplaceSettingsModule)
+      }
+      variant="pill"
+      size="md"
+      className="min-w-0"
+    >
+      <HorizontalTabScroller
+        activeKey={activeModule}
+        className="w-full"
+        locale="zh"
+      >
+        <TabsList aria-label="商城设置模块" className="w-max min-w-max">
+          <TabsTrigger
+            id="marketplace-settings-tab-brand"
+            value="brand"
+            className="min-h-11"
+            aria-controls="marketplace-settings-panel-brand"
+          >
+            品牌
+          </TabsTrigger>
+          <TabsTrigger
+            id="marketplace-settings-tab-email"
+            value="email"
+            className="min-h-11"
+            aria-controls="marketplace-settings-panel-email"
+          >
+            邮件
+          </TabsTrigger>
+          <TabsTrigger
+            id="marketplace-settings-tab-identity"
+            value="identity"
+            className="min-h-11"
+            aria-controls="marketplace-settings-panel-identity"
+          >
+            登录与身份
+          </TabsTrigger>
+          <TabsTrigger
+            id="marketplace-settings-tab-filing"
+            value="filing"
+            className="min-h-11"
+            aria-controls="marketplace-settings-panel-filing"
+          >
+            备案
+          </TabsTrigger>
+        </TabsList>
+      </HorizontalTabScroller>
+
+      {visitedModules.has("brand") ? (
+        <TabsContent
+          id="marketplace-settings-panel-brand"
+          value="brand"
+          aria-labelledby="marketplace-settings-tab-brand"
+          className="min-w-0"
+          keepMounted
+        >
+          <MallBrandPanel
+            rootRole={rootRole}
+            onBrandUpdated={onBrandUpdated}
+            onNotice={onNotice}
+          />
+        </TabsContent>
+      ) : null}
+      {visitedModules.has("email") ? (
+        <TabsContent
+          id="marketplace-settings-panel-email"
+          value="email"
+          aria-labelledby="marketplace-settings-tab-email"
+          className="min-w-0"
+          keepMounted
+        >
+          <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
+        </TabsContent>
+      ) : null}
+      {visitedModules.has("identity") ? (
+        <TabsContent
+          id="marketplace-settings-panel-identity"
+          value="identity"
+          aria-labelledby="marketplace-settings-tab-identity"
+          className="min-w-0"
+          keepMounted
+        >
+          <LoginMethodsPanel />
+          <NationalIdentityConfigPanel
+            rootRole={rootRole}
+            onNotice={onNotice}
+          />
+          <WeChatLoginConfigPanel
+            rootRole={rootRole}
+            onNotice={onNotice}
+          />
+          <PhoneLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
+        </TabsContent>
+      ) : null}
+      {visitedModules.has("filing") ? (
+        <TabsContent
+          id="marketplace-settings-panel-filing"
+          value="filing"
+          aria-labelledby="marketplace-settings-tab-filing"
+          className="min-w-0"
+          keepMounted
+        >
+          {organizationId ? (
+            <PlatformSiteSettingsPanel
+              organizationId={organizationId}
+              platformPath="/"
+              platformName={platformName ?? "商城"}
+              onNotice={onNotice}
+            />
+          ) : (
+            <p className="platform-access-empty" role="status">
+              {setupStatus === "ready"
+                ? "商城组织已确认为未创建；创建后才能保存站点设置。"
+                : "商城组织状态尚未验证，站点设置保存已暂停。"}
+            </p>
+          )}
+        </TabsContent>
+      ) : null}
+    </Tabs>
   );
 }

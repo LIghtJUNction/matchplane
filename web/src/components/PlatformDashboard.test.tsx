@@ -20,6 +20,12 @@ const api = vi.hoisted(() => ({
   getPlatformApiKeys: vi.fn(),
 }));
 const bootstrapMock = vi.hoisted(() => ({ current: undefined as unknown }));
+const settingsModuleRequests = vi.hoisted(() => ({
+  brand: vi.fn(),
+  email: vi.fn(),
+  identity: vi.fn(),
+  filing: vi.fn(),
+}));
 
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
@@ -30,7 +36,17 @@ vi.mock("../hooks/usePlatformBootstrapResources", () => ({
   freshBootstrapResourceData: (resource: { status: string; data?: unknown }) =>
     resource.status === "ready" ? resource.data : null,
 }));
-vi.mock("./LoginMethodsPanel", () => ({ LoginMethodsPanel: () => null }));
+vi.mock("./LoginMethodsPanel", async () => {
+  const { useEffect } = await import("react");
+  return {
+    LoginMethodsPanel: () => {
+      useEffect(() => {
+        settingsModuleRequests.identity();
+      }, []);
+      return <div data-testid="login-methods-panel" />;
+    },
+  };
+});
 vi.mock("./PlatformBootstrapNotice", () => ({
   PlatformBootstrapNotice: () => null,
 }));
@@ -55,30 +71,56 @@ vi.mock("./PlatformPaymentRoutingPanel", () => ({
     <div data-testid="payment-routing-panel" />
   ),
 }));
-vi.mock("./PlatformSiteSettingsPanel", () => ({
-  PlatformSiteSettingsPanel: () => null,
-}));
-vi.mock("./RootEmailConfigPanel", () => ({
-  RootEmailConfigPanel: () => null,
-}));
+vi.mock("./PlatformSiteSettingsPanel", async () => {
+  const { useEffect } = await import("react");
+  return {
+    PlatformSiteSettingsPanel: () => {
+      useEffect(() => {
+        settingsModuleRequests.filing();
+      }, []);
+      return <div data-testid="site-settings-panel" />;
+    },
+  };
+});
+vi.mock("./RootEmailConfigPanel", async () => {
+  const { useEffect } = await import("react");
+  return {
+    RootEmailConfigPanel: () => {
+      useEffect(() => {
+        settingsModuleRequests.email();
+      }, []);
+      return <div data-testid="email-config-panel" />;
+    },
+  };
+});
 vi.mock("./PlatformAiConfigPanel", () => ({
   PlatformAiConfigPanel: () => <div data-testid="ai-panel-content" />,
 }));
 vi.mock("./NationalIdentityConfigPanel", () => ({
-  NationalIdentityConfigPanel: () => null,
+  NationalIdentityConfigPanel: () => (
+    <div data-testid="national-identity-config-panel" />
+  ),
 }));
 vi.mock("./WeChatLoginConfigPanel", () => ({
-  WeChatLoginConfigPanel: () => null,
+  WeChatLoginConfigPanel: () => <div data-testid="wechat-config-panel" />,
 }));
 vi.mock("./PhoneLoginConfigPanel", () => ({
-  PhoneLoginConfigPanel: () => null,
+  PhoneLoginConfigPanel: () => <div data-testid="phone-config-panel" />,
 }));
 vi.mock("./MallCatalogModeration", () => ({
   MallCatalogModeration: () => null,
 }));
-vi.mock("./MallBrandPanel", () => ({
-  MallBrandPanel: () => <div data-testid="brand-panel-content" />,
-}));
+vi.mock("./MallBrandPanel", async () => {
+  const { useEffect } = await import("react");
+  return {
+    MallBrandPanel: () => {
+      useEffect(() => {
+        settingsModuleRequests.brand();
+      }, []);
+      return <div data-testid="brand-panel-content" />;
+    },
+  };
+});
 vi.mock("./MallInitializationPanel", () => ({
   MallInitializationPanel: ({
     onOpenStores,
@@ -151,28 +193,159 @@ beforeEach(() => {
 
 describe("PlatformDashboard deferred sections", () => {
   it.each([320, 390])(
-    "contains the tab strip without document overflow at %ipx",
-    (width) => {
+    "contains both tab strips without document overflow at %ipx",
+    async (width) => {
+      const user = userEvent.setup();
       const { container } = render(
         <div style={{ width }}>
           <PlatformDashboard {...dashboardProps} />
         </div>,
       );
 
-      const scroller = container.querySelector(
+      await user.click(screen.getByRole("tab", { name: "商城设置" }));
+
+      const scrollers = container.querySelectorAll(
         '[data-horizontal-tab-scroller="true"]',
       );
-      const viewport = container.querySelector(
+      const viewports = container.querySelectorAll(
         '[data-horizontal-tab-scroller-viewport="true"]',
       );
-      expect(scroller).toHaveClass("min-w-0", "w-full");
-      expect(viewport).toHaveClass("min-w-0", "overflow-x-auto");
-      expect(viewport).toContainElement(
+      expect(scrollers).toHaveLength(2);
+      expect(viewports).toHaveLength(2);
+      for (const scroller of scrollers) {
+        expect(scroller).toHaveClass("min-w-0", "w-full");
+      }
+      for (const viewport of viewports) {
+        expect(viewport).toHaveClass("min-w-0", "overflow-x-auto");
+      }
+      expect(viewports[0]).toContainElement(
         screen.getByRole("tablist", { name: "商城管理分区" }),
+      );
+      expect(viewports[1]).toContainElement(
+        screen.getByRole("tablist", { name: "商城设置模块" }),
       );
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     },
   );
+
+  it("lazily mounts marketplace settings modules once and preserves their tabpanels", async () => {
+    const user = userEvent.setup();
+    render(<PlatformDashboard {...dashboardProps} />);
+
+    expect(screen.queryByTestId("brand-panel-content")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "商城设置" }));
+
+    const outerTab = screen.getByRole("tab", { name: "商城设置" });
+    const outerPanel = document.getElementById("platform-panel-brand");
+    expect(outerTab).toHaveAttribute("id", "platform-tab-brand");
+    expect(outerTab).toHaveAttribute("aria-controls", "platform-panel-brand");
+    expect(outerPanel).toHaveAttribute("role", "tabpanel");
+    expect(outerPanel).toHaveAttribute("aria-labelledby", "platform-tab-brand");
+
+    const moduleLabels = ["品牌", "邮件", "登录与身份", "备案"] as const;
+    for (const label of moduleLabels) {
+      expect(screen.getByRole("tab", { name: label })).toHaveClass("min-h-11");
+    }
+    expect(screen.getByRole("tab", { name: "品牌" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByTestId("brand-panel-content")).toBeVisible();
+    expect(screen.queryByTestId("email-config-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("login-methods-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("site-settings-panel")).not.toBeInTheDocument();
+    expect(settingsModuleRequests.brand).toHaveBeenCalledOnce();
+    expect(settingsModuleRequests.email).not.toHaveBeenCalled();
+    expect(settingsModuleRequests.identity).not.toHaveBeenCalled();
+    expect(settingsModuleRequests.filing).not.toHaveBeenCalled();
+
+    const brandPanel = document.getElementById(
+      "marketplace-settings-panel-brand",
+    );
+    const brandContent = screen.getByTestId("brand-panel-content");
+    expect(screen.getByRole("tab", { name: "品牌" })).toHaveAttribute(
+      "aria-controls",
+      brandPanel?.id,
+    );
+    expect(brandPanel).toHaveAttribute(
+      "aria-labelledby",
+      "marketplace-settings-tab-brand",
+    );
+    expect(brandPanel).toHaveAttribute("role", "tabpanel");
+
+    await user.click(screen.getByRole("tab", { name: "邮件" }));
+    const emailPanel = document.getElementById(
+      "marketplace-settings-panel-email",
+    );
+    const emailContent = screen.getByTestId("email-config-panel");
+    expect(screen.getByRole("tab", { name: "邮件" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "品牌" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+    expect(emailContent).toBeVisible();
+    expect(brandPanel).not.toBeVisible();
+
+    await user.click(screen.getByRole("tab", { name: "登录与身份" }));
+    const identityPanel = document.getElementById(
+      "marketplace-settings-panel-identity",
+    );
+    const identityContent = screen.getByTestId("login-methods-panel");
+    expect(identityContent).toBeVisible();
+    expect(screen.getByTestId("national-identity-config-panel")).toBeVisible();
+    expect(screen.getByTestId("wechat-config-panel")).toBeVisible();
+    expect(screen.getByTestId("phone-config-panel")).toBeVisible();
+
+    await user.click(screen.getByRole("tab", { name: "备案" }));
+    const filingPanel = document.getElementById(
+      "marketplace-settings-panel-filing",
+    );
+    const filingContent = screen.getByTestId("site-settings-panel");
+    expect(filingContent).toBeVisible();
+
+    for (const [label, panelId, tabId] of [
+      [
+        "邮件",
+        "marketplace-settings-panel-email",
+        "marketplace-settings-tab-email",
+      ],
+      [
+        "登录与身份",
+        "marketplace-settings-panel-identity",
+        "marketplace-settings-tab-identity",
+      ],
+      [
+        "备案",
+        "marketplace-settings-panel-filing",
+        "marketplace-settings-tab-filing",
+      ],
+    ] as const) {
+      const tab = screen.getByRole("tab", { name: label });
+      const panel = document.getElementById(panelId);
+      expect(tab).toHaveAttribute("aria-controls", panelId);
+      expect(panel).toHaveAttribute("role", "tabpanel");
+      expect(panel).toHaveAttribute("aria-labelledby", tabId);
+    }
+
+    await user.click(screen.getByRole("tab", { name: "品牌" }));
+    expect(screen.getByTestId("brand-panel-content")).toBe(brandContent);
+    await user.click(screen.getByRole("tab", { name: "邮件" }));
+    expect(screen.getByTestId("email-config-panel")).toBe(emailContent);
+    await user.click(screen.getByRole("tab", { name: "登录与身份" }));
+    expect(screen.getByTestId("login-methods-panel")).toBe(identityContent);
+    await user.click(screen.getByRole("tab", { name: "备案" }));
+    expect(screen.getByTestId("site-settings-panel")).toBe(filingContent);
+    expect(emailPanel).not.toBeVisible();
+    expect(identityPanel).not.toBeVisible();
+    expect(filingPanel).toBeVisible();
+    expect(settingsModuleRequests.brand).toHaveBeenCalledOnce();
+    expect(settingsModuleRequests.email).toHaveBeenCalledOnce();
+    expect(settingsModuleRequests.identity).toHaveBeenCalledOnce();
+    expect(settingsModuleRequests.filing).toHaveBeenCalledOnce();
+  });
 
   it("defers the 11 identified offscreen GETs and loads each resource group once", async () => {
     const user = userEvent.setup();
