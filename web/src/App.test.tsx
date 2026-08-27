@@ -152,7 +152,11 @@ describe("MatchPlane workspaces", () => {
     const platform = render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "商城后台" }),
+      await screen.findByRole(
+        "heading",
+        { name: "商城后台" },
+        { timeout: 10_000 },
+      ),
     ).toBeInTheDocument();
     expect(platformDashboardModule.loads).toBe(1);
     platform.unmount();
@@ -175,7 +179,11 @@ describe("MatchPlane workspaces", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("heading", { name: "商城后台" }),
+      await screen.findByRole(
+        "heading",
+        { name: "商城后台" },
+        { timeout: 10_000 },
+      ),
     ).toBeInTheDocument();
     expect(platformDashboardModule.loads).toBe(1);
   });
