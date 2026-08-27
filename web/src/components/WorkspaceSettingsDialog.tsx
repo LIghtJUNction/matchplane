@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { Search, X, type LucideIcon } from "lucide-react";
 import {
   Dialog,
@@ -12,6 +12,65 @@ import {
   DialogTitle,
 } from "@appica/ui-react/dialog";
 import { Button } from "@appica/ui-react/button";
+
+const DIALOG_TAB_STOP_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[contenteditable]:not([contenteditable='false'])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+function isAvailableTabStop(element: HTMLElement, dialog: HTMLElement) {
+  if (element.tabIndex < 0 || element.matches(":disabled")) return false;
+  for (
+    let current: HTMLElement | null = element;
+    current;
+    current = current.parentElement
+  ) {
+    if (
+      current.hidden ||
+      current.inert ||
+      current.getAttribute("aria-hidden") === "true"
+    ) {
+      return false;
+    }
+    const style = window.getComputedStyle(current);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    if (current === dialog) break;
+  }
+  return true;
+}
+
+function keepTabFocusInsideDialog(event: KeyboardEvent<HTMLDivElement>) {
+  if (
+    event.key !== "Tab" ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey
+  ) {
+    return;
+  }
+
+  const dialog = event.currentTarget;
+  const tabStops = Array.from(
+    dialog.querySelectorAll<HTMLElement>(DIALOG_TAB_STOP_SELECTOR),
+  ).filter((element) => isAvailableTabStop(element, dialog));
+  if (!tabStops.length) return;
+
+  const first = tabStops[0];
+  const last = tabStops[tabStops.length - 1];
+  const active = document.activeElement;
+  // Base UI's modal trap uses sibling focus guards and redirects from them on
+  // the next animation frame. Cycle at the popup boundary so focus never
+  // transiently leaves the element exposed as the dialog.
+  if (event.shiftKey ? active === first : active === last) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  }
+}
 
 interface WorkspaceSettingsNavigationItem {
   id: string;
@@ -56,6 +115,7 @@ export function WorkspaceSettingsDialog({
 }: WorkspaceSettingsDialogProps) {
   const titleId = useId();
   const searchId = useId();
+  const initialFocusRef = useRef<HTMLButtonElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState("");
   const showSearch = Boolean(searchLabel) && navigation.length >= 6;
@@ -78,19 +138,16 @@ export function WorkspaceSettingsDialog({
   useEffect(() => {
     if (!open) return;
     setQuery("");
+    const activeElement = document.activeElement;
     restoreFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
         : null;
-    return () => {
-      const previous = restoreFocusRef.current;
-      restoreFocusRef.current = null;
-      previous?.focus();
-    };
   }, [open]);
 
   return (
     <Dialog
+      modal
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) onClose();
@@ -101,7 +158,10 @@ export function WorkspaceSettingsDialog({
         closeButton={false}
         closeLabel={backdropLabel}
         frame={false}
+        initialFocus={initialFocusRef}
+        finalFocus={restoreFocusRef}
         aria-labelledby={titleId}
+        onKeyDown={keepTabFocusInsideDialog}
       >
         <div className="workspace-settings-layout">
           <aside
@@ -109,6 +169,7 @@ export function WorkspaceSettingsDialog({
             aria-label={navigationLabel || title}
           >
             <Button
+              ref={initialFocusRef}
               className="workspace-settings-close"
               variant="ghost"
               size="icon-sm"
