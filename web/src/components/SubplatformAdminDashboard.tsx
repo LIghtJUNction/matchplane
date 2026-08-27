@@ -21,6 +21,13 @@ import { StoreCustomersPanel } from "./StoreCustomersPanel";
 import { StoreFinancePanel } from "./StoreFinancePanel";
 import { StoreManagementPanel } from "./StoreManagementPanel";
 
+type StoreConsoleSection =
+  | "products"
+  | "customers"
+  | "finance"
+  | "store"
+  | "team";
+
 /** Store operators manage commerce only; mall infrastructure stays in the root console. */
 export function SubplatformAdminDashboard({
   locale,
@@ -39,10 +46,24 @@ export function SubplatformAdminDashboard({
   onStoreUpdated: (store: StoreSummary) => void;
   initialSection?: "products" | "customers";
 }) {
-  const [section, setSection] = useState<
-    "products" | "customers" | "finance" | "store" | "team"
-  >(initialSection);
+  const [section, setSection] = useState<StoreConsoleSection>(initialSection);
+  const [visitedSections, setVisitedSections] = useState<
+    ReadonlySet<StoreConsoleSection>
+  >(() => new Set([initialSection]));
   const english = locale === "en";
+
+  const activateSection = (nextSection: StoreConsoleSection) => {
+    const requiresManagement =
+      nextSection === "finance" ||
+      nextSection === "store" ||
+      nextSection === "team";
+    if (requiresManagement && !canManageStore) return;
+
+    setVisitedSections((visited) =>
+      visited.has(nextSection) ? visited : new Set(visited).add(nextSection),
+    );
+    setSection(nextSection);
+  };
 
   return (
     <div className="dashboard subplatform-admin-dashboard">
@@ -60,7 +81,7 @@ export function SubplatformAdminDashboard({
             <button
               type="button"
               className="store-closed-banner-action"
-              onClick={() => setSection("store")}
+              onClick={() => activateSection("store")}
             >
               {english
                 ? "Go to store details to reopen"
@@ -74,7 +95,7 @@ export function SubplatformAdminDashboard({
         <Tabs
           value={section}
           onValueChange={(value) =>
-            setSection(value as typeof section)
+            activateSection(value as StoreConsoleSection)
           }
           variant="pill"
           size="md"
@@ -125,24 +146,30 @@ export function SubplatformAdminDashboard({
       </div>
 
       <div className="store-console-content">
-        <div hidden={section !== "products"}>
-          <SellerDashboard
-            locale={locale}
-            onNotice={onNotice}
-            subplatform={subplatform}
-          />
-        </div>
-        <div hidden={section !== "customers"}>
-          <StoreCustomersPanel storeId={store.id} locale={locale} />
-        </div>
-        {canManageStore && section === "finance" ? (
-          <StoreFinancePanel
-            locale={locale}
-            onNotice={onNotice}
-            store={store}
-          />
+        {visitedSections.has("products") ? (
+          <div hidden={section !== "products"}>
+            <SellerDashboard
+              locale={locale}
+              onNotice={onNotice}
+              subplatform={subplatform}
+            />
+          </div>
         ) : null}
-        {canManageStore ? (
+        {visitedSections.has("customers") ? (
+          <div hidden={section !== "customers"}>
+            <StoreCustomersPanel storeId={store.id} locale={locale} />
+          </div>
+        ) : null}
+        {canManageStore && visitedSections.has("finance") ? (
+          <div hidden={section !== "finance"}>
+            <StoreFinancePanel
+              locale={locale}
+              onNotice={onNotice}
+              store={store}
+            />
+          </div>
+        ) : null}
+        {canManageStore && visitedSections.has("store") ? (
           <div hidden={section !== "store"}>
             <StoreManagementPanel
               store={store}
@@ -153,7 +180,7 @@ export function SubplatformAdminDashboard({
             />
           </div>
         ) : null}
-        {canManageStore ? (
+        {canManageStore && visitedSections.has("team") ? (
           <div hidden={section !== "team"}>
             <PlatformAccessPanel
               organizations={
