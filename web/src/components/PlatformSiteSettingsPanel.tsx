@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@appica/ui-react/button";
 import { type SyntheticEvent, useEffect, useState } from "react";
 import { Search, Save, ShieldCheck } from "lucide-react";
 
@@ -125,15 +126,17 @@ export function PlatformSiteSettingsPanel({
     >
       <div className="site-settings-heading">
         <SectionHeading eyebrow="网站与合规" title="备案信息" />
-        <button
-          className="button button-light site-settings-lookup"
+        <Button
+          className="site-settings-lookup min-h-11!"
+          variant="outline"
+          size="md"
           type="button"
           onClick={() => void lookup()}
           disabled={lookingUp || loading}
         >
           <Search size={16} aria-hidden="true" />
           {lookingUp ? "查询中…" : "自动查询当前域名"}
-        </button>
+        </Button>
       </div>
       <p className="site-settings-intro">
         {platformName}{" "}
@@ -200,14 +203,16 @@ export function PlatformSiteSettingsPanel({
               ? ` · 最近查询 ${formatDate(settings.lookup_checked_at)}`
               : ""}
           </p>
-          <button
-            className="button button-dark"
+          <Button
+            className="min-h-11"
+            variant="primary"
+            size="md"
             type="submit"
             disabled={saving || loading}
           >
             <Save size={16} aria-hidden="true" />
             {saving ? "保存中…" : "保存备案信息"}
-          </button>
+          </Button>
         </div>
       </form>
     </section>
