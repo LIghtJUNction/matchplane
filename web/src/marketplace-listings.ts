@@ -99,9 +99,14 @@ function mapRecommendation(
     item.match_risks ?? stringList(dynamicItem.risks) ?? undefined;
   if (reasons?.length) listing.reasons = reasons;
   if (risks?.length) listing.risks = risks;
-  if (intentId || item.match_score !== undefined) {
+  // Only surface a score when the server returned a real finite value.
+  // Missing scores must stay undefined — never invent 0% for an intent hit.
+  if (
+    typeof item.match_score === "number" &&
+    Number.isFinite(item.match_score)
+  ) {
     listing.matchScore = Math.round(
-      Math.max(0, Math.min(1, item.match_score ?? 0)) * 100,
+      Math.max(0, Math.min(1, item.match_score)) * 100,
     );
   }
 

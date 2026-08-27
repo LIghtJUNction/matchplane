@@ -196,12 +196,13 @@ async function recordAssistantUsage(input: {
       input.subject,
       minimizeQuestion(input.question),
       randomUUID(),
-      input.model ?? "deterministic-search",
+      input.model,
       input.usage?.promptTokens ?? null,
       input.usage?.completionTokens ?? null,
       input.usage?.totalTokens ?? null,
       JSON.stringify(input.toolCalls.slice(0, 16)),
-      Math.max(1, Math.min(16, Math.trunc(input.modelCalls))),
+      // Preserve factual 0 for deterministic paths; never invent a model call.
+      Math.max(0, Math.min(16, Math.trunc(input.modelCalls) || 0)),
     ],
   );
 }
