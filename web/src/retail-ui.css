@@ -3433,7 +3433,8 @@ body {
 
 .marketplace-search-trace {
   width: min(100%, 72rem);
-  padding: clamp(1.1rem, 2.6vw, 1.7rem);
+  min-width: 0;
+  padding: clamp(0.9rem, 2vw, 1.25rem);
   border: 1px solid var(--retail-line);
   border-radius: 1.2rem;
   background: color-mix(in srgb, var(--retail-surface-muted) 72%, transparent);
@@ -3442,29 +3443,77 @@ body {
 
 .marketplace-search-trace-heading {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
-  gap: 1.5rem;
-  margin-bottom: 1.25rem;
-}
-
-.marketplace-search-trace-kicker {
-  display: block;
-  margin-bottom: 0.35rem;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .marketplace-search-trace-heading h2 {
+  min-width: 0;
   margin: 0;
   color: var(--retail-ink);
-  font-size: clamp(1.2rem, 2vw, 1.55rem);
-  letter-spacing: -0.03em;
+  font-size: clamp(1.05rem, 1.7vw, 1.25rem);
+  letter-spacing: -0.025em;
 }
 
-.marketplace-search-trace-heading > p {
+.marketplace-search-trace-toggle {
+  flex: 0 0 auto;
+  min-height: max(2.75rem, 44px);
+  max-width: 100%;
+  gap: 0.45rem;
+  white-space: normal;
+}
+
+.marketplace-search-trace-toggle svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  transition: transform 160ms ease-out;
+}
+
+.marketplace-search-trace-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.marketplace-search-trace-summary {
+  display: flex;
+  min-width: 0;
+  min-height: max(2.75rem, 44px);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.85rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--retail-line);
+  border-radius: 0.8rem;
+  background: var(--retail-surface);
+}
+
+.marketplace-search-trace-summary-path {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
   margin: 0;
   color: var(--retail-muted);
   font-size: 0.78rem;
-  text-align: right;
+}
+
+.marketplace-search-trace-summary-path strong {
+  color: var(--retail-ink);
+}
+
+.marketplace-search-trace-summary-path svg {
+  width: 0.8rem;
+  height: 0.8rem;
+  flex: 0 0 auto;
+}
+
+.marketplace-search-trace-summary > small {
+  color: var(--retail-muted);
+  font-size: 0.72rem;
 }
 
 .marketplace-search-trace-flow {
@@ -3475,7 +3524,7 @@ body {
     );
   align-items: stretch;
   gap: 0.6rem;
-  margin: 0;
+  margin: 0.85rem 0 0;
   padding: 0;
   list-style: none;
 }
@@ -3650,12 +3699,17 @@ body {
   }
 
   .marketplace-search-trace-heading {
-    display: grid;
-    gap: 0.45rem;
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 
-  .marketplace-search-trace-heading > p {
-    text-align: left;
+  .marketplace-search-trace-heading h2 {
+    flex: 1 1 10rem;
+    padding-block: 0.5rem;
+  }
+
+  .marketplace-search-trace-summary > small {
+    width: 100%;
   }
 
   .marketplace-search-trace-flow {
@@ -3695,6 +3749,7 @@ body {
   }
 
   .marketplace-search-trace-store,
+  .marketplace-search-trace-toggle svg,
   .root-marketplace-scroll-cue span {
     transition: none !important;
     transition-duration: 0s !important;

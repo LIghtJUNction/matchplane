@@ -238,6 +238,7 @@ describe("MarketplaceHome actions", () => {
       screen.getByRole("heading", { name: "这些结果来自哪里" }),
     ).toBeInTheDocument();
     expect(screen.getByText("2 家店铺返回 3 个可见结果")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看检索路径" }));
     await user.click(
       screen.getByRole("button", {
         name: "进入示例店铺甲，2 个可见结果",
@@ -262,10 +263,13 @@ describe("MarketplaceHome actions", () => {
       screen.getByText("1 visible match from 1 store"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", {
+      screen.getByRole("button", { name: "View search path" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("button", {
         name: "Open Example Store, 1 visible match",
       }),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
   });
 
   it("uses a keyboard-navigable toggle group for category filtering", async () => {

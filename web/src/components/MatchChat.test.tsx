@@ -166,8 +166,9 @@ describe("MatchChat sending state", () => {
       expect(stored?.owner).toBe("user:user-2");
     });
   });
-  it("shows only the typing indicator until a result arrives", async () => {
+  it("resets prior provenance while keeping visible search progress until a result arrives", async () => {
     const user = userEvent.setup();
+    const onSearchTrace = vi.fn();
     askMallShoppingAssistant.mockImplementation(() => {
       routePromise.current = new Promise((resolve) => {
         resolveRoute.current = () =>
@@ -180,7 +181,14 @@ describe("MatchChat sending state", () => {
       });
       return routePromise.current;
     });
-    render(<MatchChat home onNotice={vi.fn()} subplatform={subplatform} />);
+    render(
+      <MatchChat
+        home
+        onNotice={vi.fn()}
+        onSearchTrace={onSearchTrace}
+        subplatform={subplatform}
+      />,
+    );
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -188,6 +196,7 @@ describe("MatchChat sending state", () => {
     await user.type(input, "寻找合适的方案");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
+    expect(onSearchTrace).toHaveBeenCalledWith(null);
     expect(
       screen.getByRole("status", { name: "正在回复…" }),
     ).toBeInTheDocument();
@@ -210,8 +219,9 @@ describe("MatchChat sending state", () => {
     resolveRoute.current?.();
   });
 
-  it("keeps a failed request retryable without turning the error into an assistant message", async () => {
+  it("keeps a failed request reason retryable after resetting prior provenance", async () => {
     const user = userEvent.setup();
+    const onSearchTrace = vi.fn();
     askMallShoppingAssistant.mockRejectedValueOnce(
       new MarketplaceApiError(429, "请求过于频繁，请稍后再试。", {
         code: "rate_limited",
@@ -219,7 +229,14 @@ describe("MatchChat sending state", () => {
         retryAfterMs: 90_000,
       }),
     );
-    render(<MatchChat home onNotice={vi.fn()} subplatform={subplatform} />);
+    render(
+      <MatchChat
+        home
+        onNotice={vi.fn()}
+        onSearchTrace={onSearchTrace}
+        subplatform={subplatform}
+      />,
+    );
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
@@ -228,6 +245,7 @@ describe("MatchChat sending state", () => {
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
     const alert = await screen.findByRole("alert");
+    expect(onSearchTrace).toHaveBeenCalledWith(null);
     expect(alert).toHaveTextContent("请求过于频繁，请稍后再试。");
     expect(alert).toHaveTextContent("建议约 2 分钟后重试。");
     expect(input).toHaveValue("帮我找啊");
