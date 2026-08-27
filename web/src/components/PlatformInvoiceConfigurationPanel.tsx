@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@appica/ui-react/button";
 import { AlertTriangle, ReceiptText, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -190,9 +191,15 @@ export function PlatformInvoiceConfigurationPanel({
         >
           <div className="admin-editor-heading">
             <strong>新增发票 provider</strong>
-            <button type="button" onClick={() => setProviderEditorOpen(false)}>
+            <Button
+              className="min-h-11"
+              size="sm"
+              type="button"
+              variant="ghost"
+              onClick={() => setProviderEditorOpen(false)}
+            >
               关闭
-            </button>
+            </Button>
           </div>
           <label>
             <span>名称</span>
@@ -250,9 +257,11 @@ export function PlatformInvoiceConfigurationPanel({
               spellCheck={false}
             />
           </label>
-          <button
-            className="button button-dark"
+          <Button
+            className="min-h-11"
+            size="md"
             type="submit"
+            variant="primary"
             disabled={
               controller.mutation !== null ||
               !providerWritable ||
@@ -260,7 +269,7 @@ export function PlatformInvoiceConfigurationPanel({
             }
           >
             {controller.mutation === "provider" ? "保存中…" : "保存 provider"}
-          </button>
+          </Button>
         </form>
       ) : null}
 
@@ -310,8 +319,11 @@ export function PlatformInvoiceConfigurationPanel({
                 ))}
               </select>
             </label>
-            <button
+            <Button
+              className="min-h-11"
+              size="md"
               type="submit"
+              variant="primary"
               disabled={
                 controller.mutation !== null ||
                 !modeWritable ||
@@ -319,7 +331,7 @@ export function PlatformInvoiceConfigurationPanel({
               }
             >
               切换模式
-            </button>
+            </Button>
           </form>
         ) : null}
       </div>
@@ -360,15 +372,17 @@ function InvoiceConfigurationNotice({
             ))}
           </ul>
         </div>
-        <button
-          className="button button-light button-small"
+        <Button
+          className="min-h-11"
+          size="sm"
           type="button"
+          variant="outline"
           disabled={!controller.retryAvailable}
           onClick={() => void controller.retryFailed()}
         >
           <RefreshCw aria-hidden="true" size={14} />
           重试失败项
-        </button>
+        </Button>
       </div>
     );
   }
