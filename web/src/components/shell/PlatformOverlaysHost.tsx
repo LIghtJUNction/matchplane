@@ -1,19 +1,12 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
 import { LogOut, ShieldCheck, Store, UserRound, X } from "lucide-react";
 
-import { ListingSheet } from "../ListingSheet";
 import { ModeDialog } from "../Overlays";
 import { WorkspaceSettingsDialog } from "../WorkspaceSettingsDialog";
-import { SubplatformAdminDashboard } from "../SubplatformAdminDashboard";
 import { PreferenceControls } from "../PreferenceControls";
-import { PersonalProfilePanel } from "../PersonalProfilePanel";
-import { ChangePasswordPanel } from "../ChangePasswordPanel";
-import { IdentityBindingsPanel } from "../IdentityBindingsPanel";
-import { PasskeyPanel } from "../PasskeyPanel";
-import { SessionPanel } from "../SessionPanel";
-import { HostedStoreOnboarding } from "../HostedStoreOnboarding";
 
 import type { AssetListing, WorkspaceRole } from "../../types";
 import type { SubplatformConfig } from "../../subplatform";
@@ -32,6 +25,66 @@ import {
 } from "../../hooks/useSubplatformRoute";
 import type { StoreConsoleContext } from "../../hooks/useOwnedStores";
 import { isLiveMarketplaceEnabled } from "../../api";
+
+function DeferredOverlayStatus() {
+  return (
+    <p
+      className="workspace-settings-section"
+      role="status"
+      aria-busy="true"
+    >
+      Loading…
+    </p>
+  );
+}
+
+const DeferredListingSheet = dynamic(
+  () => import("../ListingSheet").then((module) => module.ListingSheet),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredSubplatformAdminDashboard = dynamic(
+  () =>
+    import("../SubplatformAdminDashboard").then(
+      (module) => module.SubplatformAdminDashboard,
+    ),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredPersonalProfilePanel = dynamic(
+  () =>
+    import("../PersonalProfilePanel").then(
+      (module) => module.PersonalProfilePanel,
+    ),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredChangePasswordPanel = dynamic(
+  () =>
+    import("../ChangePasswordPanel").then(
+      (module) => module.ChangePasswordPanel,
+    ),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredIdentityBindingsPanel = dynamic(
+  () =>
+    import("../IdentityBindingsPanel").then(
+      (module) => module.IdentityBindingsPanel,
+    ),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredPasskeyPanel = dynamic(
+  () => import("../PasskeyPanel").then((module) => module.PasskeyPanel),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredSessionPanel = dynamic(
+  () => import("../SessionPanel").then((module) => module.SessionPanel),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredHostedStoreOnboarding = dynamic(
+  () =>
+    import("../HostedStoreOnboarding").then(
+      (module) => module.HostedStoreOnboarding,
+    ),
+  { loading: DeferredOverlayStatus },
+);
 
 interface PlatformOverlaysHostProps {
   authUser: AuthenticatedUser | null;
@@ -137,26 +190,28 @@ export function PlatformOverlaysHost({
           closeLabel={ui.closeStoreConsole}
           backdropLabel={ui.closeStoreConsoleDialog}
         >
-          <SubplatformAdminDashboard
-            locale={locale}
-            onNotice={setNotice}
-            subplatform={storeConsoleContext.subplatform}
-            store={storeConsoleContext.store}
-            canManageStore={canManageStoreConsole}
-            initialSection={storeConsoleSection}
-            onStoreUpdated={(updated) => {
-              setStoreConsoleContext((current) =>
-                current && current.store.id === updated.id
-                  ? { ...current, store: { ...current.store, ...updated } }
-                  : current,
-              );
-              setOwnedStores((current) =>
-                current.map((store) =>
-                  store.id === updated.id ? { ...store, ...updated } : store,
-                ),
-              );
-            }}
-          />
+          {storeConsoleOpen ? (
+            <DeferredSubplatformAdminDashboard
+              locale={locale}
+              onNotice={setNotice}
+              subplatform={storeConsoleContext.subplatform}
+              store={storeConsoleContext.store}
+              canManageStore={canManageStoreConsole}
+              initialSection={storeConsoleSection}
+              onStoreUpdated={(updated) => {
+                setStoreConsoleContext((current) =>
+                  current && current.store.id === updated.id
+                    ? { ...current, store: { ...current.store, ...updated } }
+                    : current,
+                );
+                setOwnedStores((current) =>
+                  current.map((store) =>
+                    store.id === updated.id ? { ...store, ...updated } : store,
+                  ),
+                );
+              }}
+            />
+          ) : null}
         </WorkspaceSettingsDialog>
       )}
 
@@ -280,23 +335,23 @@ export function PlatformOverlaysHost({
                   onTextSizeChange={onTextSizeChange}
                 />
               </section>
-              <ChangePasswordPanel
+              <DeferredChangePasswordPanel
                 email={authUser.email}
                 locale={locale}
                 onNotice={setNotice}
               />
-              <IdentityBindingsPanel
+              <DeferredIdentityBindingsPanel
                 locale={locale}
                 subplatform={subplatform}
                 onNotice={setNotice}
               />
-              <PasskeyPanel
+              <DeferredPasskeyPanel
                 locale={locale}
                 subplatform={subplatform}
                 accountLabel={authUser.email}
                 onNotice={setNotice}
               />
-              <SessionPanel
+              <DeferredSessionPanel
                 locale={locale}
                 subplatform={subplatform}
                 onNotice={setNotice}
@@ -304,7 +359,7 @@ export function PlatformOverlaysHost({
             </div>
           ) : accountSettingsSection === "stores" ? (
             <div className="workspace-settings-overview">
-              <HostedStoreOnboarding
+              <DeferredHostedStoreOnboarding
                 locale={locale}
                 onNotice={setNotice}
                 initialStores={ownedStores}
@@ -312,8 +367,8 @@ export function PlatformOverlaysHost({
                 onManageStore={(store) => void openStoreConsoleFor(store)}
               />
             </div>
-          ) : (
-            <PersonalProfilePanel
+          ) : accountSettingsSection === "profile" ? (
+            <DeferredPersonalProfilePanel
               locale={locale}
               onAvatarChanged={(image) =>
                 setAuthUser((current) =>
@@ -321,30 +376,32 @@ export function PlatformOverlaysHost({
                 )
               }
             />
-          )}
+          ) : null}
         </WorkspaceSettingsDialog>
       )}
 
-      <ListingSheet
-        listing={listing}
-        subplatform={subplatform}
-        locale={locale}
-        onClose={closeListing}
-        contactDisabled={!isLiveMarketplaceEnabled()}
-        onManage={
-          selectedManagedStore
-            ? () => {
-                closeListing();
-                if (typeof window !== "undefined") {
-                  window.location.assign(
-                    `${selectedManagedStore.path}?console=products`,
-                  );
+      {listing ? (
+        <DeferredListingSheet
+          listing={listing}
+          subplatform={subplatform}
+          locale={locale}
+          onClose={closeListing}
+          contactDisabled={!isLiveMarketplaceEnabled()}
+          onManage={
+            selectedManagedStore
+              ? () => {
+                  closeListing();
+                  if (typeof window !== "undefined") {
+                    window.location.assign(
+                      `${selectedManagedStore.path}?console=products`,
+                    );
+                  }
                 }
-              }
-            : undefined
-        }
-        onContact={onContactListing}
-      />
+              : undefined
+          }
+          onContact={onContactListing}
+        />
+      ) : null}
 
       <ModeDialog
         open={modeDialogOpen}
