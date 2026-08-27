@@ -1,67 +1,25 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
-  isLiveMarketplaceEnabled: vi.fn(() => false),
+  isLiveMarketplaceEnabled: vi.fn(() => true),
+  getPaymentGateways: vi.fn(),
+  getPaymentRoutes: vi.fn(),
+  getInvoiceProviders: vi.fn(),
+  getInvoiceSetting: vi.fn(),
+  getSubplatformOrganizations: vi.fn(),
+  getPaymentAdminRecords: vi.fn(),
+  getRefundAdminRecords: vi.fn(),
+  getInvoiceAdminRecords: vi.fn(),
+  getPlatformOidcClients: vi.fn(),
+  getFederationBindings: vi.fn(),
+  getPlatformDomains: vi.fn(),
+  getPlatformAccounts: vi.fn(),
+  getPlatformMembers: vi.fn(),
+  getPlatformApiKeys: vi.fn(),
 }));
 const bootstrapMock = vi.hoisted(() => ({ current: undefined as unknown }));
-const invoiceConfigurationMock = vi.hoisted(() => ({
-  use: vi.fn(),
-  controller: {
-    providers: { status: "ready", data: [] },
-    setting: {
-      status: "ready",
-      data: {
-        tenant_id: "tenant",
-        active_mode: "test",
-        provider_id: null,
-        updated_by: "admin",
-        version: 1,
-        updated_at: "2026-08-26T00:00:00.000Z",
-      },
-    },
-    mutation: null,
-    writeBlockReason: null,
-    retryAvailable: true,
-    retryFailed: vi.fn(),
-    refreshProviders: vi.fn(),
-    refreshSetting: vi.fn(),
-    commitProvider: vi.fn(),
-    commitMode: vi.fn(),
-  },
-}));
-const localStoreMock = vi.hoisted(() => ({
-  use: vi.fn(),
-  controller: {
-    organizations: { status: "ready", data: [] },
-    mutation: null,
-    operationPhase: "",
-    registrationCancellable: false,
-    writeBlockReason: null,
-    retryAvailable: true,
-    retryFailed: vi.fn(),
-    refreshOrganizations: vi.fn(),
-    cancelRegistration: vi.fn(),
-    commitRegistration: vi.fn(),
-    commitActivation: vi.fn(),
-    prepareUpdate: vi.fn(),
-  },
-}));
-const paymentRoutingMock = vi.hoisted(() => ({
-  use: vi.fn(),
-  controller: {
-    gateways: { status: "ready", data: [] },
-    routes: { status: "ready", data: [] },
-    mutation: null,
-    writeBlockReason: null,
-    retryAvailable: true,
-    retryFailed: vi.fn(),
-    refreshGateways: vi.fn(),
-    refreshRoutes: vi.fn(),
-    commitGateway: vi.fn(),
-    commitRoute: vi.fn(),
-  },
-}));
 
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
@@ -72,32 +30,9 @@ vi.mock("../hooks/usePlatformBootstrapResources", () => ({
   freshBootstrapResourceData: (resource: { status: string; data?: unknown }) =>
     resource.status === "ready" ? resource.data : null,
 }));
-vi.mock("../hooks/usePlatformInvoiceConfigurationResources", () => ({
-  usePlatformInvoiceConfigurationResources: (options: unknown) => {
-    invoiceConfigurationMock.use(options);
-    return invoiceConfigurationMock.controller;
-  },
-}));
-vi.mock("../hooks/usePlatformLocalStoreResources", () => ({
-  usePlatformLocalStoreResources: (options: unknown) => {
-    localStoreMock.use(options);
-    return localStoreMock.controller;
-  },
-}));
-vi.mock("../hooks/usePlatformPaymentRoutingResources", () => ({
-  usePlatformPaymentRoutingResources: (options: unknown) => {
-    paymentRoutingMock.use(options);
-    return paymentRoutingMock.controller;
-  },
-}));
 vi.mock("./LoginMethodsPanel", () => ({ LoginMethodsPanel: () => null }));
-vi.mock("./Overlays", () => ({ ModeDialog: () => null }));
-vi.mock("./PlatformAccessPanel", () => ({ PlatformAccessPanel: () => null }));
 vi.mock("./PlatformBootstrapNotice", () => ({
   PlatformBootstrapNotice: () => null,
-}));
-vi.mock("./PlatformFinanceRecordsPanel", () => ({
-  PlatformFinanceRecordsPanel: () => null,
 }));
 vi.mock("./PlatformInvoiceConfigurationPanel", () => ({
   PlatformInvoiceConfigurationPanel: () => (
@@ -105,7 +40,15 @@ vi.mock("./PlatformInvoiceConfigurationPanel", () => ({
   ),
 }));
 vi.mock("./PlatformLocalStorePanel", () => ({
-  PlatformLocalStorePanel: () => <div data-testid="local-store-panel" />,
+  PlatformLocalStorePanel: ({ hidden }: { hidden?: boolean }) => (
+    <section
+      id="platform-panel-tree"
+      role="tabpanel"
+      aria-labelledby="platform-tab-tree"
+      hidden={hidden}
+      data-testid="local-store-panel"
+    />
+  ),
 }));
 vi.mock("./PlatformPaymentRoutingPanel", () => ({
   PlatformPaymentRoutingPanel: () => (
@@ -119,7 +62,7 @@ vi.mock("./RootEmailConfigPanel", () => ({
   RootEmailConfigPanel: () => null,
 }));
 vi.mock("./PlatformAiConfigPanel", () => ({
-  PlatformAiConfigPanel: () => null,
+  PlatformAiConfigPanel: () => <div data-testid="ai-panel-content" />,
 }));
 vi.mock("./NationalIdentityConfigPanel", () => ({
   NationalIdentityConfigPanel: () => null,
@@ -133,9 +76,31 @@ vi.mock("./PhoneLoginConfigPanel", () => ({
 vi.mock("./MallCatalogModeration", () => ({
   MallCatalogModeration: () => null,
 }));
-vi.mock("./MallBrandPanel", () => ({ MallBrandPanel: () => null }));
+vi.mock("./MallBrandPanel", () => ({
+  MallBrandPanel: () => <div data-testid="brand-panel-content" />,
+}));
 vi.mock("./MallInitializationPanel", () => ({
-  MallInitializationPanel: () => null,
+  MallInitializationPanel: ({
+    onOpenStores,
+    onOpenSettings,
+    onOpenAi,
+  }: {
+    onOpenStores: (openScope: boolean) => void;
+    onOpenSettings: () => void;
+    onOpenAi: () => void;
+  }) => (
+    <div>
+      <button type="button" onClick={() => onOpenStores(true)}>
+        初始化跳转：店铺
+      </button>
+      <button type="button" onClick={onOpenSettings}>
+        初始化跳转：设置
+      </button>
+      <button type="button" onClick={onOpenAi}>
+        初始化跳转：AI
+      </button>
+    </div>
+  ),
 }));
 vi.mock("./StoreCommercialTermsPanel", () => ({
   StoreCommercialTermsPanel: () => null,
@@ -146,6 +111,7 @@ vi.mock("./RemoteStoreOnboarding", () => ({
 vi.mock("./Primitives", () => ({ SectionHeading: () => null }));
 
 import type {
+  InvoiceSetting,
   PlatformAiStatus,
   PlatformDomainRecord,
   PlatformSetupStatus,
@@ -160,113 +126,176 @@ const dashboardProps = {
 };
 
 beforeEach(() => {
-  dashboardProps.onNotice.mockReset();
-  invoiceConfigurationMock.use.mockClear();
-  localStoreMock.use.mockClear();
-  paymentRoutingMock.use.mockClear();
-});
-
-describe("PlatformDashboard local store boundary", () => {
-  it("passes role plus raw setup and domain authority to the extracted controller", () => {
-    const initial = resources({ status: "ready", data: [domain("a")] });
-    bootstrapMock.current = initial;
-    const { rerender } = render(<PlatformDashboard {...dashboardProps} />);
-
-    expect(screen.getByTestId("local-store-panel")).toBeInTheDocument();
-    expect(localStoreMock.use).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        authorized: true,
-        apiAvailable: false,
-        rootRole: "rootSuperAdmin",
-        setup: initial.setup,
-        domains: initial.domains,
-      }),
-    );
-
-    const stale = {
-      ...resources({ status: "error", message: "数据范围不可用" }),
-      setup: {
-        status: "error",
-        message: "初始化状态不可用",
-        previous: setup,
-      },
-    };
-    bootstrapMock.current = stale;
-    rerender(<PlatformDashboard {...dashboardProps} />);
-
-    expect(localStoreMock.use).toHaveBeenLastCalledWith(
-      expect.objectContaining({ setup: stale.setup, domains: stale.domains }),
-    );
+  vi.clearAllMocks();
+  bootstrapMock.current = resources({ status: "ready", data: [domain("a")] });
+  api.isLiveMarketplaceEnabled.mockReturnValue(true);
+  api.getPaymentGateways.mockResolvedValue([]);
+  api.getPaymentRoutes.mockResolvedValue([]);
+  api.getInvoiceProviders.mockResolvedValue([]);
+  api.getInvoiceSetting.mockResolvedValue(invoiceSetting);
+  api.getSubplatformOrganizations.mockResolvedValue([]);
+  api.getPaymentAdminRecords.mockResolvedValue([]);
+  api.getRefundAdminRecords.mockResolvedValue([]);
+  api.getInvoiceAdminRecords.mockResolvedValue([]);
+  api.getPlatformOidcClients.mockResolvedValue([]);
+  api.getFederationBindings.mockResolvedValue([]);
+  api.getPlatformDomains.mockResolvedValue([]);
+  api.getPlatformAccounts.mockResolvedValue([]);
+  api.getPlatformMembers.mockResolvedValue({
+    organizationId: "root",
+    organizationName: "Root",
+    members: [],
   });
+  api.getPlatformApiKeys.mockResolvedValue([]);
 });
 
-describe("PlatformDashboard invoice configuration boundary", () => {
-  it("keeps invoice reads independent while passing only a fresh setup tenant for writes", () => {
-    bootstrapMock.current = resources({ status: "ready", data: [domain("a")] });
-    const { rerender } = render(<PlatformDashboard {...dashboardProps} />);
+describe("PlatformDashboard deferred sections", () => {
+  it("defers the 11 identified offscreen GETs and loads each resource group once", async () => {
+    const user = userEvent.setup();
+    render(<PlatformDashboard {...dashboardProps} />);
 
+    expect(identifiedDeferredGetCount()).toBe(0);
+    expect(financeRecordGetCount()).toBe(0);
+    expect(screen.queryByTestId("brand-panel-content")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ai-panel-content")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("local-store-panel")).not.toBeInTheDocument();
     expect(
-      screen.getByTestId("invoice-configuration-panel"),
-    ).toBeInTheDocument();
-    expect(invoiceConfigurationMock.use).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        authorized: true,
-        apiAvailable: false,
-        tenant: { status: "verified", tenantId: "tenant" },
-      }),
+      screen.queryByTestId("payment-routing-panel"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("invoice-configuration-panel"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "支付（可选）" }));
+    await waitFor(() => expect(paymentGetCount()).toBe(2));
+    const paymentPanel = document.getElementById("platform-panel-payments");
+    expect(paymentPanel).toBeVisible();
+
+    await user.click(screen.getByRole("tab", { name: "首页" }));
+    expect(paymentPanel).not.toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "支付（可选）" }));
+    expect(document.getElementById("platform-panel-payments")).toBe(
+      paymentPanel,
     );
+    expect(paymentGetCount()).toBe(2);
 
-    bootstrapMock.current = {
-      ...resources({ status: "ready", data: [domain("a")] }),
-      setup: {
-        status: "error",
-        message: "初始化状态暂时不可用",
-        previous: setup,
-      },
-    };
-    rerender(<PlatformDashboard {...dashboardProps} />);
+    await user.click(screen.getByRole("tab", { name: "财务与退款" }));
+    await waitFor(() => {
+      expect(invoiceGetCount()).toBe(2);
+      expect(financeRecordGetCount()).toBe(3);
+    });
+    await user.click(screen.getByRole("tab", { name: "首页" }));
+    await user.click(screen.getByRole("tab", { name: "财务与退款" }));
+    expect(invoiceGetCount()).toBe(2);
+    expect(financeRecordGetCount()).toBe(3);
 
-    expect(invoiceConfigurationMock.use).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        authorized: true,
-        tenant: { status: "unverified" },
-      }),
+    await user.click(screen.getByRole("tab", { name: "店铺与商品" }));
+    await waitFor(() =>
+      expect(api.getSubplatformOrganizations).toHaveBeenCalledOnce(),
+    );
+    await user.click(screen.getByRole("tab", { name: "用户与团队" }));
+    await waitFor(() => expect(accessGetCount()).toBe(6));
+
+    expect(identifiedDeferredGetCount()).toBe(11);
+    expect(financeRecordGetCount()).toBe(3);
+
+    await user.click(screen.getByRole("tab", { name: "首页" }));
+    await user.click(screen.getByRole("tab", { name: "用户与团队" }));
+    expect(identifiedDeferredGetCount()).toBe(11);
+    expect(financeRecordGetCount()).toBe(3);
+  });
+
+  it("keeps every visited tabpanel mounted with its ARIA relationship", async () => {
+    const user = userEvent.setup();
+    render(<PlatformDashboard {...dashboardProps} />);
+
+    const sections = [
+      ["home", "首页"],
+      ["tree", "店铺与商品"],
+      ["access", "用户与团队"],
+      ["ai", "AI"],
+      ["brand", "商城设置"],
+      ["payments", "支付（可选）"],
+      ["finance", "财务与退款"],
+    ] as const;
+
+    for (const [section, label] of sections) {
+      const tab = screen.getByRole("tab", { name: label });
+      await user.click(tab);
+      const panel = document.getElementById(`platform-panel-${section}`);
+      expect(tab).toHaveAttribute("aria-controls", panel?.id);
+      expect(tab).toHaveAttribute("aria-selected", "true");
+      expect(panel).toHaveAttribute("role", "tabpanel");
+      expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+      expect(panel).toBeVisible();
+    }
+
+    for (const [section] of sections.slice(0, -1)) {
+      expect(document.getElementById(`platform-panel-${section}`)).toBeTruthy();
+      expect(
+        document.getElementById(`platform-panel-${section}`),
+      ).not.toBeVisible();
+    }
+  });
+
+  it("uses the same lazy activation path for initialization shortcuts", async () => {
+    const user = userEvent.setup();
+    render(<PlatformDashboard {...dashboardProps} />);
+
+    await user.click(screen.getByRole("button", { name: "初始化跳转：店铺" }));
+
+    expect(screen.getByRole("tab", { name: "店铺与商品" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByTestId("local-store-panel")).toBeVisible();
+    await waitFor(() =>
+      expect(api.getSubplatformOrganizations).toHaveBeenCalledOnce(),
     );
   });
 });
 
-describe("PlatformDashboard payment routing boundary", () => {
-  it("keeps reads independent while passing only a fresh setup tenant for writes", () => {
-    bootstrapMock.current = resources({ status: "ready", data: [domain("a")] });
-    const { rerender } = render(<PlatformDashboard {...dashboardProps} />);
+function paymentGetCount() {
+  return (
+    api.getPaymentGateways.mock.calls.length +
+    api.getPaymentRoutes.mock.calls.length
+  );
+}
 
-    expect(screen.getByTestId("payment-routing-panel")).toBeInTheDocument();
-    expect(paymentRoutingMock.use).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        authorized: true,
-        apiAvailable: false,
-        tenant: { status: "verified", tenantId: "tenant" },
-      }),
-    );
+function invoiceGetCount() {
+  return (
+    api.getInvoiceProviders.mock.calls.length +
+    api.getInvoiceSetting.mock.calls.length
+  );
+}
 
-    bootstrapMock.current = {
-      ...resources({ status: "ready", data: [domain("a")] }),
-      setup: {
-        status: "error",
-        message: "初始化状态暂时不可用",
-        previous: setup,
-      },
-    };
-    rerender(<PlatformDashboard {...dashboardProps} />);
+function accessGetCount() {
+  return [
+    api.getPlatformOidcClients,
+    api.getFederationBindings,
+    api.getPlatformDomains,
+    api.getPlatformAccounts,
+    api.getPlatformMembers,
+    api.getPlatformApiKeys,
+  ].reduce((total, request) => total + request.mock.calls.length, 0);
+}
 
-    expect(paymentRoutingMock.use).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        authorized: true,
-        tenant: { status: "unverified" },
-      }),
-    );
-  });
-});
+function identifiedDeferredGetCount() {
+  return (
+    paymentGetCount() +
+    invoiceGetCount() +
+    api.getSubplatformOrganizations.mock.calls.length +
+    accessGetCount()
+  );
+}
+
+function financeRecordGetCount() {
+  return (
+    api.getPaymentAdminRecords.mock.calls.length +
+    api.getRefundAdminRecords.mock.calls.length +
+    api.getInvoiceAdminRecords.mock.calls.length
+  );
+}
 
 function resources(domains: BootstrapDomainsState) {
   return {
@@ -324,6 +353,15 @@ const setup: PlatformSetupStatus = {
   hostedAgent: { configured: false, status: "fallback" },
   builder: { configured: false, status: "unconfigured" },
   firstRun: { needsRootAccount: false, readyForAdmin: true },
+};
+
+const invoiceSetting: InvoiceSetting = {
+  tenant_id: "tenant",
+  active_mode: "test",
+  provider_id: null,
+  updated_by: "admin",
+  version: 1,
+  updated_at: "2026-08-26T00:00:00.000Z",
 };
 
 const aiStatus: PlatformAiStatus = {

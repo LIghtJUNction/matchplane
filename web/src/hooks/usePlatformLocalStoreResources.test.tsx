@@ -45,6 +45,31 @@ beforeEach(() => {
 });
 
 describe("usePlatformLocalStoreResources", () => {
+  it("does not read before authorization and loads once when authorization is retained", async () => {
+    const { rerender } = renderHook(
+      ({ authorized }: { authorized: boolean }) =>
+        usePlatformLocalStoreResources({
+          authorized,
+          apiAvailable: true,
+          rootRole: "rootSuperAdmin",
+          setup: readySetup,
+          domains: readyDomains,
+          onNotice,
+        }),
+      { initialProps: { authorized: false } },
+    );
+
+    expect(api.getSubplatformOrganizations).not.toHaveBeenCalled();
+
+    rerender({ authorized: true });
+    await waitFor(() =>
+      expect(api.getSubplatformOrganizations).toHaveBeenCalledOnce(),
+    );
+
+    rerender({ authorized: true });
+    expect(api.getSubplatformOrganizations).toHaveBeenCalledOnce();
+  });
+
   it("distinguishes rejected organization loading from verified empty and retries GET only", async () => {
     api.getSubplatformOrganizations
       .mockRejectedValueOnce(new Error("本地店铺服务不可用"))
@@ -320,7 +345,13 @@ function renderResources(
   } = { setup: readySetup, domains: readyDomains },
 ) {
   return renderHook(
-    ({ setup, domains }) =>
+    ({
+      setup,
+      domains,
+    }: {
+      setup: PlatformSetupResourceState;
+      domains: PlatformDomainsResourceState;
+    }) =>
       usePlatformLocalStoreResources({
         authorized: true,
         apiAvailable: true,

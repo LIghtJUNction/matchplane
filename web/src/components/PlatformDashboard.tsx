@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Bot,
   ChevronLeft,
@@ -65,6 +65,19 @@ export function PlatformDashboard({
   onBrandUpdated,
   onNotice,
 }: PlatformDashboardProps) {
+  const [activeSection, setActiveSection] = useState<PlatformSection>("home");
+  const [visitedSections, setVisitedSections] = useState<
+    ReadonlySet<PlatformSection>
+  >(() => new Set(["home"]));
+  const activateSection = useCallback((section: PlatformSection) => {
+    setActiveSection(section);
+    setVisitedSections((current) => {
+      if (current.has(section)) return current;
+      const next = new Set(current);
+      next.add(section);
+      return next;
+    });
+  }, []);
   const bootstrapAuthorized =
     rootRole === "rootSuperAdmin" || rootRole === "rootAdmin";
   const bootstrap = usePlatformBootstrapResources({
@@ -75,7 +88,7 @@ export function PlatformDashboard({
   const verifiedSetup = freshBootstrapResourceData(bootstrap.setup);
   const marketplaceApiAvailable = isLiveMarketplaceEnabled();
   const paymentRouting = usePlatformPaymentRoutingResources({
-    authorized: bootstrapAuthorized,
+    authorized: bootstrapAuthorized && visitedSections.has("payments"),
     apiAvailable: marketplaceApiAvailable,
     tenant:
       bootstrap.setup.status === "ready"
@@ -87,7 +100,7 @@ export function PlatformDashboard({
     onNotice,
   });
   const invoiceConfiguration = usePlatformInvoiceConfigurationResources({
-    authorized: bootstrapAuthorized,
+    authorized: bootstrapAuthorized && visitedSections.has("finance"),
     apiAvailable: marketplaceApiAvailable,
     tenant:
       bootstrap.setup.status === "ready"
@@ -99,14 +112,15 @@ export function PlatformDashboard({
     onNotice,
   });
   const localStores = usePlatformLocalStoreResources({
-    authorized: bootstrapAuthorized,
+    authorized:
+      bootstrapAuthorized &&
+      (visitedSections.has("tree") || visitedSections.has("access")),
     apiAvailable: marketplaceApiAvailable,
     rootRole,
     setup: bootstrap.setup,
     domains: bootstrap.domains,
     onNotice,
   });
-  const [activeSection, setActiveSection] = useState<PlatformSection>("home");
   const freshSubplatforms =
     localStores.organizations.status === "ready"
       ? localStores.organizations.data
@@ -163,7 +177,7 @@ export function PlatformDashboard({
             aria-selected={activeSection === "home"}
             aria-controls="platform-panel-home"
             className={activeSection === "home" ? "is-active" : ""}
-            onClick={() => setActiveSection("home")}
+            onClick={() => activateSection("home")}
           >
             <ShieldCheck size={17} aria-hidden="true" />
             <span>首页</span>
@@ -175,7 +189,7 @@ export function PlatformDashboard({
             aria-selected={activeSection === "tree"}
             aria-controls="platform-panel-tree"
             className={activeSection === "tree" ? "is-active" : ""}
-            onClick={() => setActiveSection("tree")}
+            onClick={() => activateSection("tree")}
           >
             <GitBranch size={17} aria-hidden="true" />
             <span>店铺与商品</span>
@@ -187,7 +201,7 @@ export function PlatformDashboard({
             aria-selected={activeSection === "access"}
             aria-controls="platform-panel-access"
             className={activeSection === "access" ? "is-active" : ""}
-            onClick={() => setActiveSection("access")}
+            onClick={() => activateSection("access")}
           >
             <ShieldCheck size={17} aria-hidden="true" />
             <span>用户与团队</span>
@@ -199,7 +213,7 @@ export function PlatformDashboard({
             aria-selected={activeSection === "ai"}
             aria-controls="platform-panel-ai"
             className={activeSection === "ai" ? "is-active" : ""}
-            onClick={() => setActiveSection("ai")}
+            onClick={() => activateSection("ai")}
           >
             <Bot size={17} aria-hidden="true" />
             <span>AI</span>
@@ -211,7 +225,7 @@ export function PlatformDashboard({
             aria-selected={activeSection === "brand"}
             aria-controls="platform-panel-brand"
             className={activeSection === "brand" ? "is-active" : ""}
-            onClick={() => setActiveSection("brand")}
+            onClick={() => activateSection("brand")}
           >
             <Palette size={17} aria-hidden="true" />
             <span>商城设置</span>
@@ -223,7 +237,7 @@ export function PlatformDashboard({
             aria-selected={activeSection === "payments"}
             aria-controls="platform-panel-payments"
             className={activeSection === "payments" ? "is-active" : ""}
-            onClick={() => setActiveSection("payments")}
+            onClick={() => activateSection("payments")}
           >
             <CreditCard size={17} aria-hidden="true" />
             <span>支付（可选）</span>
@@ -235,7 +249,7 @@ export function PlatformDashboard({
             aria-selected={activeSection === "finance"}
             aria-controls="platform-panel-finance"
             className={activeSection === "finance" ? "is-active" : ""}
-            onClick={() => setActiveSection("finance")}
+            onClick={() => activateSection("finance")}
           >
             <ReceiptText size={17} aria-hidden="true" />
             <span>财务与退款</span>
@@ -267,179 +281,209 @@ export function PlatformDashboard({
                 onInitializeRoot={() =>
                   void bootstrap.initializeRootOrganization()
                 }
-                onOpenStores={() => setActiveSection("tree")}
-                onOpenSettings={() => setActiveSection("brand")}
-                onOpenAi={() => setActiveSection("ai")}
+                onOpenStores={() => activateSection("tree")}
+                onOpenSettings={() => activateSection("brand")}
+                onOpenAi={() => activateSection("ai")}
               />
             </section>
-            <div
-              id="platform-panel-brand"
-              className="platform-component-panel"
-              role="tabpanel"
-              aria-labelledby="platform-tab-brand"
-              hidden={activeSection !== "brand"}
-            >
-              <MallBrandPanel
-                rootRole={rootRole}
-                onBrandUpdated={onBrandUpdated}
-                onNotice={onNotice}
-              />
-              <LoginMethodsPanel />
-              <section
+            {visitedSections.has("brand") ? (
+              <div
+                id="platform-panel-brand"
                 className="platform-component-panel"
-                aria-label="商城账号邮件服务"
+                role="tabpanel"
+                aria-labelledby="platform-tab-brand"
+                hidden={activeSection !== "brand"}
               >
-                <RootEmailConfigPanel rootRole={rootRole} onNotice={onNotice} />
-              </section>
-              <NationalIdentityConfigPanel
-                rootRole={rootRole}
-                onNotice={onNotice}
-              />
-              <WeChatLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
-              <PhoneLoginConfigPanel rootRole={rootRole} onNotice={onNotice} />
-              {verifiedSetup?.root.organization?.id ? (
-                <PlatformSiteSettingsPanel
-                  organizationId={verifiedSetup.root.organization.id}
-                  platformPath="/"
-                  platformName={verifiedSetup.root.organization.name}
+                <MallBrandPanel
+                  rootRole={rootRole}
+                  onBrandUpdated={onBrandUpdated}
                   onNotice={onNotice}
                 />
-              ) : (
-                <p className="platform-access-empty" role="status">
-                  {bootstrap.setup.status === "ready"
-                    ? "商城组织已确认为未创建；创建后才能保存站点设置。"
-                    : "商城组织状态尚未验证，站点设置保存已暂停。"}
-                </p>
-              )}
-            </div>
-            <section
-              id="platform-panel-ai"
-              className="platform-component-panel"
-              role="tabpanel"
-              aria-labelledby="platform-tab-ai"
-              hidden={activeSection !== "ai"}
-            >
-              <PlatformAiConfigPanel rootRole={rootRole} onNotice={onNotice} />
-            </section>
+                <LoginMethodsPanel />
+                <section
+                  className="platform-component-panel"
+                  aria-label="商城账号邮件服务"
+                >
+                  <RootEmailConfigPanel
+                    rootRole={rootRole}
+                    onNotice={onNotice}
+                  />
+                </section>
+                <NationalIdentityConfigPanel
+                  rootRole={rootRole}
+                  onNotice={onNotice}
+                />
+                <WeChatLoginConfigPanel
+                  rootRole={rootRole}
+                  onNotice={onNotice}
+                />
+                <PhoneLoginConfigPanel
+                  rootRole={rootRole}
+                  onNotice={onNotice}
+                />
+                {verifiedSetup?.root.organization?.id ? (
+                  <PlatformSiteSettingsPanel
+                    organizationId={verifiedSetup.root.organization.id}
+                    platformPath="/"
+                    platformName={verifiedSetup.root.organization.name}
+                    onNotice={onNotice}
+                  />
+                ) : (
+                  <p className="platform-access-empty" role="status">
+                    {bootstrap.setup.status === "ready"
+                      ? "商城组织已确认为未创建；创建后才能保存站点设置。"
+                      : "商城组织状态尚未验证，站点设置保存已暂停。"}
+                  </p>
+                )}
+              </div>
+            ) : null}
+            {visitedSections.has("ai") ? (
+              <section
+                id="platform-panel-ai"
+                className="platform-component-panel"
+                role="tabpanel"
+                aria-labelledby="platform-tab-ai"
+                hidden={activeSection !== "ai"}
+              >
+                <PlatformAiConfigPanel
+                  rootRole={rootRole}
+                  onNotice={onNotice}
+                />
+              </section>
+            ) : null}
 
-            <PlatformLocalStorePanel
-              controller={localStores}
-              domainsResource={bootstrap.domains}
-              hidden={activeSection !== "tree"}
-              onNotice={onNotice}
-            />
+            {visitedSections.has("tree") ? (
+              <>
+                <PlatformLocalStorePanel
+                  controller={localStores}
+                  domainsResource={bootstrap.domains}
+                  hidden={activeSection !== "tree"}
+                  onNotice={onNotice}
+                />
 
-            <div
-              className="platform-component-panel"
-              hidden={activeSection !== "tree"}
-            >
-              <RemoteStoreOnboarding
-                domainsResource={bootstrap.domains}
-                onNotice={onNotice}
-              />
-            </div>
-
-            <div
-              className="platform-component-panel"
-              hidden={activeSection !== "tree"}
-            >
-              <MallCatalogModeration onNotice={onNotice} />
-            </div>
-
-            <div
-              id="platform-panel-access"
-              className="platform-component-panel"
-              role="tabpanel"
-              aria-labelledby="platform-tab-access"
-              hidden={activeSection !== "access"}
-            >
-              <PlatformAccessPanel
-                organizations={accessOrganizations}
-                rootRole={rootRole}
-                onNotice={onNotice}
-              />
-            </div>
-
-            <section
-              id="platform-panel-payments"
-              className="surface gateway-panel"
-              role="tabpanel"
-              aria-labelledby="platform-tab-payments"
-              hidden={activeSection !== "payments"}
-            >
-              <StoreCommercialTermsPanel
-                rootRole={rootRole}
-                onNotice={onNotice}
-              />
-              <div className={`payment-mode-control mode-${paymentMode}`}>
-                <div>
-                  <span className="status-orb" aria-hidden="true" />
-                  <span>
-                    <small>可选线上支付</small>
-                    <strong>
-                      {paymentMode === "test" ? "测试模式" : "生产模式"}
-                    </strong>
-                  </span>
+                <div
+                  className="platform-component-panel"
+                  hidden={activeSection !== "tree"}
+                >
+                  <RemoteStoreOnboarding
+                    domainsResource={bootstrap.domains}
+                    onNotice={onNotice}
+                  />
                 </div>
-                <button type="button" onClick={onRequestModeChange}>
-                  切换支付模式
-                </button>
-              </div>
-              <PlatformPaymentRoutingPanel
-                controller={paymentRouting}
-                onNotice={onNotice}
-              />
-            </section>
 
-            <section
-              id="platform-panel-finance"
-              className="surface commission-panel"
-              role="tabpanel"
-              aria-labelledby="platform-tab-finance"
-              hidden={activeSection !== "finance"}
-            >
-              <SectionHeading eyebrow="提成模型" title="本月收入构成" />
-              <div className="commission-total">
-                <span>已确认净收入</span>
-                <strong>—</strong>
-                <small>等待 API 返回成交与服务费数据</small>
-              </div>
-              <div className="commission-empty">
-                <HandCoins size={23} aria-hidden="true" />
-                <p>收入构成会按真实成交、线下撮合和增值服务数据生成。</p>
-              </div>
-              <div className="commission-note">
-                <ShieldCheck size={18} aria-hidden="true" />
-                <p>
-                  提成按双方确认的最终成交价精确计算，退款时按比例冲回并生成发票更正。
-                </p>
-              </div>
-            </section>
+                <div
+                  className="platform-component-panel"
+                  hidden={activeSection !== "tree"}
+                >
+                  <MallCatalogModeration onNotice={onNotice} />
+                </div>
+              </>
+            ) : null}
 
-            <section
-              className="surface finance-activity"
-              aria-labelledby="finance-activity-title"
-              hidden={activeSection !== "finance"}
-            >
-              <SectionHeading eyebrow="财务动态" title="支付、发票与退款" />
-              <PlatformFinanceRecordsPanel
-                authorized={bootstrapAuthorized}
-                apiAvailable={isLiveMarketplaceEnabled()}
-                tenant={
-                  bootstrap.setup.status === "ready"
-                    ? {
-                        status: "verified",
-                        tenantId: bootstrap.setup.data.root.tenantId,
-                      }
-                    : { status: "unverified" }
-                }
-                onNotice={onNotice}
-              />
-              <PlatformInvoiceConfigurationPanel
-                controller={invoiceConfiguration}
-                onNotice={onNotice}
-              />
-            </section>
+            {visitedSections.has("access") ? (
+              <div
+                id="platform-panel-access"
+                className="platform-component-panel"
+                role="tabpanel"
+                aria-labelledby="platform-tab-access"
+                hidden={activeSection !== "access"}
+              >
+                <PlatformAccessPanel
+                  organizations={accessOrganizations}
+                  rootRole={rootRole}
+                  onNotice={onNotice}
+                />
+              </div>
+            ) : null}
+
+            {visitedSections.has("payments") ? (
+              <section
+                id="platform-panel-payments"
+                className="surface gateway-panel"
+                role="tabpanel"
+                aria-labelledby="platform-tab-payments"
+                hidden={activeSection !== "payments"}
+              >
+                <StoreCommercialTermsPanel
+                  rootRole={rootRole}
+                  onNotice={onNotice}
+                />
+                <div className={`payment-mode-control mode-${paymentMode}`}>
+                  <div>
+                    <span className="status-orb" aria-hidden="true" />
+                    <span>
+                      <small>可选线上支付</small>
+                      <strong>
+                        {paymentMode === "test" ? "测试模式" : "生产模式"}
+                      </strong>
+                    </span>
+                  </div>
+                  <button type="button" onClick={onRequestModeChange}>
+                    切换支付模式
+                  </button>
+                </div>
+                <PlatformPaymentRoutingPanel
+                  controller={paymentRouting}
+                  onNotice={onNotice}
+                />
+              </section>
+            ) : null}
+
+            {visitedSections.has("finance") ? (
+              <>
+                <section
+                  id="platform-panel-finance"
+                  className="surface commission-panel"
+                  role="tabpanel"
+                  aria-labelledby="platform-tab-finance"
+                  hidden={activeSection !== "finance"}
+                >
+                  <SectionHeading eyebrow="提成模型" title="本月收入构成" />
+                  <div className="commission-total">
+                    <span>已确认净收入</span>
+                    <strong>—</strong>
+                    <small>等待 API 返回成交与服务费数据</small>
+                  </div>
+                  <div className="commission-empty">
+                    <HandCoins size={23} aria-hidden="true" />
+                    <p>收入构成会按真实成交、线下撮合和增值服务数据生成。</p>
+                  </div>
+                  <div className="commission-note">
+                    <ShieldCheck size={18} aria-hidden="true" />
+                    <p>
+                      提成按双方确认的最终成交价精确计算，退款时按比例冲回并生成发票更正。
+                    </p>
+                  </div>
+                </section>
+
+                <section
+                  className="surface finance-activity"
+                  aria-labelledby="finance-activity-title"
+                  hidden={activeSection !== "finance"}
+                >
+                  <SectionHeading eyebrow="财务动态" title="支付、发票与退款" />
+                  <PlatformFinanceRecordsPanel
+                    authorized={
+                      bootstrapAuthorized && visitedSections.has("finance")
+                    }
+                    apiAvailable={marketplaceApiAvailable}
+                    tenant={
+                      bootstrap.setup.status === "ready"
+                        ? {
+                            status: "verified",
+                            tenantId: bootstrap.setup.data.root.tenantId,
+                          }
+                        : { status: "unverified" }
+                    }
+                    onNotice={onNotice}
+                  />
+                  <PlatformInvoiceConfigurationPanel
+                    controller={invoiceConfiguration}
+                    onNotice={onNotice}
+                  />
+                </section>
+              </>
+            ) : null}
           </div>
         </div>
       </div>

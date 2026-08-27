@@ -35,6 +35,32 @@ beforeEach(() => {
 });
 
 describe("usePlatformInvoiceConfigurationResources", () => {
+  it("does not read before authorization and loads once when authorization is retained", async () => {
+    const { rerender } = renderHook(
+      ({ authorized }: { authorized: boolean }) =>
+        usePlatformInvoiceConfigurationResources({
+          authorized,
+          apiAvailable: true,
+          tenant: verifiedTenant,
+          onNotice,
+        }),
+      { initialProps: { authorized: false } },
+    );
+
+    expect(api.getInvoiceProviders).not.toHaveBeenCalled();
+    expect(api.getInvoiceSetting).not.toHaveBeenCalled();
+
+    rerender({ authorized: true });
+    await waitFor(() => {
+      expect(api.getInvoiceProviders).toHaveBeenCalledOnce();
+      expect(api.getInvoiceSetting).toHaveBeenCalledOnce();
+    });
+
+    rerender({ authorized: true });
+    expect(api.getInvoiceProviders).toHaveBeenCalledOnce();
+    expect(api.getInvoiceSetting).toHaveBeenCalledOnce();
+  });
+
   it("keeps a fresh provider sibling when setting fails and retries only the failure", async () => {
     api.getInvoiceProviders.mockResolvedValue([
       provider("provider-test", "test"),
@@ -192,7 +218,7 @@ describe("usePlatformInvoiceConfigurationResources", () => {
 
 function renderResources(tenant: InvoiceConfigurationTenantState) {
   return renderHook(
-    ({ tenant: nextTenant }) =>
+    ({ tenant: nextTenant }: { tenant: InvoiceConfigurationTenantState }) =>
       usePlatformInvoiceConfigurationResources({
         authorized: true,
         apiAvailable: true,

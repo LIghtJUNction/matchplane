@@ -27,6 +27,32 @@ beforeEach(() => {
 });
 
 describe("usePlatformPaymentRoutingResources", () => {
+  it("does not read before authorization and loads once when authorization is retained", async () => {
+    const { rerender } = renderHook(
+      ({ authorized }: { authorized: boolean }) =>
+        usePlatformPaymentRoutingResources({
+          authorized,
+          apiAvailable: true,
+          tenant: verifiedTenant,
+          onNotice,
+        }),
+      { initialProps: { authorized: false } },
+    );
+
+    expect(api.getPaymentGateways).not.toHaveBeenCalled();
+    expect(api.getPaymentRoutes).not.toHaveBeenCalled();
+
+    rerender({ authorized: true });
+    await waitFor(() => {
+      expect(api.getPaymentGateways).toHaveBeenCalledOnce();
+      expect(api.getPaymentRoutes).toHaveBeenCalledOnce();
+    });
+
+    rerender({ authorized: true });
+    expect(api.getPaymentGateways).toHaveBeenCalledOnce();
+    expect(api.getPaymentRoutes).toHaveBeenCalledOnce();
+  });
+
   it("keeps a fresh sibling when one initial request fails and retries only the failure", async () => {
     api.getPaymentGateways.mockResolvedValue([gateway("gateway-a")]);
     api.getPaymentRoutes
@@ -180,7 +206,7 @@ describe("usePlatformPaymentRoutingResources", () => {
 
 function renderResources(tenant: PaymentRoutingTenantState) {
   return renderHook(
-    ({ tenant: nextTenant }) =>
+    ({ tenant: nextTenant }: { tenant: PaymentRoutingTenantState }) =>
       usePlatformPaymentRoutingResources({
         authorized: true,
         apiAvailable: true,
