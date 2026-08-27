@@ -91,7 +91,7 @@ export function SubplatformAdminDashboard({
             onClick={() => setSection("customers")}
           >
             <UserSearch size={16} aria-hidden="true" />
-            {english ? "Customers" : "客户"}
+            {english ? "Customer management" : "客户管理"}
           </button>
           {canManageStore ? (
             <button

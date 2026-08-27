@@ -26,9 +26,9 @@ import type {
 } from "../../lib/preferences";
 import type { AuthenticatedUser } from "../../hooks/useAuthSession";
 import {
-  requestedStoreConsoleSection,
   roleLabel,
   type AccountSettingsSection,
+  type StoreConsoleSection,
 } from "../../hooks/useSubplatformRoute";
 import type { StoreConsoleContext } from "../../hooks/useOwnedStores";
 import { isLiveMarketplaceEnabled } from "../../api";
@@ -48,6 +48,7 @@ interface PlatformOverlaysHostProps {
   fullscreenPlugin: boolean;
   storeConsoleOpen: boolean;
   setStoreConsoleOpen: (open: boolean) => void;
+  storeConsoleSection: StoreConsoleSection;
   storeConsoleContext: StoreConsoleContext | null;
   setStoreConsoleContext: React.Dispatch<
     React.SetStateAction<StoreConsoleContext | null>
@@ -89,6 +90,7 @@ export function PlatformOverlaysHost({
   fullscreenPlugin,
   storeConsoleOpen,
   setStoreConsoleOpen,
+  storeConsoleSection,
   storeConsoleContext,
   setStoreConsoleContext,
   canManageStoreConsole,
@@ -141,7 +143,7 @@ export function PlatformOverlaysHost({
             subplatform={storeConsoleContext.subplatform}
             store={storeConsoleContext.store}
             canManageStore={canManageStoreConsole}
-            initialSection={requestedStoreConsoleSection()}
+            initialSection={storeConsoleSection}
             onStoreUpdated={(updated) => {
               setStoreConsoleContext((current) =>
                 current && current.store.id === updated.id

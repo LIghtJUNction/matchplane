@@ -62,6 +62,14 @@ describe("StoreCustomersPanel", () => {
     expect(screen.getAllByText(/明确询问交付时间/).length).toBeGreaterThan(0);
     expect(screen.getByText("测试商品")).toBeVisible();
     expect(screen.getByText("未请求")).toBeVisible();
+    expect(screen.getByText("高意向客户")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "搜索客户" })).toBeVisible();
+
+    const search = screen.getByRole("textbox", { name: "搜索客户" });
+    await user.type(search, "不存在");
+    expect(screen.getByText("没有符合筛选条件的客户")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "清除筛选" }));
+    expect(screen.getAllByText("测试客户").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "收藏客户" }));
     expect(updateStoreCustomer).toHaveBeenCalledWith(

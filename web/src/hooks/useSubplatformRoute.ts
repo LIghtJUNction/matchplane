@@ -10,6 +10,7 @@ import type { WorkspaceRole } from "../types";
 import { requiresAuthenticatedWorkspace } from "./useAuthSession";
 
 export type AccountSettingsSection = "profile" | "account" | "stores";
+export type StoreConsoleSection = "products" | "customers";
 
 export function roleFromLocation(): WorkspaceRole {
   if (typeof window === "undefined") return "buyer";
@@ -27,7 +28,7 @@ export function parentPlatformHref(path: string, role: WorkspaceRole): string {
   return role === "buyer" ? "/" : `/?role=${encodeURIComponent(role)}`;
 }
 
-export function requestedStoreConsoleSection(): "products" | "customers" {
+export function requestedStoreConsoleSection(): StoreConsoleSection {
   if (typeof window === "undefined") return "products";
   return new URLSearchParams(window.location.search).get(
     "storeConsoleSection",
@@ -148,6 +149,10 @@ export function useSubplatformRoute({
   const [accountSettingsSection, setAccountSettingsSection] =
     useState<AccountSettingsSection | null>(null);
   const [storeConsoleRequested, setStoreConsoleRequested] = useState(false);
+  const [storeConsoleRequestedStoreId, setStoreConsoleRequestedStoreId] =
+    useState<string | null>(null);
+  const [storeConsoleRequestedSection, setStoreConsoleRequestedSection] =
+    useState<StoreConsoleSection>("products");
 
   const requestedRoleRef = useRef<WorkspaceRole>(roleFromLocation());
   const navigationRequestRef = useRef(0);
@@ -201,8 +206,22 @@ export function useSubplatformRoute({
       searchParams.delete("stores");
       cleanWorkspaceTarget = true;
     }
-    if (searchParams.get("console") === "products") {
+    const requestedStoreId = searchParams.get("storeConsole")?.trim();
+    if (requestedStoreId) {
       setStoreConsoleRequested(true);
+      setStoreConsoleRequestedStoreId(requestedStoreId);
+      setStoreConsoleRequestedSection(
+        searchParams.get("storeConsoleSection") === "customers"
+          ? "customers"
+          : "products",
+      );
+      searchParams.delete("storeConsole");
+      searchParams.delete("storeConsoleSection");
+      cleanWorkspaceTarget = true;
+    } else if (searchParams.get("console") === "products") {
+      setStoreConsoleRequested(true);
+      setStoreConsoleRequestedStoreId(null);
+      setStoreConsoleRequestedSection("products");
       searchParams.delete("console");
       cleanWorkspaceTarget = true;
     }
@@ -276,6 +295,10 @@ export function useSubplatformRoute({
     setAccountSettingsSection,
     storeConsoleRequested,
     setStoreConsoleRequested,
+    storeConsoleRequestedStoreId,
+    setStoreConsoleRequestedStoreId,
+    storeConsoleRequestedSection,
+    setStoreConsoleRequestedSection,
     navigateToSubplatform,
     requestedRoleRef,
   };

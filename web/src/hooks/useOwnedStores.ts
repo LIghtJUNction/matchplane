@@ -44,6 +44,8 @@ interface UseOwnedStoresOptions {
   locale: "zh" | "en";
   storeConsoleRequested: boolean;
   setStoreConsoleRequested: (val: boolean) => void;
+  storeConsoleRequestedStoreId: string | null;
+  setStoreConsoleRequestedStoreId: (value: string | null) => void;
   setAccountSettingsSection: (section: AccountSettingsSection | null) => void;
   onNotice: (message: string) => void;
   openSignIn: () => void;
@@ -55,6 +57,8 @@ export function useOwnedStores({
   locale,
   storeConsoleRequested,
   setStoreConsoleRequested,
+  storeConsoleRequestedStoreId,
+  setStoreConsoleRequestedStoreId,
   setAccountSettingsSection,
   onNotice,
   openSignIn,
@@ -132,20 +136,34 @@ export function useOwnedStores({
       openSignIn();
       return;
     }
-    if (!currentManagedStore) {
+    const requestedStore = storeConsoleRequestedStoreId
+      ? (ownedStores.find(
+          (store) => store.id === storeConsoleRequestedStoreId,
+        ) ?? null)
+      : currentManagedStore;
+    setStoreConsoleRequestedStoreId(null);
+    if (!requestedStore) {
       onNotice("只有店主或店铺运营人员可以管理这家店");
       return;
     }
-    setStoreConsoleContext({ subplatform, store: currentManagedStore });
+    if (storeConsoleRequestedStoreId) {
+      void openStoreConsoleFor(requestedStore);
+      return;
+    }
+    setStoreConsoleContext({ subplatform, store: requestedStore });
     setStoreConsoleOpen(true);
   }, [
     authUser,
     currentManagedStore,
     onNotice,
     openSignIn,
+    openStoreConsoleFor,
+    ownedStores,
     ownedStoresResolved,
     setStoreConsoleRequested,
+    setStoreConsoleRequestedStoreId,
     storeConsoleRequested,
+    storeConsoleRequestedStoreId,
     subplatform,
   ]);
 

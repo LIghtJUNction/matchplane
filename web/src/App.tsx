@@ -69,6 +69,9 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     setAccountSettingsSection,
     storeConsoleRequested,
     setStoreConsoleRequested,
+    storeConsoleRequestedStoreId,
+    setStoreConsoleRequestedStoreId,
+    storeConsoleRequestedSection,
     navigateToSubplatform,
     requestedRoleRef,
   } = useSubplatformRoute({ initialPath, authResolved: false });
@@ -123,6 +126,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     locale,
     storeConsoleRequested,
     setStoreConsoleRequested,
+    storeConsoleRequestedStoreId,
+    setStoreConsoleRequestedStoreId,
     setAccountSettingsSection,
     onNotice: setNotice,
     openSignIn,
@@ -557,6 +562,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
           fullscreenPlugin={fullscreenPlugin}
           storeConsoleOpen={storeConsoleOpen}
           setStoreConsoleOpen={setStoreConsoleOpen}
+          storeConsoleSection={storeConsoleRequestedSection}
           storeConsoleContext={storeConsoleContext}
           setStoreConsoleContext={setStoreConsoleContext}
           canManageStoreConsole={canManageStoreConsole}

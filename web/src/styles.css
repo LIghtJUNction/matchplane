@@ -1946,7 +1946,6 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .store-customers-heading p { color: var(--cactus-strong); font-family: var(--font-mono); font-size: 0.62rem; font-weight: 760; letter-spacing: 0.09em; }
 .store-customers-heading h2 { font-size: 1.12rem; color: var(--ink); }
 .store-customers-heading span { color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
-.store-customers-refresh, .store-customers-error button, .store-customers-state button { min-height: 2.5rem; padding: 0 0.78rem; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; border: 1px solid var(--line-strong); border-radius: 0.62rem; background: var(--paper); color: var(--ink-soft); font: inherit; font-size: 0.7rem; font-weight: 680; cursor: pointer; }
 .store-customers-filters { min-height: 3rem; display: flex; align-items: center; gap: 1rem; padding: 0.55rem 0.7rem; border-block: 1px solid var(--line); }
 .store-customers-filters label { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--muted); font-size: 0.68rem; font-weight: 650; }
 .store-customers-filters select, .store-customer-detail select { min-height: 2.25rem; padding: 0 1.8rem 0 0.62rem; border: 1px solid var(--line-strong); border-radius: 0.55rem; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.68rem; }
@@ -1989,7 +1988,6 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .store-customer-products strong { overflow: hidden; color: var(--ink); font-size: 0.7rem; text-overflow: ellipsis; white-space: nowrap; }
 .store-customer-products small, .store-customer-muted { color: var(--muted); font-size: 0.64rem; }
 .store-customer-notes textarea { width: 100%; resize: vertical; padding: 0.65rem 0.7rem; border: 1px solid var(--line-strong); border-radius: 0.62rem; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.72rem; line-height: 1.55; }
-.store-customer-detail section > .button { justify-self: start; }
 @media (max-width: 760px) {
 .store-customers-heading { align-items: stretch; }
 .store-customers-refresh { flex: 0 0 auto; }

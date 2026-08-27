@@ -310,6 +310,76 @@ describe("MatchPlane workspaces", () => {
     expect(window.location.search).not.toContain("console");
   });
 
+  it("opens customer management from a store handoff link", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?storeConsole=33333333-3333-4333-8333-333333333333&storeConsoleSection=customers",
+    );
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.startsWith("/api/platform/manifest?path=")) {
+        return new Response(
+          JSON.stringify({
+            displayName: "Store A",
+            assets: {
+              hosted: {
+                entry: "index.html",
+                url: "/api/platform/plugin-assets/store-a/index.html?build=test",
+                digest: "a".repeat(64),
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url === "/api/stores?mine=1") {
+        return new Response(
+          JSON.stringify({
+            stores: [
+              {
+                id: "33333333-3333-4333-8333-333333333333",
+                slug: "store-a",
+                path: "/store-a",
+                displayName: "Store A",
+                description: "二手车",
+                integrationKind: "package",
+                status: "active",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url === "/api/stores/33333333-3333-4333-8333-333333333333/customers") {
+        return new Response(JSON.stringify({ customers: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ error: "test service unavailable" }),
+        { status: 503, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("dialog", { name: "Store A" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "客户管理" }),
+    ).toBeInTheDocument();
+    expect(window.location.search).not.toContain("storeConsole");
+  });
+
   it("does not expose store management from a copied product-console link", async () => {
     window.history.replaceState(null, "", "/store-a?console=products");
     window.sessionStorage.setItem("matchplane.test-auth", "true");
