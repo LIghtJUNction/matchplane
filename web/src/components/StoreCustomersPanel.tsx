@@ -57,7 +57,7 @@ export function StoreCustomersPanel({
       setSelectedId((current) =>
         current && next.some((customer) => customer.id === current)
           ? current
-          : (next[0]?.id ?? null),
+          : null,
       );
     } catch (cause) {
       setError(
@@ -181,7 +181,7 @@ export function StoreCustomersPanel({
       </div>
 
       <div className="store-customers-filters" aria-label={english ? "Customer filters" : "客户筛选"}>
-        <label className="relative min-w-0 flex-1 sm:max-w-sm">
+        <label className="store-customers-search relative min-w-0 flex-1 sm:max-w-sm">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
             size={16}
@@ -222,20 +222,40 @@ export function StoreCustomersPanel({
       </div>
 
       <div
-        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+        className="store-customers-summary grid grid-cols-3 gap-2 sm:gap-3"
+        role="group"
         aria-label={english ? "Customer summary" : "客户概览"}
       >
-        <Card frame="solid" className="min-w-0">
-          <CardDescription>{english ? "Qualified customers" : "高意向客户"}</CardDescription>
-          <p className="mt-1 text-2xl font-semibold text-foreground">{summary.total}</p>
+        <Card
+          className="min-w-0"
+          contentProps={{ className: "justify-between gap-1 sm:p-3" }}
+        >
+          <CardDescription>
+            {english ? "Qualified customers" : "高意向客户"}
+          </CardDescription>
+          <p className="text-xl font-semibold tabular-nums text-foreground sm:text-2xl">
+            {summary.total}
+          </p>
         </Card>
-        <Card frame="solid" className="min-w-0">
+        <Card
+          className="min-w-0"
+          contentProps={{ className: "justify-between gap-1 sm:p-3" }}
+        >
           <CardDescription>{english ? "Favorites" : "已收藏"}</CardDescription>
-          <p className="mt-1 text-2xl font-semibold text-foreground">{summary.favorites}</p>
+          <p className="text-xl font-semibold tabular-nums text-foreground sm:text-2xl">
+            {summary.favorites}
+          </p>
         </Card>
-        <Card frame="solid" className="min-w-0">
-          <CardDescription>{english ? "Contact consent" : "已同意联系"}</CardDescription>
-          <p className="mt-1 text-2xl font-semibold text-foreground">{summary.consented}</p>
+        <Card
+          className="min-w-0"
+          contentProps={{ className: "justify-between gap-1 sm:p-3" }}
+        >
+          <CardDescription>
+            {english ? "Contact consent" : "已同意联系"}
+          </CardDescription>
+          <p className="text-xl font-semibold tabular-nums text-foreground sm:text-2xl">
+            {summary.consented}
+          </p>
         </Card>
       </div>
 
@@ -403,7 +423,22 @@ export function StoreCustomersPanel({
                 </Button>
               </section>
             </article>
-          ) : null}
+          ) : (
+            <aside
+              className="store-customers-state is-empty store-customer-detail-empty"
+              aria-labelledby="store-customer-detail-empty-title"
+            >
+              <UserRound size={25} aria-hidden="true" />
+              <h3 id="store-customer-detail-empty-title">
+                {english ? "Select a customer" : "选择一位客户"}
+              </h3>
+              <p>
+                {english
+                  ? "Choose a customer to review intent, interested products, contact consent, and staff notes."
+                  : "选择客户后，这里会显示意向分析、关注商品、联系方式同意状态和店员备注。"}
+              </p>
+            </aside>
+          )}
         </div>
       ) : (
         <div className="store-customers-state is-empty">
