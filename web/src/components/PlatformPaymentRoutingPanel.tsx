@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@appica/ui-react/button";
 import { AlertTriangle, CreditCard, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -191,13 +192,16 @@ export function PlatformPaymentRoutingPanel({
           <p>
             这不会阻断撮合。默认在双方同意后交换微信和手机号；需要平台内收款时再配置网关。
           </p>
-          <button
+          <Button
+            variant="outline"
+            size="md"
+            className="min-h-11"
             type="button"
             disabled={!gatewayWritable}
             onClick={() => setGatewayEditorOpen(true)}
           >
             打开配置
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -212,9 +216,15 @@ export function PlatformPaymentRoutingPanel({
         >
           <div className="admin-editor-heading">
             <strong>新增支付网关</strong>
-            <button type="button" onClick={() => setGatewayEditorOpen(false)}>
+            <Button
+              variant="ghost"
+              size="md"
+              className="min-h-11"
+              type="button"
+              onClick={() => setGatewayEditorOpen(false)}
+            >
               关闭
-            </button>
+            </Button>
           </div>
           <label>
             <span>名称</span>
@@ -275,8 +285,10 @@ export function PlatformPaymentRoutingPanel({
               spellCheck={false}
             />
           </label>
-          <button
-            className="button button-dark"
+          <Button
+            variant="primary"
+            size="md"
+            className="min-h-11"
             type="submit"
             disabled={
               controller.mutation !== null ||
@@ -285,7 +297,7 @@ export function PlatformPaymentRoutingPanel({
             }
           >
             {controller.mutation === "gateway" ? "保存中…" : "保存网关"}
-          </button>
+          </Button>
         </form>
       ) : null}
 
@@ -295,13 +307,16 @@ export function PlatformPaymentRoutingPanel({
             <p className="eyebrow">路由矩阵</p>
             <strong>支付方式与币种</strong>
           </div>
-          <button
+          <Button
+            variant="outline"
+            size="md"
+            className="min-h-11"
             type="button"
             disabled={!routeEditorOpen && !routeWritable}
             onClick={() => setRouteEditorOpen((current) => !current)}
           >
             {routeEditorOpen ? "关闭配置" : "配置路由"}
-          </button>
+          </Button>
         </div>
 
         {resourceStaleText(controller.routes, "支付路由") ? (
@@ -350,9 +365,15 @@ export function PlatformPaymentRoutingPanel({
           >
             <div className="admin-editor-heading">
               <strong>新增支付路由</strong>
-              <button type="button" onClick={() => setRouteEditorOpen(false)}>
+              <Button
+                variant="ghost"
+                size="md"
+                className="min-h-11"
+                type="button"
+                onClick={() => setRouteEditorOpen(false)}
+              >
                 关闭
-              </button>
+              </Button>
             </div>
             <label>
               <span>支付网关</span>
@@ -407,8 +428,10 @@ export function PlatformPaymentRoutingPanel({
                 />
               </label>
             </div>
-            <button
-              className="button button-dark"
+            <Button
+              variant="primary"
+              size="md"
+              className="min-h-11"
               type="submit"
               disabled={
                 controller.mutation !== null ||
@@ -417,7 +440,7 @@ export function PlatformPaymentRoutingPanel({
               }
             >
               {controller.mutation === "route" ? "保存中…" : "保存路由"}
-            </button>
+            </Button>
           </form>
         ) : null}
       </div>
@@ -447,15 +470,17 @@ function PaymentRoutingNotice({
             ))}
           </ul>
         </div>
-        <button
-          className="button button-light button-small"
+        <Button
+          variant="outline"
+          size="md"
+          className="min-h-11"
           type="button"
           disabled={!controller.retryAvailable}
           onClick={() => void controller.retryFailed()}
         >
           <RefreshCw aria-hidden="true" size={14} />
           重试失败项
-        </button>
+        </Button>
       </div>
     );
   }
