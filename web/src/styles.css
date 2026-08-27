@@ -1478,10 +1478,6 @@ main > div > .match-chat.is-root { width: min(100%, 72rem); margin: clamp(3rem, 
 .buyer-dashboard { width: min(100%, 92rem); margin: 0 auto; }
 .subplatform-admin-dashboard .workspace-heading { min-height: 15rem; padding: clamp(1.4rem, 4vw, 2.5rem); border: 0; border-radius: 1.15rem; background: color-mix(in srgb, var(--cactus) 52%, var(--paper)); }
 .subplatform-admin-dashboard .workspace-heading h1 { max-width: 18ch; font-size: clamp(2rem, 4vw, 3.75rem); font-weight: 650; letter-spacing: -0.02em; }
-.store-management-tabs { margin: 1rem 0; padding: 0.4rem; display: grid; flex-wrap: wrap; gap: 0.35rem; border: 1px solid var(--line); border-radius: 0.95rem; background: var(--ivory); grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.store-management-tabs button { min-height: 3rem; padding: 0 0.8rem; border: 0; border-radius: 0.7rem; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 0.74rem; font-weight: 680; }
-.store-management-tabs button:hover, .store-management-tabs button:focus-visible { background: var(--paper); color: var(--ink); outline: 0; }
-.store-management-tabs button.is-active { background: var(--ink); color: var(--ivory); box-shadow: var(--shadow-small); }
 .seller-settings-nav { position: sticky; z-index: 3; top: 0; padding: 0.28rem; display: flex; gap: 0.22rem; overflow-x: auto; border: 1px solid var(--line); border-radius: 0.9rem; background: color-mix(in srgb, var(--paper) 74%, var(--ivory)); scrollbar-width: none; }
 @media (max-width: 42rem) {
 .header-store-action { width: 2.65rem; padding: 0; justify-content: center; }
@@ -1501,7 +1497,6 @@ main > div > .match-chat.is-root { width: min(100%, 72rem); margin: clamp(3rem, 
 .match-chat-suggestions button { flex: 0 0 auto; }
 main > div > .match-chat.is-root { margin-top: 2.5rem; }
 .buyer-dashboard .listing-visual { min-height: 14rem; }
-.store-management-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 main > div > .match-chat.is-root.is-catalog-header { width: min(100%, 92rem); margin: 0.85rem auto 0.65rem; padding: 0.9rem 1rem; display: grid; grid-template-columns: minmax(13rem, 0.42fr) minmax(22rem, 1.58fr); align-items: center; gap: 1rem; border-radius: 0.95rem; background: color-mix(in srgb, var(--cactus) 52%, var(--paper)); }
 .match-chat.is-catalog-header .match-chat-heading { align-items: start; }
@@ -1907,10 +1902,6 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .workspace-settings-dialog-store-console .workspace-settings-content { padding: 0 1.25rem 1.25rem; }
 :root[data-theme="dark"] .workspace-settings-dialog-store-console { --ivory: #181818; --paper: #222222; --paper-deep: #2b2b2b; --ink: #f1f1ef; --ink-soft: #d3d3cf; --muted: #a2a29c; --line: rgba(255, 255, 255, 0.1); --line-strong: rgba(255, 255, 255, 0.18); }
 .store-console-toolbar { min-height: 3.65rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--line); }
-.store-console-toolbar .store-management-tabs { position: static; padding: 0; display: flex; align-items: center; gap: 0.2rem; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
-.store-console-toolbar .store-management-tabs button { min-height: 2.45rem; padding: 0 0.78rem; display: inline-flex; align-items: center; gap: 0.42rem; border: 1px solid transparent; border-radius: 0.65rem; color: var(--muted); font-size: 0.78rem; }
-.store-console-toolbar .store-management-tabs button:hover, .store-console-toolbar .store-management-tabs button:focus-visible { background: var(--paper); color: var(--ink); }
-.store-console-toolbar .store-management-tabs button.is-active { border-color: var(--line); background: var(--paper-deep); color: var(--ink); box-shadow: none; }
 .store-console-scope { display: inline-flex; align-items: center; gap: 0.38rem; color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
 .store-console-content { min-width: 0; padding-top: 1rem; }
 .store-console-content .seller-dashboard { margin-top: 0; gap: 0.85rem; }
@@ -1921,7 +1912,6 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .workspace-settings-dialog-store-console { width: calc(100vw - 1rem); height: calc(100dvh - 1rem); }
 .workspace-settings-dialog-store-console .workspace-settings-content { padding: 0 0.8rem 0.8rem; }
 .store-console-toolbar { align-items: flex-start; flex-direction: column-reverse; gap: 0.45rem; padding: 0.65rem 0; }
-.store-console-toolbar .store-management-tabs { width: 100%; overflow-x: auto; }
 .store-console-scope { padding-inline: 0.25rem; }
 }
 @media (min-width: 761px) {

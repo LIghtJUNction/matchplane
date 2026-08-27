@@ -2106,18 +2106,6 @@ select {
   color: var(--retail-ink);
 }
 
-.store-management-tabs button {
-  border-radius: 0.6rem;
-  color: var(--retail-ink-soft);
-}
-
-.store-management-tabs button:hover,
-.store-management-tabs button.is-active,
-.store-management-tabs button[aria-selected="true"] {
-  background: var(--retail-blue-soft);
-  color: var(--retail-blue-strong);
-}
-
 .store-console-scope {
   color: var(--retail-muted);
 }

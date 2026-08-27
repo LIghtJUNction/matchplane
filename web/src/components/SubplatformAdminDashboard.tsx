@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Tabs, TabsList, TabsTrigger } from "@appica/ui-react/tabs";
 import {
   Moon,
   Package,
@@ -61,75 +62,56 @@ export function SubplatformAdminDashboard({
               className="store-closed-banner-action"
               onClick={() => setSection("store")}
             >
-              {english ? "Go to store details to reopen" : "前往店铺资料恢复营业"}
+              {english
+                ? "Go to store details to reopen"
+                : "前往店铺资料恢复营业"}
             </button>
           )}
         </div>
       )}
 
       <div className="store-console-toolbar">
-        <nav
-          className="store-management-tabs"
-          role="tablist"
-          aria-label={english ? "Store management sections" : "店铺管理分区"}
+        <Tabs
+          value={section}
+          onValueChange={(value) =>
+            setSection(value as typeof section)
+          }
+          variant="pill"
+          size="md"
+          className="store-management-tabs min-w-0 flex-1"
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={section === "products"}
-            className={section === "products" ? "is-active" : ""}
-            onClick={() => setSection("products")}
+          <TabsList
+            aria-label={english ? "Store management sections" : "店铺管理分区"}
+            className="w-full min-w-max overflow-x-auto"
           >
-            <Package size={16} aria-hidden="true" />
-            {english ? "Products" : "商品"}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={section === "customers"}
-            className={section === "customers" ? "is-active" : ""}
-            onClick={() => setSection("customers")}
-          >
-            <UserSearch size={16} aria-hidden="true" />
-            {english ? "Customer management" : "客户管理"}
-          </button>
-          {canManageStore ? (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={section === "finance"}
-              className={section === "finance" ? "is-active" : ""}
-              onClick={() => setSection("finance")}
-            >
-              <ReceiptText size={16} aria-hidden="true" />
-              {english ? "Finance" : "财务"}
-            </button>
-          ) : null}
-          {canManageStore ? (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={section === "store"}
-              className={section === "store" ? "is-active" : ""}
-              onClick={() => setSection("store")}
-            >
-              <Store size={16} aria-hidden="true" />
-              {english ? "Store details" : "店铺资料"}
-            </button>
-          ) : null}
-          {canManageStore ? (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={section === "team"}
-              className={section === "team" ? "is-active" : ""}
-              onClick={() => setSection("team")}
-            >
-              <UsersRound size={16} aria-hidden="true" />
-              {english ? "Team" : "店员"}
-            </button>
-          ) : null}
-        </nav>
+            <TabsTrigger value="products" className="min-h-11">
+              <Package size={16} aria-hidden="true" />
+              {english ? "Products" : "商品"}
+            </TabsTrigger>
+            <TabsTrigger value="customers" className="min-h-11">
+              <UserSearch size={16} aria-hidden="true" />
+              {english ? "Customer management" : "客户管理"}
+            </TabsTrigger>
+            {canManageStore ? (
+              <TabsTrigger value="finance" className="min-h-11">
+                <ReceiptText size={16} aria-hidden="true" />
+                {english ? "Finance" : "财务"}
+              </TabsTrigger>
+            ) : null}
+            {canManageStore ? (
+              <TabsTrigger value="store" className="min-h-11">
+                <Store size={16} aria-hidden="true" />
+                {english ? "Store details" : "店铺资料"}
+              </TabsTrigger>
+            ) : null}
+            {canManageStore ? (
+              <TabsTrigger value="team" className="min-h-11">
+                <UsersRound size={16} aria-hidden="true" />
+                {english ? "Team" : "店员"}
+              </TabsTrigger>
+            ) : null}
+          </TabsList>
+        </Tabs>
         <span className="store-console-scope">
           <ShieldCheck size={16} aria-hidden="true" />
           {canManageStore
