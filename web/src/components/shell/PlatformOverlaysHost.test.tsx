@@ -180,10 +180,8 @@ describe("PlatformOverlaysHost deferred panels", () => {
     });
     await user.click(opener);
 
-    expect(await screen.findByRole("status")).toHaveAttribute(
-      "aria-busy",
-      "true",
-    );
+    expect(await screen.findByRole("status")).toHaveAccessibleName("Loading…");
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
     deferredModules.profile.resolve({
       PersonalProfilePanel: () => <Marker>Profile panel ready</Marker>,
     });
@@ -247,13 +245,12 @@ describe("PlatformOverlaysHost deferred panels", () => {
           storeConsoleOpen: true,
           setStoreConsoleOpen,
           closeListing,
+          locale: "zh",
         })}
       />,
     );
-    expect(await screen.findByRole("status")).toHaveAttribute(
-      "aria-busy",
-      "true",
-    );
+    expect(await screen.findByRole("status")).toHaveAccessibleName("正在加载…");
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
     deferredModules.storeConsole.resolve({
       SubplatformAdminDashboard: () => (
         <Marker>Store console panel ready</Marker>

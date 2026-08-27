@@ -1,5 +1,6 @@
 "use client";
 
+import { createContext, useContext } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
 import { LogOut, ShieldCheck, Store, UserRound, X } from "lucide-react";
@@ -26,14 +27,20 @@ import {
 import type { StoreConsoleContext } from "../../hooks/useOwnedStores";
 import { isLiveMarketplaceEnabled } from "../../api";
 
+const DeferredOverlayLocaleContext = createContext<InterfaceLocale>("zh");
+
 function DeferredOverlayStatus() {
+  const locale = useContext(DeferredOverlayLocaleContext);
+  const message = locale === "en" ? "Loading…" : "正在加载…";
+
   return (
     <p
       className="workspace-settings-section"
       role="status"
+      aria-label={message}
       aria-busy="true"
     >
-      Loading…
+      {message}
     </p>
   );
 }
@@ -176,8 +183,9 @@ export function PlatformOverlaysHost({
     : null;
 
   return (
-    <>
-      {!authUser || !storeConsoleContext ? null : (
+    <DeferredOverlayLocaleContext.Provider value={locale}>
+      <>
+        {!authUser || !storeConsoleContext ? null : (
         <WorkspaceSettingsDialog
           open={storeConsoleOpen}
           onClose={() => setStoreConsoleOpen(false)}
@@ -432,7 +440,8 @@ export function PlatformOverlaysHost({
             </button>
           </motion.div>
         ) : null}
-      </AnimatePresence>
-    </>
+        </AnimatePresence>
+      </>
+    </DeferredOverlayLocaleContext.Provider>
   );
 }
