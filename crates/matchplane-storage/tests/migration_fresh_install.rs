@@ -10,6 +10,7 @@ const CURRENCY_SETTINGS_V1: &str =
 const CURRENCY_SETTINGS_V2: &str =
     include_str!("../../../migrations/202608280002_upgrade_mall_currency_exchange_rate.sql");
 const CURRENCY_SETTINGS_V1_SQLX_CHECKSUM: &str = "5cfd4a04c6f2f0ea139d8fd0c073c98e5535df7fc961c674ce32b12abb5826245e794f67f67d723d577e34c11b2c0dc0";
+const CURRENCY_SETTINGS_V2_SQLX_CHECKSUM: &str = "e1e63455ab259a79d88faf5e317ffec2ccc8013ec3d3abb07abcf73e6bff2a48590b69acad0335b01a95b10076fd8ae3";
 
 fn currency_settings_migration(
     version: i64,
@@ -224,8 +225,18 @@ async fn currency_settings_upgrade_should_migrate_the_original_snapshot_without_
         "upgrade mall currency exchange rate",
         CURRENCY_SETTINGS_V2,
     );
+    assert_eq!(
+        hex::encode(v2.checksum.as_ref()),
+        CURRENCY_SETTINGS_V2_SQLX_CHECKSUM,
+        "the immutable 002 migration no longer has its released SQLx checksum",
+    );
     let v2_checksum = v2.checksum.to_vec();
-    Migrator::with_migrations(vec![v1.clone(), v2])
+    let migrator = Migrator::with_migrations(vec![v1.clone(), v2]);
+    migrator
+        .run(&pool)
+        .await
+        .map_err(|error| sqlx::Error::Migrate(Box::new(error)))?;
+    migrator
         .run(&pool)
         .await
         .map_err(|error| sqlx::Error::Migrate(Box::new(error)))?;
