@@ -341,6 +341,26 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .mall-account-search input { min-width: 0; min-height: 2.65rem; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 0.74rem; }
 .mall-brand-panel { grid-column: 1 / -1; }
 .mall-brand-intro { max-width: 44rem; margin-top: 0.62rem; color: var(--muted); font-size: 0.74rem; line-height: 1.6; }
+.mall-currency-panel { grid-column: 1 / -1; }
+.mall-currency-intro { max-width: 48rem; margin-top: 0.62rem; color: var(--muted); font-size: 0.74rem; line-height: 1.6; }
+.mall-currency-form { margin-top: 1.15rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.mall-currency-field { min-width: 0; display: grid; align-content: start; gap: 0.35rem; }
+.mall-currency-field > span, .mall-currency-rate > span { color: var(--ink-soft); font-size: 0.68rem; font-weight: 650; }
+.mall-currency-field select { width: 100%; min-height: 2.75rem; padding: 0 0.75rem; border: 1px solid var(--line); border-radius: 0.78rem; outline: 0; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.75rem; }
+.mall-currency-field select:focus { border-color: var(--focus); box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--focus) 18%, transparent); }
+.mall-currency-field small, .mall-currency-rate small { color: var(--muted); font-size: 0.62rem; line-height: 1.5; }
+.mall-currency-rate { min-width: 0; min-height: 7.05rem; padding: 0.75rem 0.8rem; display: grid; align-content: center; gap: 0.25rem; border: 1px solid var(--line); border-radius: 0.82rem; background: var(--paper); }
+.mall-currency-rate strong { min-width: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 1.1rem; letter-spacing: -0.025em; }
+.mall-currency-actions { grid-column: 1 / -1; padding-top: 0.95rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--line); }
+.mall-currency-actions p { max-width: 34rem; margin: 0; color: var(--muted); font-size: 0.68rem; line-height: 1.5; }
+.mall-currency-actions > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem; }
+.mall-currency-actions .button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; white-space: nowrap; }
+.mall-currency-status { margin-top: 1rem; color: var(--muted); font-size: 0.74rem; }
+.mall-currency-error { margin-top: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--danger); font-size: 0.72rem; }
+.mall-currency-error p { margin: 0; overflow-wrap: anywhere; }
+.mall-currency-error .button { min-height: 2.75rem; display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+.mall-currency-panel .animate-spin { animation: mall-currency-spin 0.9s linear infinite; }
+@keyframes mall-currency-spin { to { transform: rotate(360deg); } }
 .mall-brand-form { margin-top: 1.15rem; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1rem; }
 .mall-brand-preview { width: 6.5rem; height: 6.5rem; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 1.25rem; background: var(--paper); color: var(--ink); font-size: 2rem; font-weight: 740; }
 .mall-brand-preview img { width: 100%; height: 100%; object-fit: contain; background: var(--ivory); }
@@ -2024,6 +2044,17 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .store-contact-released-values > div { display: grid; gap: 0.08rem; }
 .store-contact-released-values dt { color: var(--muted); font-size: 0.62rem; }
 .store-contact-released-values dd { margin: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 0.72rem; font-weight: 650; }
+@media (max-width: 760px) {
+.mall-currency-form { grid-template-columns: 1fr; }
+.mall-currency-actions { align-items: stretch; flex-direction: column; }
+.mall-currency-actions > div { justify-content: stretch; }
+.mall-currency-actions .button { flex: 1 1 12rem; }
+.mall-currency-error { align-items: stretch; flex-direction: column; }
+.mall-currency-error .button { width: fit-content; }
+}
+@media (prefers-reduced-motion: reduce) {
+.mall-currency-panel .animate-spin { animation: none; }
+}
 @media (min-width: 761px) {
 .workspace-settings-dialog.workspace-settings-dialog-store-console { height: auto; min-height: min(34rem, calc(100dvh - 2rem)); max-height: calc(100dvh - 2rem); }
 .workspace-settings-dialog-store-console .workspace-settings-layout { height: auto; max-height: calc(100dvh - 2rem); }

@@ -8,7 +8,7 @@ async fn fresh_install_should_apply_every_embedded_migration(
     let latest_applied: bool = sqlx::query_scalar(
         "SELECT EXISTS (\
              SELECT 1 FROM _sqlx_migrations \
-              WHERE version = 202608240005 AND success\
+              WHERE version = 202608280001 AND success\
          )",
     )
     .fetch_one(&pool)
@@ -38,6 +38,15 @@ async fn fresh_install_should_apply_every_embedded_migration(
     assert!(
         projection_table_present,
         "the conversion projection schema was not installed",
+    );
+
+    let currency_settings_table_present: bool =
+        sqlx::query_scalar("SELECT to_regclass('public.mall_currency_settings') IS NOT NULL")
+            .fetch_one(&pool)
+            .await?;
+    assert!(
+        currency_settings_table_present,
+        "the mall currency settings schema was not installed",
     );
 
     Ok(())

@@ -43,6 +43,7 @@ import { WeChatLoginConfigPanel } from "./WeChatLoginConfigPanel";
 import { PhoneLoginConfigPanel } from "./PhoneLoginConfigPanel";
 import { MallCatalogModeration } from "./MallCatalogModeration";
 import { MallBrandPanel } from "./MallBrandPanel";
+import { MallCurrencySettingsPanel } from "./MallCurrencySettingsPanel";
 import { MallInitializationPanel } from "./MallInitializationPanel";
 import { StoreCommercialTermsPanel } from "./StoreCommercialTermsPanel";
 import { RemoteStoreOnboarding } from "./RemoteStoreOnboarding";
@@ -67,6 +68,7 @@ type PlatformSection =
 
 type MarketplaceSettingsModule =
   | "brand"
+  | "currency"
   | "email"
   | "identity"
   | "filing";
@@ -534,6 +536,14 @@ function MarketplaceSettingsModules({
             品牌
           </TabsTrigger>
           <TabsTrigger
+            id="marketplace-settings-tab-currency"
+            value="currency"
+            className="min-h-11"
+            aria-controls="marketplace-settings-panel-currency"
+          >
+            货币与汇率
+          </TabsTrigger>
+          <TabsTrigger
             id="marketplace-settings-tab-email"
             value="email"
             className="min-h-11"
@@ -573,6 +583,17 @@ function MarketplaceSettingsModules({
             onBrandUpdated={onBrandUpdated}
             onNotice={onNotice}
           />
+        </TabsContent>
+      ) : null}
+      {visitedModules.has("currency") ? (
+        <TabsContent
+          id="marketplace-settings-panel-currency"
+          value="currency"
+          aria-labelledby="marketplace-settings-tab-currency"
+          className="min-w-0"
+          keepMounted
+        >
+          <MallCurrencySettingsPanel rootRole={rootRole} onNotice={onNotice} />
         </TabsContent>
       ) : null}
       {visitedModules.has("email") ? (

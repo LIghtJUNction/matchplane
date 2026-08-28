@@ -936,6 +936,15 @@ export interface MallSettings {
   placeholderPhrases?: string[];
 }
 
+export interface MallExchangeRateSettings {
+  baseCurrency: "USD";
+  localCurrency: string;
+  usdToLocalRate: number | null;
+  rateSource: string | null;
+  rateUpdatedAt: string | null;
+  version: number;
+}
+
 export async function getMallSettings(): Promise<MallSettings> {
   const body = await apiJson<{ mall: MallSettings }>(`/api/mall/settings`, {
     cache: "no-store",
@@ -964,6 +973,65 @@ export async function saveMallSettings(input: {
       ),
   });
   return body.mall;
+}
+
+export async function getMallExchangeRateSettings(): Promise<MallExchangeRateSettings> {
+  const body = await apiJson<{
+    exchangeRate: MallExchangeRateSettings;
+  }>(`/api/mall/exchange-rate`, {
+    cache: "no-store",
+    fallbackError: "货币设置读取失败",
+    ok: (value) =>
+      Boolean(
+        value &&
+          typeof value === "object" &&
+          "exchangeRate" in value &&
+          value.exchangeRate,
+      ),
+  });
+  return body.exchangeRate;
+}
+
+export async function saveMallExchangeRateSettings(input: {
+  localCurrency: string;
+  expectedVersion: number;
+}): Promise<MallExchangeRateSettings> {
+  const body = await apiJson<{
+    exchangeRate: MallExchangeRateSettings;
+  }>(`/api/mall/exchange-rate`, {
+    method: "PATCH",
+    body: input,
+    fallbackError: "本地货币保存失败",
+    ok: (value) =>
+      Boolean(
+        value &&
+          typeof value === "object" &&
+          "exchangeRate" in value &&
+          value.exchangeRate,
+      ),
+  });
+  return body.exchangeRate;
+}
+
+export async function syncLatestUsdExchangeRate(input: {
+  localCurrency: string;
+  expectedVersion: number;
+}): Promise<MallExchangeRateSettings> {
+  const body = await apiJson<{
+    exchangeRate: MallExchangeRateSettings;
+  }>(`/api/mall/exchange-rate`, {
+    method: "POST",
+    body: input,
+    fallbackError: "最新美元汇率同步失败",
+    ok: (value) =>
+      Boolean(
+        value &&
+          typeof value === "object" &&
+          "exchangeRate" in value &&
+          value.exchangeRate,
+      ),
+  });
+  return body.exchangeRate;
 }
 
 export async function uploadMallBrandLogo(input: {

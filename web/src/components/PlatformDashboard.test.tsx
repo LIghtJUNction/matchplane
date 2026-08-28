@@ -22,6 +22,7 @@ const api = vi.hoisted(() => ({
 const bootstrapMock = vi.hoisted(() => ({ current: undefined as unknown }));
 const settingsModuleRequests = vi.hoisted(() => ({
   brand: vi.fn(),
+  currency: vi.fn(),
   email: vi.fn(),
   identity: vi.fn(),
   filing: vi.fn(),
@@ -118,6 +119,17 @@ vi.mock("./MallBrandPanel", async () => {
         settingsModuleRequests.brand();
       }, []);
       return <div data-testid="brand-panel-content" />;
+    },
+  };
+});
+vi.mock("./MallCurrencySettingsPanel", async () => {
+  const { useEffect } = await import("react");
+  return {
+    MallCurrencySettingsPanel: () => {
+      useEffect(() => {
+        settingsModuleRequests.currency();
+      }, []);
+      return <div data-testid="currency-panel-content" />;
     },
   };
 });
@@ -242,7 +254,13 @@ describe("PlatformDashboard deferred sections", () => {
     expect(outerPanel).toHaveAttribute("role", "tabpanel");
     expect(outerPanel).toHaveAttribute("aria-labelledby", "platform-tab-brand");
 
-    const moduleLabels = ["品牌", "邮件", "登录与身份", "备案"] as const;
+    const moduleLabels = [
+      "品牌",
+      "货币与汇率",
+      "邮件",
+      "登录与身份",
+      "备案",
+    ] as const;
     for (const label of moduleLabels) {
       expect(screen.getByRole("tab", { name: label })).toHaveClass("min-h-11");
     }
@@ -255,6 +273,7 @@ describe("PlatformDashboard deferred sections", () => {
     expect(screen.queryByTestId("login-methods-panel")).not.toBeInTheDocument();
     expect(screen.queryByTestId("site-settings-panel")).not.toBeInTheDocument();
     expect(settingsModuleRequests.brand).toHaveBeenCalledOnce();
+    expect(settingsModuleRequests.currency).not.toHaveBeenCalled();
     expect(settingsModuleRequests.email).not.toHaveBeenCalled();
     expect(settingsModuleRequests.identity).not.toHaveBeenCalled();
     expect(settingsModuleRequests.filing).not.toHaveBeenCalled();
@@ -272,6 +291,10 @@ describe("PlatformDashboard deferred sections", () => {
       "marketplace-settings-tab-brand",
     );
     expect(brandPanel).toHaveAttribute("role", "tabpanel");
+
+    await user.click(screen.getByRole("tab", { name: "货币与汇率" }));
+    expect(screen.getByTestId("currency-panel-content")).toBeVisible();
+    expect(settingsModuleRequests.currency).toHaveBeenCalledOnce();
 
     await user.click(screen.getByRole("tab", { name: "邮件" }));
     const emailPanel = document.getElementById(

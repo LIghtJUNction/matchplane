@@ -35,7 +35,7 @@ import { POST } from "../app/api/platform/agent/handoff/route";
 
 const requestId = "123e4567-e89b-42d3-a456-426614174000";
 const sessionSubject = "223e4567-e89b-42d3-a456-426614174000";
-const apiKeySubject = "api-key:323e4567-e89b-42d3-a456-426614174000";
+const integrationSubject = "integration-subject-fixture";
 const otherSessionSubject = "423e4567-e89b-42d3-a456-426614174000";
 const validHandoff = {
   protocol: "matchplane.agent/v1",
@@ -270,12 +270,12 @@ describe("platform Agent handoff route idempotency", () => {
       body: validHandoff,
       actor: {
         ...defaultActor,
-        subject: apiKeySubject,
+        subject: integrationSubject,
         access: "api_key",
         organizationId: "223e4567-e89b-42d3-a456-426614174000",
       },
       comparison: {
-        authSubject: apiKeySubject,
+        authSubject: integrationSubject,
         sameOrganization: false,
       },
       sqlFragment:
