@@ -161,6 +161,7 @@ export async function POST(request: Request): Promise<Response> {
     await recordAssistantUsage({
       requestId,
       subject: identity.subject,
+      platformPath: requestedStorePath ?? "/",
       question,
       model: reply.model,
       usage: reply.usage,
@@ -239,6 +240,7 @@ export async function POST(request: Request): Promise<Response> {
 async function recordAssistantUsage(input: {
   requestId: string;
   subject: string;
+  platformPath: string;
   question: string;
   model: string;
   usage: {
@@ -255,7 +257,7 @@ async function recordAssistantUsage(input: {
        VALUES (
                      $1::uuid,
                      $2,
-                     '/',
+                     $11,
                      $3,
                      '[]'::jsonb,
                      jsonb_build_object(
@@ -270,7 +272,7 @@ async function recordAssistantUsage(input: {
      INSERT INTO platform_ai_usage
        (id, match_request_id, auth_user_id, platform_path, source, cost_bearer, model,
         max_input_characters, max_output_tokens, prompt_tokens, completion_tokens, total_tokens, model_calls, degraded)
-     SELECT $4::uuid, id, $2, '/', 'ai', 'platform', $5, 12000, 320, $6, $7, $8, $10, false FROM request`,
+     SELECT $4::uuid, id, $2, $11, 'ai', 'platform', $5, 12000, 320, $6, $7, $8, $10, false FROM request`,
     [
       input.requestId,
       input.subject,
@@ -282,6 +284,7 @@ async function recordAssistantUsage(input: {
       input.usage?.totalTokens ?? null,
       JSON.stringify(input.toolCalls.slice(0, 16)),
       Math.max(0, Math.min(16, Math.trunc(input.modelCalls))),
+      input.platformPath,
     ],
   );
 }

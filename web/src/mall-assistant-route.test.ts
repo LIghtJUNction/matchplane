@@ -235,6 +235,26 @@ describe("mall assistant store directory budget", () => {
     );
   });
 
+  it("attributes store-scoped assistant usage to the canonical store path", async () => {
+    const target = {
+      path: "/target-store",
+      displayName: "目标店铺",
+    };
+    mocks.readPublicStores.mockResolvedValue([target]);
+    mocks.answerPlatformShoppingQuestion.mockResolvedValue(successfulReply());
+
+    const response = await POST(
+      assistantRequest({ question: "找商品", storePath: target.path }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.authDatabaseQuery).toHaveBeenCalledOnce();
+    expect(
+      String(mocks.authDatabaseQuery.mock.calls[0]?.[0]).match(/\$11/g),
+    ).toHaveLength(2);
+    expect(mocks.authDatabaseQuery.mock.calls[0]?.[1]?.[10]).toBe(target.path);
+  });
+
   it("keeps an unknown exact store path as a 404", async () => {
     mocks.readPublicStores.mockResolvedValue([]);
 
