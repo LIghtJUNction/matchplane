@@ -12,9 +12,9 @@ import {
 } from "../api";
 import { SectionHeading } from "./Primitives";
 
-// Frankfurter's ECB-backed /latest endpoint does not publish TWD or VND; keep selectable
-// currencies within the provider's supported set. Unknown persisted codes remain visible below
-// so an existing tenant can still be corrected rather than silently changing its setting.
+// Keep this list aligned with Frankfurter's ECB-backed /currencies response. Unknown persisted
+// codes remain visible below so an existing tenant can still be corrected rather than silently
+// changing its setting.
 const LOCAL_CURRENCY_OPTIONS = [
   ["CNY", "人民币"],
   ["JPY", "日元"],
@@ -27,8 +27,12 @@ const LOCAL_CURRENCY_OPTIONS = [
   ["AUD", "澳大利亚元"],
   ["CAD", "加拿大元"],
   ["CHF", "瑞士法郎"],
+  ["CZK", "捷克克朗"],
+  ["HUF", "匈牙利福林"],
+  ["ILS", "以色列新谢克尔"],
   ["INR", "印度卢比"],
   ["IDR", "印度尼西亚卢比"],
+  ["ISK", "冰岛克朗"],
   ["MYR", "马来西亚林吉特"],
   ["THB", "泰铢"],
   ["PHP", "菲律宾比索"],
@@ -37,6 +41,8 @@ const LOCAL_CURRENCY_OPTIONS = [
   ["SEK", "瑞典克朗"],
   ["DKK", "丹麦克朗"],
   ["PLN", "波兰兹罗提"],
+  ["MXN", "墨西哥比索"],
+  ["RON", "罗马尼亚列伊"],
   ["TRY", "土耳其里拉"],
   ["BRL", "巴西雷亚尔"],
   ["ZAR", "南非兰特"],

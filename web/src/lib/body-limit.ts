@@ -100,8 +100,7 @@ async function readBoundedBytes(
   let onAbort: (() => void) | undefined;
 
   try {
-    if (signal?.aborted) throw abortError(signal);
-    const abortPromise = signal
+    const abortPromise = signal && !signal.aborted
       ? new Promise<never>((_, reject) => {
           rejectAbort = reject;
           onAbort = () => {
@@ -117,6 +116,7 @@ async function readBoundedBytes(
       : null;
 
     try {
+      if (signal?.aborted) throw abortError(signal);
       while (true) {
         const pendingRead = reader.read();
         const { done, value } = abortPromise

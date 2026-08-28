@@ -54,9 +54,12 @@ interface EditorContext {
 }
 
 class ExchangeRateProviderError extends Error {
-  constructor(message: string) {
+  readonly status: number;
+
+  constructor(message: string, status = 502) {
     super(message);
     this.name = "ExchangeRateProviderError";
+    this.status = status;
   }
 }
 
@@ -153,7 +156,7 @@ export async function PATCH(request: Request): Promise<Response> {
     );
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
-    if (error instanceof ExchangeRateConflictError) {
+    if (isExchangeRateConflict(error)) {
       return jsonError("货币设置已被其他人更新，请刷新后重试", 409);
     }
     if (isMissingCurrencySettingsTable(error)) {
@@ -182,7 +185,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     if (error instanceof ExchangeRateProviderError) {
       console.error("mall exchange rate provider failed", error.message);
-      return jsonError(error.message, 502);
+      return jsonError(error.message, error.status);
     }
     console.error("mall exchange rate sync failed", error);
     return jsonError("最新美元汇率获取失败，请稍后重试", 502);
@@ -221,7 +224,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
-    if (error instanceof ExchangeRateConflictError) {
+    if (isExchangeRateConflict(error)) {
       return jsonError("货币设置已被其他人更新，请刷新后重试", 409);
     }
     if (isMissingCurrencySettingsTable(error)) {
@@ -420,6 +423,7 @@ async function fetchLatestUsdRate(
     return { rate: 1, source: "identity" };
   }
 
+  const usesDefaultProvider = !process.env.MATCHPLANE_EXCHANGE_RATE_URL?.trim();
   const url = await exchangeRateProviderUrl();
   url.searchParams.set("from", BASE_CURRENCY);
   url.searchParams.set("to", localCurrency);
@@ -437,12 +441,18 @@ async function fetchLatestUsdRate(
       });
     } catch (error) {
       if (controller.signal.aborted || isAbortError(error)) {
-        throw new ExchangeRateProviderError("汇率服务响应超时，请稍后重试");
+        throw new ExchangeRateProviderError(
+          "汇率服务响应超时，请稍后重试",
+          504,
+        );
       }
       throw new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
     }
 
     if (!response.ok) {
+      if (usesDefaultProvider && response.status === 404) {
+        throw new ExchangeRateProviderError("汇率服务暂不支持该本地货币", 400);
+      }
       throw new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
     }
 
@@ -455,14 +465,17 @@ async function fetchLatestUsdRate(
       );
     } catch (error) {
       if (controller.signal.aborted || isAbortError(error)) {
-        throw new ExchangeRateProviderError("汇率服务响应超时，请稍后重试");
+        throw new ExchangeRateProviderError(
+          "汇率服务响应超时，请稍后重试",
+          504,
+        );
       }
       throw new ExchangeRateProviderError("汇率服务返回了无效数据，请稍后重试");
     }
 
     const rate = extractRate(payload, localCurrency);
     if (rate === null) {
-      throw new ExchangeRateProviderError("汇率服务暂不支持该本地货币");
+      throw new ExchangeRateProviderError("汇率服务返回了无效数据，请稍后重试");
     }
     return { rate, source: url.hostname };
   } finally {
@@ -477,7 +490,7 @@ async function exchangeRateProviderUrl(): Promise<URL> {
   try {
     url = new URL(raw);
   } catch {
-    throw new ExchangeRateProviderError("汇率服务配置无效");
+    throw new ExchangeRateProviderError("汇率服务配置无效", 503);
   }
 
   // MatchPlane uses MATCHPLANE_ENVIRONMENT as the deployment profile. NODE_ENV is often
@@ -494,14 +507,14 @@ async function exchangeRateProviderUrl(): Promise<URL> {
     (loopback && !developmentLoopback) ||
     (url.protocol !== "https:" && !developmentLoopback)
   ) {
-    throw new ExchangeRateProviderError("汇率服务配置无效");
+    throw new ExchangeRateProviderError("汇率服务配置无效", 503);
   }
 
   // Resolve immediately before fetch and fail closed if any answer is private, loopback,
   // link-local, metadata, multicast, documentation, or otherwise non-global. A local HTTP
   // loopback mock is the sole development exception, matching the project's endpoint contract.
   if (!developmentLoopback && !(await hasOnlyPublicAddresses(url.toString()))) {
-    throw new ExchangeRateProviderError("汇率服务配置无效");
+    throw new ExchangeRateProviderError("汇率服务配置无效", 503);
   }
   return url;
 }
@@ -515,6 +528,13 @@ function isAbortError(error: unknown): boolean {
     (error instanceof DOMException && error.name === "AbortError") ||
     (error instanceof Error && error.name === "AbortError")
   );
+}
+
+function isExchangeRateConflict(error: unknown): boolean {
+  if (error instanceof ExchangeRateConflictError) return true;
+  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "40001" || code === "40P01";
 }
 
 function extractRate(payload: unknown, localCurrency: string): number | null {

@@ -214,7 +214,7 @@ describe("mall exchange-rate route", () => {
       request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
     );
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
       error: "汇率服务配置无效",
     });
@@ -236,7 +236,7 @@ describe("mall exchange-rate route", () => {
       request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
     );
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
       error: "汇率服务配置无效",
     });
@@ -255,7 +255,7 @@ describe("mall exchange-rate route", () => {
       request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
     );
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
       error: "汇率服务配置无效",
     });
@@ -276,8 +276,63 @@ describe("mall exchange-rate route", () => {
       request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
     );
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(503);
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("maps blocked redirects to an upstream provider failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("fetch failed: redirect mode is set to error");
+      }),
+    );
+
+    const response = await POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "汇率服务暂时不可用，请稍后重试",
+    });
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("maps unsupported provider currencies to a client error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 404 })));
+
+    const response = await POST(
+      request("POST", { localCurrency: "TWD", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "汇率服务暂不支持该本地货币",
+    });
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("maps malformed provider data to an upstream failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ base: "USD", rates: {} }), {
+            status: 200,
+          }),
+      ),
+    );
+
+    const response = await POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "汇率服务返回了无效数据，请稍后重试",
+    });
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("applies the provider timeout while reading a slow response body", async () => {
@@ -300,13 +355,36 @@ describe("mall exchange-rate route", () => {
     await vi.advanceTimersByTimeAsync(6_000);
     const response = await pending;
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(504);
     await expect(response.json()).resolves.toEqual({
       error: "汇率服务响应超时，请稍后重试",
     });
     expect(cancel).toHaveBeenCalled();
     expect(mocks.connect).not.toHaveBeenCalled();
   });
+
+  it.each(["40001", "40P01"])(
+    "maps PostgreSQL transaction conflict %s to 409",
+    async (code) => {
+      const client = transactionClient();
+      client.query.mockImplementation(async (sql: string) => {
+        if (sql === "ROLLBACK") return {};
+        throw Object.assign(new Error("transaction conflict"), { code });
+      });
+      mocks.connect.mockResolvedValue(client);
+
+      const response = await PATCH(
+        request("PATCH", { localCurrency: "EUR", expectedVersion: 3 }),
+      );
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: "货币设置已被其他人更新，请刷新后重试",
+      });
+      expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+      expect(client.release).toHaveBeenCalled();
+    },
+  );
 
   it("requires the trusted owner session for mutations", async () => {
     mocks.getSession.mockResolvedValue(null);

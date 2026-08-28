@@ -131,11 +131,15 @@ describe("MallCurrencySettingsPanel", () => {
           version: 8,
         }),
       );
-    api.saveMallExchangeRateSettings.mockRejectedValue(
-      Object.assign(new Error("货币设置已被其他人更新，请刷新后重试"), {
-        status: 409,
-      }),
-    );
+    api.saveMallExchangeRateSettings
+      .mockRejectedValueOnce(
+        Object.assign(new Error("货币设置已被其他人更新，请刷新后重试"), {
+          status: 409,
+        }),
+      )
+      .mockResolvedValueOnce(
+        settings({ localCurrency: "JPY", version: 9 }),
+      );
     render(
       <MallCurrencySettingsPanel
         rootRole="rootSuperAdmin"
@@ -151,10 +155,19 @@ describe("MallCurrencySettingsPanel", () => {
       expect(api.getMallExchangeRateSettings).toHaveBeenCalledTimes(2),
     );
     expect(screen.getByLabelText("本地货币")).toHaveValue("EUR");
-    expect(api.saveMallExchangeRateSettings).toHaveBeenCalledWith({
+    expect(api.saveMallExchangeRateSettings).toHaveBeenNthCalledWith(1, {
       localCurrency: "EUR",
       expectedVersion: 3,
     });
+
+    await user.selectOptions(screen.getByLabelText("本地货币"), "JPY");
+    await user.click(screen.getByRole("button", { name: "保存本地货币" }));
+    await waitFor(() =>
+      expect(api.saveMallExchangeRateSettings).toHaveBeenNthCalledWith(2, {
+        localCurrency: "JPY",
+        expectedVersion: 8,
+      }),
+    );
   });
 
   it("reloads settings after a sync version conflict", async () => {
@@ -162,11 +175,15 @@ describe("MallCurrencySettingsPanel", () => {
     api.getMallExchangeRateSettings
       .mockResolvedValueOnce(settings())
       .mockResolvedValueOnce(settings({ localCurrency: "JPY", version: 9 }));
-    api.syncLatestUsdExchangeRate.mockRejectedValue(
-      Object.assign(new Error("货币设置已被其他人更新，请刷新后重试"), {
-        status: 409,
-      }),
-    );
+    api.syncLatestUsdExchangeRate
+      .mockRejectedValueOnce(
+        Object.assign(new Error("货币设置已被其他人更新，请刷新后重试"), {
+          status: 409,
+        }),
+      )
+      .mockResolvedValueOnce(
+        settings({ localCurrency: "JPY", usdToLocalRate: 146.12, version: 10 }),
+      );
     render(
       <MallCurrencySettingsPanel
         rootRole="rootSuperAdmin"
@@ -182,13 +199,21 @@ describe("MallCurrencySettingsPanel", () => {
       expect(api.getMallExchangeRateSettings).toHaveBeenCalledTimes(2),
     );
     expect(screen.getByLabelText("本地货币")).toHaveValue("JPY");
-    expect(api.syncLatestUsdExchangeRate).toHaveBeenCalledWith({
+    expect(api.syncLatestUsdExchangeRate).toHaveBeenNthCalledWith(1, {
       localCurrency: "JPY",
       expectedVersion: 3,
     });
+
+    await user.click(screen.getByRole("button", { name: "同步最新美元汇率" }));
+    await waitFor(() =>
+      expect(api.syncLatestUsdExchangeRate).toHaveBeenNthCalledWith(2, {
+        localCurrency: "JPY",
+        expectedVersion: 9,
+      }),
+    );
   });
 
-  it("does not offer currencies unsupported by the default Frankfurter provider", async () => {
+  it("offers every currency supported by the default Frankfurter provider", async () => {
     render(
       <MallCurrencySettingsPanel
         rootRole="rootSuperAdmin"
@@ -197,8 +222,44 @@ describe("MallCurrencySettingsPanel", () => {
     );
 
     await screen.findByTestId("usd-exchange-rate");
-    expect(screen.queryByRole("option", { name: /新台币/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /越南盾/ })).not.toBeInTheDocument();
+    const currencyCodes = screen
+      .getAllByRole("option")
+      .map((option) => (option as HTMLOptionElement).value)
+      .sort();
+    expect(currencyCodes).toEqual(
+      [
+        "AUD",
+        "BRL",
+        "CAD",
+        "CHF",
+        "CNY",
+        "CZK",
+        "DKK",
+        "EUR",
+        "GBP",
+        "HKD",
+        "HUF",
+        "IDR",
+        "ILS",
+        "INR",
+        "ISK",
+        "JPY",
+        "KRW",
+        "MXN",
+        "MYR",
+        "NOK",
+        "NZD",
+        "PHP",
+        "PLN",
+        "RON",
+        "SEK",
+        "SGD",
+        "THB",
+        "TRY",
+        "USD",
+        "ZAR",
+      ].sort(),
+    );
   });
 
   it("keeps the settings read-only for non-owners", async () => {

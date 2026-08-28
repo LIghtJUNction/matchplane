@@ -160,6 +160,24 @@ describe("bounded JSON request bodies", () => {
     expect(cancel).toHaveBeenCalled();
   });
 
+  it("cancels an upstream response when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        cancel(reason) {
+          cancel(reason);
+        },
+      }),
+    );
+    controller.abort();
+
+    await expect(
+      readJsonResponseBody(response, 128, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancel).toHaveBeenCalled();
+  });
+
   it("reads a bounded upstream text response", async () => {
     const response = new Response("gateway error", { status: 502 });
 
