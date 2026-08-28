@@ -888,7 +888,7 @@ export async function probeFederationBinding(bindingId: string): Promise<{
   };
 }
 
-export interface PlatformChildSummary {
+interface PlatformChildSummary {
   slug: string;
   path: string;
   displayName: string;
@@ -1065,7 +1065,7 @@ export async function uploadMallBrandLogo(input: {
   return body.mall;
 }
 
-export interface MallLegalDocument {
+interface MallLegalDocument {
   content: string;
   version: number;
   updatedAt: string;
@@ -1510,7 +1510,7 @@ export interface SubplatformSourceIntake {
   error?: string | null;
 }
 
-export interface SubplatformEmailConfig {
+interface SubplatformEmailConfig {
   tenant_id: string;
   domain_id: string;
   provider_key: string;
@@ -1615,7 +1615,7 @@ export interface ManagedPlatformRouterMutationState
 }
 
 /** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
-export type ContactExchange = Record<string, string>;
+type ContactExchange = Record<string, string>;
 
 export interface OfflineDeal {
   offline_deal_id: string;
@@ -1683,7 +1683,7 @@ export interface MarketplaceOfferCandidate extends MarketplaceOffer {
   risks?: string[];
 }
 
-export interface MarketplaceOfferPreference {
+interface MarketplaceOfferPreference {
   tenant_id: string;
   domain_id: string;
   participant_id: string;
@@ -1792,7 +1792,7 @@ export interface RecommendedBackendListing {
   [key: string]: unknown;
 }
 
-export interface MallSearchResponse {
+interface MallSearchResponse {
   requestId: string;
   stores: Array<{ slug: string; path: string; displayName: string }>;
   recommendations: RecommendedBackendListing[];
@@ -1902,7 +1902,7 @@ export interface MallAssistantMessage {
   content: string;
 }
 
-export interface MallAssistantSearchTraceStore {
+interface MallAssistantSearchTraceStore {
   path: string;
   displayName: string;
   offerCount: number;
@@ -1921,7 +1921,7 @@ export interface MallAssistantChoiceAction {
   options: Array<{ id: string; label: string; value: string }>;
 }
 
-export interface MallAssistantProductsAction {
+interface MallAssistantProductsAction {
   type: "products";
   productIds: string[];
 }
@@ -2470,7 +2470,7 @@ export async function saveWeChatOAuthConfig(input: {
   };
 }
 
-export interface ContactResponse {
+interface ContactResponse {
   counterpart: {
     party_id: string;
     display_name: string;
@@ -2496,7 +2496,7 @@ export interface PlatformRouteHop {
   depth: number;
 }
 
-export interface PlatformRouteDecision {
+interface PlatformRouteDecision {
   selectedSlugs: string[];
   source: "ai" | "policy_fallback";
   routeMechanism?: "mcp_tool" | "structured_json" | "policy_fallback";
