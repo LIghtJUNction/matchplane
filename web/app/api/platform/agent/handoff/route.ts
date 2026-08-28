@@ -129,21 +129,44 @@ export async function POST(request: Request): Promise<Response> {
   if (inserted.rowCount !== 1) {
     const existing = await authDatabase.query(
       `SELECT request_id AS "requestId", auth_subject AS "authSubject",
-              platform_path AS "platformPath", stage, status,
-              expires_at AS "expiresAt"
+              status, expires_at AS "expiresAt",
+              organization_id IS NOT DISTINCT FROM $2::uuid AS "sameOrganization",
+              platform_path = $3 AS "samePlatformPath",
+              stage = $4 AS "sameStage",
+              narrative = $5 AS "sameNarrative",
+              requirements = $6::jsonb AS "sameRequirements",
+              agent = $7::jsonb AS "sameAgent",
+              budget = $8::jsonb AS "sameBudget",
+              selected_refs = $9::jsonb AS "sameSelectedRefs"
          FROM platform_agent_handoffs
         WHERE request_id = $1::uuid
         LIMIT 1`,
-      [handoff.requestId],
+      [
+        handoff.requestId,
+        actor.organizationId,
+        handoff.platformPath,
+        handoff.stage,
+        handoff.narrative,
+        JSON.stringify(handoff.requirements),
+        JSON.stringify(handoff.agent),
+        JSON.stringify(handoff.budget),
+        JSON.stringify(handoff.selectedRefs),
+      ],
     );
     const row = existing.rows[0] as
       | {
           requestId?: string;
           authSubject?: string;
-          platformPath?: string;
-          stage?: string;
           status?: string;
           expiresAt?: string;
+          sameOrganization?: boolean;
+          samePlatformPath?: boolean;
+          sameStage?: boolean;
+          sameNarrative?: boolean;
+          sameRequirements?: boolean;
+          sameAgent?: boolean;
+          sameBudget?: boolean;
+          sameSelectedRefs?: boolean;
         }
       | undefined;
     if (!row || row.authSubject !== actor.subject) {
@@ -152,12 +175,22 @@ export async function POST(request: Request): Promise<Response> {
         { status: 409 },
       );
     }
-    if (
-      row.platformPath !== handoff.platformPath ||
-      row.stage !== handoff.stage
-    ) {
+    if (row.samePlatformPath !== true || row.sameStage !== true) {
       return NextResponse.json(
         { error: "同一 request_id 不能改变 handoff 范围" },
+        { status: 409 },
+      );
+    }
+    if (
+      row.sameOrganization !== true ||
+      row.sameNarrative !== true ||
+      row.sameRequirements !== true ||
+      row.sameAgent !== true ||
+      row.sameBudget !== true ||
+      row.sameSelectedRefs !== true
+    ) {
+      return NextResponse.json(
+        { error: "同一 request_id 不能改变 handoff payload" },
         { status: 409 },
       );
     }
