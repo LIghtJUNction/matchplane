@@ -2,6 +2,15 @@ use std::collections::HashMap;
 
 use sqlx::PgPool;
 
+#[derive(sqlx::FromRow)]
+struct ColumnMetadata {
+    name: String,
+    data_type: String,
+    nullable: String,
+    precision: Option<i32>,
+    scale: Option<i32>,
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 #[ignore = "requires PostgreSQL with the MatchPlane extensions; CI runs this target explicitly"]
 async fn fresh_install_should_apply_every_embedded_migration(
@@ -17,8 +26,9 @@ async fn fresh_install_should_apply_every_embedded_migration(
     .await?;
     assert!(latest_applied, "latest migration was not applied");
 
-    let columns: Vec<(String, String, String, Option<i32>, Option<i32>)> = sqlx::query_as(
-        "SELECT column_name, data_type, is_nullable, numeric_precision, numeric_scale \
+    let columns: Vec<ColumnMetadata> = sqlx::query_as(
+        "SELECT column_name AS name, data_type, is_nullable AS nullable, \
+                numeric_precision AS precision, numeric_scale AS scale \
            FROM information_schema.columns \
           WHERE table_schema = current_schema() \
             AND table_name = 'mall_currency_settings'",
@@ -27,9 +37,7 @@ async fn fresh_install_should_apply_every_embedded_migration(
     .await?;
     let columns: HashMap<_, _> = columns
         .into_iter()
-        .map(|(name, data_type, nullable, precision, scale)| {
-            (name, (data_type, nullable, precision, scale))
-        })
+        .map(|column| (column.name.clone(), column))
         .collect();
     for required in [
         "tenant_id",
@@ -46,15 +54,17 @@ async fn fresh_install_should_apply_every_embedded_migration(
     ] {
         assert!(columns.contains_key(required), "missing column {required}");
     }
-    assert_eq!(
-        columns.get("usd_to_local_rate"),
-        Some(&("numeric".to_owned(), "YES".to_owned(), None, None)),
-        "the exchange-rate numeric must remain unbounded and exact",
-    );
+    let rate_column = columns
+        .get("usd_to_local_rate")
+        .expect("missing usd_to_local_rate column");
+    assert_eq!(rate_column.data_type, "numeric");
+    assert_eq!(rate_column.nullable, "YES");
+    assert_eq!(rate_column.precision, None);
+    assert_eq!(rate_column.scale, None);
     assert_eq!(
         columns
             .get("rate_effective_date")
-            .map(|column| column.0.as_str()),
+            .map(|column| column.data_type.as_str()),
         Some("date"),
     );
 
