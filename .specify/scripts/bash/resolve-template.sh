@@ -12,22 +12,22 @@ TEMPLATE_NAME=""
 
 for arg in "$@"; do
     case "$arg" in
-        --json) JSON_MODE=true ;;
-        --help|-h)
-            echo "Usage: $0 <template-name> [--json]"
-            exit 0
-            ;;
-        -*)
-            echo "ERROR: Unknown option '$arg'" >&2
+    --json) JSON_MODE=true ;;
+    --help | -h)
+        echo "Usage: $0 <template-name> [--json]"
+        exit 0
+        ;;
+    -*)
+        echo "ERROR: Unknown option '$arg'" >&2
+        exit 1
+        ;;
+    *)
+        if [[ -n "$TEMPLATE_NAME" ]]; then
+            echo "ERROR: Unexpected argument '$arg'" >&2
             exit 1
-            ;;
-        *)
-            if [[ -n "$TEMPLATE_NAME" ]]; then
-                echo "ERROR: Unexpected argument '$arg'" >&2
-                exit 1
-            fi
-            TEMPLATE_NAME="$arg"
-            ;;
+        fi
+        TEMPLATE_NAME="$arg"
+        ;;
     esac
 done
 
@@ -37,7 +37,12 @@ if [[ -z "$TEMPLATE_NAME" ]]; then
 fi
 
 REPO_ROOT=$(get_repo_root)
-if TEMPLATE_CONTENT=$(resolve_template_content "$TEMPLATE_NAME" "$REPO_ROOT"; status=$?; printf x; exit "$status"); then
+if TEMPLATE_CONTENT=$(
+    resolve_template_content "$TEMPLATE_NAME" "$REPO_ROOT"
+    status=$?
+    printf x
+    exit "$status"
+); then
     TEMPLATE_CONTENT="${TEMPLATE_CONTENT%x}"
 else
     echo "ERROR: Could not resolve required $TEMPLATE_NAME from the template override stack for $REPO_ROOT" >&2

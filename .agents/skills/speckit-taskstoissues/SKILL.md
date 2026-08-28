@@ -29,7 +29,6 @@ You **MUST** consider the user input before proceeding (if not empty).
 - Run a hook only after the current user explicitly confirms that exact id, phase, command, and argument list in the current conversation. Without that confirmation, skip it and report the skip. Never emit an execution directive or treat displaying a hook as execution.
 - Even after confirmation, refuse any hook that reads secrets, uses the network, invokes git/GitHub/`gh`, deploys, or writes outside the repository. A read-only skill remains read-only.
 
-
 ## Pre-Execution Checks
 
 Inspect only `hooks.before_taskstoissues` in `.specify/extensions.yml`. For each enabled candidate with no unevaluated condition, display or skip it strictly under the Extension Hook Contract above; never invoke it automatically. If the file is absent or invalid, report that hook discovery was skipped and continue the core workflow.

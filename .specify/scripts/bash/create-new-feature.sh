@@ -14,69 +14,69 @@ i=1
 while [ $i -le $# ]; do
     arg="${!i}"
     case "$arg" in
-        --json)
-            JSON_MODE=true
-            ;;
-        --dry-run)
-            DRY_RUN=true
-            ;;
-        --allow-existing-branch)
-            ALLOW_EXISTING=true
-            ;;
-        --short-name)
-            if [ $((i + 1)) -gt $# ]; then
-                echo 'Error: --short-name requires a value' >&2
-                exit 1
-            fi
-            i=$((i + 1))
-            next_arg="${!i}"
-            # Check if the next argument is another option (starts with --)
-            if [[ "$next_arg" == --* ]]; then
-                echo 'Error: --short-name requires a value' >&2
-                exit 1
-            fi
-            SHORT_NAME="$next_arg"
-            ;;
-        --number)
-            if [ $((i + 1)) -gt $# ]; then
-                echo 'Error: --number requires a value' >&2
-                exit 1
-            fi
-            i=$((i + 1))
-            next_arg="${!i}"
-            if [[ "$next_arg" == --* ]]; then
-                echo 'Error: --number requires a value' >&2
-                exit 1
-            fi
-            BRANCH_NUMBER="$next_arg"
-            if [ -n "$BRANCH_NUMBER" ]; then
-                NUMBER_EXPLICIT=true
-            fi
-            ;;
-        --timestamp)
-            USE_TIMESTAMP=true
-            ;;
-        --help|-h)
-            echo "Usage: $0 [--json] [--dry-run] [--allow-existing-branch] [--short-name <name>] [--number N] [--timestamp] <feature_description>"
-            echo ""
-            echo "Options:"
-            echo "  --json              Output in JSON format"
-            echo "  --dry-run           Compute feature name and paths without creating directories or files"
-            echo "  --allow-existing-branch  Reuse an existing feature directory if it already exists"
-            echo "  --short-name <name> Provide a custom short name (2-4 words) for the feature"
-            echo "  --number N          Prefer a feature number (auto-corrected if its specs prefix exists)"
-            echo "  --timestamp         Use timestamp prefix (YYYYMMDD-HHMMSS) instead of sequential numbering"
-            echo "  --help, -h          Show this help message"
-            echo ""
-            echo "Examples:"
-            echo "  $0 'Add user authentication system' --short-name 'user-auth'"
-            echo "  $0 'Implement OAuth2 integration for API' --number 5"
-            echo "  $0 --timestamp --short-name 'user-auth' 'Add user authentication'"
-            exit 0
-            ;;
-        *)
-            ARGS+=("$arg")
-            ;;
+    --json)
+        JSON_MODE=true
+        ;;
+    --dry-run)
+        DRY_RUN=true
+        ;;
+    --allow-existing-branch)
+        ALLOW_EXISTING=true
+        ;;
+    --short-name)
+        if [ $((i + 1)) -gt $# ]; then
+            echo 'Error: --short-name requires a value' >&2
+            exit 1
+        fi
+        i=$((i + 1))
+        next_arg="${!i}"
+        # Check if the next argument is another option (starts with --)
+        if [[ "$next_arg" == --* ]]; then
+            echo 'Error: --short-name requires a value' >&2
+            exit 1
+        fi
+        SHORT_NAME="$next_arg"
+        ;;
+    --number)
+        if [ $((i + 1)) -gt $# ]; then
+            echo 'Error: --number requires a value' >&2
+            exit 1
+        fi
+        i=$((i + 1))
+        next_arg="${!i}"
+        if [[ "$next_arg" == --* ]]; then
+            echo 'Error: --number requires a value' >&2
+            exit 1
+        fi
+        BRANCH_NUMBER="$next_arg"
+        if [ -n "$BRANCH_NUMBER" ]; then
+            NUMBER_EXPLICIT=true
+        fi
+        ;;
+    --timestamp)
+        USE_TIMESTAMP=true
+        ;;
+    --help | -h)
+        echo "Usage: $0 [--json] [--dry-run] [--allow-existing-branch] [--short-name <name>] [--number N] [--timestamp] <feature_description>"
+        echo ""
+        echo "Options:"
+        echo "  --json              Output in JSON format"
+        echo "  --dry-run           Compute feature name and paths without creating directories or files"
+        echo "  --allow-existing-branch  Reuse an existing feature directory if it already exists"
+        echo "  --short-name <name> Provide a custom short name (2-4 words) for the feature"
+        echo "  --number N          Prefer a feature number (auto-corrected if its specs prefix exists)"
+        echo "  --timestamp         Use timestamp prefix (YYYYMMDD-HHMMSS) instead of sequential numbering"
+        echo "  --help, -h          Show this help message"
+        echo ""
+        echo "Examples:"
+        echo "  $0 'Add user authentication system' --short-name 'user-auth'"
+        echo "  $0 'Implement OAuth2 integration for API' --number 5"
+        echo "  $0 --timestamp --short-name 'user-auth' 'Add user authentication'"
+        exit 0
+        ;;
+    *)
+        ARGS+=("$arg")
+        ;;
     esac
     i=$((i + 1))
 done
@@ -157,7 +157,7 @@ fit_branch_name() {
     local branch_name="${feature_num}-${branch_suffix}"
 
     if [ ${#branch_name} -gt $MAX_BRANCH_LENGTH ]; then
-        local prefix_length=$(( ${#feature_num} + 1 ))
+        local prefix_length=$((${#feature_num} + 1))
         local max_suffix_length=$((MAX_BRANCH_LENGTH - prefix_length))
         local truncated_suffix
         truncated_suffix=$(printf '%s' "$branch_suffix" | cut -c "1-$max_suffix_length" | sed 's/-$//')
@@ -348,7 +348,12 @@ if [ "$DRY_RUN" != true ]; then
     SPEC_TEMPLATE_CONTENT=""
     if [ ! -f "$SPEC_FILE" ]; then
         NEEDS_SPEC=true
-        if SPEC_TEMPLATE_CONTENT=$(resolve_template_content "spec-template" "$REPO_ROOT"; status=$?; printf x; exit "$status"); then
+        if SPEC_TEMPLATE_CONTENT=$(
+            resolve_template_content "spec-template" "$REPO_ROOT"
+            status=$?
+            printf x
+            exit "$status"
+        ); then
             SPEC_TEMPLATE_CONTENT="${SPEC_TEMPLATE_CONTENT%x}"
             SPEC_TEMPLATE_FOUND=true
         else
@@ -363,7 +368,7 @@ if [ "$DRY_RUN" != true ]; then
 
     if [ "$NEEDS_SPEC" = true ]; then
         if [ "$SPEC_TEMPLATE_FOUND" = true ]; then
-            printf '%s' "$SPEC_TEMPLATE_CONTENT" > "$SPEC_FILE"
+            printf '%s' "$SPEC_TEMPLATE_CONTENT" >"$SPEC_FILE"
         else
             echo "Warning: Spec template not found; created empty spec file" >&2
             touch "$SPEC_FILE"

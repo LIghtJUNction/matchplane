@@ -31,28 +31,28 @@ TEMPLATE_NAME=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --json)
-            JSON_MODE=true
-            ;;
-        --require-tasks)
-            REQUIRE_TASKS=true
-            ;;
-        --include-tasks)
-            INCLUDE_TASKS=true
-            ;;
-        --paths-only)
-            PATHS_ONLY=true
-            ;;
-        --template)
-            shift
-            if [[ $# -eq 0 ]]; then
-                echo "ERROR: --template requires a template name" >&2
-                exit 1
-            fi
-            TEMPLATE_NAME="$1"
-            ;;
-        --help|-h)
-            cat << 'EOF'
+    --json)
+        JSON_MODE=true
+        ;;
+    --require-tasks)
+        REQUIRE_TASKS=true
+        ;;
+    --include-tasks)
+        INCLUDE_TASKS=true
+        ;;
+    --paths-only)
+        PATHS_ONLY=true
+        ;;
+    --template)
+        shift
+        if [[ $# -eq 0 ]]; then
+            echo "ERROR: --template requires a template name" >&2
+            exit 1
+        fi
+        TEMPLATE_NAME="$1"
+        ;;
+    --help | -h)
+        cat <<'EOF'
 Usage: check-prerequisites.sh [OPTIONS]
 
 Consolidated prerequisite checking for Spec-Driven Development workflow.
@@ -76,12 +76,12 @@ EXAMPLES:
   ./check-prerequisites.sh --paths-only
 
 EOF
-            exit 0
-            ;;
-        *)
-            echo "ERROR: Unknown option '$1'. Use --help for usage information." >&2
-            exit 1
-            ;;
+        exit 0
+        ;;
+    *)
+        echo "ERROR: Unknown option '$1'. Use --help for usage information." >&2
+        exit 1
+        ;;
     esac
     shift
 done
@@ -99,9 +99,15 @@ RESEARCH="" DATA_MODEL="" QUICKSTART="" CONTRACTS_DIR=""
 # In --paths-only mode this is pure resolution, so pass --no-persist to opt out
 # of the feature.json write side effect (issue #3025).
 if $PATHS_ONLY; then
-    _paths_output=$(get_feature_paths --no-persist) || { echo "ERROR: Failed to resolve feature paths" >&2; exit 1; }
+    _paths_output=$(get_feature_paths --no-persist) || {
+        echo "ERROR: Failed to resolve feature paths" >&2
+        exit 1
+    }
 else
-    _paths_output=$(get_feature_paths) || { echo "ERROR: Failed to resolve feature paths" >&2; exit 1; }
+    _paths_output=$(get_feature_paths) || {
+        echo "ERROR: Failed to resolve feature paths" >&2
+        exit 1
+    }
 fi
 eval "$_paths_output"
 unset _paths_output
@@ -175,7 +181,12 @@ fi
 
 TEMPLATE_CONTENT=""
 if [[ -n "$TEMPLATE_NAME" ]]; then
-    if TEMPLATE_CONTENT=$(resolve_template_content "$TEMPLATE_NAME" "$REPO_ROOT"; status=$?; printf x; exit "$status"); then
+    if TEMPLATE_CONTENT=$(
+        resolve_template_content "$TEMPLATE_NAME" "$REPO_ROOT"
+        status=$?
+        printf x
+        exit "$status"
+    ); then
         TEMPLATE_CONTENT="${TEMPLATE_CONTENT%x}"
     else
         echo "ERROR: Could not resolve required $TEMPLATE_NAME from the template override stack for $REPO_ROOT" >&2

@@ -24,8 +24,8 @@ OUTSIDE="$TEST_TMP/outside"
 COPIED_SCRIPTS="$TEST_REPO/.specify/scripts/bash"
 mkdir -p "$COPIED_SCRIPTS" "$TEST_REPO/.specify/templates" "$TEST_REPO/specs" "$OUTSIDE"
 cp "$SCRIPT_DIR"/*.sh "$COPIED_SCRIPTS/"
-printf '%s\n' '# Plan template' > "$TEST_REPO/.specify/templates/plan-template.md"
-printf '%s\n' '# Tasks template' > "$TEST_REPO/.specify/templates/tasks-template.md"
+printf '%s\n' '# Plan template' >"$TEST_REPO/.specify/templates/plan-template.md"
+printf '%s\n' '# Tasks template' >"$TEST_REPO/.specify/templates/tasks-template.md"
 
 fail() {
     echo "security-contract-test: FAIL: $1" >&2
@@ -62,7 +62,7 @@ assert_feature_dir "$ABSOLUTE_FEATURE" \
     "$COPIED_SCRIPTS/check-prerequisites.sh" --paths-only --json
 
 JSON_FEATURE="$TEST_REPO/specs/003-json"
-printf '{"feature_dir":"%s"}\n' "$JSON_FEATURE" > "$TEST_REPO/.specify/feature.json"
+printf '{"feature_dir":"%s"}\n' "$JSON_FEATURE" >"$TEST_REPO/.specify/feature.json"
 assert_feature_dir "$JSON_FEATURE" \
     env -u SPECIFY_FEATURE_DIRECTORY SPECIFY_INIT_DIR="$TEST_REPO" \
     "$COPIED_SCRIPTS/check-prerequisites.sh" --paths-only --json
@@ -76,7 +76,7 @@ expect_failure "absolute path outside specs" \
     env SPECIFY_INIT_DIR="$TEST_REPO" SPECIFY_FEATURE_DIRECTORY="/etc" \
     "$COPIED_SCRIPTS/setup-plan.sh"
 
-printf '%s\n' '{"feature_directory":"../../json-escape"}' > "$TEST_REPO/.specify/feature.json"
+printf '%s\n' '{"feature_directory":"../../json-escape"}' >"$TEST_REPO/.specify/feature.json"
 expect_failure "feature.json traversal" \
     env -u SPECIFY_FEATURE_DIRECTORY SPECIFY_INIT_DIR="$TEST_REPO" \
     "$COPIED_SCRIPTS/setup-plan.sh"
@@ -96,7 +96,7 @@ expect_failure "feature control character" \
     "$COPIED_SCRIPTS/setup-plan.sh"
 
 rm -f "$TEST_REPO/.specify/templates/plan-template.md"
-printf '%s\n' '# Outside template' > "$OUTSIDE/plan-template.md"
+printf '%s\n' '# Outside template' >"$OUTSIDE/plan-template.md"
 ln -s "$OUTSIDE/plan-template.md" "$TEST_REPO/.specify/templates/plan-template.md"
 mkdir -p "$TEST_REPO/specs/006-template-link"
 expect_failure "template symlink escape" \
