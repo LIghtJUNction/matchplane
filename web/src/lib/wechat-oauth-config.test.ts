@@ -7,6 +7,14 @@ const fsState = vi.hoisted(() => {
   return { files, descriptors, allocate: () => nextDescriptor++ };
 });
 
+const endpointState = vi.hoisted(() => ({
+  hasOnlyPublicAddresses: vi.fn(),
+}));
+
+vi.mock("./public-endpoint", () => ({
+  hasOnlyPublicAddresses: endpointState.hasOnlyPublicAddresses,
+}));
+
 vi.mock("node:fs", () => {
   const mocked = {
     readFileSync: vi.fn((file: string) => {
@@ -57,6 +65,7 @@ import {
 beforeEach(() => {
   fsState.files.clear();
   fsState.descriptors.clear();
+  endpointState.hasOnlyPublicAddresses.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -157,6 +166,9 @@ describe("wechat native protocol adapter", () => {
     expect(isWeChatNativeEndpoint("https://mock-gateway.example/token")).toBe(
       false,
     );
+    expect(isWeChatNativeEndpoint("https://api.weixin.qq.com.evil.example/token")).toBe(false);
+    expect(isWeChatNativeEndpoint("http://api.weixin.qq.com/token")).toBe(false);
+    expect(isWeChatNativeEndpoint("https://user:pass@api.weixin.qq.com/token")).toBe(false);
     expect(isWeChatNativeEndpoint("not a url")).toBe(false);
     expect(isWeChatNativeEndpoint(undefined)).toBe(false);
   });
@@ -188,11 +200,81 @@ describe("wechat native protocol adapter", () => {
     expect(requested.searchParams.get("secret")).toBe("<appsecret>");
     expect(requested.searchParams.get("code")).toBe("AUTH_CODE");
     expect(requested.searchParams.get("grant_type")).toBe("authorization_code");
+    expect(endpointState.hasOnlyPublicAddresses).toHaveBeenCalledWith(
+      "https://api.weixin.qq.com",
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({ credentials: "omit", redirect: "error" }),
+    );
     expect(tokens.accessToken).toBe("ACCESS");
     expect(tokens.refreshToken).toBe("REFRESH");
     expect(tokens.scopes).toEqual(["snsapi_login"]);
     expect(tokens.raw?.openid).toBe("OPENID");
     expect(tokens.accessTokenExpiresAt).toBeInstanceOf(Date);
+  });
+
+  it("rejects malformed or non-official token destinations before fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const tokenUrl of [
+      "not a url",
+      "http://api.weixin.qq.com/sns/oauth2/access_token",
+      "https://user:pass@api.weixin.qq.com/sns/oauth2/access_token",
+      "https://api.weixin.qq.com.evil.example/sns/oauth2/access_token",
+      "https://api.weixin.qq.com/sns/oauth2/access_token?redirect=https://example.com",
+    ]) {
+      const exchange = createWeChatTokenExchange({
+        tokenUrl,
+        appId: "<appid>",
+        appSecret: "<appsecret>",
+      });
+      await expect(exchange({ code: "AUTH_CODE" }), tokenUrl).rejects.toThrow(
+        /微信官方 HTTPS 地址/,
+      );
+    }
+    const loadUserInfo = createWeChatUserInfoLoader({
+      userInfoUrl: "https://api.weixin.qq.com.evil.example/sns/userinfo",
+    });
+    await expect(
+      loadUserInfo({ accessToken: "ACCESS", raw: { openid: "OPENID" } }),
+    ).rejects.toThrow(/微信官方 HTTPS 地址/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the official host does not resolve only to public addresses", async () => {
+    endpointState.hasOnlyPublicAddresses.mockResolvedValueOnce(false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const exchange = createWeChatTokenExchange({
+      tokenUrl: WECHAT_TOKEN_URL,
+      appId: "<appid>",
+      appSecret: "<appsecret>",
+    });
+
+    await expect(exchange({ code: "AUTH_CODE" })).rejects.toThrow(
+      /公共网络边界/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects redirects even when the fetch implementation returns them", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        redirected: false,
+        status: 302,
+      }),
+    );
+    const exchange = createWeChatTokenExchange({
+      tokenUrl: WECHAT_TOKEN_URL,
+      appId: "<appid>",
+      appSecret: "<appsecret>",
+    });
+
+    await expect(exchange({ code: "AUTH_CODE" })).rejects.toThrow(/重定向/);
   });
 
   it("rejects WeChat errcode bodies even on HTTP 200", async () => {

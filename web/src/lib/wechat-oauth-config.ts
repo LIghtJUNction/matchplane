@@ -2,6 +2,8 @@ import { chmodSync, closeSync, fsyncSync, openSync, readFileSync, renameSync, un
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
+import { hasOnlyPublicAddresses } from "./public-endpoint";
+
 const SECRET_ROOT = "/etc/matchplane/secrets/root-email";
 const CONFIG_PATH = path.join(SECRET_ROOT, "wechat-oauth.json");
 const SECRET_PATH = path.join(SECRET_ROOT, "wechat-oauth-app-secret");
@@ -83,8 +85,7 @@ export function saveManagedWeChatOAuthConfig(input: {
 export function isWeChatNativeEndpoint(value: string | undefined): boolean {
   if (!value) return false;
   try {
-    const hostname = new URL(value).hostname;
-    return hostname === "weixin.qq.com" || hostname.endsWith(".weixin.qq.com");
+    return isAllowedWeChatRequestDestination(new URL(value));
   } catch {
     return false;
   }
@@ -106,7 +107,7 @@ export interface WeChatOAuthTokens {
  */
 export function createWeChatTokenExchange(options: { tokenUrl: string; appId: string; appSecret: string }) {
   return async (data: { code: string }): Promise<WeChatOAuthTokens> => {
-    const url = new URL(options.tokenUrl);
+    const url = parseWeChatRequestUrl(options.tokenUrl, "微信令牌");
     url.searchParams.set("appid", options.appId);
     url.searchParams.set("secret", options.appSecret);
     url.searchParams.set("code", data.code);
@@ -148,7 +149,7 @@ export function createWeChatUserInfoLoader(options: { userInfoUrl: string }) {
     // WeChat never returns an email; the synthetic Better Auth address must stay unverified.
     const identity: WeChatUserProfile = { openid, emailVerified: false };
     if (typeof tokens.raw?.unionid === "string") identity.unionid = tokens.raw.unionid;
-    const url = new URL(options.userInfoUrl);
+    const url = parseWeChatRequestUrl(options.userInfoUrl, "微信用户信息");
     url.searchParams.set("access_token", accessToken);
     url.searchParams.set("openid", openid);
     url.searchParams.set("lang", "zh_CN");
@@ -162,7 +163,17 @@ export function createWeChatUserInfoLoader(options: { userInfoUrl: string }) {
 }
 
 async function fetchWeChatJson(url: URL, label: string): Promise<Record<string, unknown>> {
-  const response = await fetch(url.toString(), { method: "GET", headers: { accept: "application/json" } });
+  if (!isAllowedWeChatRequestDestination(url)) throw new Error(`${label}请求地址不在微信官方域名 allowlist 内`);
+  if (!(await hasOnlyPublicAddresses(url.origin))) throw new Error(`${label}请求地址未通过公共网络边界检查`);
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { accept: "application/json" },
+    redirect: "error",
+    credentials: "omit",
+  });
+  if (response.redirected || (response.status >= 300 && response.status < 400)) {
+    throw new Error(`${label}请求不允许重定向`);
+  }
   // WeChat serves JSON bodies with a text/plain content type; parse the raw text.
   const text = await response.text();
   let body: Record<string, unknown>;
@@ -178,6 +189,22 @@ async function fetchWeChatJson(url: URL, label: string): Promise<Record<string, 
     throw new Error(`${label}请求失败（errcode ${String(errcode ?? response.status)}）`);
   }
   return body;
+}
+
+function parseWeChatRequestUrl(value: string, label: string): URL {
+  try {
+    const url = new URL(value);
+    if (!isAllowedWeChatRequestDestination(url) || url.search || url.hash) throw new Error();
+    return url;
+  } catch {
+    throw new Error(`${label}地址必须是无凭据、无查询参数或片段的微信官方 HTTPS 地址`);
+  }
+}
+
+function isAllowedWeChatRequestDestination(url: URL): boolean {
+  const hostname = url.hostname.toLowerCase();
+  const officialHostname = hostname === "weixin.qq.com" || hostname.endsWith(".weixin.qq.com");
+  return url.protocol === "https:" && !url.username && !url.password && !url.port && officialHostname;
 }
 
 function readString(body: Record<string, unknown>, key: string): string | undefined {
