@@ -16,8 +16,11 @@
   },
   "files": [
     "dist",
+    "examples",
     "src/index.ts",
     "README.md",
+    "README.zh-CN.md",
+    "scripts/verify-package.mjs",
     "LICENSE"
   ],
   "sideEffects": false,
@@ -32,7 +35,8 @@
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target node --format esm",
     "check": "tsc --noEmit",
-    "prepublishOnly": "bun run build",
+    "check:package": "node scripts/verify-package.mjs",
+    "prepublishOnly": "bun run build && bun run check:package",
     "test": "bun test"
   },
   "devDependencies": {

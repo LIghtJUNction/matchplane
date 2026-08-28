@@ -65,6 +65,12 @@ install -Dm0644 "$repository_root/docs/cli-and-mcp.md" \
   "$root/usr/share/doc/matchplane/cli-and-mcp.md"
 install -Dm0644 "$repository_root/docs/postgresql-backup-gate.md" \
   "$root/usr/share/doc/matchplane/postgresql-backup-gate.md"
+# Ship every public machine-readable contract used by Agent and subplatform integrators. Keeping
+# this as a source glob makes a newly added protocol fail visible in the release artifact by default.
+for contract in "$repository_root"/docs/*.json; do
+  install -Dm0644 "$contract" \
+    "$root/usr/share/doc/matchplane/$(basename "$contract")"
+done
 cp -a "$repository_root/.agents/skills/." "$root/usr/share/matchplane/skills/"
 cp -a "$standalone_web_root/." "$root/usr/share/matchplane/web/"
 # Next can place the standalone server below the traced runtime while keeping

@@ -10,8 +10,9 @@ Group=matchplane-web
 SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
 EnvironmentFile=/etc/matchplane/services/web.env
-# Keep Better Auth's signing secret readable only by the web service account.
+# Keep web-only provider and signing secrets readable only by the web service account.
 EnvironmentFile=-/etc/matchplane/secrets/web/better-auth.env
+EnvironmentFile=-/etc/matchplane/secrets/web/router-ai.env
 # MATCHPLANE_ENVIRONMENT is intentionally supplied by the shared environment file.
 # This unit is used for development/test and production profiles; hard-coding the
 # value here would silently turn a test installation into a production safety profile.

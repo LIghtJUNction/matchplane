@@ -41,29 +41,30 @@ console.log("已获取买方主动公开的匿名需求摘要；后续引介仍�
   demandLeads,
 });
 
-// Sellers can review introductions visible to this party. Publishing an offer alone never
-// grants access to buyer contact details.
-const introductions = await client.listIntroductions(capability, {
+// A match is never consent. Collect the authenticated supply party's explicit opt-in outside this
+// process, then pass only that reviewed introduction id. An unset value is intentionally fail-closed;
+// never select or consent to the first match automatically.
+await client.listIntroductions(capability, {
   tenant_id: capability.tenant_id,
   domain_id: capability.domain_id,
   platform_path: capability.platform_path,
   participant_id: capability.party_id,
 });
-const introductionId = readFirstIntroduction(introductions);
-if (introductionId) {
+const consentedIntroductionId = process.env.MATCHPLANE_CONSENTED_INTRODUCTION_ID;
+if (consentedIntroductionId) {
   await client.consentContact(capability, {
     tenant_id: capability.tenant_id,
     domain_id: capability.domain_id,
     participant_id: capability.party_id,
-    introduction_id: introductionId,
-    idempotency_key: `contact-consent:${introductionId}`,
+    introduction_id: consentedIntroductionId,
+    idempotency_key: `contact-consent:${consentedIntroductionId}`,
   });
-  console.log("已同意一次联系方式交换；平台会按双方 consent policy 决定是否释放联系方式。", {
+  console.log("已记录供给方明确同意；平台仍会按双方 consent policy 决定是否释放联系方式。", {
     offerId,
-    introductionId,
+    introductionId: consentedIntroductionId,
   });
 } else {
-  console.log("供给已发布，当前没有待处理的介绍。");
+  console.log("供给已发布；未收到供给方明确同意，不执行联系方式交换。", { offerId });
 }
 
 function readString(value: unknown, key: string): string {
@@ -72,14 +73,4 @@ function readString(value: unknown, key: string): string {
     if (typeof candidate === "string" && candidate.length > 0) return candidate;
   }
   throw new Error(`MatchPlane response is missing ${key}`);
-}
-
-function readFirstIntroduction(value: unknown): string | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const introductions = (value as Record<string, unknown>).introductions;
-  if (!Array.isArray(introductions)) return null;
-  const first = introductions[0];
-  if (!first || typeof first !== "object" || Array.isArray(first)) return null;
-  const id = (first as Record<string, unknown>).introduction_id;
-  return typeof id === "string" && id.length > 0 ? id : null;
 }

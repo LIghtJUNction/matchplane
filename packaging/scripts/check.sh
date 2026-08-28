@@ -82,6 +82,18 @@ if ! rg -q '^Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchpla
   echo 'web service must use its own builder-token copy' >&2
   exit 1
 fi
+if rg -q '^(BETTER_AUTH_SECRET|MATCHPLANE_ROUTER_AI_KEY)=' \
+  packaging/config/matchplane.env; then
+  echo 'web-only secrets must not be declared in the shared production environment' >&2
+  exit 1
+fi
+for secret_environment in better-auth router-ai; do
+  if ! rg -q "^EnvironmentFile=-/etc/matchplane/secrets/web/${secret_environment}\\.env$" \
+    packaging/systemd/matchplane-web.service; then
+    echo "web service must load the isolated ${secret_environment} secret environment" >&2
+    exit 1
+  fi
+done
 if ! rg -q '^Environment=MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN_FILE=/etc/matchplane/secrets/builder/builder\.token$' \
   packaging/systemd/matchplane-subplatform-builder.service; then
   echo 'builder service must use its isolated builder-token copy' >&2
@@ -161,6 +173,10 @@ for staged_path in \
     exit 1
   fi
 done
+if ! rg -Fq '"$repository_root"/docs/*.json' packaging/scripts/stage.sh; then
+  echo 'staging must include all public Agent and subplatform JSON contracts' >&2
+  exit 1
+fi
 
 router_state_root='/etc/matchplane/secrets/root-email'
 if ! rg -q '^d /etc/matchplane/secrets/root-email 0770 root matchplane-web -$' \

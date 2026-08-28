@@ -24,19 +24,22 @@ function fakeFetch() {
       body.method === "tools/call" &&
       body.params?.name === "marketplace.agent.session"
     ) {
+      const args = body.params.arguments ?? {};
+      const side = args.side === "supply" ? "supply" : "demand";
       return new Response(
         JSON.stringify({
           jsonrpc: "2.0",
           id: "1",
           result: {
             structuredContent: {
-              tenant_id: "t",
-              domain_id: "d",
+              tenant_id: args.tenant_id,
+              domain_id: args.domain_id,
               party_id: "p",
-              side: "demand",
-              role: "buyer",
-              access_token: "secret",
+              side,
+              role: side === "demand" ? "buyer" : "seller",
+              access_token: "party-token-secret",
               access_token_expires_at: "2099-01-01T00:00:00Z",
+              platform_path: args.platform_path,
               cost_bearer: "caller",
             },
           },
@@ -429,9 +432,9 @@ describe("MatchPlane external Agent client", () => {
       narrative: "找一个合适的供给",
       idempotency_key: "intent-1",
     });
-    expect(new Headers(fake.calls[1]?.init?.headers).get("authorization")).toBe(
-      "Bearer secret",
-    );
+    const partyHeaders = new Headers(fake.calls[1]?.init?.headers);
+    expect(partyHeaders.get("authorization")).toBe("Bearer party-token-secret");
+    expect(partyHeaders.get("x-matchplane-api-key")).toBeNull();
     const secondBody = JSON.parse(String(fake.calls[1]?.init?.body)) as {
       params?: { arguments?: { platform_path?: string } };
     };
@@ -467,6 +470,70 @@ describe("MatchPlane external Agent client", () => {
       idempotency_key: "contact-release-1",
     });
     expect(fake.calls).toHaveLength(5);
+  });
+
+  it("rejects malformed or confused party capabilities instead of falling back to the API key", async () => {
+    let calls = 0;
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: async (_url, init) => {
+        calls += 1;
+        const body = JSON.parse(String(init?.body)) as {
+          params?: { arguments?: Record<string, unknown> };
+        };
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              structuredContent: {
+                ...body.params?.arguments,
+                party_id: "p",
+                side: "demand",
+                role: "buyer",
+                access_token_expires_at: "2099-01-01T00:00:00Z",
+                cost_bearer: "caller",
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    await expect(
+      client.openMarketplaceSession({
+        tenant_id: "tenant",
+        domain_id: "domain",
+        platform_path: "/store-a",
+        side: "demand",
+      }),
+    ).rejects.toThrow("capability scope is invalid");
+    expect(calls).toBe(1);
+
+    const fake = fakeFetch();
+    const scopedClient = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: fake.fetchImpl,
+    });
+    const capability = await scopedClient.openMarketplaceSession({
+      tenant_id: "tenant",
+      domain_id: "domain",
+      platform_path: "/store-a",
+      side: "demand",
+    });
+    await expect(
+      scopedClient.createIntent(capability, {
+        tenant_id: "other-tenant",
+        domain_id: "domain",
+        participant_id: "p",
+        side: "demand",
+        narrative: "找一个合适的供给",
+        idempotency_key: "intent-1",
+      }),
+    ).rejects.toThrow("tenant_id must match the party capability");
+    expect(fake.calls).toHaveLength(1);
   });
 
   it("rejects platform-funded external handoffs before a network call", async () => {
@@ -535,7 +602,7 @@ describe("MatchPlane external Agent client", () => {
     expect(requestSignal).toBeInstanceOf(AbortSignal);
   });
 
-  it("rejects a malformed base URL with a stable validation error", () => {
+  it("rejects malformed and cleartext remote base URLs while allowing local development", () => {
     expect(
       () =>
         new MatchPlaneAgentClient({
@@ -543,6 +610,20 @@ describe("MatchPlane external Agent client", () => {
           apiKey: "mpk_test",
         }),
     ).toThrow("valid absolute URL");
+    expect(
+      () =>
+        new MatchPlaneAgentClient({
+          baseUrl: "http://agent.example",
+          apiKey: "mpk_test",
+        }),
+    ).toThrow("must use HTTPS outside loopback");
+    expect(
+      () =>
+        new MatchPlaneAgentClient({
+          baseUrl: "http://127.0.0.1:3000",
+          apiKey: "mpk_test",
+        }),
+    ).not.toThrow();
   });
 
   it("rejects an unbounded external Agent request timeout", () => {

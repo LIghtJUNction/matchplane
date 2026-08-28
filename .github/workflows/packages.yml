@@ -91,12 +91,17 @@ jobs:
         with:
           bun-version: 1.3.14
           no-cache: true
-      - name: Build and pack external Agent client
+      - name: Install pinned workspace dependencies
+        run: bun install --frozen-lockfile
+      - name: Verify, build, and pack external Agent client
         run: |
           version=${VERSION#v}
           cd integrations/matchplane-agent-client
+          bun run check
+          bun test
           npm version --no-git-tag-version --allow-same-version "$version"
           bun run build
+          bun run check:package
           mkdir -p "$GITHUB_WORKSPACE/dist"
           npm pack --ignore-scripts --pack-destination "$GITHUB_WORKSPACE/dist"
       - name: Inspect external Agent package

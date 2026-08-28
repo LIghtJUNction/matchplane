@@ -13,9 +13,9 @@ bun add @matchplane/agent-client
 该包在 `dist/index.js` 处公开 ESM，并将其 TypeScript 源保留为类型入口点。
 在发布分叉或内部镜像之前运行 `bun run build`。
 
-将 API 密钥和返回方能力保存在代理的服务器端秘密存储中。不要
-将此包捆绑到浏览器应用程序中。将 `access_token_expires_at` 视为艰难的 15 分钟
-截止日期并在到期后请求新的功能。
+将 API 密钥和返回的 party capability 保存在 Agent 的服务端密钥存储中，不要把此包打进浏览器。
+远程 origin 必须使用 HTTPS；明文 HTTP 仅允许回环地址的本地开发。`access_token_expires_at` 是硬性
+截止时间；客户端会拒绝已过期的 capability，调用方须重新建立 session。
 
 ```ts
 import { MatchPlaneAgentClient, terminalRoutePlanPaths } from "@matchplane/agent-client";
@@ -144,8 +144,9 @@ const toolResult = await client.callChildTool({
 公开的匿名需求摘要；该查询不会返回参与者ID或联系方式，也不会代替需求方发起引介。完整的买家/卖家服务器端示例见[`examples/buyer-agent.ts`](examples/buyer-agent.ts)和
 [`examples/seller-agent.ts`](examples/seller-agent.ts)。同时共享同一个 SDK 和 MCP 协议：侵犯用
 `side: "demand"` 创建意向、选择报价、发起介绍；募集方用 `side: "supply"` 发布
-Offer、读取自己可见的介绍，并在人工或代理策略确认后调用`consentContact`。只有双方
-都同意，平台才会进入联系发布阶段；示例不会把微信、手机号等联系方式交换上市或
+Offer、读取自己可见的介绍。只有经过认证的供给方明确同意后，调用方才可把已审核的 introduction ID
+写入 `MATCHPLANE_CONSENTED_INTRODUCTION_ID` 并调用 `consentContact`；未设置时示例默认不授权。
+只有双方都同意，平台才会进入联系发布阶段；示例不会把微信、手机号等联系方式交换上市或
 模型提示。
 
 ## 多步骤技巧
