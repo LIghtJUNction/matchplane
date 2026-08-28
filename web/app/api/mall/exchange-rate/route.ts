@@ -201,7 +201,7 @@ export async function POST(request: Request): Promise<Response> {
 
   let latest: ProviderRateSnapshot;
   try {
-    latest = await fetchLatestUsdRate(input.localCurrency);
+    latest = await fetchLatestUsdRate(input.localCurrency, request.signal);
   } catch (error) {
     if (error instanceof ExchangeRateProviderError) {
       console.error("mall exchange rate provider failed", error.message);
@@ -456,6 +456,7 @@ async function writeAuditEvent(
 
 async function fetchLatestUsdRate(
   localCurrency: string,
+  signal?: AbortSignal,
 ): Promise<ProviderRateSnapshot> {
   if (localCurrency === BASE_CURRENCY) {
     const effectiveDate = new Date().toISOString().slice(0, 10);
@@ -486,6 +487,7 @@ async function fetchLatestUsdRate(
       requestTimeoutMs: PROVIDER_TIMEOUT_MS,
       responseBodyTimeoutMs: PROVIDER_TIMEOUT_MS,
       responseLimitBytes: PROVIDER_RESPONSE_LIMIT,
+      signal,
     }));
   } catch (error) {
     throw mapProviderTransportError(error);

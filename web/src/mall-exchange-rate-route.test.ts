@@ -279,9 +279,11 @@ describe("mall exchange-rate route", () => {
       ),
     );
 
-    const response = await POST(
-      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
-    );
+    const syncRequest = request("POST", {
+      localCurrency: "JPY",
+      expectedVersion: 3,
+    });
+    const response = await POST(syncRequest);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       exchangeRate: {
@@ -300,6 +302,7 @@ describe("mall exchange-rate route", () => {
         requestTimeoutMs: 6_000,
         responseBodyTimeoutMs: 6_000,
         responseLimitBytes: 64 * 1024,
+        signal: syncRequest.signal,
       }),
     );
     const providerUrl = mocks.fetchPinnedPublicText.mock.calls[0]?.[0];
@@ -327,6 +330,45 @@ describe("mall exchange-rate route", () => {
       rate_effective_date: "2026-08-28",
     });
     vi.unstubAllGlobals();
+  });
+
+  it("propagates request cancellation to the pinned provider before opening a database transaction", async () => {
+    const controller = new AbortController();
+    const syncRequest = new Request(
+      "https://matchplane.test/api/mall/exchange-rate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://matchplane.test",
+        },
+        body: JSON.stringify({ localCurrency: "JPY", expectedVersion: 3 }),
+        signal: controller.signal,
+      },
+    );
+    mocks.fetchPinnedPublicText.mockImplementation(async (_url, options) => {
+      await new Promise<never>((_resolve, reject) => {
+        options.signal?.addEventListener(
+          "abort",
+          () => reject(options.signal?.reason),
+          { once: true },
+        );
+      });
+      throw new Error("unreachable");
+    });
+
+    const pending = POST(syncRequest);
+    await vi.waitFor(() => {
+      expect(mocks.fetchPinnedPublicText).toHaveBeenCalledOnce();
+    });
+    expect(mocks.fetchPinnedPublicText.mock.calls[0]?.[1]?.signal).toBe(
+      syncRequest.signal,
+    );
+    controller.abort();
+
+    const response = await pending;
+    expect(response.status).toBe(504);
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it.each([
