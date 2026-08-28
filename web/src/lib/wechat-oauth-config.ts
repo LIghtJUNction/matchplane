@@ -2,7 +2,12 @@ import { chmodSync, closeSync, fsyncSync, openSync, readFileSync, renameSync, un
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
-import { hasOnlyPublicAddresses } from "./public-endpoint";
+import { ResponseBodyTooLargeError } from "./body-limit";
+import {
+  fetchPinnedPublicText,
+  PinnedPublicEndpointError,
+  PinnedPublicRedirectError,
+} from "./pinned-public-endpoint";
 
 const SECRET_ROOT = "/etc/matchplane/secrets/root-email";
 const CONFIG_PATH = path.join(SECRET_ROOT, "wechat-oauth.json");
@@ -14,6 +19,9 @@ export const WECHAT_QR_AUTHORIZATION_URL = "https://open.weixin.qq.com/connect/q
 export const WECHAT_TOKEN_URL = "https://api.weixin.qq.com/sns/oauth2/access_token";
 export const WECHAT_USERINFO_URL = "https://api.weixin.qq.com/sns/userinfo";
 const WECHAT_DEFAULT_SCOPES = ["snsapi_login"] as const;
+const WECHAT_REQUEST_TIMEOUT_MS = 5_000;
+const WECHAT_RESPONSE_BODY_TIMEOUT_MS = 5_000;
+const WECHAT_RESPONSE_LIMIT_BYTES = 64 * 1024;
 
 interface StoredWeChatOAuthConfig {
   enabled: boolean;
@@ -164,18 +172,35 @@ export function createWeChatUserInfoLoader(options: { userInfoUrl: string }) {
 
 async function fetchWeChatJson(url: URL, label: string): Promise<Record<string, unknown>> {
   if (!isAllowedWeChatRequestDestination(url)) throw new Error(`${label}请求地址不在微信官方域名 allowlist 内`);
-  if (!(await hasOnlyPublicAddresses(url.origin))) throw new Error(`${label}请求地址未通过公共网络边界检查`);
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { accept: "application/json" },
-    redirect: "error",
-    credentials: "omit",
-  });
+
+  let response: Response;
+  let text: string;
+  try {
+    ({ response, text } = await fetchPinnedPublicText(url, {
+      requestTimeoutMs: WECHAT_REQUEST_TIMEOUT_MS,
+      responseBodyTimeoutMs: WECHAT_RESPONSE_BODY_TIMEOUT_MS,
+      responseLimitBytes: WECHAT_RESPONSE_LIMIT_BYTES,
+    }));
+  } catch (error) {
+    if (error instanceof PinnedPublicEndpointError) {
+      throw new Error(`${label}请求地址未通过公共网络边界检查`);
+    }
+    if (error instanceof PinnedPublicRedirectError) {
+      throw new Error(`${label}请求不允许重定向`);
+    }
+    if (error instanceof ResponseBodyTooLargeError) {
+      throw new Error(`${label}响应体超过大小限制`);
+    }
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new Error(`${label}请求超时`);
+    }
+    // Do not propagate Undici errors containing the credential-bearing query URL.
+    throw new Error(`${label}请求失败`);
+  }
   if (response.redirected || (response.status >= 300 && response.status < 400)) {
     throw new Error(`${label}请求不允许重定向`);
   }
-  // WeChat serves JSON bodies with a text/plain content type; parse the raw text.
-  const text = await response.text();
+  // WeChat serves JSON bodies with a text/plain content type; parse the bounded raw text.
   let body: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(text);

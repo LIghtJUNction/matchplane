@@ -8,11 +8,12 @@ const fsState = vi.hoisted(() => {
 });
 
 const endpointState = vi.hoisted(() => ({
-  hasOnlyPublicAddresses: vi.fn(),
+  fetchPinnedPublicText: vi.fn(),
 }));
 
-vi.mock("./public-endpoint", () => ({
-  hasOnlyPublicAddresses: endpointState.hasOnlyPublicAddresses,
+vi.mock("./pinned-public-endpoint", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./pinned-public-endpoint")>()),
+  fetchPinnedPublicText: endpointState.fetchPinnedPublicText,
 }));
 
 vi.mock("node:fs", () => {
@@ -51,6 +52,10 @@ vi.mock("node:fs", () => {
 });
 
 import {
+  PinnedPublicEndpointError,
+  PinnedPublicRedirectError,
+} from "./pinned-public-endpoint";
+import {
   createWeChatTokenExchange,
   createWeChatUserInfoLoader,
   getManagedWeChatOAuthConfig,
@@ -65,7 +70,18 @@ import {
 beforeEach(() => {
   fsState.files.clear();
   fsState.descriptors.clear();
-  endpointState.hasOnlyPublicAddresses.mockResolvedValue(true);
+  endpointState.fetchPinnedPublicText.mockImplementation(async (url: URL) => {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { accept: "application/json" },
+      redirect: "manual",
+      credentials: "omit",
+    });
+    if (response.redirected || (response.status >= 300 && response.status < 400)) {
+      throw new PinnedPublicRedirectError(response.status);
+    }
+    return { response, text: await response.text() };
+  });
 });
 
 afterEach(() => {
@@ -200,12 +216,17 @@ describe("wechat native protocol adapter", () => {
     expect(requested.searchParams.get("secret")).toBe("<appsecret>");
     expect(requested.searchParams.get("code")).toBe("AUTH_CODE");
     expect(requested.searchParams.get("grant_type")).toBe("authorization_code");
-    expect(endpointState.hasOnlyPublicAddresses).toHaveBeenCalledWith(
-      "https://api.weixin.qq.com",
+    expect(endpointState.fetchPinnedPublicText).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({
+        requestTimeoutMs: expect.any(Number),
+        responseBodyTimeoutMs: expect.any(Number),
+        responseLimitBytes: expect.any(Number),
+      }),
     );
     expect(fetchMock).toHaveBeenCalledWith(
       expect.any(URL),
-      expect.objectContaining({ credentials: "omit", redirect: "error" }),
+      expect.objectContaining({ credentials: "omit", redirect: "manual" }),
     );
     expect(tokens.accessToken).toBe("ACCESS");
     expect(tokens.refreshToken).toBe("REFRESH");
@@ -243,8 +264,10 @@ describe("wechat native protocol adapter", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the official host does not resolve only to public addresses", async () => {
-    endpointState.hasOnlyPublicAddresses.mockResolvedValueOnce(false);
+  it("fails closed when the pinned connector rejects the resolved addresses", async () => {
+    endpointState.fetchPinnedPublicText.mockRejectedValueOnce(
+      new PinnedPublicEndpointError(),
+    );
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const exchange = createWeChatTokenExchange({

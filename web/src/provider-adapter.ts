@@ -1,17 +1,17 @@
-import type { LookupAddress } from "node:dns";
-import { isIP, type LookupFunction } from "node:net";
+import type { LookupFunction } from "node:net";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel, LanguageModelUsage } from "ai";
-import { Agent, fetch as undiciFetch } from "undici";
+import { type Agent, fetch as undiciFetch } from "undici";
 
 import {
-  isPrivateOrReservedIpLiteral,
-  resolvePublicAddresses,
-  type ResolveAddresses,
-} from "./lib/public-endpoint";
+  createPinnedPublicDispatcher,
+  createPinnedPublicLookup,
+  resolvePinnedPublicAddresses,
+} from "./lib/pinned-public-endpoint";
+import type { ResolveAddresses } from "./lib/public-endpoint";
 
 export type ProviderProtocol =
   "openai-compatible" | "anthropic-messages" | "gemini-generate-content";
@@ -236,22 +236,12 @@ function createPinnedProviderDispatcher(
   resolver: ResolveAddresses | undefined,
   signal: AbortSignal | undefined,
 ): Agent {
-  const hostname = normalizedHostname(url.hostname);
-  if (isIP(hostname)) {
-    if (
-      !isDevelopmentLoopback(url) &&
-      isPrivateOrReservedIpLiteral(hostname)
-    ) {
-      throw new ProviderAdapterError("MP_PROVIDER_NETWORK_POLICY");
-    }
-    return new Agent();
-  }
-  return new Agent({
-    autoSelectFamily: true,
-    autoSelectFamilyAttemptTimeout: 250,
-    connect: {
-      lookup: createPinnedProviderLookup(url, resolver, signal),
-    },
+  return createPinnedPublicDispatcher(url, {
+    resolveAddresses: resolver,
+    signal,
+    allowLoopback: isDevelopmentLoopback(url),
+    createPolicyError: providerNetworkPolicyError,
+    interruptedMessage: "Provider request interrupted",
   });
 }
 
@@ -260,41 +250,13 @@ export function createPinnedProviderLookup(
   resolver: ResolveAddresses | undefined,
   signal: AbortSignal | undefined,
 ): LookupFunction {
-  const expectedHostname = normalizedHostname(url.hostname);
-  return (hostname, lookupOptions, callback) => {
-    void (async () => {
-      if (normalizedHostname(hostname) !== expectedHostname) {
-        throw new ProviderAdapterError("MP_PROVIDER_NETWORK_POLICY");
-      }
-      const addresses = await resolveValidatedProviderAddresses(
-        url,
-        resolver,
-        signal,
-      );
-      const records: LookupAddress[] = addresses.map((address) => ({
-        address,
-        family: isIP(address),
-      }));
-      if (lookupOptions.all) {
-        callback(null, records);
-      } else {
-        const first = records[0];
-        callback(null, first.address, first.family);
-      }
-    })().catch((error: unknown) => {
-      const safeError =
-        error instanceof ProviderAdapterError
-          ? error
-          : error instanceof DOMException &&
-              (error.name === "AbortError" || error.name === "TimeoutError")
-            ? Object.assign(new Error("Provider request interrupted"), {
-                name: error.name,
-                cause: error,
-              })
-            : new ProviderAdapterError("MP_PROVIDER_NETWORK_POLICY");
-      callback(safeError, "", 0);
-    });
-  };
+  return createPinnedPublicLookup(url, {
+    resolveAddresses: resolver,
+    signal,
+    allowLoopback: isDevelopmentLoopback(url),
+    createPolicyError: providerNetworkPolicyError,
+    interruptedMessage: "Provider request interrupted",
+  });
 }
 
 async function resolveValidatedProviderAddresses(
@@ -302,44 +264,17 @@ async function resolveValidatedProviderAddresses(
   resolver: ResolveAddresses | undefined,
   signal: AbortSignal | undefined,
 ): Promise<string[]> {
-  const hostname = normalizedHostname(url.hostname);
-  let addresses: readonly string[];
-  if (isDevelopmentLoopback(url)) {
-    addresses =
-      hostname === "localhost" ? ["127.0.0.1", "::1"] : [hostname];
-  } else if (isIP(hostname)) {
-    addresses = [hostname];
-  } else {
-    try {
-      addresses = await awaitWithAbort(
-        (resolver ?? resolvePublicAddresses)(hostname),
-        signal,
-      );
-    } catch {
-      signal?.throwIfAborted();
-      throw new ProviderAdapterError("MP_PROVIDER_NETWORK_POLICY");
-    }
-  }
-  const unique = [...new Set(addresses.map(normalizedHostname))];
-  if (
-    unique.length === 0 ||
-    unique.some(
-      (address) =>
-        isIP(address) === 0 ||
-        (!isDevelopmentLoopback(url) &&
-          isPrivateOrReservedIpLiteral(address)),
-    )
-  ) {
-    throw new ProviderAdapterError("MP_PROVIDER_NETWORK_POLICY");
-  }
-  return unique;
+  return resolvePinnedPublicAddresses(url, {
+    resolveAddresses: resolver,
+    signal,
+    allowLoopback: isDevelopmentLoopback(url),
+    createPolicyError: providerNetworkPolicyError,
+    interruptedMessage: "Provider request interrupted",
+  });
 }
 
-function normalizedHostname(value: string): string {
-  const normalized = value.trim().toLowerCase().replace(/\.$/, "");
-  return normalized.startsWith("[") && normalized.endsWith("]")
-    ? normalized.slice(1, -1)
-    : normalized;
+function providerNetworkPolicyError(): ProviderAdapterError {
+  return new ProviderAdapterError("MP_PROVIDER_NETWORK_POLICY");
 }
 
 function finalProviderUrl(resource: RequestInfo | URL): URL {
