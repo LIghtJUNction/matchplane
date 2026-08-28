@@ -1,4 +1,4 @@
-import { Button } from "@appica/ui-react/button";
+import { Button, buttonVariants } from "@appica/ui-react/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -245,15 +245,18 @@ export function HostedStoreOnboarding({
                 <ArrowRight size={17} aria-hidden="true" />
               </Button>
             ) : (
-              <Button
-                render={<a href={`${createdStore.path}?console=products`} />}
-                variant="primary"
-                size="md"
-                className="min-h-11"
+              <a
+                href={`${createdStore.path}?console=products`}
+                data-slot="button"
+                className={buttonVariants({
+                  variant: "primary",
+                  size: "md",
+                  className: "min-h-11",
+                })}
               >
                 {locale === "en" ? "Add products" : "开始添加商品"}
                 <ArrowRight size={17} aria-hidden="true" />
-              </Button>
+              </a>
             )}
           </div>
         </div>

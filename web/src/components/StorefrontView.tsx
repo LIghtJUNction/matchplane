@@ -7,7 +7,7 @@ import {
   AlertIcon,
   AlertTitle,
 } from "@appica/ui-react/alert";
-import { Button } from "@appica/ui-react/button";
+import { Button, buttonVariants } from "@appica/ui-react/button";
 import {
   Dialog,
   DialogBody,
@@ -101,15 +101,19 @@ export function StorefrontView({
   return (
     <div className="storefront-view root-storefront-page">
       <header className="storefront-view-header">
-        <Button
-          render={<a href="/" />}
-          variant="ghost"
-          size="md"
-          className="min-h-11 justify-start px-0 text-[var(--retail-blue)] text-sm font-semibold"
+        <a
+          href="/"
+          data-slot="button"
+          className={buttonVariants({
+            variant: "ghost",
+            size: "md",
+            className:
+              "min-h-11 justify-start px-0 text-[var(--retail-blue)] text-sm font-semibold",
+          })}
         >
           <ArrowLeft size={17} aria-hidden="true" />
           {english ? "Back to mall" : "返回商城"}
-        </Button>
+        </a>
         <div className="storefront-view-identity">
           <span className="storefront-view-mark" aria-hidden="true">
             {subplatform.brandLogoUrl ? (
@@ -250,15 +254,18 @@ export function StorefrontView({
               : "店主已暂时暂停对外营业，暂不接受新的咨询和下单。所有商品数据与客户记录均完整保留。您可以返回商城选购其他好物。"}
           </p>
           <div className="storefront-closed-actions">
-            <Button
-              render={<a href="/" />}
-              variant="primary"
-              size="md"
-              className="min-h-11"
+            <a
+              href="/"
+              data-slot="button"
+              className={buttonVariants({
+                variant: "primary",
+                size: "md",
+                className: "min-h-11",
+              })}
             >
               <ArrowLeft size={16} aria-hidden="true" />
               {english ? "Back to mall home" : "返回商城首页"}
-            </Button>
+            </a>
             {canManageStore && onOpenStoreConsole ? (
               <Button
                 variant="outline"
@@ -291,15 +298,18 @@ export function StorefrontView({
               : "该店铺已被商城管理暂停营业，暂时无法公开访问。如有疑问请联系商城管理员。"}
           </p>
           <div className="storefront-closed-actions">
-            <Button
-              render={<a href="/" />}
-              variant="primary"
-              size="md"
-              className="min-h-11"
+            <a
+              href="/"
+              data-slot="button"
+              className={buttonVariants({
+                variant: "primary",
+                size: "md",
+                className: "min-h-11",
+              })}
             >
               <ArrowLeft size={16} aria-hidden="true" />
               {english ? "Back to mall home" : "返回商城首页"}
-            </Button>
+            </a>
           </div>
         </div>
       )}
@@ -316,15 +326,18 @@ export function StorefrontView({
               : "该店铺接入资料正在审核中，审核通过后将正式开放营业。"}
           </p>
           <div className="storefront-closed-actions">
-            <Button
-              render={<a href="/" />}
-              variant="primary"
-              size="md"
-              className="min-h-11"
+            <a
+              href="/"
+              data-slot="button"
+              className={buttonVariants({
+                variant: "primary",
+                size: "md",
+                className: "min-h-11",
+              })}
             >
               <ArrowLeft size={16} aria-hidden="true" />
               {english ? "Back to mall home" : "返回商城首页"}
-            </Button>
+            </a>
           </div>
         </div>
       )}
@@ -454,18 +467,21 @@ export function StorefrontView({
                           "Ask the store manager",
                         )}
                       </Button>
-                      <Button
-                        render={<a href="/" />}
-                        variant="ghost"
-                        size="md"
-                        className="min-h-11 text-[var(--retail-blue)]"
+                      <a
+                        href="/"
+                        data-slot="button"
+                        className={buttonVariants({
+                          variant: "ghost",
+                          size: "md",
+                          className: "min-h-11 text-[var(--retail-blue)]",
+                        })}
                       >
                         {verticalCopy(
                           "emptyBrowseAction",
                           "浏览其他店铺",
                           "Browse other stores",
                         )}
-                      </Button>
+                      </a>
                     </>
                   )}
                 </div>

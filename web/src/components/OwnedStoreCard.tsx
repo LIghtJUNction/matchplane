@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@appica/ui-react";
+import { buttonVariants } from "@appica/ui-react";
 import { ArrowRight, Check, Copy, Link2, UserPlus } from "lucide-react";
 
 import type { StoreCollaboratorInvite, StoreSummary } from "../api";
@@ -93,15 +93,18 @@ export function OwnedStoreCard({
               : store.description || (english ? "Hosted store" : "托管店铺")}
           </p>
         </div>
-        <Button
-          render={<a href={store.path} />}
-          variant={secondary ? "outline" : "primary"}
-          size="md"
-          className="owned-store-enter min-h-11"
+        <a
+          href={store.path}
+          data-slot="button"
+          className={buttonVariants({
+            variant: secondary ? "outline" : "primary",
+            size: "md",
+            className: "owned-store-enter min-h-11",
+          })}
         >
           {enterLabel}
           <ArrowRight size={16} aria-hidden="true" />
-        </Button>
+        </a>
       </div>
       <div className="owned-store-card-toolbar">
         {canInvite ? (
