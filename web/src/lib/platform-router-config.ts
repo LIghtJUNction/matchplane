@@ -28,7 +28,6 @@ export type { PlatformRouterAuditRecord } from "./platform-router-config/audit";
 export {
   acquirePlatformRouterLock,
   checkpointDeliveredAudit,
-  cleanupRecognizedOrphanTemps,
   commitGeneration,
   flushAuditOutbox,
   garbageCollectPlatformRouterArtifacts,
@@ -45,10 +44,8 @@ export {
   withPlatformRouterLock,
 } from "./platform-router-config/transaction";
 export type {
-  PlatformRouterGeneration,
   PlatformRouterGenerationInput,
   PlatformRouterLockHandle,
-  PlatformRouterPointer,
   PlatformRouterRecoveryResult,
   PlatformRouterSnapshot,
   PlatformRouterTransactionOptions,
@@ -61,14 +58,12 @@ export {
   activateTransactionalManagedPlatformRouterDraft,
   createTransactionalManagedPlatformRouterLifecycle,
   getTransactionalManagedPlatformRouterConfig,
-  getTransactionalManagedPlatformRouterDraftConfig,
   getTransactionalManagedPlatformRouterState,
   markTransactionalManagedPlatformRouterDraftTested,
   PlatformRouterStateIndeterminateError,
   PlatformRouterStorageUncertainError,
   prepareTransactionalManagedPlatformRouterDraftProbe,
   readTransactionalManagedPlatformRouterConfig,
-  readTransactionalManagedPlatformRouterDraftConfig,
   stageTransactionalManagedPlatformRouterConfig,
 } from "./platform-router-config/transactional-lifecycle";
 export type {
@@ -80,14 +75,7 @@ export type {
   TransactionalManagedPlatformRouterLifecycle,
   TransactionalManagedPlatformRouterPublicState,
 } from "./platform-router-config/transactional-lifecycle";
-export {
-  activateManagedPlatformRouterDraft,
-  getManagedPlatformRouterDraftConfig,
-  markManagedPlatformRouterDraftTested,
-  readManagedPlatformRouterConfig,
-  readManagedPlatformRouterDraftConfig,
-  stageManagedPlatformRouterConfig,
-} from "./platform-router-config/lifecycle";
+export { readManagedPlatformRouterConfig } from "./platform-router-config/lifecycle";
 export function managedPlatformRouterStateFromTransactionalState(
   state: TransactionalManagedPlatformRouterPublicState,
   environment: EnvironmentProviderStatus = readEnvironmentProviderStatus(),

@@ -28,7 +28,7 @@ export interface PaymentGatewayDraft {
   credentialSecretRef?: string;
 }
 
-export interface PaymentRouteDraft {
+interface PaymentRouteDraft {
   gatewayId: string;
   methodCode: string;
   currency: string;

@@ -11,7 +11,7 @@ const SECRET_PATH = path.join(SECRET_ROOT, "wechat-oauth-app-secret");
 export const WECHAT_QR_AUTHORIZATION_URL = "https://open.weixin.qq.com/connect/qrconnect#wechat_redirect";
 export const WECHAT_TOKEN_URL = "https://api.weixin.qq.com/sns/oauth2/access_token";
 export const WECHAT_USERINFO_URL = "https://api.weixin.qq.com/sns/userinfo";
-export const WECHAT_DEFAULT_SCOPES = ["snsapi_login"] as const;
+const WECHAT_DEFAULT_SCOPES = ["snsapi_login"] as const;
 
 interface StoredWeChatOAuthConfig {
   enabled: boolean;

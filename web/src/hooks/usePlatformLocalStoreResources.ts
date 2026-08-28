@@ -30,7 +30,7 @@ export type LocalStoreResourceState<T> =
   | { status: "ready"; data: T }
   | { status: "error"; message: string; previous?: T };
 
-export interface LocalStoreRegistrationDraft {
+interface LocalStoreRegistrationDraft {
   sourceKind: "git" | "archive";
   domainId: string;
   sourceLocator: string;
@@ -40,7 +40,7 @@ export interface LocalStoreRegistrationDraft {
   updateOrganizationId?: string;
 }
 
-export interface LocalStoreUpdateSeed {
+interface LocalStoreUpdateSeed {
   organizationId: string;
   sourceKind: "git" | "archive";
   domainId: string;

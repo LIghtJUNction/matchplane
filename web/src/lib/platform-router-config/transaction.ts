@@ -52,7 +52,7 @@ const DEFAULT_LOCK_TIMEOUT_MS = 2_000;
 const DEFAULT_OWNER_CREATION_GRACE_MS = 250;
 const DEFAULT_GC_GRACE_MS = 5 * 60_000;
 const MAX_GENERATION_LINEAGE_DEPTH = 10_000;
-export const MAX_STATE_BYTES = 1024 * 1024;
+const MAX_STATE_BYTES = 1024 * 1024;
 export const MAX_PENDING_AUDIT_RECORDS = 1_024;
 const AUDIT_SCAN_CHUNK_BYTES = 64 * 1024;
 const MAX_AUDIT_RECORD_BYTES = 64 * 1024;
@@ -89,13 +89,13 @@ interface DirectoryIdentity {
 
 const lockCapabilities = new WeakMap<object, LockCapability>();
 
-export interface PlatformRouterPointer {
+interface PlatformRouterPointer {
   schemaVersion: 1;
   generationId: string;
   sha256: string;
 }
 
-export interface PlatformRouterGeneration {
+interface PlatformRouterGeneration {
   schemaVersion: 1;
   generationId: string;
   parentGenerationId: string | null;
@@ -125,7 +125,7 @@ export interface PlatformRouterGenerationInput {
   pendingAudit: PlatformRouterAuditRecord[];
 }
 
-export interface PlatformRouterLockOwner {
+interface PlatformRouterLockOwner {
   pid: number;
   bootId: string;
   startTicks: string;
@@ -752,44 +752,6 @@ export function garbageCollectPlatformRouterArtifacts(
   };
 }
 
-export function cleanupRecognizedOrphanTemps(
-  handle: PlatformRouterLockHandle,
-  options: PlatformRouterTransactionOptions = {},
-): string[] {
-  const environment = resolveHandleEnvironment(handle, options);
-  assertPlatformRouterLockOwned(handle, environment);
-  const removed: string[] = [];
-  const rootEntries = readdirSync(environment.root);
-  assertPlatformRouterLockOwned(handle, environment);
-  for (const entry of rootEntries) {
-    if (!POINTER_TEMP_PATTERN.test(entry)) continue;
-    const target = path.join(environment.root, entry);
-    assertRegularPathIfPresent(target, "AI 配置临时指针路径无效");
-    assertPlatformRouterLockOwned(handle, environment);
-    environment.io.unlink(target);
-    removed.push(entry);
-  }
-  assertPlatformRouterLockOwned(handle, environment);
-  const generationDirectory = ensureGenerationDirectory(environment);
-  const generationEntries = readdirSync(generationDirectory);
-  assertPlatformRouterLockOwned(handle, environment);
-  for (const entry of generationEntries) {
-    if (!GENERATION_TEMP_PATTERN.test(entry)) continue;
-    const target = path.join(generationDirectory, entry);
-    assertRegularPathIfPresent(target, "AI 配置临时代际路径无效");
-    assertPlatformRouterLockOwned(handle, environment);
-    environment.io.unlink(target);
-    removed.push(`${PLATFORM_ROUTER_GENERATION_DIRECTORY}/${entry}`);
-  }
-  if (removed.some((entry) => !entry.includes("/"))) {
-    fsyncDirectory(environment.root, environment);
-  }
-  if (removed.some((entry) => entry.includes("/"))) {
-    fsyncDirectory(generationDirectory, environment);
-  }
-  return removed.sort();
-}
-
 export function validateReferencedCredentials(
   snapshot: Pick<PlatformRouterSnapshot, "active" | "draft">,
   options: PlatformRouterTransactionOptions = {},
@@ -823,14 +785,6 @@ export function validateReferencedCredentials(
       if (descriptor !== null) closeSync(descriptor);
     }
   }
-}
-
-export function assertPlatformRouterLockCapability(
-  handle: PlatformRouterLockHandle,
-  options: Pick<PlatformRouterTransactionOptions, "root"> = {},
-): void {
-  const environment = resolveEnvironment({ root: options.root ?? handle.root });
-  assertPlatformRouterLockOwned(handle, environment);
 }
 
 function assertPlatformRouterLockOwned(

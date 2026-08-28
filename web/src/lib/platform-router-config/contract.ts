@@ -353,7 +353,7 @@ export function boundedAuditText(value: string, label: string): string {
   return normalized;
 }
 
-export function normalizeReasoningEfforts(value: unknown): string[] {
+function normalizeReasoningEfforts(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [
     ...new Set(

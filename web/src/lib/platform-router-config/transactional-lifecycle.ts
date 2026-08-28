@@ -669,7 +669,7 @@ function sameState(
   );
 }
 
-export function draftDigest(
+function draftDigest(
   config: NormalizedStoredRouterConfig,
   apiKey: string,
 ): string {
@@ -681,7 +681,7 @@ export function draftDigest(
     .digest("hex");
 }
 
-export function constantTimeTextEqual(left: string, right: string): boolean {
+function constantTimeTextEqual(left: string, right: string): boolean {
   const length = Math.max(left.length, right.length);
   let difference = left.length ^ right.length;
   for (let index = 0; index < length; index += 1) {
@@ -697,10 +697,6 @@ export function readTransactionalManagedPlatformRouterConfig(): ManagedPlatformR
   return productionTransactionalLifecycle.readActive();
 }
 
-export function readTransactionalManagedPlatformRouterDraftConfig(): ManagedPlatformRouterSecretConfig | null {
-  return productionTransactionalLifecycle.readDraft();
-}
-
 export function getTransactionalManagedPlatformRouterState(
   transactionOptions?: PlatformRouterTransactionOptions,
 ): TransactionalManagedPlatformRouterPublicState {
@@ -714,10 +710,6 @@ export function getTransactionalManagedPlatformRouterState(
 
 export function getTransactionalManagedPlatformRouterConfig(): ManagedPlatformRouterConfig | null {
   return productionTransactionalLifecycle.getActive();
-}
-
-export function getTransactionalManagedPlatformRouterDraftConfig(): ManagedPlatformRouterDraftConfig | null {
-  return productionTransactionalLifecycle.getDraft();
 }
 
 export function prepareTransactionalManagedPlatformRouterDraftProbe(): PlatformRouterDraftProbe {

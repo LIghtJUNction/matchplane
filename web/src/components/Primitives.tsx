@@ -7,12 +7,6 @@ import { ChevronRight, Sparkles } from "lucide-react";
 import type { Accent } from "../types";
 
 export const spring = { type: "spring" as const, bounce: 0, duration: 0.38 };
-export const momentumSpring = {
-  type: "spring" as const,
-  bounce: 0.18,
-  duration: 0.4,
-};
-
 export function Brand({
   label = "MatchPlane",
   logoUrl,

@@ -35,7 +35,7 @@ export interface PlatformRouterAuditRecord {
   keyChanged: boolean;
 }
 
-export interface PlatformRouterAuditAppendOptions {
+interface PlatformRouterAuditAppendOptions {
   root?: string;
   nextId?: () => string;
   now?: () => Date;

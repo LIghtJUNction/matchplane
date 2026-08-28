@@ -113,7 +113,7 @@ export async function rankPublicStorefrontCandidates<Row>(
   return mergeRustRankedCandidates(prepared, rankedRows);
 }
 
-export function hasPublicStorefrontRequestCriteria(
+function hasPublicStorefrontRequestCriteria(
   narrative: string,
   intent: PublicShoppingIntent | undefined,
 ): boolean {

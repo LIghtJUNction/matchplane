@@ -12,13 +12,13 @@ import { requiresAuthenticatedWorkspace } from "./useAuthSession";
 export type AccountSettingsSection = "profile" | "account" | "stores";
 export type StoreConsoleSection = "products" | "customers";
 
-export function roleFromLocation(): WorkspaceRole {
+function roleFromLocation(): WorkspaceRole {
   if (typeof window === "undefined") return "buyer";
   const requested = new URLSearchParams(window.location.search).get("role");
   return requested === "platform" ? requested : "buyer";
 }
 
-export function relativeBrowserLocation(searchParams: URLSearchParams): string {
+function relativeBrowserLocation(searchParams: URLSearchParams): string {
   const query = searchParams.toString();
   return `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
 }
@@ -26,15 +26,6 @@ export function relativeBrowserLocation(searchParams: URLSearchParams): string {
 export function parentPlatformHref(path: string, role: WorkspaceRole): string {
   void path;
   return role === "buyer" ? "/" : `/?role=${encodeURIComponent(role)}`;
-}
-
-export function requestedStoreConsoleSection(): StoreConsoleSection {
-  if (typeof window === "undefined") return "products";
-  return new URLSearchParams(window.location.search).get(
-    "storeConsoleSection",
-  ) === "customers"
-    ? "customers"
-    : "products";
 }
 
 export function roleLabel(

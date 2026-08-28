@@ -12,7 +12,7 @@ export interface StoreConsoleContext {
   store: StoreSummary;
 }
 
-export function canManageStore(
+function canManageStore(
   user: AuthenticatedUser | null,
   store: StoreSummary | null,
 ): boolean {

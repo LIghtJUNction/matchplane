@@ -1,6 +1,6 @@
 import type { AssetListing } from "../types";
 
-export interface WebMcpToolExecuteOptions {
+interface WebMcpToolExecuteOptions {
   readonly signal: AbortSignal;
 }
 
@@ -108,7 +108,7 @@ export interface MarketplaceWebMcpAvailability {
   readonly listings: boolean;
 }
 
-export type MarketplaceWebMcpOutcome =
+type MarketplaceWebMcpOutcome =
   | {
       readonly ok: true;
       readonly action: "need_drafted";

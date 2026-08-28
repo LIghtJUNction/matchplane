@@ -1,6 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
-import { lstatSync } from "node:fs";
-import path from "node:path";
+import { createHash } from "node:crypto";
 import {
   boundedAuditText,
   decodeStoredRouterConfig,
@@ -23,19 +21,12 @@ import {
   credentialStorageEntry,
   type PlatformRouterStorageEntry,
   type ProtectedPlatformRouterStorage,
-  PLATFORM_ROUTER_SECRET_ROOT,
-  protectedPlatformRouterStorage,
 } from "./protected-storage";
 import {
   getTransactionalManagedPlatformRouterConfig,
-  getTransactionalManagedPlatformRouterDraftConfig,
   readTransactionalManagedPlatformRouterConfig,
-  readTransactionalManagedPlatformRouterDraftConfig,
 } from "./transactional-lifecycle";
-import {
-  PLATFORM_ROUTER_POINTER_FILE,
-  PlatformRouterConflictError,
-} from "./transaction";
+import { PlatformRouterConflictError } from "./transaction";
 
 const DRAFT_ENTRIES: PlatformRouterStorageEntry[] = [
   "draft-config",
@@ -220,60 +211,12 @@ export function createManagedPlatformRouterLifecycle(
   };
 }
 
-const lifecycle = createManagedPlatformRouterLifecycle({
-  storage: protectedPlatformRouterStorage,
-  nextId: randomUUID,
-  now: () => new Date(),
-  transactionalStatePresent: () =>
-    pathExists(
-      path.join(PLATFORM_ROUTER_SECRET_ROOT, PLATFORM_ROUTER_POINTER_FILE),
-    ),
-});
-
 export function readManagedPlatformRouterConfig(): ManagedPlatformRouterSecretConfig | null {
   return readTransactionalManagedPlatformRouterConfig();
 }
 
-export function readManagedPlatformRouterDraftConfig(): ManagedPlatformRouterSecretConfig | null {
-  return readTransactionalManagedPlatformRouterDraftConfig();
-}
-
 export function getManagedPlatformRouterConfig(): ManagedPlatformRouterConfig | null {
   return getTransactionalManagedPlatformRouterConfig();
-}
-
-export function getManagedPlatformRouterDraftConfig(): ManagedPlatformRouterDraftConfig | null {
-  return getTransactionalManagedPlatformRouterDraftConfig();
-}
-
-export function stageManagedPlatformRouterConfig(
-  input: ManagedPlatformRouterInput,
-): ManagedPlatformRouterDraftConfig {
-  return lifecycle.stage(input);
-}
-
-export function markManagedPlatformRouterDraftTested(requestId: string): void {
-  lifecycle.markTested(requestId);
-}
-
-export function activateManagedPlatformRouterDraft(): ManagedPlatformRouterConfig {
-  return lifecycle.activate();
-}
-
-function pathExists(target: string): boolean {
-  try {
-    lstatSync(target);
-    return true;
-  } catch (cause) {
-    if (
-      cause instanceof Error &&
-      "code" in cause &&
-      (cause as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
-      return false;
-    }
-    throw cause;
-  }
 }
 
 function captureSnapshot(

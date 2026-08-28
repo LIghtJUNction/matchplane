@@ -28,7 +28,7 @@ export interface InvoiceProviderDraft {
   credentialSecretRef?: string;
 }
 
-export interface InvoiceModeDraft {
+interface InvoiceModeDraft {
   mode: "test" | "production";
   providerId: string;
 }

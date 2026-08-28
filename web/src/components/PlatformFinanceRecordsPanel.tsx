@@ -19,7 +19,7 @@ import {
   RefundEditor,
 } from "./PlatformFinanceRecordViews";
 
-export type PlatformFinanceTenantState =
+type PlatformFinanceTenantState =
   | { status: "unverified" }
   | { status: "verified"; tenantId: string | null };
 

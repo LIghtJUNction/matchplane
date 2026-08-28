@@ -190,9 +190,6 @@ export function createProtectedPlatformRouterStorage(
   };
 }
 
-export const protectedPlatformRouterStorage =
-  createProtectedPlatformRouterStorage();
-
 function writeAll(
   descriptor: number,
   bytes: Buffer,
