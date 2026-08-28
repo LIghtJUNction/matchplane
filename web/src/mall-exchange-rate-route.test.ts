@@ -69,36 +69,53 @@ function transactionClient(row: Record<string, unknown> = current) {
     query: vi.fn<
       (sql: string, parameters?: readonly unknown[]) => Promise<MockQueryResult>
     >(async (sql: string) => {
-        if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK")
-          return {};
-        if (sql.includes("FROM tenants"))
-          return { rowCount: 1, rows: [{ id: mocks.tenantId }] };
-        if (sql.includes("FROM mall_currency_settings"))
-          return { rowCount: 1, rows: [row] };
-        if (sql.includes("UPDATE mall_currency_settings")) {
-          return {
-            rowCount: 1,
-            rows: [
-              {
-                ...row,
-                localCurrency: "JPY",
-                usdToLocalRate: "146.12",
-                rateSource: "api.frankfurter.app",
-                rateProvider: "frankfurter",
-                rateEffectiveDate: "2026-08-28",
-                rateResponseDigest: `sha256:${"b".repeat(64)}`,
-                rateUpdatedAt: "2026-08-28T06:00:00.000Z",
-                version: "4",
-              },
-            ],
-          };
-        }
-        if (sql.includes("INSERT INTO platform_audit_events"))
-          return { rowCount: 1, rows: [] };
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK")
+        return {};
+      if (sql.includes("FROM tenants"))
+        return { rowCount: 1, rows: [{ id: mocks.tenantId }] };
+      if (sql.includes("FROM mall_currency_settings"))
+        return { rowCount: 1, rows: [row] };
+      if (sql.includes("UPDATE mall_currency_settings")) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              ...row,
+              localCurrency: "JPY",
+              usdToLocalRate: "146.12",
+              rateSource: "api.frankfurter.app",
+              rateProvider: "frankfurter",
+              rateEffectiveDate: "2026-08-28",
+              rateResponseDigest: `sha256:${"b".repeat(64)}`,
+              rateUpdatedAt: "2026-08-28T06:00:00.000Z",
+              version: "4",
+            },
+          ],
+        };
+      }
+      if (sql.includes("INSERT INTO platform_audit_events"))
         return { rowCount: 1, rows: [] };
-      }),
+      return { rowCount: 1, rows: [] };
+    }),
     release: vi.fn(),
   };
+  return client;
+}
+
+function schemaUnavailableClient(code: "42P01" | "42703") {
+  const client = transactionClient();
+  client.query.mockImplementation(async (sql: string) => {
+    if (sql === "BEGIN" || sql === "ROLLBACK") return {};
+    if (sql.includes("FROM tenants")) {
+      return { rowCount: 1, rows: [{ id: mocks.tenantId }] };
+    }
+    if (sql.includes("FROM mall_currency_settings")) {
+      throw Object.assign(new Error("currency settings schema unavailable"), {
+        code,
+      });
+    }
+    return { rowCount: 1, rows: [] };
+  });
   return client;
 }
 
@@ -143,6 +160,62 @@ describe("mall exchange-rate route", () => {
       [mocks.tenantId, "CNY"],
     );
   });
+
+  it.each(["42P01", "42703"] as const)(
+    "returns 503 when GET encounters PostgreSQL schema error %s",
+    async (code) => {
+      mocks.query.mockRejectedValueOnce(
+        Object.assign(new Error("currency settings schema unavailable"), {
+          code,
+        }),
+      );
+
+      const response = await GET();
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: "货币设置暂不可用；请确认数据库迁移已完成",
+      });
+    },
+  );
+
+  it.each(["42P01", "42703"] as const)(
+    "returns 503 when PATCH encounters PostgreSQL schema error %s",
+    async (code) => {
+      const client = schemaUnavailableClient(code);
+      mocks.connect.mockResolvedValue(client);
+
+      const response = await PATCH(
+        request("PATCH", { localCurrency: "EUR", expectedVersion: 3 }),
+      );
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: "货币设置暂不可用；请确认数据库迁移已完成",
+      });
+      expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+      expect(client.release).toHaveBeenCalled();
+    },
+  );
+
+  it.each(["42P01", "42703"] as const)(
+    "returns 503 when POST encounters PostgreSQL schema error %s",
+    async (code) => {
+      const client = schemaUnavailableClient(code);
+      mocks.connect.mockResolvedValue(client);
+
+      const response = await POST(
+        request("POST", { localCurrency: "USD", expectedVersion: 3 }),
+      );
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: "货币设置暂不可用；请确认数据库迁移已完成",
+      });
+      expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+      expect(client.release).toHaveBeenCalled();
+    },
+  );
 
   it("clears a stale rate when the local currency is changed", async () => {
     const client = transactionClient();

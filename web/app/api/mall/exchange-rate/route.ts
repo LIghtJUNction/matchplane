@@ -114,7 +114,7 @@ export async function GET(): Promise<Response> {
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
-    if (isMissingCurrencySettingsTable(error)) {
+    if (isCurrencySettingsSchemaUnavailable(error)) {
       return jsonError("货币设置暂不可用；请确认数据库迁移已完成", 503);
     }
     console.error("mall exchange rate settings read failed", error);
@@ -179,7 +179,7 @@ export async function PATCH(request: Request): Promise<Response> {
     if (isExchangeRateConflict(error)) {
       return jsonError("货币设置已被其他人更新，请刷新后重试", 409);
     }
-    if (isMissingCurrencySettingsTable(error)) {
+    if (isCurrencySettingsSchemaUnavailable(error)) {
       return jsonError("货币设置暂不可用；请确认数据库迁移已完成", 503);
     }
     console.error("mall exchange rate settings update failed", error);
@@ -250,7 +250,7 @@ export async function POST(request: Request): Promise<Response> {
     if (isExchangeRateConflict(error)) {
       return jsonError("货币设置已被其他人更新，请刷新后重试", 409);
     }
-    if (isMissingCurrencySettingsTable(error)) {
+    if (isCurrencySettingsSchemaUnavailable(error)) {
       return jsonError("货币设置暂不可用；请确认数据库迁移已完成", 503);
     }
     console.error("mall exchange rate sync failed", error);
@@ -756,11 +756,10 @@ function normalizeTimestamp(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function isMissingCurrencySettingsTable(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "42P01"
-  );
+function isCurrencySettingsSchemaUnavailable(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  return code === "42P01" || code === "42703";
 }
