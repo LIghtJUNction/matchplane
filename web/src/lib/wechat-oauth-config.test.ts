@@ -86,6 +86,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
 
@@ -120,6 +121,33 @@ describe("managed wechat oauth config storage", () => {
       userInfoUrl: WECHAT_USERINFO_URL,
       appSecret: "<appsecret>",
     });
+  });
+
+  it("rejects non-WeChat managed endpoints in production before storing the secret", () => {
+    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+    expect(() =>
+      saveManagedWeChatOAuthConfig({
+        enabled: true,
+        appId: "appid",
+        appSecret: "must-not-be-written",
+        authorizationUrl: "https://oauth.example.test/authorize",
+        tokenUrl: "https://oauth.example.test/token",
+        userInfoUrl: "https://oauth.example.test/userinfo",
+      }),
+    ).toThrow("生产环境仅允许微信官方 OAuth 地址");
+    expect([...fsState.files.values()]).not.toContain("must-not-be-written");
+  });
+
+  it("keeps custom OAuth-compatible mock endpoints available outside production", () => {
+    const config = saveManagedWeChatOAuthConfig({
+      enabled: true,
+      appId: "appid",
+      appSecret: "secret",
+      authorizationUrl: "https://oauth.example.test/authorize",
+      tokenUrl: "https://oauth.example.test/token",
+      userInfoUrl: "https://oauth.example.test/userinfo",
+    });
+    expect(config.tokenUrl).toBe("https://oauth.example.test/token");
   });
 
   it("keeps the stored AppSecret when the update omits it", () => {

@@ -37,6 +37,11 @@ export interface PinnedPublicTextRequestOptions {
   responseBodyTimeoutMs: number;
   responseLimitBytes: number;
   signal?: AbortSignal;
+  method?: "GET" | "POST";
+  headers?: HeadersInit;
+  body?: BodyInit;
+  resolveAddresses?: ResolveAddresses;
+  allowLoopback?: boolean;
 }
 
 export interface PinnedPublicTextResponse {
@@ -95,8 +100,8 @@ export function createPinnedPublicDispatcher(
   const hostname = normalizedHostname(url.hostname);
   if (isIP(hostname)) {
     if (
-      !options.allowLoopback &&
-      isPrivateOrReservedIpLiteral(hostname)
+      isPrivateOrReservedIpLiteral(hostname) &&
+      !(options.allowLoopback && isLoopbackHostname(hostname))
     ) {
       throw policyError(options);
     }
@@ -139,7 +144,12 @@ export async function resolvePinnedPublicAddresses(
     unique.some(
       (address) =>
         isIP(address) === 0 ||
-        (!options.allowLoopback && isPrivateOrReservedIpLiteral(address)),
+        (isPrivateOrReservedIpLiteral(address) &&
+          !(
+            options.allowLoopback &&
+            isLoopbackHostname(hostname) &&
+            isLoopbackHostname(address)
+          )),
     )
   ) {
     throw policyError(options);
@@ -153,7 +163,8 @@ export async function fetchPinnedPublicText(
   options: PinnedPublicTextRequestOptions,
 ): Promise<PinnedPublicTextResponse> {
   if (
-    url.protocol !== "https:" ||
+    (url.protocol !== "https:" &&
+      !(options.allowLoopback && isLoopbackHttpUrl(url))) ||
     !url.hostname ||
     url.username ||
     url.password
@@ -177,18 +188,30 @@ export async function fetchPinnedPublicText(
 
   try {
     requestSignal.throwIfAborted();
-    dispatcher = createPinnedPublicDispatcher(url, { signal: requestSignal });
+    dispatcher = createPinnedPublicDispatcher(url, {
+      signal: requestSignal,
+      resolveAddresses: options.resolveAddresses,
+      allowLoopback: options.allowLoopback,
+    });
     // SAFETY: Undici's Response implements the same Fetch response contract;
     // this bridges package-local Undici types to the DOM type used by body-limit.
-    response = (await undiciFetch(url, {
-      method: "GET",
-      headers: { accept: "application/json" },
+    const requestInit: RequestInit & { dispatcher: Agent } = {
+      method: options.method ?? "GET",
+      headers: options.headers ?? { accept: "application/json" },
       signal: requestSignal,
       redirect: "manual",
       credentials: "omit",
       cache: "no-store",
       dispatcher,
-    })) as unknown as Response;
+    };
+    if (options.body !== undefined) requestInit.body = options.body;
+    const undiciResponse = await undiciFetch(
+      url,
+      // SAFETY: requestInit adds only Undici's dispatcher to standard Fetch fields.
+      requestInit as unknown as Parameters<typeof undiciFetch>[1],
+    );
+    // SAFETY: Undici's response implements the DOM Fetch response contract.
+    response = undiciResponse as unknown as Response;
     requestTimeout.clear();
 
     if (
@@ -258,6 +281,13 @@ function normalizedHostname(value: string): string {
 
 function isLoopbackHostname(hostname: string): boolean {
   return ["localhost", "127.0.0.1", "::1"].includes(hostname);
+}
+
+function isLoopbackHttpUrl(url: URL): boolean {
+  return (
+    url.protocol === "http:" &&
+    isLoopbackHostname(normalizedHostname(url.hostname))
+  );
 }
 
 function timeoutController(timeoutMs: number, message: string): {

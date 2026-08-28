@@ -8,6 +8,7 @@ import {
   PinnedPublicEndpointError,
   PinnedPublicRedirectError,
 } from "./pinned-public-endpoint";
+import { isProductionEnvironment } from "./runtime";
 
 const SECRET_ROOT = "/etc/matchplane/secrets/root-email";
 const CONFIG_PATH = path.join(SECRET_ROOT, "wechat-oauth.json");
@@ -77,6 +78,7 @@ export function saveManagedWeChatOAuthConfig(input: {
     tokenUrl: normalizeWeChatUrl(input.tokenUrl?.trim() || WECHAT_TOKEN_URL, "令牌地址", false),
     userInfoUrl: normalizeWeChatUrl(input.userInfoUrl?.trim() || WECHAT_USERINFO_URL, "用户信息地址", false),
   };
+  assertManagedWeChatEgressPolicy(config);
   if (input.appSecret !== undefined) writeProtected(SECRET_PATH, input.appSecret, "AppSecret");
   const configured = Boolean(readOptional(SECRET_PATH));
   if (config.enabled && !configured) throw new Error("启用前请填写 AppSecret");
@@ -87,8 +89,9 @@ export function saveManagedWeChatOAuthConfig(input: {
 /**
  * WeChat's sns endpoints predate standard OAuth2: they only speak WeChat's own
  * protocol. The adapters below are applied when the configured endpoints are
- * WeChat-hosted; a standards-compliant proxy or mock gateway on another host
- * keeps the default generic OAuth behaviour.
+ * WeChat-hosted. A standards-compliant proxy or mock gateway remains available
+ * outside production; production managed configuration fails closed because
+ * Better Auth's generic transport cannot enforce this module's DNS pinning.
  */
 export function isWeChatNativeEndpoint(value: string | undefined): boolean {
   if (!value) return false;
@@ -238,7 +241,7 @@ function readString(body: Record<string, unknown>, key: string): string | undefi
 }
 
 function normalizeStoredConfig(value: Partial<StoredWeChatOAuthConfig>): StoredWeChatOAuthConfig {
-  return {
+  const config = {
     enabled: value.enabled === true,
     appId: boundedText(value.appId ?? "", "AppID", 512),
     scopes: normalizeScopes(value.scopes),
@@ -246,6 +249,20 @@ function normalizeStoredConfig(value: Partial<StoredWeChatOAuthConfig>): StoredW
     tokenUrl: normalizeWeChatUrl(value.tokenUrl, "令牌地址", false),
     userInfoUrl: normalizeWeChatUrl(value.userInfoUrl, "用户信息地址", false),
   };
+  assertManagedWeChatEgressPolicy(config);
+  return config;
+}
+
+function assertManagedWeChatEgressPolicy(config: StoredWeChatOAuthConfig): void {
+  if (!config.enabled || !isProductionEnvironment()) return;
+  if (
+    isWeChatNativeEndpoint(config.authorizationUrl) &&
+    isWeChatNativeEndpoint(config.tokenUrl) &&
+    isWeChatNativeEndpoint(config.userInfoUrl)
+  ) {
+    return;
+  }
+  throw new Error("生产环境仅允许微信官方 OAuth 地址");
 }
 
 function normalizeWeChatUrl(value: string | undefined, label: string, allowWeChatRedirectFragment: boolean): string {

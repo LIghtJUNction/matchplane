@@ -1,4 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const transportState = vi.hoisted(() => ({
+  fetchPinnedPublicText: vi.fn(),
+}));
+
+vi.mock("./lib/pinned-public-endpoint", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./lib/pinned-public-endpoint")>()),
+  fetchPinnedPublicText: transportState.fetchPinnedPublicText,
+}));
 
 import {
   invokeSubplatformMcpTool,
@@ -9,6 +18,11 @@ import {
 } from "./platform-agent-tool";
 
 describe("subplatform MCP endpoint boundary", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
   it("resolves an operator-configured endpoint without accepting direct secrets", () => {
     const environment: NodeJS.ProcessEnv = {
       NODE_ENV: "production",
@@ -77,6 +91,71 @@ describe("subplatform MCP endpoint boundary", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.payload.result).toBeDefined();
+  });
+
+  it("uses the pinned bounded transport for production MCP calls", async () => {
+    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+    transportState.fetchPinnedPublicText.mockResolvedValue({
+      response: new Response(null, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+      text: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "request-pinned",
+        result: { content: [] },
+      }),
+    });
+
+    const result = await invokeSubplatformMcpTool({
+      endpoint: {
+        serverKey: "store-a",
+        url: "https://agent.example/mcp",
+        bearerToken: "child-secret",
+        timeoutMs: 1_000,
+      },
+      toolName: "inventory.search",
+      arguments: {},
+      requestId: "request-pinned",
+      platformPath: "/store-a",
+      actorSubject: "agent-subject",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(transportState.fetchPinnedPublicText).toHaveBeenCalledWith(
+      new URL("https://agent.example/mcp"),
+      expect.objectContaining({
+        method: "POST",
+        responseLimitBytes: 256 * 1024,
+        requestTimeoutMs: 1_000,
+        responseBodyTimeoutMs: 1_000,
+      }),
+    );
+  });
+
+  it("rejects an injected test fetcher in production", async () => {
+    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+    const fetcher = vi.fn<typeof fetch>();
+    const result = await invokeSubplatformMcpTool({
+      endpoint: {
+        serverKey: "store-a",
+        url: "https://agent.example/mcp",
+        bearerToken: "child-secret",
+        timeoutMs: 1_000,
+      },
+      toolName: "inventory.search",
+      arguments: {},
+      requestId: "request-production",
+      platformPath: "/store-a",
+      actorSubject: "agent-subject",
+      fetcher,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      status: 502,
+      payload: { error: "subplatform MCP endpoint is unavailable" },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("accepts a bounded streamable-HTTP SSE response", async () => {

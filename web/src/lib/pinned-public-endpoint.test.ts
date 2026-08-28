@@ -80,6 +80,52 @@ describe("pinned public endpoint transport", () => {
     expect(init.redirect).toBe("manual");
   });
 
+  it("preserves a bounded POST while still forcing manual redirects and pinned DNS", async () => {
+    undiciState.fetch.mockResolvedValue(new Response("{}", { status: 202 }));
+    const headers = new Headers({
+      authorization: "Bearer secret",
+      "content-type": "application/json",
+    });
+
+    await expect(
+      fetchPinnedPublicText(new URL("https://sms.example.test/send"), {
+        method: "POST",
+        headers,
+        body: '{"code":"123456"}',
+        resolveAddresses: vi.fn().mockResolvedValue(["8.8.8.8"]),
+        requestTimeoutMs: 1_000,
+        responseBodyTimeoutMs: 1_000,
+        responseLimitBytes: 1_024,
+      }),
+    ).resolves.toMatchObject({ text: "{}" });
+
+    const [, init] = undiciState.fetch.mock.calls[0] as [
+      URL,
+      { method: string; headers: Headers; body: string; redirect: string },
+    ];
+    expect(init.method).toBe("POST");
+    expect(init.headers.get("authorization")).toBe("Bearer secret");
+    expect(init.body).toBe('{"code":"123456"}');
+    expect(init.redirect).toBe("manual");
+  });
+
+  it("does not let loopback mode admit a private answer for a public hostname", async () => {
+    const lookup = createPinnedPublicLookup(
+      new URL("https://sms.example.test/send"),
+      {
+        allowLoopback: true,
+        resolveAddresses: vi.fn().mockResolvedValue(["10.0.0.2"]),
+      },
+    );
+    const result = new Promise((resolve, reject) => {
+      lookup("sms.example.test", { all: true }, (error, addresses) => {
+        if (error) reject(error);
+        else resolve(addresses);
+      });
+    });
+    await expect(result).rejects.toBeInstanceOf(PinnedPublicEndpointError);
+  });
+
   it("times out a request that never produces response headers", async () => {
     vi.useFakeTimers();
     undiciState.fetch.mockImplementation(

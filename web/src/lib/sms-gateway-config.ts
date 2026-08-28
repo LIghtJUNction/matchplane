@@ -2,6 +2,8 @@ import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, ren
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
+import { isProductionEnvironment } from "./runtime";
+
 const DEFAULT_SECRET_ROOT = "/etc/matchplane/secrets/root-email";
 const CONFIG_FILE = "sms-gateway.json";
 const TOKEN_FILE = "sms-gateway-token";
@@ -65,18 +67,24 @@ function normalizeStoredConfig(value: Partial<StoredSmsGatewayConfig>): StoredSm
 }
 
 /**
- * Mirrors the transport rule in sms.ts: HTTPS anywhere, or plain HTTP only for a
- * loopback mock during development. Embedded credentials and fragments are rejected.
+ * HTTPS is required in production. Plain HTTP is limited to an exact loopback
+ * hostname in non-production profiles so the development mock cannot become a
+ * production SSRF escape hatch. Embedded credentials and fragments are rejected.
  */
 function normalizeGatewayUrl(value: string): string {
   try {
-    const url = new URL(value.trim());
+    const normalized = value.trim();
+    if (!normalized || normalized.length > 2_048) throw new Error();
+    const url = new URL(normalized);
     if (url.username || url.password || url.hash) throw new Error();
-    const loopback = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    const loopback =
+      !isProductionEnvironment() &&
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
     if (url.protocol !== "https:" && !loopback) throw new Error();
     return url.toString();
   } catch {
-    throw new Error("短信网关地址必须是 HTTPS 地址（本地演示可用 http://localhost），且不能包含凭据或片段");
+    throw new Error("短信网关地址必须是 HTTPS 地址（非生产本地演示可用 http://localhost），且不能包含凭据或片段");
   }
 }
 
