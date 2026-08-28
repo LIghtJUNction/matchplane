@@ -149,6 +149,10 @@ jobs:
           # The SQLx test owns an isolated migrated database and passes only that loopback URL to
           # the Bun harness, which executes the production TypeScript database-reader seams.
           CARGO_BUILD_JOBS=2 cargo test --locked -p matchplane-storage --test storefront_web_lifecycle -- --ignored --test-threads=1
+      - name: Test marketplace contact idempotency against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test marketplace_contact_idempotency -- --ignored
       - name: Test ordered outbox claims against PostgreSQL
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres

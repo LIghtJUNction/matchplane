@@ -499,15 +499,19 @@ impl OrderBook {
                 actual: intent.market_id,
             });
         }
+        if self.orders.contains_key(&intent.order_id) {
+            return Err(EngineError::OrderAlreadyExists(intent.order_id));
+        }
+        if intent.quantity.is_zero() {
+            return Err(NumericError::NonPositiveQuantity.into());
+        }
         let order = OrderView {
             intent: intent.clone(),
             remaining_quantity: intent.quantity,
             status: OrderStatus::Open,
             accepted_sequence,
         };
-        if self.orders.insert(intent.order_id, order.clone()).is_some() {
-            return Err(EngineError::OrderAlreadyExists(intent.order_id));
-        }
+        self.orders.insert(intent.order_id, order.clone());
         self.push_to_level(&order);
         Ok(())
     }
@@ -799,6 +803,56 @@ mod tests {
             EngineError::Numeric(NumericError::NonPositiveQuantity)
         );
         assert_eq!(book.last_command_sequence(), 0);
+    }
+
+    #[test]
+    fn apply_should_reject_invalid_order_acceptance_without_mutating_state() {
+        let market_id = MarketId::new();
+        let original = intent(market_id, OrderSide::Buy, 100, 5, timestamp(1));
+        let order_id = original.order_id;
+        let mut book = OrderBook::new(market_id);
+        book.process(&place(1, original.clone()))
+            .expect("original order should apply");
+        let state_before = book.state_hash().expect("book should hash");
+
+        let mut replacement = original;
+        replacement.price = Price::new(101).expect("replacement price should be valid");
+        let duplicate_command = place(2, replacement.clone());
+        let duplicate_event = OrderBook::event(
+            &duplicate_command,
+            0,
+            MatchingEvent::OrderAccepted {
+                intent: replacement,
+                accepted_sequence: 2,
+            },
+        );
+        let duplicate_error = book
+            .apply(&duplicate_event)
+            .expect_err("duplicate order event must be rejected");
+        assert_eq!(duplicate_error, EngineError::OrderAlreadyExists(order_id));
+        assert_eq!(book.state_hash().expect("book should hash"), state_before);
+
+        let mut zero = intent(market_id, OrderSide::Sell, 99, 1, timestamp(2));
+        let zero_order_id = zero.order_id;
+        zero.quantity = Quantity::ZERO;
+        let zero_command = place(2, zero.clone());
+        let zero_event = OrderBook::event(
+            &zero_command,
+            0,
+            MatchingEvent::OrderAccepted {
+                intent: zero,
+                accepted_sequence: 2,
+            },
+        );
+        let zero_error = book
+            .apply(&zero_event)
+            .expect_err("zero-quantity order event must be rejected");
+        assert_eq!(
+            zero_error,
+            EngineError::Numeric(NumericError::NonPositiveQuantity)
+        );
+        assert!(book.order(zero_order_id).is_none());
+        assert_eq!(book.state_hash().expect("book should hash"), state_before);
     }
 
     #[test]
