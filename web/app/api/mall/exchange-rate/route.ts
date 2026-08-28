@@ -1,21 +1,20 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-
-import { NextResponse } from "next/server";
 
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import {
   readJsonBody,
-  readJsonResponseBody,
   RequestBodyTooLargeError,
+  ResponseBodyTooLargeError,
 } from "../../../../src/lib/body-limit";
 import { jsonError } from "../../../../src/lib/json-error";
 import {
-  hasOnlyPublicAddresses,
-  isPrivateOrReservedIpLiteral,
-} from "../../../../src/lib/public-endpoint";
+  fetchPinnedPublicText,
+  PinnedPublicEndpointError,
+  PinnedPublicRedirectError,
+} from "../../../../src/lib/pinned-public-endpoint";
+import { isPrivateOrReservedIpLiteral } from "../../../../src/lib/public-endpoint";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
-import { isProductionEnvironment } from "../../../../src/lib/runtime";
 import { configuredTenantId } from "../../../../src/lib/store-access";
 
 export const runtime = "nodejs";
@@ -31,6 +30,9 @@ interface StoredExchangeRate {
   localCurrency: string;
   usdToLocalRate: string | null;
   rateSource: string | null;
+  rateProvider: string | null;
+  rateEffectiveDate: unknown;
+  rateResponseDigest: string | null;
   rateUpdatedAt: unknown;
   version: string;
 }
@@ -44,13 +46,25 @@ interface ExchangeRateResult {
   baseCurrency: typeof BASE_CURRENCY;
   localCurrency: string;
   usdToLocalRate: number | null;
+  usdToLocalRateExact: string | null;
   rateSource: string | null;
+  rateProvider: string | null;
+  rateEffectiveDate: string | null;
+  rateResponseDigest: string | null;
   rateUpdatedAt: string | null;
   version: number;
 }
 
 interface EditorContext {
   actorId: string;
+}
+
+interface ProviderRateSnapshot {
+  rateExact: string;
+  source: string;
+  provider: string;
+  effectiveDate: string;
+  responseDigest: string;
 }
 
 class ExchangeRateProviderError extends Error {
@@ -79,6 +93,9 @@ export async function GET(): Promise<Response> {
       `SELECT COALESCE(currency.local_currency, $2) AS "localCurrency",
               currency.usd_to_local_rate::text AS "usdToLocalRate",
               currency.rate_source AS "rateSource",
+              currency.rate_provider AS "rateProvider",
+              currency.rate_effective_date AS "rateEffectiveDate",
+              currency.rate_response_digest AS "rateResponseDigest",
               currency.rate_updated_at AS "rateUpdatedAt",
               COALESCE(currency.version, 1)::text AS version
          FROM tenants tenant
@@ -92,7 +109,7 @@ export async function GET(): Promise<Response> {
     const row = result.rows[0];
     if (!row) return jsonError("商城不存在", 404);
 
-    return NextResponse.json(
+    return Response.json(
       { exchangeRate: toPublicExchangeRate(row) },
       { headers: { "cache-control": "no-store" } },
     );
@@ -134,7 +151,7 @@ export async function PATCH(request: Request): Promise<Response> {
 
     if (current && current.localCurrency === input.localCurrency) {
       await transactionClient.query("COMMIT");
-      return NextResponse.json(
+      return Response.json(
         { exchangeRate: toPublicExchangeRate(current) },
         { headers: { "cache-control": "no-store" } },
       );
@@ -147,10 +164,13 @@ export async function PATCH(request: Request): Promise<Response> {
       localCurrency: input.localCurrency,
       usdToLocalRate: null,
       rateSource: null,
+      rateProvider: null,
+      rateEffectiveDate: null,
+      rateResponseDigest: null,
       actorId: editor.actorId,
     });
     await transactionClient.query("COMMIT");
-    return NextResponse.json(
+    return Response.json(
       { exchangeRate: toPublicExchangeRate(updated) },
       { headers: { "cache-control": "no-store" } },
     );
@@ -179,7 +199,7 @@ export async function POST(request: Request): Promise<Response> {
   const tenantId = configuredTenantId();
   if (!tenantId) return jsonError("商城尚未完成初始化", 503);
 
-  let latest: { rate: number; source: string };
+  let latest: ProviderRateSnapshot;
   try {
     latest = await fetchLatestUsdRate(input.localCurrency);
   } catch (error) {
@@ -213,12 +233,15 @@ export async function POST(request: Request): Promise<Response> {
       tenantId,
       current,
       localCurrency: input.localCurrency,
-      usdToLocalRate: normalizeRateForStorage(latest.rate),
+      usdToLocalRate: latest.rateExact,
       rateSource: latest.source,
+      rateProvider: latest.provider,
+      rateEffectiveDate: latest.effectiveDate,
+      rateResponseDigest: latest.responseDigest,
       actorId: editor.actorId,
     });
     await transactionClient.query("COMMIT");
-    return NextResponse.json(
+    return Response.json(
       { exchangeRate: toPublicExchangeRate(updated) },
       { headers: { "cache-control": "no-store" } },
     );
@@ -307,6 +330,9 @@ async function readStoredExchangeRate(
     `SELECT local_currency AS "localCurrency",
             usd_to_local_rate::text AS "usdToLocalRate",
             rate_source AS "rateSource",
+            rate_provider AS "rateProvider",
+            rate_effective_date AS "rateEffectiveDate",
+            rate_response_digest AS "rateResponseDigest",
             rate_updated_at AS "rateUpdatedAt",
             version::text
        FROM mall_currency_settings
@@ -324,29 +350,39 @@ async function writeStoredExchangeRate(input: {
   localCurrency: string;
   usdToLocalRate: string | null;
   rateSource: string | null;
+  rateProvider: string | null;
+  rateEffectiveDate: string | null;
+  rateResponseDigest: string | null;
   actorId: string;
 }): Promise<StoredExchangeRate> {
   const nextVersion = exchangeRateVersion(input.current) + 1;
+  const parameters = [
+    input.tenantId,
+    input.localCurrency,
+    input.usdToLocalRate,
+    input.rateSource,
+    input.rateProvider,
+    input.rateEffectiveDate,
+    input.rateResponseDigest,
+  ];
   if (!input.current) {
     const inserted = await input.client.query<StoredExchangeRate>(
       `INSERT INTO mall_currency_settings
          (tenant_id, local_currency, usd_to_local_rate, rate_source,
+          rate_provider, rate_effective_date, rate_response_digest,
           rate_updated_at, version, created_at, updated_at)
-       VALUES ($1::uuid, $2, $3::numeric, $4,
+       VALUES ($1::uuid, $2, $3::numeric, $4, $5, $6::date, $7,
                CASE WHEN $3::numeric IS NULL THEN NULL ELSE clock_timestamp() END,
-               $5::bigint, clock_timestamp(), clock_timestamp())
+               $8::bigint, clock_timestamp(), clock_timestamp())
        RETURNING local_currency AS "localCurrency",
                  usd_to_local_rate::text AS "usdToLocalRate",
                  rate_source AS "rateSource",
+                 rate_provider AS "rateProvider",
+                 rate_effective_date AS "rateEffectiveDate",
+                 rate_response_digest AS "rateResponseDigest",
                  rate_updated_at AS "rateUpdatedAt",
                  version::text`,
-      [
-        input.tenantId,
-        input.localCurrency,
-        input.usdToLocalRate,
-        input.rateSource,
-        nextVersion,
-      ],
+      [...parameters, nextVersion],
     );
     const row = inserted.rows[0];
     if (!row) throw new Error("currency settings insert returned no row");
@@ -359,25 +395,25 @@ async function writeStoredExchangeRate(input: {
         SET local_currency = $2,
             usd_to_local_rate = $3::numeric,
             rate_source = $4,
+            rate_provider = $5,
+            rate_effective_date = $6::date,
+            rate_response_digest = $7,
             rate_updated_at = CASE
               WHEN $3::numeric IS NULL THEN NULL
               ELSE clock_timestamp()
             END,
             version = version + 1,
             updated_at = clock_timestamp()
-      WHERE tenant_id = $1::uuid AND version = $5::bigint
+      WHERE tenant_id = $1::uuid AND version = $8::bigint
       RETURNING local_currency AS "localCurrency",
                 usd_to_local_rate::text AS "usdToLocalRate",
                 rate_source AS "rateSource",
+                rate_provider AS "rateProvider",
+                rate_effective_date AS "rateEffectiveDate",
+                rate_response_digest AS "rateResponseDigest",
                 rate_updated_at AS "rateUpdatedAt",
                 version::text`,
-    [
-      input.tenantId,
-      input.localCurrency,
-      input.usdToLocalRate,
-      input.rateSource,
-      input.current.version,
-    ],
+    [...parameters, input.current.version],
   );
   const row = updated.rows[0];
   if (!row) throw new ExchangeRateConflictError();
@@ -406,11 +442,13 @@ async function writeAuditEvent(
       JSON.stringify({
         previous_local_currency:
           previous?.localCurrency ?? DEFAULT_LOCAL_CURRENCY,
+        previous_usd_to_local_rate_exact: previous?.usdToLocalRate ?? null,
         local_currency: next.localCurrency,
-        usd_to_local_rate: next.usdToLocalRate
-          ? Number(next.usdToLocalRate)
-          : null,
+        usd_to_local_rate_exact: next.usdToLocalRate,
         rate_source: next.rateSource,
+        rate_provider: next.rateProvider,
+        rate_effective_date: normalizeDate(next.rateEffectiveDate),
+        rate_response_digest: next.rateResponseDigest,
       }),
     ],
   );
@@ -418,72 +456,89 @@ async function writeAuditEvent(
 
 async function fetchLatestUsdRate(
   localCurrency: string,
-): Promise<{ rate: number; source: string }> {
+): Promise<ProviderRateSnapshot> {
   if (localCurrency === BASE_CURRENCY) {
-    return { rate: 1, source: "identity" };
+    const effectiveDate = new Date().toISOString().slice(0, 10);
+    const identitySummary = JSON.stringify({
+      base: BASE_CURRENCY,
+      date: effectiveDate,
+      provider: "identity",
+      rate: "1",
+    });
+    return {
+      rateExact: "1",
+      source: "identity",
+      provider: "identity",
+      effectiveDate,
+      responseDigest: responseDigest(identitySummary),
+    };
   }
 
   const usesDefaultProvider = !process.env.MATCHPLANE_EXCHANGE_RATE_URL?.trim();
-  const url = await exchangeRateProviderUrl();
+  const url = exchangeRateProviderUrl();
   url.searchParams.set("from", BASE_CURRENCY);
   url.searchParams.set("to", localCurrency);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  let response: Response;
+  let text: string;
   try {
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        cache: "no-store",
-        headers: { accept: "application/json" },
-        redirect: "error",
-        signal: controller.signal,
-      });
-    } catch (error) {
-      if (controller.signal.aborted || isAbortError(error)) {
-        throw new ExchangeRateProviderError(
-          "汇率服务响应超时，请稍后重试",
-          504,
-        );
-      }
-      throw new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
-    }
-
-    if (!response.ok) {
-      if (usesDefaultProvider && response.status === 404) {
-        throw new ExchangeRateProviderError("汇率服务暂不支持该本地货币", 400);
-      }
-      throw new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
-    }
-
-    let payload: unknown;
-    try {
-      payload = await readJsonResponseBody<unknown>(
-        response,
-        PROVIDER_RESPONSE_LIMIT,
-        controller.signal,
-      );
-    } catch (error) {
-      if (controller.signal.aborted || isAbortError(error)) {
-        throw new ExchangeRateProviderError(
-          "汇率服务响应超时，请稍后重试",
-          504,
-        );
-      }
-      throw new ExchangeRateProviderError("汇率服务返回了无效数据，请稍后重试");
-    }
-
-    const rate = extractRate(payload, localCurrency);
-    if (rate === null) {
-      throw new ExchangeRateProviderError("汇率服务返回了无效数据，请稍后重试");
-    }
-    return { rate, source: url.hostname };
-  } finally {
-    clearTimeout(timeout);
+    ({ response, text } = await fetchPinnedPublicText(url, {
+      requestTimeoutMs: PROVIDER_TIMEOUT_MS,
+      responseBodyTimeoutMs: PROVIDER_TIMEOUT_MS,
+      responseLimitBytes: PROVIDER_RESPONSE_LIMIT,
+    }));
+  } catch (error) {
+    throw mapProviderTransportError(error);
   }
+
+  if (!response.ok) {
+    if (usesDefaultProvider && response.status === 404) {
+      throw new ExchangeRateProviderError("汇率服务暂不支持该本地货币", 400);
+    }
+    throw new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(quoteJsonNumbers(text));
+  } catch {
+    throw new ExchangeRateProviderError("汇率服务返回了无效数据，请稍后重试");
+  }
+
+  const snapshot = extractProviderRate(payload, localCurrency, url.hostname);
+  if (!snapshot) {
+    throw new ExchangeRateProviderError("汇率服务返回了无效数据，请稍后重试");
+  }
+  return {
+    ...snapshot,
+    source: url.hostname,
+    responseDigest: responseDigest(text),
+  };
 }
 
-async function exchangeRateProviderUrl(): Promise<URL> {
+function mapProviderTransportError(error: unknown): ExchangeRateProviderError {
+  if (
+    error instanceof PinnedPublicEndpointError ||
+    (error instanceof Error && error.name === "PinnedPublicEndpointError")
+  ) {
+    return new ExchangeRateProviderError("汇率服务配置无效", 503);
+  }
+  if (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "TimeoutError")
+  ) {
+    return new ExchangeRateProviderError("汇率服务响应超时，请稍后重试", 504);
+  }
+  if (error instanceof PinnedPublicRedirectError) {
+    return new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
+  }
+  if (error instanceof ResponseBodyTooLargeError) {
+    return new ExchangeRateProviderError("汇率服务返回了无效数据，请稍后重试");
+  }
+  return new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
+}
+
+function exchangeRateProviderUrl(): URL {
   const raw =
     process.env.MATCHPLANE_EXCHANGE_RATE_URL?.trim() || DEFAULT_PROVIDER_URL;
   let url: URL;
@@ -493,41 +548,17 @@ async function exchangeRateProviderUrl(): Promise<URL> {
     throw new ExchangeRateProviderError("汇率服务配置无效", 503);
   }
 
-  // MatchPlane uses MATCHPLANE_ENVIRONMENT as the deployment profile. NODE_ENV is often
-  // production for an optimized local Compose bundle and must not weaken this boundary.
-  const production = isProductionEnvironment();
-  const loopback = isLoopbackHostname(url.hostname);
-  const developmentLoopback =
-    !production && url.protocol === "http:" && loopback;
   if (
+    url.protocol !== "https:" ||
     url.username ||
     url.password ||
     url.hash ||
-    isPrivateOrReservedIpLiteral(url.hostname) ||
-    (loopback && !developmentLoopback) ||
-    (url.protocol !== "https:" && !developmentLoopback)
+    !url.hostname ||
+    isPrivateOrReservedIpLiteral(url.hostname)
   ) {
     throw new ExchangeRateProviderError("汇率服务配置无效", 503);
   }
-
-  // Resolve immediately before fetch and fail closed if any answer is private, loopback,
-  // link-local, metadata, multicast, documentation, or otherwise non-global. A local HTTP
-  // loopback mock is the sole development exception, matching the project's endpoint contract.
-  if (!developmentLoopback && !(await hasOnlyPublicAddresses(url.toString()))) {
-    throw new ExchangeRateProviderError("汇率服务配置无效", 503);
-  }
   return url;
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  return ["localhost", "127.0.0.1", "[::1]"].includes(hostname.toLowerCase());
-}
-
-function isAbortError(error: unknown): boolean {
-  return (
-    (error instanceof DOMException && error.name === "AbortError") ||
-    (error instanceof Error && error.name === "AbortError")
-  );
 }
 
 function isExchangeRateConflict(error: unknown): boolean {
@@ -537,41 +568,150 @@ function isExchangeRateConflict(error: unknown): boolean {
   return code === "40001" || code === "40P01";
 }
 
-function extractRate(payload: unknown, localCurrency: string): number | null {
+function extractProviderRate(
+  payload: unknown,
+  localCurrency: string,
+  fallbackProvider: string,
+): Omit<ProviderRateSnapshot, "source" | "responseDigest"> | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return null;
   }
   const record = payload as Record<string, unknown>;
   if (
-    typeof record.base === "string" &&
-    record.base.toUpperCase() !== BASE_CURRENCY
+    typeof record.base !== "string" ||
+    record.base.trim().toUpperCase() !== BASE_CURRENCY
   ) {
     return null;
   }
+
+  const effectiveDate = normalizeProviderDate(
+    record.date ?? record.effectiveDate ?? record.effective_date,
+  );
+  if (!effectiveDate) return null;
+  const provider =
+    record.provider === undefined
+      ? fallbackProvider
+      : normalizeProviderIdentifier(record.provider);
+  if (!provider) return null;
 
   const rates = record.rates;
   const rawRate =
     rates && typeof rates === "object" && !Array.isArray(rates)
       ? (rates as Record<string, unknown>)[localCurrency]
       : record.rate;
-  const rate =
-    typeof rawRate === "number"
-      ? rawRate
-      : typeof rawRate === "string"
-        ? Number(rawRate)
-        : Number.NaN;
-  if (!Number.isFinite(rate) || rate <= 0 || rate > 1e12) return null;
-  return rate;
+  const rateExact = normalizeExactPositiveDecimal(rawRate);
+  return rateExact ? { rateExact, provider, effectiveDate } : null;
+}
+
+/** Quote JSON number tokens before JSON.parse so provider decimals never pass through Number. */
+function quoteJsonNumbers(value: string): string {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < value.length; ) {
+    const character = value[index];
+    if (inString) {
+      result += character;
+      index += 1;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      result += character;
+      index += 1;
+      continue;
+    }
+    if (character === "-" || (character >= "0" && character <= "9")) {
+      const token = value
+        .slice(index)
+        .match(/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/)?.[0];
+      if (token) {
+        result += `"${token}"`;
+        index += token.length;
+        continue;
+      }
+    }
+    result += character;
+    index += 1;
+  }
+  return result;
+}
+
+function normalizeExactPositiveDecimal(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 256) return null;
+  const match = /^(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(
+    value,
+  );
+  if (!match) return null;
+  const integer = match[1];
+  const fraction = match[2] ?? "";
+  const exponentText = match[3] ?? "0";
+  if (!/^[+-]?\d{1,3}$/.test(exponentText)) return null;
+  const exponent = Number(exponentText);
+  if (Math.abs(exponent) > 100) return null;
+
+  const expanded = expandDecimal(integer, fraction, exponent);
+  const [rawWhole, rawFraction = ""] = expanded.split(".");
+  const whole = rawWhole.replace(/^0+(?=\d)/, "");
+  const normalizedFraction = rawFraction.replace(/0+$/, "");
+  const normalized = normalizedFraction ? `${whole}.${normalizedFraction}` : whole;
+  if (!/[1-9]/.test(normalized)) return null;
+  return exactRateExceedsLimit(whole, normalizedFraction) ? null : normalized;
+}
+
+function expandDecimal(
+  integer: string,
+  fraction: string,
+  exponent: number,
+): string {
+  const digits = `${integer}${fraction}`;
+  const decimalIndex = integer.length + exponent;
+  if (decimalIndex <= 0) {
+    return `0.${"0".repeat(-decimalIndex)}${digits}`;
+  }
+  if (decimalIndex >= digits.length) {
+    return `${digits}${"0".repeat(decimalIndex - digits.length)}`;
+  }
+  return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+}
+
+function exactRateExceedsLimit(whole: string, fraction: string): boolean {
+  if (whole.length !== 13) return whole.length > 13;
+  if (whole !== "1000000000000") return whole > "1000000000000";
+  return fraction.length > 0;
+}
+
+function normalizeProviderDate(value: unknown): string | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+    ? value
+    : null;
+}
+
+function normalizeProviderIdentifier(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const identifier = value.trim();
+  return identifier.length >= 1 &&
+    identifier.length <= 128 &&
+    !/[\u0000-\u001f\u007f]/.test(identifier)
+    ? identifier
+    : null;
+}
+
+function responseDigest(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
 function normalizeCurrency(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const currency = value.trim().toUpperCase();
   return /^[A-Z]{3}$/.test(currency) ? currency : null;
-}
-
-function normalizeRateForStorage(rate: number): string {
-  return rate.toFixed(12);
 }
 
 function exchangeRateVersion(row: StoredExchangeRate | null): number {
@@ -590,10 +730,23 @@ function toPublicExchangeRate(row: StoredExchangeRate): ExchangeRateResult {
       parsedRate !== null && Number.isFinite(parsedRate) && parsedRate > 0
         ? parsedRate
         : null,
+    usdToLocalRateExact: row.usdToLocalRate,
     rateSource: row.rateSource ?? null,
+    rateProvider: row.rateProvider ?? null,
+    rateEffectiveDate: normalizeDate(row.rateEffectiveDate),
+    rateResponseDigest: row.rateResponseDigest ?? null,
     rateUpdatedAt: normalizeTimestamp(row.rateUpdatedAt),
     version: exchangeRateVersion(row),
   };
+}
+
+function normalizeDate(value: unknown): string | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? value
+    : null;
 }
 
 function normalizeTimestamp(value: unknown): string | null {

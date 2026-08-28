@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -5,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   connect: vi.fn(),
   getSession: vi.fn(),
   hasTrustedBrowserOrigin: vi.fn(),
-  hasOnlyPublicAddresses: vi.fn(),
+  fetchPinnedPublicText: vi.fn(),
   tenantId: "11111111-1111-4111-8111-111111111111",
 }));
 
@@ -13,9 +15,9 @@ vi.mock("./lib/auth", () => ({
   auth: { api: { getSession: mocks.getSession } },
   authDatabase: { query: mocks.query, connect: mocks.connect },
 }));
-vi.mock("./lib/public-endpoint", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./lib/public-endpoint")>()),
-  hasOnlyPublicAddresses: mocks.hasOnlyPublicAddresses,
+vi.mock("./lib/pinned-public-endpoint", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./lib/pinned-public-endpoint")>()),
+  fetchPinnedPublicText: mocks.fetchPinnedPublicText,
 }));
 vi.mock("./lib/request-origin", () => ({
   hasTrustedBrowserOrigin: mocks.hasTrustedBrowserOrigin,
@@ -25,11 +27,18 @@ vi.mock("./lib/store-access", () => ({
 }));
 
 import { GET, PATCH, POST } from "../app/api/mall/exchange-rate/route";
+import {
+  PinnedPublicEndpointError,
+  PinnedPublicRedirectError,
+} from "./lib/pinned-public-endpoint";
 
 const current = {
   localCurrency: "CNY",
   usdToLocalRate: "7.2",
   rateSource: "api.frankfurter.app",
+  rateProvider: "frankfurter",
+  rateEffectiveDate: "2026-08-28",
+  rateResponseDigest: `sha256:${"a".repeat(64)}`,
   rateUpdatedAt: "2026-08-28T05:00:00.000Z",
   version: "3",
 };
@@ -57,8 +66,9 @@ function request(method: string, body?: unknown) {
 
 function transactionClient(row: Record<string, unknown> = current) {
   const client = {
-    query: vi.fn<(sql: string) => Promise<MockQueryResult>>(
-      async (sql: string) => {
+    query: vi.fn<
+      (sql: string, parameters?: readonly unknown[]) => Promise<MockQueryResult>
+    >(async (sql: string) => {
         if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK")
           return {};
         if (sql.includes("FROM tenants"))
@@ -74,6 +84,9 @@ function transactionClient(row: Record<string, unknown> = current) {
                 localCurrency: "JPY",
                 usdToLocalRate: "146.12",
                 rateSource: "api.frankfurter.app",
+                rateProvider: "frankfurter",
+                rateEffectiveDate: "2026-08-28",
+                rateResponseDigest: `sha256:${"b".repeat(64)}`,
                 rateUpdatedAt: "2026-08-28T06:00:00.000Z",
                 version: "4",
               },
@@ -83,8 +96,7 @@ function transactionClient(row: Record<string, unknown> = current) {
         if (sql.includes("INSERT INTO platform_audit_events"))
           return { rowCount: 1, rows: [] };
         return { rowCount: 1, rows: [] };
-      },
-    ),
+      }),
     release: vi.fn(),
   };
   return client;
@@ -93,7 +105,10 @@ function transactionClient(row: Record<string, unknown> = current) {
 beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.MATCHPLANE_EXCHANGE_RATE_URL;
-  mocks.hasOnlyPublicAddresses.mockResolvedValue(true);
+  mocks.fetchPinnedPublicText.mockImplementation(async (url: URL) => {
+    const response = await fetch(url);
+    return { response, text: await response.text() };
+  });
   mocks.hasTrustedBrowserOrigin.mockReturnValue(true);
   mocks.getSession.mockResolvedValue(editorSession());
   mocks.query.mockResolvedValue({ rows: [current], rowCount: 1 });
@@ -114,7 +129,11 @@ describe("mall exchange-rate route", () => {
         baseCurrency: "USD",
         localCurrency: "CNY",
         usdToLocalRate: 7.2,
+        usdToLocalRateExact: "7.2",
         rateSource: "api.frankfurter.app",
+        rateProvider: "frankfurter",
+        rateEffectiveDate: "2026-08-28",
+        rateResponseDigest: `sha256:${"a".repeat(64)}`,
         rateUpdatedAt: "2026-08-28T05:00:00.000Z",
         version: 3,
       },
@@ -142,6 +161,9 @@ describe("mall exchange-rate route", () => {
               localCurrency: "EUR",
               usdToLocalRate: null,
               rateSource: null,
+              rateProvider: null,
+              rateEffectiveDate: null,
+              rateResponseDigest: null,
               rateUpdatedAt: null,
               version: "4",
             },
@@ -161,7 +183,7 @@ describe("mall exchange-rate route", () => {
     });
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("usd_to_local_rate = $3::numeric"),
-      [mocks.tenantId, "EUR", null, null, "3"],
+      [mocks.tenantId, "EUR", null, null, null, null, null, "3"],
     );
   });
 
@@ -173,7 +195,12 @@ describe("mall exchange-rate route", () => {
       vi.fn(
         async () =>
           new Response(
-            JSON.stringify({ base: "USD", rates: { JPY: 146.12 } }),
+            JSON.stringify({
+              base: "USD",
+              date: "2026-08-28",
+              provider: "frankfurter",
+              rates: { JPY: 146.12 },
+            }),
             { status: 200, headers: { "content-type": "application/json" } },
           ),
       ),
@@ -187,19 +214,178 @@ describe("mall exchange-rate route", () => {
       exchangeRate: {
         localCurrency: "JPY",
         usdToLocalRate: 146.12,
+        usdToLocalRateExact: "146.12",
+        rateProvider: "frankfurter",
+        rateEffectiveDate: "2026-08-28",
+        rateResponseDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
         version: 4,
       },
     });
-    expect(fetch).toHaveBeenCalledWith(
+    expect(mocks.fetchPinnedPublicText).toHaveBeenCalledWith(
       expect.any(URL),
       expect.objectContaining({
-        redirect: "error",
-        signal: expect.any(AbortSignal),
+        requestTimeoutMs: 6_000,
+        responseBodyTimeoutMs: 6_000,
+        responseLimitBytes: 64 * 1024,
       }),
     );
-    const providerUrl = vi.mocked(fetch).mock.calls[0]?.[0];
+    const providerUrl = mocks.fetchPinnedPublicText.mock.calls[0]?.[0];
     expect(String(providerUrl)).toContain("to=JPY");
+    const updateCall = client.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE mall_currency_settings"),
+    );
+    expect(updateCall?.[1]).toEqual([
+      mocks.tenantId,
+      "JPY",
+      "146.12",
+      "api.frankfurter.app",
+      "frankfurter",
+      "2026-08-28",
+      expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      "3",
+    ]);
+    const auditCall = client.query.mock.calls.find(([sql]) =>
+      sql.includes("INSERT INTO platform_audit_events"),
+    );
+    expect(JSON.parse(String(auditCall?.[1]?.[3]))).toMatchObject({
+      previous_usd_to_local_rate_exact: "7.2",
+      usd_to_local_rate_exact: "146.12",
+      rate_provider: "frankfurter",
+      rate_effective_date: "2026-08-28",
+    });
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["default", undefined],
+    ["custom", "https://rates.example/latest"],
+  ])("requires an explicit USD base from the %s provider", async (_name, url) => {
+    if (url) vi.stubEnv("MATCHPLANE_EXCHANGE_RATE_URL", url);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ date: "2026-08-28", rates: { JPY: "146.12" } }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const response = await POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "汇率服务返回了无效数据，请稍后重试",
+    });
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("keeps the provider decimal exact in SQL and audit metadata", async () => {
+    const exact = "146.12345678901234567890123456789";
+    const client = transactionClient();
+    client.query.mockImplementation(async (sql, parameters) => {
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return {};
+      if (sql.includes("FROM tenants"))
+        return { rowCount: 1, rows: [{ id: mocks.tenantId }] };
+      if (sql.includes("FROM mall_currency_settings"))
+        return { rowCount: 1, rows: [current] };
+      if (sql.includes("UPDATE mall_currency_settings")) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              ...current,
+              localCurrency: "JPY",
+              usdToLocalRate: parameters?.[2],
+              rateProvider: parameters?.[4],
+              rateEffectiveDate: parameters?.[5],
+              rateResponseDigest: parameters?.[6],
+              version: "4",
+            },
+          ],
+        };
+      }
+      return { rowCount: 1, rows: [] };
+    });
+    mocks.connect.mockResolvedValue(client);
+    const providerPayload =
+      `{"base":"USD","date":"2026-08-28","provider":"decimal-feed",` +
+      `"rates":{"JPY":${exact}}}`;
+    const expectedDigest = `sha256:${createHash("sha256")
+      .update(providerPayload)
+      .digest("hex")}`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(providerPayload, { status: 200 })),
+    );
+
+    const response = await POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(200);
+    const updateCall = client.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE mall_currency_settings"),
+    );
+    expect(updateCall?.[1]?.[2]).toBe(exact);
+    expect(updateCall?.[1]?.[6]).toBe(expectedDigest);
+    const auditCall = client.query.mock.calls.find(([sql]) =>
+      sql.includes("INSERT INTO platform_audit_events"),
+    );
+    const metadata = JSON.parse(String(auditCall?.[1]?.[3]));
+    expect(metadata.usd_to_local_rate_exact).toBe(exact);
+    expect(typeof metadata.usd_to_local_rate_exact).toBe("string");
+    await expect(response.json()).resolves.toMatchObject({
+      exchangeRate: { usdToLocalRateExact: exact },
+    });
+  });
+
+  it("rolls back the rate write when the audit insert fails", async () => {
+    const client = transactionClient();
+    client.query.mockImplementation(async (sql) => {
+      if (sql === "BEGIN" || sql === "ROLLBACK") return {};
+      if (sql.includes("FROM tenants"))
+        return { rowCount: 1, rows: [{ id: mocks.tenantId }] };
+      if (sql.includes("FROM mall_currency_settings"))
+        return { rowCount: 1, rows: [current] };
+      if (sql.includes("UPDATE mall_currency_settings")) {
+        return { rowCount: 1, rows: [{ ...current, version: "4" }] };
+      }
+      if (sql.includes("INSERT INTO platform_audit_events")) {
+        throw new Error("audit unavailable");
+      }
+      return { rowCount: 1, rows: [] };
+    });
+    mocks.connect.mockResolvedValue(client);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              base: "USD",
+              date: "2026-08-28",
+              rates: { JPY: "146.12" },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const response = await POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(client.query.mock.calls.some(([sql]) =>
+      sql.includes("UPDATE mall_currency_settings"),
+    )).toBe(true);
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(client.query).not.toHaveBeenCalledWith("COMMIT");
+    expect(client.release).toHaveBeenCalled();
   });
 
   it("rejects private provider IPs before making an outbound request", async () => {
@@ -222,13 +408,14 @@ describe("mall exchange-rate route", () => {
     expect(mocks.connect).not.toHaveBeenCalled();
   });
 
-  it("fails closed when a provider hostname resolves to a private address", async () => {
-    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+  it("fails closed when the pinned connector rejects resolved addresses", async () => {
     vi.stubEnv(
       "MATCHPLANE_EXCHANGE_RATE_URL",
       "https://provider.example/latest",
     );
-    mocks.hasOnlyPublicAddresses.mockResolvedValue(false);
+    mocks.fetchPinnedPublicText.mockRejectedValueOnce(
+      new PinnedPublicEndpointError(),
+    );
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
 
@@ -241,6 +428,7 @@ describe("mall exchange-rate route", () => {
       error: "汇率服务配置无效",
     });
     expect(fetcher).not.toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("rejects provider credentials before making an outbound request", async () => {
@@ -281,11 +469,8 @@ describe("mall exchange-rate route", () => {
   });
 
   it("maps blocked redirects to an upstream provider failure", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new TypeError("fetch failed: redirect mode is set to error");
-      }),
+    mocks.fetchPinnedPublicText.mockRejectedValueOnce(
+      new PinnedPublicRedirectError(302),
     );
 
     const response = await POST(
@@ -335,31 +520,21 @@ describe("mall exchange-rate route", () => {
     expect(mocks.connect).not.toHaveBeenCalled();
   });
 
-  it("applies the provider timeout while reading a slow response body", async () => {
-    vi.useFakeTimers();
-    const cancel = vi.fn();
-    const responseBody = new ReadableStream<Uint8Array>({
-      cancel(reason) {
-        cancel(reason);
-      },
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(responseBody, { status: 200 })),
+  it("maps a pinned response-body timeout without opening a transaction", async () => {
+    mocks.fetchPinnedPublicText.mockRejectedValueOnce(
+      Object.assign(new Error("response body timed out"), {
+        name: "TimeoutError",
+      }),
     );
-    mocks.connect.mockResolvedValue(transactionClient());
 
-    const pending = POST(
+    const response = await POST(
       request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
     );
-    await vi.advanceTimersByTimeAsync(6_000);
-    const response = await pending;
 
     expect(response.status).toBe(504);
     await expect(response.json()).resolves.toEqual({
       error: "汇率服务响应超时，请稍后重试",
     });
-    expect(cancel).toHaveBeenCalled();
     expect(mocks.connect).not.toHaveBeenCalled();
   });
 
