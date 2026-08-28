@@ -1,7 +1,7 @@
 "use client";
 
 import { RefreshCw, Save } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   getMallExchangeRateSettings,
@@ -71,6 +71,10 @@ export function MallCurrencySettingsPanel({
   const [syncing, setSyncing] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [panelError, setPanelError] = useState<PanelError | null>(null);
+  const latestLoadId = useRef(0);
+  const loadingRef = useRef(true);
+  const savingRef = useRef(false);
+  const syncingRef = useRef(false);
 
   const applySettings = useCallback(
     (
@@ -101,14 +105,18 @@ export function MallCurrencySettingsPanel({
       preserveDraft?: boolean;
       successAnnouncement?: string;
     } = {}) => {
+      const loadId = ++latestLoadId.current;
+      loadingRef.current = true;
       setLoading(true);
       try {
         const next = await getMallExchangeRateSettings();
+        if (loadId !== latestLoadId.current) return false;
         applySettings(next, { preserveDraft });
         setPanelError(null);
         setAnnouncement(successAnnouncement);
         return true;
       } catch (error) {
+        if (loadId !== latestLoadId.current) return false;
         const message =
           error instanceof Error ? error.message : "货币设置读取失败";
         setPanelError({ message, retry: "load" });
@@ -116,7 +124,10 @@ export function MallCurrencySettingsPanel({
         onNotice(message);
         return false;
       } finally {
-        setLoading(false);
+        if (loadId === latestLoadId.current) {
+          loadingRef.current = false;
+          setLoading(false);
+        }
       }
     },
     [applySettings, onNotice],
@@ -144,7 +155,15 @@ export function MallCurrencySettingsPanel({
   };
 
   const saveCurrency = async () => {
-    if (!canEdit || !settings || saving || syncing) return;
+    if (
+      !canEdit ||
+      !settings ||
+      loadingRef.current ||
+      savingRef.current ||
+      syncingRef.current
+    ) {
+      return;
+    }
     if (localCurrency === savedCurrency) {
       setPanelError((current) =>
         current?.retry === "save" ? null : current,
@@ -154,6 +173,7 @@ export function MallCurrencySettingsPanel({
       return;
     }
     const submittedCurrency = localCurrency;
+    savingRef.current = true;
     setSaving(true);
     setAnnouncement("");
     try {
@@ -175,13 +195,23 @@ export function MallCurrencySettingsPanel({
         onNotice(message);
       }
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   const sync = async () => {
-    if (!canEdit || !settings || saving || syncing) return;
+    if (
+      !canEdit ||
+      !settings ||
+      loadingRef.current ||
+      savingRef.current ||
+      syncingRef.current
+    ) {
+      return;
+    }
     const submittedCurrency = localCurrency;
+    syncingRef.current = true;
     setSyncing(true);
     setAnnouncement("");
     try {
@@ -203,6 +233,7 @@ export function MallCurrencySettingsPanel({
         onNotice(message);
       }
     } finally {
+      syncingRef.current = false;
       setSyncing(false);
     }
   };
@@ -244,9 +275,16 @@ export function MallCurrencySettingsPanel({
     );
   }
 
-  const hasKnownCurrency = LOCAL_CURRENCY_OPTIONS.some(
+  const hasKnownSavedCurrency = LOCAL_CURRENCY_OPTIONS.some(
     ([code]) => code === settings.localCurrency,
   );
+  const hasKnownDraftCurrency = LOCAL_CURRENCY_OPTIONS.some(
+    ([code]) => code === localCurrency,
+  );
+  const draftCurrencyOptionLabel =
+    localCurrency === settings.localCurrency
+      ? `${localCurrency}（当前设置）`
+      : `${localCurrency}（未保存草稿）`;
   const rate = formatRate(settings.usdToLocalRate);
   const updated = formatUpdatedAt(settings.rateUpdatedAt);
   const rateDescription =
@@ -285,11 +323,15 @@ export function MallCurrencySettingsPanel({
             id="mall-local-currency"
             value={localCurrency}
             aria-label="本地货币"
-            disabled={!canEdit}
+            disabled={!canEdit || loading}
             onChange={(event) => setLocalCurrency(event.target.value)}
             aria-describedby="mall-local-currency-hint"
           >
-            {!hasKnownCurrency ? (
+            {!hasKnownDraftCurrency ? (
+              <option value={localCurrency}>{draftCurrencyOptionLabel}</option>
+            ) : null}
+            {!hasKnownSavedCurrency &&
+              settings.localCurrency !== localCurrency ? (
               <option value={settings.localCurrency}>
                 {settings.localCurrency}（当前设置）
               </option>
@@ -323,7 +365,7 @@ export function MallCurrencySettingsPanel({
                   className="button button-light"
                   type="button"
                   onClick={() => void saveCurrency()}
-                  disabled={saving || syncing}
+                  disabled={!canEdit || loading || saving || syncing}
                 >
                   <Save size={16} aria-hidden="true" />
                   重试保存
@@ -334,7 +376,7 @@ export function MallCurrencySettingsPanel({
                   className="button button-light"
                   type="button"
                   onClick={() => void sync()}
-                  disabled={saving || syncing}
+                  disabled={!canEdit || loading || saving || syncing}
                 >
                   <RefreshCw size={16} aria-hidden="true" />
                   重试同步
@@ -368,7 +410,11 @@ export function MallCurrencySettingsPanel({
               className="button button-light"
               type="submit"
               disabled={
-                !canEdit || saving || syncing || localCurrency === savedCurrency
+                !canEdit ||
+                loading ||
+                saving ||
+                syncing ||
+                localCurrency === savedCurrency
               }
             >
               <Save size={16} aria-hidden="true" />
@@ -378,7 +424,7 @@ export function MallCurrencySettingsPanel({
               className="button button-dark"
               type="button"
               onClick={() => void sync()}
-              disabled={!canEdit || saving || syncing}
+              disabled={!canEdit || loading || saving || syncing}
             >
               <RefreshCw
                 size={16}

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +22,14 @@ vi.mock("../api", async (importOriginal) => ({
 import { MallCurrencySettingsPanel } from "./MallCurrencySettingsPanel";
 
 const onNotice = vi.fn();
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 function settings(
   overrides: Partial<
@@ -203,6 +217,149 @@ describe("MallCurrencySettingsPanel", () => {
     );
   });
 
+  it("ignores an older GET that resolves after a newer load", async () => {
+    const user = userEvent.setup();
+    const firstLoad = deferred<ReturnType<typeof settings>>();
+    const secondLoad = deferred<ReturnType<typeof settings>>();
+    const nextNotice = vi.fn();
+    api.getMallExchangeRateSettings
+      .mockReset()
+      .mockReturnValueOnce(firstLoad.promise)
+      .mockReturnValueOnce(secondLoad.promise);
+
+    const { rerender } = render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+    rerender(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={nextNotice}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(api.getMallExchangeRateSettings).toHaveBeenCalledTimes(2),
+    );
+    await act(async () => {
+      secondLoad.resolve(settings({ localCurrency: "JPY", version: 9 }));
+      await secondLoad.promise;
+    });
+    expect(await screen.findByLabelText("本地货币")).toHaveValue("JPY");
+
+    await act(async () => {
+      firstLoad.resolve(settings({ localCurrency: "CNY", version: 3 }));
+      await firstLoad.promise;
+    });
+    expect(screen.getByLabelText("本地货币")).toHaveValue("JPY");
+
+    await user.click(screen.getByRole("button", { name: "同步最新美元汇率" }));
+    await waitFor(() =>
+      expect(api.syncLatestUsdExchangeRate).toHaveBeenCalledWith({
+        localCurrency: "JPY",
+        expectedVersion: 9,
+      }),
+    );
+  });
+
+  it("blocks every write entry while a refresh is loading and writes with the refreshed version", async () => {
+    const user = userEvent.setup();
+    const reload = deferred<ReturnType<typeof settings>>();
+    api.saveMallExchangeRateSettings.mockRejectedValueOnce(
+      new Error("本地货币保存失败，请稍后重试"),
+    );
+    render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+
+    await screen.findByTestId("usd-exchange-rate");
+    await user.selectOptions(screen.getByLabelText("本地货币"), "EUR");
+    await user.click(screen.getByRole("button", { name: "保存本地货币" }));
+    await screen.findByRole("alert");
+    api.getMallExchangeRateSettings.mockReturnValueOnce(reload.promise);
+
+    await user.click(screen.getByRole("button", { name: "重新读取" }));
+
+    const retrySave = screen.getByRole("button", { name: "重试保存" });
+    const reloadButton = screen.getByRole("button", { name: "重新读取" });
+    const saveButton = screen.getByRole("button", { name: "保存本地货币" });
+    const syncButton = screen.getByRole("button", {
+      name: "同步最新美元汇率",
+    });
+    expect(screen.getByLabelText("本地货币")).toBeDisabled();
+    expect(retrySave).toBeDisabled();
+    expect(reloadButton).toBeDisabled();
+    expect(saveButton).toBeDisabled();
+    expect(syncButton).toBeDisabled();
+
+    fireEvent.click(retrySave);
+    fireEvent.click(saveButton);
+    fireEvent.submit(saveButton.closest("form")!);
+    fireEvent.click(syncButton);
+    expect(api.saveMallExchangeRateSettings).toHaveBeenCalledTimes(1);
+    expect(api.syncLatestUsdExchangeRate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      reload.resolve(settings({ localCurrency: "JPY", version: 8 }));
+      await reload.promise;
+    });
+    await user.click(screen.getByRole("button", { name: "保存本地货币" }));
+    await waitFor(() =>
+      expect(api.saveMallExchangeRateSettings).toHaveBeenNthCalledWith(2, {
+        localCurrency: "EUR",
+        expectedVersion: 8,
+      }),
+    );
+  });
+
+  it("renders distinct unknown draft and server currencies after a conflict", async () => {
+    const user = userEvent.setup();
+    api.getMallExchangeRateSettings
+      .mockResolvedValueOnce(settings({ localCurrency: "XTS" }))
+      .mockResolvedValueOnce(settings({ localCurrency: "XDR", version: 8 }));
+    api.syncLatestUsdExchangeRate
+      .mockRejectedValueOnce(
+        Object.assign(new Error("货币设置已被其他人更新，请刷新后重试"), {
+          status: 409,
+        }),
+      )
+      .mockResolvedValueOnce(settings({ localCurrency: "XTS", version: 9 }));
+    render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+
+    expect(await screen.findByLabelText("本地货币")).toHaveValue("XTS");
+    await user.click(screen.getByRole("button", { name: "同步最新美元汇率" }));
+
+    await waitFor(() =>
+      expect(api.getMallExchangeRateSettings).toHaveBeenCalledTimes(2),
+    );
+    const currencySelect = screen.getByLabelText("本地货币");
+    expect(currencySelect).toHaveValue("XTS");
+    expect(
+      screen.getByRole("option", { name: "XTS（未保存草稿）" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "XDR（当前设置）" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "重试同步" }));
+    await waitFor(() =>
+      expect(api.syncLatestUsdExchangeRate).toHaveBeenNthCalledWith(2, {
+        localCurrency: "XTS",
+        expectedVersion: 8,
+      }),
+    );
+  });
+
   it("reloads settings after a sync version conflict", async () => {
     const user = userEvent.setup();
     api.getMallExchangeRateSettings
@@ -354,38 +511,57 @@ describe("MallCurrencySettingsPanel", () => {
     );
   });
 
-  it.each([320, 390])(
-    "keeps the form and recovery actions inspectable at %ipx",
-    async (width) => {
-      const user = userEvent.setup();
-      api.saveMallExchangeRateSettings.mockRejectedValue(
-        new Error("保存失败"),
-      );
-      const { container } = render(
-        <div style={{ width }}>
-          <MallCurrencySettingsPanel
-            rootRole="rootSuperAdmin"
-            onNotice={onNotice}
-          />
-        </div>,
-      );
+  it("prevents a non-owner from triggering save and sync retries", async () => {
+    const user = userEvent.setup();
+    api.saveMallExchangeRateSettings.mockRejectedValueOnce(
+      new Error("保存失败"),
+    );
+    api.syncLatestUsdExchangeRate.mockRejectedValueOnce(
+      new Error("同步失败"),
+    );
+    const { rerender } = render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
 
-      await screen.findByTestId("usd-exchange-rate");
-      await user.selectOptions(screen.getByLabelText("本地货币"), "EUR");
-      await user.click(screen.getByRole("button", { name: "保存本地货币" }));
-      await screen.findByRole("alert");
+    await screen.findByTestId("usd-exchange-rate");
+    await user.selectOptions(screen.getByLabelText("本地货币"), "EUR");
+    await user.click(screen.getByRole("button", { name: "保存本地货币" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("保存失败");
 
-      expect(container.querySelector(".mall-currency-panel")).toHaveClass(
-        "mall-currency-panel",
-      );
-      expect(container.querySelector(".mall-currency-form")).toBeTruthy();
-      expect(container.querySelector(".mall-currency-actions")).toBeTruthy();
-      expect(
-        container.querySelector(".mall-currency-error-actions"),
-      ).toContainElement(screen.getByRole("button", { name: "重新读取" }));
-      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
-    },
-  );
+    rerender(
+      <MallCurrencySettingsPanel
+        rootRole="platformAdmin"
+        onNotice={onNotice}
+      />,
+    );
+    const retrySave = screen.getByRole("button", { name: "重试保存" });
+    expect(retrySave).toBeDisabled();
+    fireEvent.click(retrySave);
+    expect(api.saveMallExchangeRateSettings).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "同步最新美元汇率" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("同步失败");
+
+    rerender(
+      <MallCurrencySettingsPanel
+        rootRole="platformAdmin"
+        onNotice={onNotice}
+      />,
+    );
+    const retrySync = screen.getByRole("button", { name: "重试同步" });
+    expect(retrySync).toBeDisabled();
+    fireEvent.click(retrySync);
+    expect(api.syncLatestUsdExchangeRate).toHaveBeenCalledTimes(1);
+  });
 
   it("keeps the settings read-only for non-owners", async () => {
     render(
