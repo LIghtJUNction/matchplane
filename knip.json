@@ -5,6 +5,10 @@
       "entry": [
         "app/**/*.{ts,tsx}",
         "src/**/*.test.{ts,tsx}",
+        "src/components/index.ts",
+        "src/hooks/index.ts",
+        "src/lib/platform-router-config.ts",
+        "src/lib/platform-router-config/fixtures/transaction-child.ts",
         "public/**/*.js",
         "src/api.ts",
         "src/catalog-{projection,protocol}.ts",
