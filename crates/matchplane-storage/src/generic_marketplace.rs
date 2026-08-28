@@ -2636,6 +2636,8 @@ async fn insert_marketplace_contact_event(
             SET request_fingerprint = marketplace_introduction_contact_events.request_fingerprint
           WHERE marketplace_introduction_contact_events.request_fingerprint
                 IS NOT DISTINCT FROM EXCLUDED.request_fingerprint
+            AND marketplace_introduction_contact_events.target_party_id = EXCLUDED.target_party_id
+            AND marketplace_introduction_contact_events.decision = EXCLUDED.decision
          RETURNING id",
     )
     .bind(Uuid::now_v7())

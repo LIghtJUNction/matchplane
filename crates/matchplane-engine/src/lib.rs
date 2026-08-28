@@ -434,6 +434,9 @@ impl OrderBook {
         if self.orders.contains_key(&intent.order_id) {
             return Err(EngineError::OrderAlreadyExists(intent.order_id));
         }
+        if intent.quantity.is_zero() {
+            return Err(NumericError::NonPositiveQuantity.into());
+        }
         if intent
             .expires_at
             .is_some_and(|expires_at| command.occurred_at >= expires_at)
@@ -778,6 +781,24 @@ mod tests {
             .expect("duplicate should be accepted");
 
         assert!(duplicate_events.is_empty());
+    }
+
+    #[test]
+    fn process_should_reject_zero_quantity_order() {
+        let market_id = MarketId::new();
+        let mut invalid = intent(market_id, OrderSide::Buy, 100, 1, timestamp(1));
+        invalid.quantity = Quantity::ZERO;
+        let mut book = OrderBook::new(market_id);
+
+        let error = book
+            .process(&place(1, invalid))
+            .expect_err("zero quantity must be rejected");
+
+        assert_eq!(
+            error,
+            EngineError::Numeric(NumericError::NonPositiveQuantity)
+        );
+        assert_eq!(book.last_command_sequence(), 0);
     }
 
     #[test]
