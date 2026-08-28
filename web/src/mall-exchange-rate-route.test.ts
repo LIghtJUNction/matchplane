@@ -1,16 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   connect: vi.fn(),
   getSession: vi.fn(),
   hasTrustedBrowserOrigin: vi.fn(),
+  hasOnlyPublicAddresses: vi.fn(),
   tenantId: "11111111-1111-4111-8111-111111111111",
 }));
 
 vi.mock("./lib/auth", () => ({
   auth: { api: { getSession: mocks.getSession } },
   authDatabase: { query: mocks.query, connect: mocks.connect },
+}));
+vi.mock("./lib/public-endpoint", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./lib/public-endpoint")>()),
+  hasOnlyPublicAddresses: mocks.hasOnlyPublicAddresses,
 }));
 vi.mock("./lib/request-origin", () => ({
   hasTrustedBrowserOrigin: mocks.hasTrustedBrowserOrigin,
@@ -88,9 +93,16 @@ function transactionClient(row: Record<string, unknown> = current) {
 beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.MATCHPLANE_EXCHANGE_RATE_URL;
+  mocks.hasOnlyPublicAddresses.mockResolvedValue(true);
   mocks.hasTrustedBrowserOrigin.mockReturnValue(true);
   mocks.getSession.mockResolvedValue(editorSession());
   mocks.query.mockResolvedValue({ rows: [current], rowCount: 1 });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("mall exchange-rate route", () => {
@@ -180,11 +192,120 @@ describe("mall exchange-rate route", () => {
     });
     expect(fetch).toHaveBeenCalledWith(
       expect.any(URL),
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      expect.objectContaining({
+        redirect: "error",
+        signal: expect.any(AbortSignal),
+      }),
     );
     const providerUrl = vi.mocked(fetch).mock.calls[0]?.[0];
     expect(String(providerUrl)).toContain("to=JPY");
     vi.unstubAllGlobals();
+  });
+
+  it("rejects private provider IPs before making an outbound request", async () => {
+    vi.stubEnv(
+      "MATCHPLANE_EXCHANGE_RATE_URL",
+      "https://169.254.169.254/latest",
+    );
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "汇率服务配置无效",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a provider hostname resolves to a private address", async () => {
+    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+    vi.stubEnv(
+      "MATCHPLANE_EXCHANGE_RATE_URL",
+      "https://provider.example/latest",
+    );
+    mocks.hasOnlyPublicAddresses.mockResolvedValue(false);
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "汇率服务配置无效",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects provider credentials before making an outbound request", async () => {
+    vi.stubEnv(
+      "MATCHPLANE_EXCHANGE_RATE_URL",
+      "https://user:secret@provider.example/latest",
+    );
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "汇率服务配置无效",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("uses the MatchPlane production profile for the HTTPS boundary", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+    vi.stubEnv(
+      "MATCHPLANE_EXCHANGE_RATE_URL",
+      "http://localhost:8787/latest",
+    );
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+
+    expect(response.status).toBe(502);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("applies the provider timeout while reading a slow response body", async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    const responseBody = new ReadableStream<Uint8Array>({
+      cancel(reason) {
+        cancel(reason);
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(responseBody, { status: 200 })),
+    );
+    mocks.connect.mockResolvedValue(transactionClient());
+
+    const pending = POST(
+      request("POST", { localCurrency: "JPY", expectedVersion: 3 }),
+    );
+    await vi.advanceTimersByTimeAsync(6_000);
+    const response = await pending;
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "汇率服务响应超时，请稍后重试",
+    });
+    expect(cancel).toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("requires the trusted owner session for mutations", async () => {

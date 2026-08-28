@@ -5,18 +5,21 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   getMallExchangeRateSettings,
+  MarketplaceApiError,
   saveMallExchangeRateSettings,
   syncLatestUsdExchangeRate,
   type MallExchangeRateSettings,
 } from "../api";
 import { SectionHeading } from "./Primitives";
 
+// Frankfurter's ECB-backed /latest endpoint does not publish TWD or VND; keep selectable
+// currencies within the provider's supported set. Unknown persisted codes remain visible below
+// so an existing tenant can still be corrected rather than silently changing its setting.
 const LOCAL_CURRENCY_OPTIONS = [
   ["CNY", "人民币"],
   ["JPY", "日元"],
   ["KRW", "韩元"],
   ["HKD", "港币"],
-  ["TWD", "新台币"],
   ["SGD", "新加坡元"],
   ["USD", "美元"],
   ["EUR", "欧元"],
@@ -28,7 +31,6 @@ const LOCAL_CURRENCY_OPTIONS = [
   ["IDR", "印度尼西亚卢比"],
   ["MYR", "马来西亚林吉特"],
   ["THB", "泰铢"],
-  ["VND", "越南盾"],
   ["PHP", "菲律宾比索"],
   ["NZD", "新西兰元"],
   ["NOK", "挪威克朗"],
@@ -98,6 +100,10 @@ export function MallCurrencySettingsPanel({
       applySettings(next);
       onNotice("本地货币已保存；请同步最新美元汇率");
     } catch (error) {
+      if (isVersionConflict(error)) {
+        setSettings(null);
+        await load();
+      }
       onNotice(error instanceof Error ? error.message : "本地货币保存失败");
     } finally {
       setSaving(false);
@@ -115,6 +121,10 @@ export function MallCurrencySettingsPanel({
       applySettings(next);
       onNotice(`美元/${next.localCurrency} 汇率已同步`);
     } catch (error) {
+      if (isVersionConflict(error)) {
+        setSettings(null);
+        await load();
+      }
       onNotice(error instanceof Error ? error.message : "最新美元汇率同步失败");
     } finally {
       setSyncing(false);
@@ -270,4 +280,14 @@ function formatUpdatedAt(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(timestamp)}`;
+}
+
+function isVersionConflict(error: unknown): boolean {
+  return (
+    (error instanceof MarketplaceApiError && error.status === 409) ||
+    (typeof error === "object" &&
+      error !== null &&
+      "status" in error &&
+      (error as { status?: unknown }).status === 409)
+  );
 }

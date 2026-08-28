@@ -10,7 +10,12 @@ import {
   RequestBodyTooLargeError,
 } from "../../../../src/lib/body-limit";
 import { jsonError } from "../../../../src/lib/json-error";
+import {
+  hasOnlyPublicAddresses,
+  isPrivateOrReservedIpLiteral,
+} from "../../../../src/lib/public-endpoint";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { isProductionEnvironment } from "../../../../src/lib/runtime";
 import { configuredTenantId } from "../../../../src/lib/store-access";
 
 export const runtime = "nodejs";
@@ -415,50 +420,57 @@ async function fetchLatestUsdRate(
     return { rate: 1, source: "identity" };
   }
 
-  const url = exchangeRateProviderUrl();
+  const url = await exchangeRateProviderUrl();
   url.searchParams.set("from", BASE_CURRENCY);
   url.searchParams.set("to", localCurrency);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
-  let response: Response;
   try {
-    response = await fetch(url, {
-      cache: "no-store",
-      headers: { accept: "application/json" },
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ExchangeRateProviderError("汇率服务响应超时，请稍后重试");
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        cache: "no-store",
+        headers: { accept: "application/json" },
+        redirect: "error",
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)) {
+        throw new ExchangeRateProviderError("汇率服务响应超时，请稍后重试");
+      }
+      throw new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
     }
-    throw new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
+
+    if (!response.ok) {
+      throw new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
+    }
+
+    let payload: unknown;
+    try {
+      payload = await readJsonResponseBody<unknown>(
+        response,
+        PROVIDER_RESPONSE_LIMIT,
+        controller.signal,
+      );
+    } catch (error) {
+      if (controller.signal.aborted || isAbortError(error)) {
+        throw new ExchangeRateProviderError("汇率服务响应超时，请稍后重试");
+      }
+      throw new ExchangeRateProviderError("汇率服务返回了无效数据，请稍后重试");
+    }
+
+    const rate = extractRate(payload, localCurrency);
+    if (rate === null) {
+      throw new ExchangeRateProviderError("汇率服务暂不支持该本地货币");
+    }
+    return { rate, source: url.hostname };
   } finally {
     clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    throw new ExchangeRateProviderError("汇率服务暂时不可用，请稍后重试");
-  }
-
-  let payload: unknown;
-  try {
-    payload = await readJsonResponseBody<unknown>(
-      response,
-      PROVIDER_RESPONSE_LIMIT,
-    );
-  } catch {
-    throw new ExchangeRateProviderError("汇率服务返回了无效数据，请稍后重试");
-  }
-
-  const rate = extractRate(payload, localCurrency);
-  if (rate === null) {
-    throw new ExchangeRateProviderError("汇率服务暂不支持该本地货币");
-  }
-  return { rate, source: url.hostname };
 }
 
-function exchangeRateProviderUrl(): URL {
+async function exchangeRateProviderUrl(): Promise<URL> {
   const raw =
     process.env.MATCHPLANE_EXCHANGE_RATE_URL?.trim() || DEFAULT_PROVIDER_URL;
   let url: URL;
@@ -467,16 +479,42 @@ function exchangeRateProviderUrl(): URL {
   } catch {
     throw new ExchangeRateProviderError("汇率服务配置无效");
   }
-  const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+
+  // MatchPlane uses MATCHPLANE_ENVIRONMENT as the deployment profile. NODE_ENV is often
+  // production for an optimized local Compose bundle and must not weaken this boundary.
+  const production = isProductionEnvironment();
+  const loopback = isLoopbackHostname(url.hostname);
+  const developmentLoopback =
+    !production && url.protocol === "http:" && loopback;
   if (
     url.username ||
     url.password ||
-    (url.protocol !== "https:" &&
-      !(process.env.NODE_ENV !== "production" && loopback))
+    url.hash ||
+    isPrivateOrReservedIpLiteral(url.hostname) ||
+    (loopback && !developmentLoopback) ||
+    (url.protocol !== "https:" && !developmentLoopback)
   ) {
     throw new ExchangeRateProviderError("汇率服务配置无效");
   }
+
+  // Resolve immediately before fetch and fail closed if any answer is private, loopback,
+  // link-local, metadata, multicast, documentation, or otherwise non-global. A local HTTP
+  // loopback mock is the sole development exception, matching the project's endpoint contract.
+  if (!developmentLoopback && !(await hasOnlyPublicAddresses(url.toString()))) {
+    throw new ExchangeRateProviderError("汇率服务配置无效");
+  }
   return url;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(hostname.toLowerCase());
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
 }
 
 function extractRate(payload: unknown, localCurrency: string): number | null {

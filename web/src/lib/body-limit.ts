@@ -48,14 +48,18 @@ export async function readJsonBody<T>(
 export async function readJsonResponseBody<T>(
   response: Response,
   maximumBytes: number,
+  signal?: AbortSignal,
 ): Promise<T> {
-  return parseJson<T>(await readResponseTextBody(response, maximumBytes));
+  return parseJson<T>(
+    await readResponseTextBody(response, maximumBytes, signal),
+  );
 }
 
 /** Read an upstream response as text with a byte cap that also covers chunked transfer encoding. */
 export async function readResponseTextBody(
   response: Response,
   maximumBytes: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   const declaredLength = Number.parseInt(
     response.headers.get("content-length") ?? "",
@@ -69,6 +73,7 @@ export async function readResponseTextBody(
     response.body,
     maximumBytes,
     () => new ResponseBodyTooLargeError(maximumBytes),
+    signal,
   );
   return new TextDecoder().decode(bytes);
 }
@@ -86,30 +91,54 @@ async function readBoundedBytes(
   body: ReadableStream<Uint8Array>,
   maximumBytes: number,
   tooLarge: () => Error,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let rejectAbort: ((reason?: unknown) => void) | undefined;
+  let onAbort: (() => void) | undefined;
+
   try {
+    if (signal?.aborted) throw abortError(signal);
+    const abortPromise = signal
+      ? new Promise<never>((_, reject) => {
+          rejectAbort = reject;
+          onAbort = () => {
+            // Reject before canceling so a cancel-induced `{ done: true }` read cannot win the
+            // race. Canceling as well prevents an upstream response that drips bytes forever
+            // from keeping the request alive.
+            rejectAbort?.(abortError(signal));
+            void reader.cancel(signal.reason).catch(() => undefined);
+          };
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        })
+      : null;
+
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const pendingRead = reader.read();
+        const { done, value } = abortPromise
+          ? await Promise.race([pendingRead, abortPromise])
+          : await pendingRead;
         if (done) break;
         total += value.byteLength;
         if (total > maximumBytes) throw tooLarge();
         chunks.push(value);
       }
     } catch (error) {
-      // Stop a chunked/slow stream as soon as its bounded budget is exceeded. Releasing the
-      // reader alone leaves an unread stream attached to the request/response in some runtimes.
+      // Stop a chunked/slow stream as soon as its bounded budget is exceeded or its signal is
+      // aborted. Releasing the reader alone leaves an unread stream attached in some runtimes.
       try {
         await reader.cancel();
       } catch {
-        // Preserve the original read/size failure when cancellation also fails.
+        // Preserve the original read/size/abort failure when cancellation also fails.
       }
       throw error;
     }
   } finally {
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
     reader.releaseLock();
   }
   const bytes = new Uint8Array(total);
@@ -119,4 +148,10 @@ async function readBoundedBytes(
     offset += chunk.byteLength;
   }
   return bytes;
+}
+
+function abortError(signal: AbortSignal): Error {
+  const reason = signal.reason;
+  if (reason instanceof Error) return reason;
+  return new DOMException("The operation was aborted", "AbortError");
 }

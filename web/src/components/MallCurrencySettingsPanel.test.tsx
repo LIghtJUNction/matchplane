@@ -118,6 +118,89 @@ describe("MallCurrencySettingsPanel", () => {
     expect(onNotice).toHaveBeenCalledWith("美元/JPY 汇率已同步");
   });
 
+  it("reloads settings after a save version conflict", async () => {
+    const user = userEvent.setup();
+    api.getMallExchangeRateSettings
+      .mockResolvedValueOnce(settings())
+      .mockResolvedValueOnce(
+        settings({
+          localCurrency: "EUR",
+          usdToLocalRate: null,
+          rateSource: null,
+          rateUpdatedAt: null,
+          version: 8,
+        }),
+      );
+    api.saveMallExchangeRateSettings.mockRejectedValue(
+      Object.assign(new Error("货币设置已被其他人更新，请刷新后重试"), {
+        status: 409,
+      }),
+    );
+    render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+
+    await screen.findByTestId("usd-exchange-rate");
+    await user.selectOptions(screen.getByLabelText("本地货币"), "EUR");
+    await user.click(screen.getByRole("button", { name: "保存本地货币" }));
+
+    await waitFor(() =>
+      expect(api.getMallExchangeRateSettings).toHaveBeenCalledTimes(2),
+    );
+    expect(screen.getByLabelText("本地货币")).toHaveValue("EUR");
+    expect(api.saveMallExchangeRateSettings).toHaveBeenCalledWith({
+      localCurrency: "EUR",
+      expectedVersion: 3,
+    });
+  });
+
+  it("reloads settings after a sync version conflict", async () => {
+    const user = userEvent.setup();
+    api.getMallExchangeRateSettings
+      .mockResolvedValueOnce(settings())
+      .mockResolvedValueOnce(settings({ localCurrency: "JPY", version: 9 }));
+    api.syncLatestUsdExchangeRate.mockRejectedValue(
+      Object.assign(new Error("货币设置已被其他人更新，请刷新后重试"), {
+        status: 409,
+      }),
+    );
+    render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+
+    await screen.findByTestId("usd-exchange-rate");
+    await user.selectOptions(screen.getByLabelText("本地货币"), "JPY");
+    await user.click(screen.getByRole("button", { name: "同步最新美元汇率" }));
+
+    await waitFor(() =>
+      expect(api.getMallExchangeRateSettings).toHaveBeenCalledTimes(2),
+    );
+    expect(screen.getByLabelText("本地货币")).toHaveValue("JPY");
+    expect(api.syncLatestUsdExchangeRate).toHaveBeenCalledWith({
+      localCurrency: "JPY",
+      expectedVersion: 3,
+    });
+  });
+
+  it("does not offer currencies unsupported by the default Frankfurter provider", async () => {
+    render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+
+    await screen.findByTestId("usd-exchange-rate");
+    expect(screen.queryByRole("option", { name: /新台币/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /越南盾/ })).not.toBeInTheDocument();
+  });
+
   it("keeps the settings read-only for non-owners", async () => {
     render(
       <MallCurrencySettingsPanel

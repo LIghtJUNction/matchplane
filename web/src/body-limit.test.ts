@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   readJsonBody,
@@ -137,6 +137,27 @@ describe("bounded JSON request bodies", () => {
     await expect(readJsonResponseBody(response, 128)).rejects.toBeInstanceOf(
       ResponseBodyTooLargeError,
     );
+  });
+
+  it("aborts a slow upstream response and cancels its reader", async () => {
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull() {
+          return new Promise(() => undefined);
+        },
+        cancel(reason) {
+          cancel(reason);
+        },
+      }),
+    );
+    const pending = readJsonResponseBody(response, 128, controller.signal);
+
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancel).toHaveBeenCalled();
   });
 
   it("reads a bounded upstream text response", async () => {
