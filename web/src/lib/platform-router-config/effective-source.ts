@@ -128,6 +128,9 @@ export function platformRouterPolicyIssues(
 ): string[] {
   const endpoint = value.endpoint ?? value.endpointOrigin ?? null;
   const normalizedEndpoint = endpoint ? safeNormalizedEndpoint(endpoint) : null;
+  const normalizedEndpointOrigin = normalizedEndpoint
+    ? safeUrlOrigin(normalizedEndpoint)
+    : null;
   const issues: string[] = [];
   if (value.source === "unconfigured") issues.push("provider_not_configured");
   if (!value.enabled) issues.push("provider_not_enabled");
@@ -139,9 +142,9 @@ export function platformRouterPolicyIssues(
   if (!originAllowlist.valid) {
     issues.push("origin_allowlist_invalid");
   } else if (
-    normalizedEndpoint &&
+    normalizedEndpointOrigin &&
     originAllowlist.origins &&
-    !originAllowlist.origins.includes(new URL(normalizedEndpoint).origin)
+    !originAllowlist.origins.includes(normalizedEndpointOrigin)
   ) {
     issues.push("endpoint_origin_not_allowed");
   }
@@ -303,8 +306,15 @@ function isKnownProtocol(
 
 function safeEndpointOrigin(value: string | null): string | null {
   const endpoint = value ? safeNormalizedEndpoint(value) : null;
-  if (!endpoint) return null;
-  return new URL(endpoint).origin;
+  return endpoint ? safeUrlOrigin(endpoint) : null;
+}
+
+function safeUrlOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
 }
 
 function endpointForComparison(value: string | null): string | null {
