@@ -2111,7 +2111,9 @@ function parsePartyCapability(
   };
 }
 
-function assertUsablePartyCapability(value: unknown): asserts value is PartyCapability {
+function assertUsablePartyCapability(
+  value: unknown,
+): asserts value is PartyCapability {
   if (
     !isRecord(value) ||
     !isBoundedString(value.tenant_id, 200) ||
@@ -2336,9 +2338,14 @@ function normalizeBaseUrl(value: string): string {
       "MatchPlane baseUrl must be an origin without credentials or a path",
     );
   }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("MatchPlane baseUrl must use HTTP or HTTPS");
+  }
   const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
-  if (parsed.protocol !== "https:" && !loopbackHosts.has(parsed.hostname)) {
-    throw new Error("MatchPlane baseUrl must use HTTPS outside loopback development");
+  if (parsed.protocol === "http:" && !loopbackHosts.has(parsed.hostname)) {
+    throw new Error(
+      "MatchPlane baseUrl must use HTTPS outside loopback development",
+    );
   }
   return parsed.origin;
 }

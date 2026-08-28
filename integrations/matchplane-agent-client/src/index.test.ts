@@ -613,6 +613,13 @@ describe("MatchPlane external Agent client", () => {
     expect(
       () =>
         new MatchPlaneAgentClient({
+          baseUrl: "ftp://localhost",
+          apiKey: "mpk_test",
+        }),
+    ).toThrow("must use HTTP or HTTPS");
+    expect(
+      () =>
+        new MatchPlaneAgentClient({
           baseUrl: "http://agent.example",
           apiKey: "mpk_test",
         }),
