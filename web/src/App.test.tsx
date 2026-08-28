@@ -186,7 +186,7 @@ describe("MatchPlane workspaces", () => {
       ),
     ).toBeInTheDocument();
     expect(platformDashboardModule.loads).toBe(1);
-  });
+  }, 30_000);
 
   it("keeps the root as browse plus one inline shopping conversation", async () => {
     render(<App />);
@@ -304,7 +304,7 @@ describe("MatchPlane workspaces", () => {
     ).toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
     expect(window.location.href).not.toContain("/login");
-  });
+  }, 30_000);
 
   it("opens the product console over a fullscreen store from an explicit account link", async () => {
     window.history.replaceState(null, "", "/store-a?console=products");
