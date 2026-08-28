@@ -191,6 +191,9 @@ function createSafeProviderFetch(options: SafeFetchOptions): typeof fetch {
           options.resolveAddresses,
           signal,
         );
+        // SAFETY: requestInit contains standard Fetch options and dispatcher is
+        // the only Undici-specific field; Undici's response is Fetch-compatible.
+        // These casts bridge package-local Undici types to the DOM types here.
         response = (await undiciFetch(url, {
           ...requestInit,
           dispatcher,
@@ -353,7 +356,12 @@ function validateFinalProviderUrl(
   protocol: ProviderProtocol,
   baseURL: string,
 ): void {
-  const base = new URL(baseURL);
+  let base: URL;
+  try {
+    base = new URL(baseURL);
+  } catch {
+    throw new ProviderAdapterError("MP_PROVIDER_INVALID_ENDPOINT");
+  }
   if (
     !isAllowedProviderTransport(url) ||
     url.origin !== base.origin ||

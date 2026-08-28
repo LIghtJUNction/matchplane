@@ -264,6 +264,16 @@ describe("provider adapter official SDK models", () => {
 });
 
 describe("provider adapter transport policy", () => {
+  it("maps malformed provider endpoints to the stable adapter error code", () => {
+    expect(() =>
+      normalizeProviderBaseUrl("openai-compatible", "not-a-provider-url"),
+    ).toThrow(
+      expect.objectContaining({
+        code: "MP_PROVIDER_INVALID_ENDPOINT",
+      }),
+    );
+  });
+
   it("normalizes roots and only recognized terminal routes", () => {
     expect(
       normalizeProviderBaseUrl(
