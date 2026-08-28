@@ -51,9 +51,9 @@ We decoupled the frontend architecture into four distinct layers while preservin
    - `SubplatformFullscreenHeader`: Dedicated header for subplatform immersion and plugin hosts.
    - `PlatformOverlaysHost`: Centralizes mounting of 15+ sheets and dialogs (`ListingSheet`, `ModeDialog`, `WorkspaceSettingsDialog`, profile/password/passkey/bindings/stores panels, and toast notices).
 
-3. **Domain Organization & Unified Indices**:
+3. **Domain Organization & Explicit Imports**:
    - Categorized components by business domains (`account`, `marketplace`, `store`, `admin`, `ui`, `shell`).
-   - Provided unified barrel exports in `web/src/components/index.ts` and `web/src/hooks/index.ts`.
+   - Import components and hooks from their owning modules. Unconsumed barrel facades are not retained because they obscure dead exports from static analysis; a future public facade must be explicit and exercised by real consumers.
 
 ## Consequences
 

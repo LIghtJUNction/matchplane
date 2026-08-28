@@ -11,71 +11,30 @@ import {
   type TransactionalManagedPlatformRouterPublicState,
 } from "./platform-router-config/transactional-lifecycle";
 
-export type {
-  ManagedPlatformRouterConfig,
-  ManagedPlatformRouterDraftConfig,
-  ManagedPlatformRouterInput,
-  ManagedPlatformRouterState,
-  ManagedRouterProtocol,
-  PlatformRouterAuditEvent,
-  PlatformRouterEffectiveStatus,
-} from "./platform-router-config/contract";
+export type { ManagedRouterProtocol } from "./platform-router-config/contract";
 export {
-  appendPlatformRouterAudit,
-  buildPlatformRouterAuditRecord,
-} from "./platform-router-config/audit";
-export type { PlatformRouterAuditRecord } from "./platform-router-config/audit";
-export {
-  acquirePlatformRouterLock,
-  checkpointDeliveredAudit,
-  commitGeneration,
-  flushAuditOutbox,
-  garbageCollectPlatformRouterArtifacts,
-  PlatformRouterCommitUncertainError,
   PlatformRouterConflictError,
-  PlatformRouterCorruptionError,
-  PlatformRouterLockOwnershipError,
   PlatformRouterLockTimeoutError,
   PlatformRouterTransactionError,
-  PlatformRouterValidationError,
-  readCurrentSnapshot,
-  recoverPlatformRouterTransactions,
-  validateReferencedCredentials,
-  withPlatformRouterLock,
 } from "./platform-router-config/transaction";
-export type {
-  PlatformRouterGenerationInput,
-  PlatformRouterLockHandle,
-  PlatformRouterRecoveryResult,
-  PlatformRouterSnapshot,
-  PlatformRouterTransactionOptions,
-} from "./platform-router-config/transaction";
-export {
-  getPlatformRouterEffectiveStatus,
-  platformRouterPolicyIssues,
-} from "./platform-router-config/effective-source";
 export {
   activateTransactionalManagedPlatformRouterDraft,
-  createTransactionalManagedPlatformRouterLifecycle,
-  getTransactionalManagedPlatformRouterConfig,
-  getTransactionalManagedPlatformRouterState,
   markTransactionalManagedPlatformRouterDraftTested,
   PlatformRouterStateIndeterminateError,
   PlatformRouterStorageUncertainError,
   prepareTransactionalManagedPlatformRouterDraftProbe,
-  readTransactionalManagedPlatformRouterConfig,
   stageTransactionalManagedPlatformRouterConfig,
 } from "./platform-router-config/transactional-lifecycle";
 export type {
   PlatformRouterDraftProbe,
-  PlatformRouterMarkTestedInput,
-  PlatformRouterMutationContext,
   PlatformRouterMutationResult,
-  TransactionalLifecycleDependencies,
-  TransactionalManagedPlatformRouterLifecycle,
-  TransactionalManagedPlatformRouterPublicState,
 } from "./platform-router-config/transactional-lifecycle";
+export {
+  getPlatformRouterEffectiveStatus,
+  platformRouterPolicyIssues,
+} from "./platform-router-config/effective-source";
 export { readManagedPlatformRouterConfig } from "./platform-router-config/lifecycle";
+
 export function managedPlatformRouterStateFromTransactionalState(
   state: TransactionalManagedPlatformRouterPublicState,
   environment: EnvironmentProviderStatus = readEnvironmentProviderStatus(),
@@ -99,9 +58,7 @@ export function getManagedPlatformRouterState(
     return {
       config: null,
       draft: null,
-      effective: unreadableManagedPlatformRouterEffectiveStatus(
-        environment,
-      ),
+      effective: unreadableManagedPlatformRouterEffectiveStatus(environment),
     };
   }
 }

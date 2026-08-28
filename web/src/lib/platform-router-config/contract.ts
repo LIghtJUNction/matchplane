@@ -386,7 +386,7 @@ export function presentManagedConfig(
   };
 }
 
-export function parseJson(raw: string): JsonValue {
+function parseJson(raw: string): JsonValue {
   try {
     const value: JsonValue = JSON.parse(raw);
     return value;
