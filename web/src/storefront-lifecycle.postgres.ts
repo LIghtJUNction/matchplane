@@ -52,7 +52,12 @@ function isolatedTestDatabaseUrl(): string {
       "MATCHPLANE_TEST_DATABASE_URL and MATCHPLANE_TEST_DATABASE_NAME are required",
     );
   }
-  const url = new URL(raw);
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("MATCHPLANE_TEST_DATABASE_URL must be a valid URL");
+  }
   if (!["127.0.0.1", "::1", "localhost"].includes(url.hostname)) {
     throw new Error(
       "storefront lifecycle tests accept only a loopback PostgreSQL host",

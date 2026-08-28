@@ -11,8 +11,6 @@ import { MAX_LEXICAL_RANK_TOTAL_CANDIDATES } from "./storefront-ranking-contract
 import { isSafePublicAttributeKey } from "./storefront-ranking-shared";
 import type { PublicShoppingIntent } from "./shopping-intent";
 
-export type { PublicOfferSearchSort } from "./storefront-ranking";
-
 interface PublicOfferRow {
   id: string;
   tenantId: string;
@@ -34,7 +32,7 @@ const HOSTED_MEDIA_REFERENCE =
 
 /** Maximum store scopes admitted to one public-offer SQL query; excess fails closed. */
 export const MAX_PUBLIC_OFFER_SEARCH_STORE_IDS = MAX_PUBLIC_STORES;
-export const MAX_PUBLIC_OFFER_SEARCH_NARRATIVE_CHARACTERS = 8_000;
+const MAX_PUBLIC_OFFER_SEARCH_NARRATIVE_CHARACTERS = 8_000;
 export const MAX_PUBLIC_OFFER_SEARCH_CANDIDATES =
   MAX_LEXICAL_RANK_TOTAL_CANDIDATES;
 
@@ -105,7 +103,7 @@ export async function searchPublicStoreOfferPage(
 }
 
 /** Database reader seam for the bounded production offer page. */
-export async function searchPublicStoreOfferPageFromDatabase(
+async function searchPublicStoreOfferPageFromDatabase(
   database: Pick<typeof authDatabase, "query">,
   input: PublicOfferSearchInput,
 ): Promise<PublicOfferSearchPage> {

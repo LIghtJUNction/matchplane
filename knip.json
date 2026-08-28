@@ -16,6 +16,7 @@
         "src/retrieval-protocol.ts",
         "src/shopping-{intent,memory-contract}.ts",
         "src/store-finance.ts",
+        "src/storefront-lifecycle.postgres.ts",
         "src/subplatform.ts",
         "src/types.ts"
       ]
