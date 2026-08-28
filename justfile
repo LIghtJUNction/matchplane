@@ -68,4 +68,5 @@ migration-check:
     python3 -c 'from pathlib import Path; versions = [p.name.split("_", 1)[0] for p in Path("migrations").glob("[0-9]*_*.sql")]; assert len(versions) == len(set(versions)), f"duplicate migration versions: {[v for v in sorted(set(versions)) if versions.count(v) > 1]}"'
 
 skills-check:
-    python3 tools/check-skills.py
+    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tools/test_check_skills.py
+    PYTHONDONTWRITEBYTECODE=1 python3 tools/check-skills.py
