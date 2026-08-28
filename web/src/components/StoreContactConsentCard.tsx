@@ -330,7 +330,9 @@ export function StoreContactConsentCard({
           </span>
           <div className="store-contact-consent-empty-actions">
             <Button
-              render={<a href={`${currentLocation().pathname}?account=identity`} />}
+              render={
+                <a href={`${currentLocation().pathname}?account=identity`} />
+              }
               variant="outline"
               size="md"
               className="min-h-11"

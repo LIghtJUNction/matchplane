@@ -265,7 +265,9 @@ export function StoreManagementPanel({
           <div className="store-lifecycle-confirm" role="alert">
             <div className="store-lifecycle-confirm-content">
               <strong>
-                {isEn ? "Pause store operations?" : "确定要暂停营业（关闭店铺）吗？"}
+                {isEn
+                  ? "Pause store operations?"
+                  : "确定要暂停营业（关闭店铺）吗？"}
               </strong>
               <p>
                 {isEn

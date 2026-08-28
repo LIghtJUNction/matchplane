@@ -854,7 +854,11 @@ function configuredOAuthProviders(): GenericOAuthConfig[] {
           managedNationalIdentity?.scopes ??
           managedWeChat?.scopes ??
           parseOAuthScopes(process.env[`${prefix}SCOPES`], defaultScopes),
-        ...(wechatNativeProtocol && clientId && clientSecret && tokenUrl && userInfoUrl
+        ...(wechatNativeProtocol &&
+        clientId &&
+        clientSecret &&
+        tokenUrl &&
+        userInfoUrl
           ? {
               // The qrconnect page reads appid (client_id is ignored) and the
               // sns token endpoint does not understand PKCE parameters.

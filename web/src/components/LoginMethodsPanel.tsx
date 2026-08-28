@@ -134,7 +134,8 @@ export function LoginMethodsPanel() {
         titleId="login-methods-title"
       />
       <p className="subplatform-intro">
-        “已启用”只表示当前运行中的 Web 进程实际开放该能力，不表示已保存凭据或存在待重启变更。
+        “已启用”只表示当前运行中的 Web
+        进程实际开放该能力，不表示已保存凭据或存在待重启变更。
         微信、国家网络身份、账号邮件和短信的保存状态请以下方各自配置面板为准。
       </p>
       {status ? (
@@ -169,7 +170,8 @@ export function LoginMethodsPanel() {
       )}
       <div className="login-methods-footer">
         <p>
-          QQ、支付宝和 Google 可使用对应的 <code>MATCHPLANE_&lt;提供方&gt;_OAUTH_*</code>
+          QQ、支付宝和 Google 可使用对应的{" "}
+          <code>MATCHPLANE_&lt;提供方&gt;_OAUTH_*</code>
           部署变量；变量变更需重启 Web 服务后才会成为当前进程能力。
         </p>
         <Button

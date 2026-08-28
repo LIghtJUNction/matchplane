@@ -7,11 +7,7 @@ import {
   AlertIcon,
   AlertTitle,
 } from "@appica/ui-react/alert";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@appica/ui-react/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@appica/ui-react/avatar";
 import { Button } from "@appica/ui-react/button";
 import { Skeleton } from "@appica/ui-react/skeleton";
 import { Textarea } from "@appica/ui-react/textarea";
@@ -157,7 +153,8 @@ export function PersonalProfilePanel({
       setLoadState("ready");
     } catch (error) {
       if (requestId !== requestIdRef.current || !mountedRef.current) return;
-      const message = error instanceof Error ? error.message : copy.loadFallback;
+      const message =
+        error instanceof Error ? error.message : copy.loadFallback;
       setProfile(null);
       setLoadError(message);
       setLoadState("error");

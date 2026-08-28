@@ -144,7 +144,9 @@ describe("PersonalProfilePanel", () => {
     expect(bio).toHaveValue("Retain this bio");
 
     await user.click(screen.getByRole("button", { name: "Save profile" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Profile saved");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Profile saved",
+    );
     expect(api.saveAccountProfile).toHaveBeenLastCalledWith({
       bio: "Retain this bio",
     });
@@ -175,7 +177,10 @@ describe("PersonalProfilePanel", () => {
     await screen.findByLabelText("Bio");
     const input = fileInput(container);
 
-    await user.upload(input, new File(["text"], "avatar.txt", { type: "text/plain" }));
+    await user.upload(
+      input,
+      new File(["text"], "avatar.txt", { type: "text/plain" }),
+    );
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Choose an image file for your avatar",
     );
@@ -258,7 +263,9 @@ describe("PersonalProfilePanel", () => {
     expect(bio).toBeEnabled();
     await act(async () => upload.resolve("/avatar.webp"));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Change avatar" })).toBeEnabled(),
+      expect(
+        screen.getByRole("button", { name: "Change avatar" }),
+      ).toBeEnabled(),
     );
   });
 });

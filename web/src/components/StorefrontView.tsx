@@ -149,18 +149,20 @@ export function StorefrontView({
             </span>
           </div>
         </div>
-        {isInactive ? canManageStore && onOpenStoreConsole ? (
-          <Button
-            variant="primary"
-            size="md"
-            className="mt-5 min-h-11 w-full justify-center gap-2 rounded-full px-4 text-sm font-semibold sm:w-auto"
-            type="button"
-            onClick={onOpenStoreConsole}
-          >
-            <Store size={17} aria-hidden="true" />
-            {english ? "Store console" : "管理店铺 / 恢复营业"}
-          </Button>
-        ) : null : (
+        {isInactive ? (
+          canManageStore && onOpenStoreConsole ? (
+            <Button
+              variant="primary"
+              size="md"
+              className="mt-5 min-h-11 w-full justify-center gap-2 rounded-full px-4 text-sm font-semibold sm:w-auto"
+              type="button"
+              onClick={onOpenStoreConsole}
+            >
+              <Store size={17} aria-hidden="true" />
+              {english ? "Store console" : "管理店铺 / 恢复营业"}
+            </Button>
+          ) : null
+        ) : (
           <Dialog open={managerOpen} onOpenChange={setManagerOpen}>
             <DialogTrigger
               render={

@@ -413,7 +413,9 @@ describe("MatchPlane workspaces", () => {
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
-      if (url === "/api/stores/33333333-3333-4333-8333-333333333333/customers") {
+      if (
+        url === "/api/stores/33333333-3333-4333-8333-333333333333/customers"
+      ) {
         return new Response(JSON.stringify({ customers: [] }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -912,7 +914,9 @@ describe("MatchPlane workspaces", () => {
 
     await user.click(screen.getByRole("button", { name: "显示与语言" }));
     await user.click(screen.getByRole("button", { name: "English" }));
-    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Account menu" }),
+    );
     await user.click(await screen.findByRole("menuitem", { name: "Profile" }));
 
     expect(
