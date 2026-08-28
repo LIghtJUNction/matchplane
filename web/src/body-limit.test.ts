@@ -178,6 +178,50 @@ describe("bounded JSON request bodies", () => {
     expect(cancel).toHaveBeenCalled();
   });
 
+  it("tears down transport before detached cancellation and does not await a hung cancel", async () => {
+    const events: string[] = [];
+    const controller = new AbortController();
+    let readStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull() {
+          readStarted?.();
+          return new Promise<void>(() => undefined);
+        },
+        cancel() {
+          events.push("cancel");
+          return new Promise<void>(() => undefined);
+        },
+      }),
+    );
+    const pending = readResponseTextBody(
+      response,
+      128,
+      controller.signal,
+      () => events.push("transport"),
+    );
+    await started;
+    controller.abort();
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      pending.then(
+        () => "resolved",
+        (error: Error) => error.name,
+      ),
+      new Promise<string>((resolve) => {
+        timeout = setTimeout(() => resolve("hung"), 100);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+
+    expect(outcome).toBe("AbortError");
+    expect(events).toEqual(["transport", "cancel"]);
+  });
+
   it("reads a bounded upstream text response", async () => {
     const response = new Response("gateway error", { status: 502 });
 

@@ -18,6 +18,7 @@ const secret = "provider-secret-value";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   delete process.env.MATCHPLANE_ENVIRONMENT;
 });
 
@@ -145,6 +146,19 @@ function expectedPath(protocol: ProviderProtocol): string {
   return "/v1/chat/completions";
 }
 
+function errorChain(error: unknown): Error[] {
+  const chain: Error[] = [];
+  const seen = new Set<unknown>();
+  let candidate = error;
+  while (candidate instanceof Error && chain.length < 12) {
+    if (seen.has(candidate)) break;
+    seen.add(candidate);
+    chain.push(candidate);
+    candidate = candidate.cause;
+  }
+  return chain;
+}
+
 function modelWithFetch(protocol: ProviderProtocol, fetcher: typeof fetch) {
   return createProviderModel({
     protocol,
@@ -264,6 +278,68 @@ describe("provider adapter official SDK models", () => {
 });
 
 describe("provider adapter transport policy", () => {
+  it("rejects the injected fetcher seam outside an explicit non-production test environment", () => {
+    const fetcher = vi.fn(async () => new Response("{}")) as typeof fetch;
+    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+
+    expect(() =>
+      createProviderModel({
+        protocol: "openai-compatible",
+        endpoint: "https://provider.example",
+        apiKey: secret,
+        model: "test-model",
+        fetcher,
+        resolveAddresses: publicDns,
+        responseLimitBytes: 8_192,
+        timeoutMs: 2_000,
+      }),
+    ).toThrow(
+      expect.objectContaining({ code: "MP_PROVIDER_NETWORK_POLICY" }),
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the test-only fetcher seam when the model is invoked", async () => {
+    const fetcher = vi.fn(async () => new Response("{}")) as typeof fetch;
+    const model = modelWithFetch("openai-compatible", fetcher);
+    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+
+    const error = await generateText({ model, prompt: "hello", maxRetries: 0 })
+      .then(() => null)
+      .catch((caught) => caught);
+    expect(
+      errorChain(error).some(
+        (candidate) =>
+          candidate instanceof ProviderAdapterError &&
+          candidate.code === "MP_PROVIDER_NETWORK_POLICY",
+      ),
+    ).toBe(true);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when an environment proxy would be silently ignored by the pinned Agent", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.example:8080");
+    const model = createProviderModel({
+      protocol: "openai-compatible",
+      endpoint: "https://provider.example",
+      apiKey: secret,
+      model: "test-model",
+      responseLimitBytes: 8_192,
+      timeoutMs: 2_000,
+    });
+
+    const error = await generateText({ model, prompt: "hello", maxRetries: 0 })
+      .then(() => null)
+      .catch((caught) => caught);
+    expect(
+      errorChain(error).some(
+        (candidate) =>
+          candidate instanceof ProviderAdapterError &&
+          candidate.code === "MP_PROVIDER_NETWORK_POLICY",
+      ),
+    ).toBe(true);
+  });
+
   it("maps malformed provider endpoints to the stable adapter error code", () => {
     expect(() =>
       normalizeProviderBaseUrl("openai-compatible", "not-a-provider-url"),
@@ -485,6 +561,101 @@ describe("provider adapter transport policy", () => {
       expect(String(error)).not.toContain(secret);
       expect(String(error)).not.toContain("hidden prompt");
     }
+  });
+
+  it("maps a bounded nested Undici cause chain without losing safe policy, redirect, or timeout codes", async () => {
+    const failures = [
+      {
+        expectedCode: "MP_PROVIDER_NETWORK_POLICY",
+        leaf: new ProviderAdapterError("MP_PROVIDER_NETWORK_POLICY"),
+      },
+      {
+        expectedCode: "MP_PROVIDER_REDIRECT",
+        leaf: new ProviderAdapterError("MP_PROVIDER_REDIRECT", 307),
+      },
+      {
+        expectedCode: "UND_ERR_HEADERS_TIMEOUT",
+        leaf: Object.assign(new Error("unsafe upstream timeout detail"), {
+          code: "UND_ERR_HEADERS_TIMEOUT",
+        }),
+      },
+    ];
+
+    for (const { expectedCode, leaf } of failures) {
+      const fetcher = vi.fn(async () => {
+        throw new TypeError("fetch failed", {
+          cause: new TypeError("dispatcher failed", { cause: leaf }),
+        });
+      }) as typeof fetch;
+      const model = modelWithFetch("openai-compatible", fetcher);
+      const error = await generateText({
+        model,
+        prompt: "secret prompt",
+        maxRetries: 0,
+      })
+        .then(() => null)
+        .catch((caught) => caught);
+      const chain = errorChain(error);
+      expect(
+        chain.some(
+          (candidate) =>
+            (candidate as Error & { code?: string }).code === expectedCode,
+        ),
+      ).toBe(true);
+      expect(String(error)).not.toContain("unsafe upstream timeout detail");
+      expect(String(error)).not.toContain("secret prompt");
+    }
+  });
+
+  it("does not await a provider response body whose cancel hook hangs", async () => {
+    const controller = new AbortController();
+    let readStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    const cancel = vi.fn(() => new Promise<void>(() => undefined));
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull() {
+              readStarted?.();
+              return new Promise<void>(() => undefined);
+            },
+            cancel,
+          }),
+        ),
+    ) as typeof fetch;
+    const model = createProviderModel({
+      protocol: "openai-compatible",
+      endpoint: "https://provider.example",
+      apiKey: secret,
+      model: "test-model",
+      fetcher,
+      resolveAddresses: publicDns,
+      responseLimitBytes: 64 * 1024,
+      timeoutMs: 2_000,
+      signal: controller.signal,
+    });
+    const pending = generateText({ model, prompt: "hello", maxRetries: 0 });
+    await started;
+    controller.abort();
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      pending.then(
+        () => "resolved",
+        (error: Error) => errorChain(error).map((item) => item.name),
+      ),
+      new Promise<string>((resolve) => {
+        timeout = setTimeout(() => resolve("hung"), 100);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+
+    expect(outcome).not.toBe("hung");
+    expect(outcome).toContain("AbortError");
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("combines caller abort with the adapter deadline", async () => {

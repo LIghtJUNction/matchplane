@@ -9,6 +9,8 @@ import { type Agent, fetch as undiciFetch } from "undici";
 import {
   createPinnedPublicDispatcher,
   createPinnedPublicLookup,
+  PinnedPublicEndpointError,
+  PinnedPublicRedirectError,
   resolvePinnedPublicAddresses,
 } from "./lib/pinned-public-endpoint";
 import type { ResolveAddresses } from "./lib/public-endpoint";
@@ -53,6 +55,7 @@ export interface ProviderModelOptions {
   endpoint: string;
   apiKey: string;
   model: string;
+  /** Test-only transport seam; rejected unless NODE_ENV is test and production mode is off. */
   fetcher?: typeof fetch;
   resolveAddresses?: ResolveAddresses;
   responseLimitBytes: number;
@@ -104,10 +107,18 @@ export function normalizeProviderBaseUrl(
   return `${url.origin}${basePath}`;
 }
 
-/** Build an official SDK model while keeping transport policy provider-neutral. */
+/**
+ * Build an official SDK model while keeping transport policy provider-neutral.
+ * Non-loopback production traffic uses a connector-pinned Undici Agent and rejects
+ * environment proxy variables because that Agent cannot safely honor proxy routing
+ * and DNS pinning together.
+ */
 export function createProviderModel(
   options: ProviderModelOptions,
 ): LanguageModel {
+  if (options.fetcher && !isExplicitTestEnvironment()) {
+    throw providerNetworkPolicyError();
+  }
   const baseURL = normalizeProviderBaseUrl(options.protocol, options.endpoint);
   const safeFetch = createSafeProviderFetch({ ...options, baseURL });
   if (options.protocol === "openai-compatible") {
@@ -163,6 +174,11 @@ function createSafeProviderFetch(options: SafeFetchOptions): typeof fetch {
     ].filter((signal): signal is AbortSignal => Boolean(signal));
     const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
     let dispatcher: Agent | null = null;
+    let dispatcherDestroy: Promise<void> | undefined;
+    const destroyTransport = () => {
+      if (!dispatcher) return;
+      dispatcherDestroy ??= dispatcher.destroy().catch(() => undefined);
+    };
     try {
       signal?.throwIfAborted();
       const url = finalProviderUrl(resource);
@@ -176,9 +192,7 @@ function createSafeProviderFetch(options: SafeFetchOptions): typeof fetch {
         cache: "no-store" as const,
       };
       if (options.fetcher) {
-        // Dependency-injected transports are used by local tests. Production
-        // call sites omit this seam and therefore cannot bypass the pinned
-        // Undici connector below.
+        if (!isExplicitTestEnvironment()) throw providerNetworkPolicyError();
         await resolveValidatedProviderAddresses(
           url,
           options.resolveAddresses,
@@ -186,6 +200,7 @@ function createSafeProviderFetch(options: SafeFetchOptions): typeof fetch {
         );
         response = await options.fetcher(url, requestInit);
       } else {
+        assertEnvironmentProxyUnsupported(url);
         dispatcher = createPinnedProviderDispatcher(
           url,
           options.resolveAddresses,
@@ -208,22 +223,27 @@ function createSafeProviderFetch(options: SafeFetchOptions): typeof fetch {
         response.redirected ||
         (response.status >= 300 && response.status < 400)
       ) {
-        await response.body?.cancel().catch(() => undefined);
+        destroyTransport();
+        cancelResponseBody(response);
         throw new ProviderAdapterError("MP_PROVIDER_REDIRECT", response.status);
       }
       return await boundedResponse(
         response,
         options.responseLimitBytes,
         signal,
+        destroyTransport,
       );
+    } catch (error) {
+      destroyTransport();
+      throw safeProviderFetchError(error, signal);
     } finally {
       clearTimeout(timer);
       if (dispatcher) {
-        if (signal?.aborted) {
-          await dispatcher.destroy().catch(() => undefined);
+        if (signal?.aborted || dispatcherDestroy) {
+          destroyTransport();
         } else {
-          await dispatcher.close().catch(async () => {
-            await dispatcher?.destroy().catch(() => undefined);
+          await dispatcher.close().catch(() => {
+            destroyTransport();
           });
         }
       }
@@ -275,6 +295,32 @@ async function resolveValidatedProviderAddresses(
 
 function providerNetworkPolicyError(): ProviderAdapterError {
   return new ProviderAdapterError("MP_PROVIDER_NETWORK_POLICY");
+}
+
+function isExplicitTestEnvironment(): boolean {
+  return (
+    process.env.NODE_ENV === "test" &&
+    process.env.MATCHPLANE_ENVIRONMENT !== "production"
+  );
+}
+
+/**
+ * A connector-pinned Undici Agent cannot also honor environment proxy routing.
+ * Fail closed instead of silently bypassing an operator-configured proxy.
+ */
+function assertEnvironmentProxyUnsupported(url: URL): void {
+  if (isDevelopmentLoopback(url)) return;
+  const proxyVariables = [
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+  ] as const;
+  if (proxyVariables.some((name) => process.env[name]?.trim())) {
+    throw providerNetworkPolicyError();
+  }
 }
 
 function finalProviderUrl(resource: RequestInfo | URL): URL {
@@ -333,11 +379,13 @@ async function boundedResponse(
   response: Response,
   limitBytes: number,
   signal?: AbortSignal,
+  beforeCancel?: () => void,
 ): Promise<Response> {
   const boundedLimit = Math.max(1, Math.floor(limitBytes));
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > boundedLimit) {
-    await response.body?.cancel().catch(() => undefined);
+    beforeCancel?.();
+    cancelResponseBody(response);
     throw new ProviderAdapterError("MP_PROVIDER_BODY_LIMIT", response.status);
   }
   if (!response.body) {
@@ -347,6 +395,21 @@ async function boundedResponse(
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let cancelStarted = false;
+  const cancelReader = (reason?: unknown) => {
+    if (cancelStarted) return;
+    cancelStarted = true;
+    try {
+      beforeCancel?.();
+    } catch {
+      // Cleanup must not replace the provider failure.
+    }
+    try {
+      void reader.cancel(reason).catch(() => undefined);
+    } catch {
+      // Cancellation is best-effort and must remain bounded.
+    }
+  };
   try {
     while (true) {
       signal?.throwIfAborted();
@@ -354,7 +417,6 @@ async function boundedResponse(
       if (done) break;
       total += value.byteLength;
       if (total > boundedLimit) {
-        await reader.cancel().catch(() => undefined);
         throw new ProviderAdapterError(
           "MP_PROVIDER_BODY_LIMIT",
           response.status,
@@ -363,10 +425,14 @@ async function boundedResponse(
       chunks.push(value);
     }
   } catch (error) {
-    await reader.cancel().catch(() => undefined);
+    cancelReader(error);
     throw error;
   } finally {
-    reader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch {
+      // A hung cancellation can leave a read pending; preserve the original error.
+    }
   }
   const body = new Uint8Array(total);
   let offset = 0;
@@ -375,6 +441,14 @@ async function boundedResponse(
     offset += chunk.byteLength;
   }
   return new Response(body, responseInit(response));
+}
+
+function cancelResponseBody(response: Response, reason?: unknown): void {
+  try {
+    void response.body?.cancel(reason).catch(() => undefined);
+  } catch {
+    // Cancellation is best-effort and must never mask the provider failure.
+  }
 }
 
 function isAllowedProviderTransport(url: URL): boolean {
@@ -413,6 +487,98 @@ async function awaitWithAbort<T>(
       },
     );
   });
+}
+
+const UNDICI_TIMEOUT_CODES = new Set([
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+
+function safeProviderFetchError(
+  error: unknown,
+  signal?: AbortSignal,
+): Error {
+  if (signal?.aborted) return safeInterruptedError(signal.reason);
+  const direct = safeKnownProviderError(error);
+  if (direct) return direct;
+  if (!(error instanceof TypeError)) return providerTransportFailure();
+
+  const seen = new Set<unknown>();
+  let candidate: unknown = error;
+  for (let depth = 0; depth < 6 && candidate !== undefined; depth += 1) {
+    if (seen.has(candidate)) break;
+    seen.add(candidate);
+    const known = safeKnownProviderError(candidate);
+    if (known) return known;
+    candidate = safeErrorCause(candidate);
+  }
+
+  return providerTransportFailure();
+}
+
+function providerTransportFailure(): Error {
+  const failure = new Error("Provider request failed.");
+  failure.name = "ProviderTransportError";
+  return failure;
+}
+
+function safeKnownProviderError(error: unknown): Error | undefined {
+  if (error instanceof ProviderAdapterError) return error;
+  if (error instanceof PinnedPublicEndpointError) {
+    return providerNetworkPolicyError();
+  }
+  if (error instanceof PinnedPublicRedirectError) {
+    return new ProviderAdapterError("MP_PROVIDER_REDIRECT", error.statusCode);
+  }
+  if (!(error instanceof Error)) return undefined;
+  const code = safeErrorCode(error);
+  if (error.name === "TimeoutError" || (code && UNDICI_TIMEOUT_CODES.has(code))) {
+    return safeTimeoutError(code);
+  }
+  if (error.name === "AbortError" || code === "UND_ERR_ABORTED") {
+    const aborted = new Error("Provider request was aborted.");
+    aborted.name = "AbortError";
+    if (code === "UND_ERR_ABORTED") Object.assign(aborted, { code });
+    return aborted;
+  }
+  return undefined;
+}
+
+function safeInterruptedError(reason: unknown): Error {
+  return safeKnownProviderError(reason) ?? safeAbortError();
+}
+
+function safeAbortError(): Error {
+  const error = new Error("Provider request was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function safeTimeoutError(code?: string): Error {
+  const error = new Error("Provider request timed out.");
+  error.name = "TimeoutError";
+  if (code && UNDICI_TIMEOUT_CODES.has(code)) Object.assign(error, { code });
+  return error;
+}
+
+function safeErrorCode(error: Error): string | undefined {
+  try {
+    const code = (error as Error & { code?: unknown }).code;
+    return typeof code === "string" ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeErrorCause(error: unknown): Error | undefined {
+  if (!(error instanceof Error)) return undefined;
+  try {
+    const cause = error.cause;
+    return cause instanceof Error ? cause : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function responseInit(response: Response): ResponseInit {

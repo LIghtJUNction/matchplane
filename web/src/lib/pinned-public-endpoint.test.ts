@@ -18,6 +18,7 @@ import {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -134,6 +135,39 @@ describe("pinned public endpoint transport", () => {
     await vi.advanceTimersByTimeAsync(21);
     await assertion;
     expect(canceled).toBe(true);
+  });
+
+  it("destroys the dispatcher before a hung body cancellation", async () => {
+    vi.useFakeTimers();
+    const events: string[] = [];
+    vi.spyOn(Agent.prototype, "destroy").mockImplementation(async () => {
+      events.push("destroy");
+    });
+    const body = new ReadableStream<Uint8Array>({
+      pull() {
+        return new Promise<void>(() => undefined);
+      },
+      cancel() {
+        events.push("cancel");
+        return new Promise<void>(() => undefined);
+      },
+    });
+    undiciState.fetch.mockResolvedValue(new Response(body, { status: 200 }));
+    const pending = fetchPinnedPublicText(
+      new URL("https://api.weixin.qq.com/sns/userinfo"),
+      {
+        requestTimeoutMs: 1_000,
+        responseBodyTimeoutMs: 20,
+        responseLimitBytes: 1_024,
+      },
+    );
+    const assertion = expect(pending).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+
+    await vi.advanceTimersByTimeAsync(21);
+    await assertion;
+    expect(events).toEqual(["destroy", "cancel"]);
   });
 
   it("rejects an oversized response body through the shared body-limit reader", async () => {

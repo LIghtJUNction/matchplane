@@ -60,13 +60,25 @@ export async function readResponseTextBody(
   response: Response,
   maximumBytes: number,
   signal?: AbortSignal,
+  beforeCancel?: () => void,
 ): Promise<string> {
   const declaredLength = Number.parseInt(
     response.headers.get("content-length") ?? "",
     10,
   );
   if (Number.isSafeInteger(declaredLength) && declaredLength > maximumBytes) {
-    throw new ResponseBodyTooLargeError(maximumBytes);
+    const error = new ResponseBodyTooLargeError(maximumBytes);
+    try {
+      beforeCancel?.();
+    } catch {
+      // Cleanup must not replace the body-limit failure.
+    }
+    try {
+      void response.body?.cancel(error).catch(() => undefined);
+    } catch {
+      // Cancellation is best-effort and must remain bounded.
+    }
+    throw error;
   }
   if (!response.body) throw new SyntaxError("empty response body");
   const bytes = await readBoundedBytes(
@@ -74,6 +86,7 @@ export async function readResponseTextBody(
     maximumBytes,
     () => new ResponseBodyTooLargeError(maximumBytes),
     signal,
+    beforeCancel,
   );
   return new TextDecoder().decode(bytes);
 }
@@ -92,12 +105,28 @@ async function readBoundedBytes(
   maximumBytes: number,
   tooLarge: () => Error,
   signal?: AbortSignal,
+  beforeCancel?: () => void,
 ): Promise<Uint8Array> {
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   let rejectAbort: ((reason?: unknown) => void) | undefined;
   let onAbort: (() => void) | undefined;
+  let cancelStarted = false;
+  const cancelReader = (reason?: unknown) => {
+    if (cancelStarted) return;
+    cancelStarted = true;
+    try {
+      beforeCancel?.();
+    } catch {
+      // Cleanup must not replace the bounded read failure.
+    }
+    try {
+      void reader.cancel(reason).catch(() => undefined);
+    } catch {
+      // Some stream implementations can throw before returning a promise.
+    }
+  };
 
   try {
     const abortPromise = signal && !signal.aborted
@@ -105,10 +134,9 @@ async function readBoundedBytes(
           rejectAbort = reject;
           onAbort = () => {
             // Reject before canceling so a cancel-induced `{ done: true }` read cannot win the
-            // race. Canceling as well prevents an upstream response that drips bytes forever
-            // from keeping the request alive.
+            // race. The transport hook runs before best-effort stream cancellation.
             rejectAbort?.(abortError(signal));
-            void reader.cancel(signal.reason).catch(() => undefined);
+            cancelReader(signal.reason);
           };
           signal.addEventListener("abort", onAbort, { once: true });
           if (signal.aborted) onAbort();
@@ -128,18 +156,19 @@ async function readBoundedBytes(
         chunks.push(value);
       }
     } catch (error) {
-      // Stop a chunked/slow stream as soon as its bounded budget is exceeded or its signal is
-      // aborted. Releasing the reader alone leaves an unread stream attached in some runtimes.
-      try {
-        await reader.cancel();
-      } catch {
-        // Preserve the original read/size/abort failure when cancellation also fails.
-      }
+      // Cancellation is deliberately detached: a hostile or broken upstream
+      // must not keep an aborted/over-limit request alive forever.
+      cancelReader(error);
       throw error;
     }
   } finally {
     if (signal && onAbort) signal.removeEventListener("abort", onAbort);
-    reader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch {
+      // A hung cancellation can leave a read pending; preserving the original
+      // failure is more important than synchronously releasing that lock.
+    }
   }
   const bytes = new Uint8Array(total);
   let offset = 0;

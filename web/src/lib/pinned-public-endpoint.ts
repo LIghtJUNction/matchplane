@@ -168,7 +168,12 @@ export async function fetchPinnedPublicText(
   const requestSignal = combineSignals(options.signal, requestTimeout.signal);
   let bodyTimeout: ReturnType<typeof timeoutController> | undefined;
   let dispatcher: Agent | undefined;
+  let dispatcherDestroy: Promise<void> | undefined;
   let response: Response | undefined;
+  const destroyTransport = () => {
+    if (!dispatcher) return;
+    dispatcherDestroy ??= dispatcher.destroy().catch(() => undefined);
+  };
 
   try {
     requestSignal.throwIfAborted();
@@ -190,7 +195,8 @@ export async function fetchPinnedPublicText(
       response.redirected ||
       (response.status >= 300 && response.status < 400)
     ) {
-      await response.body?.cancel().catch(() => undefined);
+      destroyTransport();
+      cancelResponseBody(response);
       throw new PinnedPublicRedirectError(response.status);
     }
 
@@ -205,9 +211,9 @@ export async function fetchPinnedPublicText(
         response,
         options.responseLimitBytes,
         bodySignal,
+        destroyTransport,
       );
     } catch (error) {
-      await response.body?.cancel(error).catch(() => undefined);
       bodySignal.throwIfAborted();
       throw error;
     }
@@ -220,14 +226,22 @@ export async function fetchPinnedPublicText(
         requestTimeout.signal.aborted ||
         bodyTimeout?.signal.aborted ||
         options.signal?.aborted;
-      if (interrupted) {
-        await dispatcher.destroy().catch(() => undefined);
+      if (interrupted || dispatcherDestroy) {
+        destroyTransport();
       } else {
-        await dispatcher.close().catch(async () => {
-          await dispatcher?.destroy().catch(() => undefined);
+        await dispatcher.close().catch(() => {
+          destroyTransport();
         });
       }
     }
+  }
+}
+
+function cancelResponseBody(response: Response, reason?: unknown): void {
+  try {
+    void response.body?.cancel(reason).catch(() => undefined);
+  } catch {
+    // Cancellation is best-effort and must never mask the transport failure.
   }
 }
 
