@@ -293,7 +293,11 @@ describe("PlatformDashboard deferred sections", () => {
     expect(brandPanel).toHaveAttribute("role", "tabpanel");
 
     await user.click(screen.getByRole("tab", { name: "货币与汇率" }));
-    expect(screen.getByTestId("currency-panel-content")).toBeVisible();
+    const currencyPanel = document.getElementById(
+      "marketplace-settings-panel-currency",
+    );
+    const currencyContent = screen.getByTestId("currency-panel-content");
+    expect(currencyContent).toBeVisible();
     expect(settingsModuleRequests.currency).toHaveBeenCalledOnce();
 
     await user.click(screen.getByRole("tab", { name: "邮件" }));
@@ -355,6 +359,10 @@ describe("PlatformDashboard deferred sections", () => {
 
     await user.click(screen.getByRole("tab", { name: "品牌" }));
     expect(screen.getByTestId("brand-panel-content")).toBe(brandContent);
+    await user.click(screen.getByRole("tab", { name: "货币与汇率" }));
+    expect(screen.getByTestId("currency-panel-content")).toBe(currencyContent);
+    expect(currencyPanel).toBeVisible();
+    expect(settingsModuleRequests.currency).toHaveBeenCalledOnce();
     await user.click(screen.getByRole("tab", { name: "邮件" }));
     expect(screen.getByTestId("email-config-panel")).toBe(emailContent);
     await user.click(screen.getByRole("tab", { name: "登录与身份" }));
@@ -365,6 +373,7 @@ describe("PlatformDashboard deferred sections", () => {
     expect(identityPanel).not.toBeVisible();
     expect(filingPanel).toBeVisible();
     expect(settingsModuleRequests.brand).toHaveBeenCalledOnce();
+    expect(settingsModuleRequests.currency).toHaveBeenCalledOnce();
     expect(settingsModuleRequests.email).toHaveBeenCalledOnce();
     expect(settingsModuleRequests.identity).toHaveBeenCalledOnce();
     expect(settingsModuleRequests.filing).toHaveBeenCalledOnce();

@@ -341,9 +341,9 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .mall-account-search input { min-width: 0; min-height: 2.65rem; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 0.74rem; }
 .mall-brand-panel { grid-column: 1 / -1; }
 .mall-brand-intro { max-width: 44rem; margin-top: 0.62rem; color: var(--muted); font-size: 0.74rem; line-height: 1.6; }
-.mall-currency-panel { grid-column: 1 / -1; }
+.mall-currency-panel { min-width: 0; max-width: 100%; grid-column: 1 / -1; }
 .mall-currency-intro { max-width: 48rem; margin-top: 0.62rem; color: var(--muted); font-size: 0.74rem; line-height: 1.6; }
-.mall-currency-form { margin-top: 1.15rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.mall-currency-form { min-width: 0; margin-top: 1.15rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .mall-currency-field { min-width: 0; display: grid; align-content: start; gap: 0.35rem; }
 .mall-currency-field > span, .mall-currency-rate > span { color: var(--ink-soft); font-size: 0.68rem; font-weight: 650; }
 .mall-currency-field select { width: 100%; min-height: 2.75rem; padding: 0 0.75rem; border: 1px solid var(--line); border-radius: 0.78rem; outline: 0; background: var(--paper); color: var(--ink); font: inherit; font-size: 0.75rem; }
@@ -356,9 +356,10 @@ main { padding: 1.15rem 1.25rem 7rem; }
 .mall-currency-actions > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem; }
 .mall-currency-actions .button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; white-space: nowrap; }
 .mall-currency-status { margin-top: 1rem; color: var(--muted); font-size: 0.74rem; }
-.mall-currency-error { margin-top: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--danger); font-size: 0.72rem; }
-.mall-currency-error p { margin: 0; overflow-wrap: anywhere; }
-.mall-currency-error .button { min-height: 2.75rem; display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+.mall-currency-error { min-width: 0; grid-column: 1 / -1; padding: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line)); border-radius: 0.78rem; background: color-mix(in srgb, var(--danger) 6%, var(--paper)); color: var(--danger); font-size: 0.72rem; }
+.mall-currency-error p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.mall-currency-error-actions { min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem; }
+.mall-currency-error .button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; white-space: nowrap; }
 .mall-currency-panel .animate-spin { animation: mall-currency-spin 0.9s linear infinite; }
 @keyframes mall-currency-spin { to { transform: rotate(360deg); } }
 .mall-brand-form { margin-top: 1.15rem; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1rem; }
@@ -2047,10 +2048,11 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 @media (max-width: 760px) {
 .mall-currency-form { grid-template-columns: 1fr; }
 .mall-currency-actions { align-items: stretch; flex-direction: column; }
-.mall-currency-actions > div { justify-content: stretch; }
-.mall-currency-actions .button { flex: 1 1 12rem; }
+.mall-currency-actions > div { min-width: 0; justify-content: stretch; }
+.mall-currency-actions .button { min-width: 0; flex: 1 1 12rem; }
 .mall-currency-error { align-items: stretch; flex-direction: column; }
-.mall-currency-error .button { width: fit-content; }
+.mall-currency-error-actions { width: 100%; justify-content: stretch; }
+.mall-currency-error .button { min-width: 0; flex: 1 1 9rem; }
 }
 @media (prefers-reduced-motion: reduce) {
 .mall-currency-panel .animate-spin { animation: none; }

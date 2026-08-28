@@ -15,6 +15,11 @@ import { SectionHeading } from "./Primitives";
 // Keep this list aligned with Frankfurter's ECB-backed /currencies response. Unknown persisted
 // codes remain visible below so an existing tenant can still be corrected rather than silently
 // changing its setting.
+type PanelError = {
+  message: string;
+  retry: "load" | "save" | "sync";
+};
+
 const LOCAL_CURRENCY_OPTIONS = [
   ["CNY", "人民币"],
   ["JPY", "日元"],
@@ -62,55 +67,113 @@ export function MallCurrencySettingsPanel({
   const [localCurrency, setLocalCurrency] = useState("CNY");
   const [savedCurrency, setSavedCurrency] = useState("CNY");
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const [panelError, setPanelError] = useState<PanelError | null>(null);
 
-  const applySettings = useCallback((next: MallExchangeRateSettings) => {
-    setSettings(next);
-    setLocalCurrency(next.localCurrency);
-    setSavedCurrency(next.localCurrency);
-  }, []);
+  const applySettings = useCallback(
+    (
+      next: MallExchangeRateSettings,
+      options: { preserveDraft?: boolean; submittedCurrency?: string } = {},
+    ) => {
+      setSettings(next);
+      setSavedCurrency(next.localCurrency);
+      setLocalCurrency((current) => {
+        if (options.preserveDraft) return current;
+        if (
+          options.submittedCurrency &&
+          current !== options.submittedCurrency
+        ) {
+          return current;
+        }
+        return next.localCurrency;
+      });
+    },
+    [],
+  );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError("");
-    try {
-      applySettings(await getMallExchangeRateSettings());
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "货币设置读取失败";
-      setLoadError(message);
-      onNotice(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [applySettings, onNotice]);
+  const load = useCallback(
+    async ({
+      preserveDraft = false,
+      successAnnouncement = "",
+    }: {
+      preserveDraft?: boolean;
+      successAnnouncement?: string;
+    } = {}) => {
+      setLoading(true);
+      try {
+        const next = await getMallExchangeRateSettings();
+        applySettings(next, { preserveDraft });
+        setPanelError(null);
+        setAnnouncement(successAnnouncement);
+        return true;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "货币设置读取失败";
+        setPanelError({ message, retry: "load" });
+        setAnnouncement("");
+        onNotice(message);
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applySettings, onNotice],
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  const recoverFromConflict = async (
+    errorMessage: string,
+    retry: Exclude<PanelError["retry"], "load">,
+  ) => {
+    setPanelError({ message: errorMessage, retry });
+    const loaded = await load({
+      preserveDraft: true,
+      successAnnouncement: "已载入最新设置，请确认后重试",
+    });
+    if (loaded) {
+      setPanelError({
+        message: `${errorMessage}。已载入最新设置，请确认草稿后重试。`,
+        retry,
+      });
+    }
+  };
+
   const saveCurrency = async () => {
     if (!canEdit || !settings || saving || syncing) return;
     if (localCurrency === savedCurrency) {
+      setPanelError((current) =>
+        current?.retry === "save" ? null : current,
+      );
+      setAnnouncement("");
       onNotice("本地货币没有变化");
       return;
     }
+    const submittedCurrency = localCurrency;
     setSaving(true);
+    setAnnouncement("");
     try {
       const next = await saveMallExchangeRateSettings({
-        localCurrency,
+        localCurrency: submittedCurrency,
         expectedVersion: settings.version,
       });
-      applySettings(next);
+      applySettings(next, { submittedCurrency });
+      setPanelError(null);
       onNotice("本地货币已保存；请同步最新美元汇率");
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "本地货币保存失败";
       if (isVersionConflict(error)) {
-        setSettings(null);
-        await load();
+        onNotice(message);
+        await recoverFromConflict(message, "save");
+      } else {
+        setPanelError({ message, retry: "save" });
+        onNotice(message);
       }
-      onNotice(error instanceof Error ? error.message : "本地货币保存失败");
     } finally {
       setSaving(false);
     }
@@ -118,20 +181,27 @@ export function MallCurrencySettingsPanel({
 
   const sync = async () => {
     if (!canEdit || !settings || saving || syncing) return;
+    const submittedCurrency = localCurrency;
     setSyncing(true);
+    setAnnouncement("");
     try {
       const next = await syncLatestUsdExchangeRate({
-        localCurrency,
+        localCurrency: submittedCurrency,
         expectedVersion: settings.version,
       });
-      applySettings(next);
+      applySettings(next, { submittedCurrency });
+      setPanelError(null);
       onNotice(`美元/${next.localCurrency} 汇率已同步`);
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "最新美元汇率同步失败";
       if (isVersionConflict(error)) {
-        setSettings(null);
-        await load();
+        onNotice(message);
+        await recoverFromConflict(message, "sync");
+      } else {
+        setPanelError({ message, retry: "sync" });
+        onNotice(message);
       }
-      onNotice(error instanceof Error ? error.message : "最新美元汇率同步失败");
     } finally {
       setSyncing(false);
     }
@@ -159,11 +229,12 @@ export function MallCurrencySettingsPanel({
       >
         <SectionHeading title="货币与汇率" titleId="mall-currency-title" />
         <div className="mall-currency-error" role="alert">
-          <p>{loadError || "货币设置暂时不可用"}</p>
+          <p>{panelError?.message || "货币设置暂时不可用"}</p>
           <button
             className="button button-light"
             type="button"
             onClick={() => void load()}
+            disabled={loading}
           >
             <RefreshCw size={16} aria-hidden="true" />
             重新读取
@@ -187,10 +258,19 @@ export function MallCurrencySettingsPanel({
     <section
       className="surface mall-currency-panel"
       aria-labelledby="mall-currency-title"
+      aria-busy={loading || saving || syncing}
     >
       <SectionHeading title="货币与汇率" titleId="mall-currency-title" />
       <p className="mall-currency-intro">
         设置商城使用的本地货币，并从公开汇率服务同步美元参考汇率。汇率仅用于展示和换算参考。
+      </p>
+      <p
+        className={announcement ? "mall-currency-status" : "sr-only"}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {announcement}
       </p>
       <form
         className="mall-currency-form"
@@ -205,7 +285,7 @@ export function MallCurrencySettingsPanel({
             id="mall-local-currency"
             value={localCurrency}
             aria-label="本地货币"
-            disabled={!canEdit || saving || syncing}
+            disabled={!canEdit}
             onChange={(event) => setLocalCurrency(event.target.value)}
             aria-describedby="mall-local-currency-hint"
           >
@@ -229,9 +309,54 @@ export function MallCurrencySettingsPanel({
           <strong data-testid="usd-exchange-rate">{rateDescription}</strong>
           <small>
             {updated}
-            {settings.rateSource ? ` · 来源：${settings.rateSource}` : ""}
+            {settings.rateSource
+              ? ` · 来源：${formatRateSource(settings.rateSource)}`
+              : ""}
           </small>
         </div>
+        {panelError ? (
+          <div className="mall-currency-error" role="alert">
+            <p>{panelError.message}</p>
+            <div className="mall-currency-error-actions">
+              {panelError.retry === "save" ? (
+                <button
+                  className="button button-light"
+                  type="button"
+                  onClick={() => void saveCurrency()}
+                  disabled={saving || syncing}
+                >
+                  <Save size={16} aria-hidden="true" />
+                  重试保存
+                </button>
+              ) : null}
+              {panelError.retry === "sync" ? (
+                <button
+                  className="button button-light"
+                  type="button"
+                  onClick={() => void sync()}
+                  disabled={saving || syncing}
+                >
+                  <RefreshCw size={16} aria-hidden="true" />
+                  重试同步
+                </button>
+              ) : null}
+              <button
+                className="button button-light"
+                type="button"
+                onClick={() =>
+                  void load({
+                    preserveDraft: true,
+                    successAnnouncement: "已重新读取最新设置",
+                  })
+                }
+                disabled={loading || saving || syncing}
+              >
+                <RefreshCw size={16} aria-hidden="true" />
+                重新读取
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className="mall-currency-actions">
           <p>
             {canEdit
@@ -269,6 +394,10 @@ export function MallCurrencySettingsPanel({
       </form>
     </section>
   );
+}
+
+function formatRateSource(source: string): string {
+  return source === "identity" ? "USD 基准值（固定 1:1）" : source;
 }
 
 function formatRate(rate: number | null): string {

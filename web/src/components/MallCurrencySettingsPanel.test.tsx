@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -57,6 +57,28 @@ describe("MallCurrencySettingsPanel", () => {
     );
     expect(screen.getByLabelText("本地货币")).toHaveValue("CNY");
     expect(screen.getByText(/来源：api\.frankfurter\.app/)).toBeInTheDocument();
+  });
+
+  it("presents the USD identity source as a fixed baseline", async () => {
+    api.getMallExchangeRateSettings.mockResolvedValue(
+      settings({
+        localCurrency: "USD",
+        usdToLocalRate: 1,
+        rateSource: "identity",
+      }),
+    );
+    render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+
+    expect(await screen.findByTestId("usd-exchange-rate")).toHaveTextContent(
+      "1 USD = 1 USD",
+    );
+    expect(screen.getByText(/来源：USD 基准值（固定 1:1）/)).toBeInTheDocument();
+    expect(screen.queryByText(/来源：identity/)).not.toBeInTheDocument();
   });
 
   it("saves a changed local currency and clears its stale rate", async () => {
@@ -118,7 +140,7 @@ describe("MallCurrencySettingsPanel", () => {
     expect(onNotice).toHaveBeenCalledWith("美元/JPY 汇率已同步");
   });
 
-  it("reloads settings after a save version conflict", async () => {
+  it("keeps focus and the draft mounted while rebasing after a save conflict", async () => {
     const user = userEvent.setup();
     api.getMallExchangeRateSettings
       .mockResolvedValueOnce(settings())
@@ -137,9 +159,7 @@ describe("MallCurrencySettingsPanel", () => {
           status: 409,
         }),
       )
-      .mockResolvedValueOnce(
-        settings({ localCurrency: "JPY", version: 9 }),
-      );
+      .mockResolvedValueOnce(settings({ localCurrency: "JPY", version: 9 }));
     render(
       <MallCurrencySettingsPanel
         rootRole="rootSuperAdmin"
@@ -148,20 +168,33 @@ describe("MallCurrencySettingsPanel", () => {
     );
 
     await screen.findByTestId("usd-exchange-rate");
-    await user.selectOptions(screen.getByLabelText("本地货币"), "EUR");
-    await user.click(screen.getByRole("button", { name: "保存本地货币" }));
+    const currencySelect = screen.getByLabelText("本地货币");
+    await user.selectOptions(currencySelect, "JPY");
+    currencySelect.focus();
+    const form = screen
+      .getByRole("button", { name: "保存本地货币" })
+      .closest("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
 
     await waitFor(() =>
       expect(api.getMallExchangeRateSettings).toHaveBeenCalledTimes(2),
     );
-    expect(screen.getByLabelText("本地货币")).toHaveValue("EUR");
+    expect(screen.getByLabelText("本地货币")).toBe(currencySelect);
+    expect(currencySelect).toHaveFocus();
+    expect(currencySelect).toHaveValue("JPY");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "已载入最新设置，请确认后重试",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "已载入最新设置，请确认草稿后重试",
+    );
     expect(api.saveMallExchangeRateSettings).toHaveBeenNthCalledWith(1, {
-      localCurrency: "EUR",
+      localCurrency: "JPY",
       expectedVersion: 3,
     });
 
-    await user.selectOptions(screen.getByLabelText("本地货币"), "JPY");
-    await user.click(screen.getByRole("button", { name: "保存本地货币" }));
+    await user.click(screen.getByRole("button", { name: "重试保存" }));
     await waitFor(() =>
       expect(api.saveMallExchangeRateSettings).toHaveBeenNthCalledWith(2, {
         localCurrency: "JPY",
@@ -204,13 +237,72 @@ describe("MallCurrencySettingsPanel", () => {
       expectedVersion: 3,
     });
 
-    await user.click(screen.getByRole("button", { name: "同步最新美元汇率" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "已载入最新设置，请确认草稿后重试",
+    );
+    await user.click(screen.getByRole("button", { name: "重试同步" }));
     await waitFor(() =>
       expect(api.syncLatestUsdExchangeRate).toHaveBeenNthCalledWith(2, {
         localCurrency: "JPY",
         expectedVersion: 9,
       }),
     );
+  });
+
+  it("keeps save failures in the panel until retry succeeds", async () => {
+    const user = userEvent.setup();
+    api.saveMallExchangeRateSettings
+      .mockRejectedValueOnce(new Error("本地货币保存失败，请稍后重试"))
+      .mockResolvedValueOnce(
+        settings({ localCurrency: "EUR", usdToLocalRate: null, version: 4 }),
+      );
+    render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+
+    await screen.findByTestId("usd-exchange-rate");
+    await user.selectOptions(screen.getByLabelText("本地货币"), "EUR");
+    await user.click(screen.getByRole("button", { name: "保存本地货币" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "本地货币保存失败，请稍后重试",
+    );
+    expect(screen.getByRole("button", { name: "重试保存" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "重新读取" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "重试保存" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(api.saveMallExchangeRateSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps sync failures in the panel until retry succeeds", async () => {
+    const user = userEvent.setup();
+    api.syncLatestUsdExchangeRate
+      .mockRejectedValueOnce(new Error("最新美元汇率同步失败，请稍后重试"))
+      .mockResolvedValueOnce(
+        settings({ localCurrency: "JPY", usdToLocalRate: 146.12, version: 4 }),
+      );
+    render(
+      <MallCurrencySettingsPanel
+        rootRole="rootSuperAdmin"
+        onNotice={onNotice}
+      />,
+    );
+
+    await screen.findByTestId("usd-exchange-rate");
+    await user.selectOptions(screen.getByLabelText("本地货币"), "JPY");
+    await user.click(screen.getByRole("button", { name: "同步最新美元汇率" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "最新美元汇率同步失败，请稍后重试",
+    );
+    expect(screen.getByRole("button", { name: "重试同步" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "重新读取" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "重试同步" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(api.syncLatestUsdExchangeRate).toHaveBeenCalledTimes(2);
   });
 
   it("offers every currency supported by the default Frankfurter provider", async () => {
@@ -261,6 +353,39 @@ describe("MallCurrencySettingsPanel", () => {
       ].sort(),
     );
   });
+
+  it.each([320, 390])(
+    "keeps the form and recovery actions inspectable at %ipx",
+    async (width) => {
+      const user = userEvent.setup();
+      api.saveMallExchangeRateSettings.mockRejectedValue(
+        new Error("保存失败"),
+      );
+      const { container } = render(
+        <div style={{ width }}>
+          <MallCurrencySettingsPanel
+            rootRole="rootSuperAdmin"
+            onNotice={onNotice}
+          />
+        </div>,
+      );
+
+      await screen.findByTestId("usd-exchange-rate");
+      await user.selectOptions(screen.getByLabelText("本地货币"), "EUR");
+      await user.click(screen.getByRole("button", { name: "保存本地货币" }));
+      await screen.findByRole("alert");
+
+      expect(container.querySelector(".mall-currency-panel")).toHaveClass(
+        "mall-currency-panel",
+      );
+      expect(container.querySelector(".mall-currency-form")).toBeTruthy();
+      expect(container.querySelector(".mall-currency-actions")).toBeTruthy();
+      expect(
+        container.querySelector(".mall-currency-error-actions"),
+      ).toContainElement(screen.getByRole("button", { name: "重新读取" }));
+      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+    },
+  );
 
   it("keeps the settings read-only for non-owners", async () => {
     render(
