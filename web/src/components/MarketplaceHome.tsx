@@ -23,6 +23,7 @@ import { MarketplaceSearchTrace } from "./MarketplaceSearchTrace";
 import { StorefrontDirectory } from "./StorefrontDirectory";
 
 interface MarketplaceHomeProps {
+  brandName?: string;
   catalogResolved: boolean;
   catalogError?: boolean;
   listings: AssetListing[];
@@ -170,7 +171,7 @@ function MarketplaceProducts({
     >
       <div className="root-marketplace-products-heading">
         <div>
-          <p>{locale === "en" ? "VISIBLE NOW" : "当前可见"}</p>
+          <p>{locale === "en" ? "Live shelf" : "在售货架"}</p>
           <h2 id="marketplace-products-title">
             {locale === "en" ? "Products" : "商品"}
           </h2>
@@ -193,6 +194,7 @@ function MarketplaceProducts({
 }
 
 export function MarketplaceHome({
+  brandName = "MatchPlane",
   catalogResolved,
   catalogError = false,
   listings,
@@ -249,13 +251,14 @@ export function MarketplaceHome({
       className="root-marketplace-page min-h-screen bg-background-subtle text-foreground"
       id="top"
     >
+      <div className="root-marketplace-atmosphere" aria-hidden="true" />
       <div className="root-marketplace-main">
         <section
           className={`root-marketplace-entry${searchTrace ? " has-results" : ""}`}
           aria-labelledby="root-marketplace-title"
         >
           <header className="root-marketplace-catalog-intro">
-            <p>{locale === "en" ? "OPEN MARKETPLACE" : "开放商城"}</p>
+            <p className="root-marketplace-brand">{brandName}</p>
             <h1 id="root-marketplace-title">
               {locale === "en"
                 ? "Describe what you are looking for."
@@ -263,8 +266,8 @@ export function MarketplaceHome({
             </h1>
             <span>
               {locale === "en"
-                ? "MatchPlane searches public stores and keeps each visible result tied to its source."
-                : "MatchPlane 会检索公开店铺，并保留每个可见结果的真实来源。"}
+                ? `${brandName} searches public stores and keeps every visible result tied to its source.`
+                : `${brandName} 会检索公开店铺，并保留每个可见结果的真实来源。`}
             </span>
             <ul className="root-marketplace-entry-facts">
               <li>

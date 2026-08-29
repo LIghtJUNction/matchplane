@@ -17,7 +17,7 @@ import { PlatformFooter } from "./PlatformFooter";
 afterEach(() => vi.clearAllMocks());
 
 describe("PlatformFooter", () => {
-  it("exposes the public how-to-shop page from the root mall footer", async () => {
+  it("exposes the public legal links from the root mall footer", async () => {
     render(
       <PlatformFooter
         subplatform={{
@@ -30,10 +30,6 @@ describe("PlatformFooter", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: "如何选购" })).toHaveAttribute(
-      "href",
-      "/how",
-    );
     expect(screen.getByRole("link", { name: "用户协议" })).toHaveAttribute(
       "href",
       "/terms",
@@ -42,5 +38,8 @@ describe("PlatformFooter", () => {
       "href",
       "/privacy",
     );
+    expect(
+      screen.queryByRole("link", { name: "如何选购" }),
+    ).not.toBeInTheDocument();
   });
 });
