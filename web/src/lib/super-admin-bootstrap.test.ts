@@ -29,9 +29,9 @@ describe("super administrator bootstrap claim", () => {
       registrationEmail: null,
       targetEmail: "owner@example.com",
     };
-    expect(
-      isReservedSuperAdminEmail(targetedInvite, "owner@example.com"),
-    ).toBe(true);
+    expect(isReservedSuperAdminEmail(targetedInvite, "owner@example.com")).toBe(
+      true,
+    );
     expect(
       matchesReservedSuperAdminInvite(
         targetedInvite,
@@ -43,18 +43,10 @@ describe("super administrator bootstrap claim", () => {
 
   it("matches the reserved email only with the original bearer token", () => {
     expect(
-      matchesReservedSuperAdminInvite(
-        invite,
-        "OWNER@example.com",
-        token,
-      ),
+      matchesReservedSuperAdminInvite(invite, "OWNER@example.com", token),
     ).toBe(true);
     expect(
-      matchesReservedSuperAdminInvite(
-        invite,
-        "owner@example.com",
-        digest,
-      ),
+      matchesReservedSuperAdminInvite(invite, "owner@example.com", digest),
     ).toBe(false);
     expect(
       matchesReservedSuperAdminInvite(

@@ -75,7 +75,8 @@ function remainingRefundMinorUnits(payment: PaymentAdminRecord): bigint | null {
   if (!isValidCurrencyScale(payment.currency_scale)) return null;
   const captured = parseStoredMinorUnits(payment.captured_amount);
   const refunded = parseStoredMinorUnits(payment.refunded_amount);
-  if (captured === null || refunded === null || refunded > captured) return null;
+  if (captured === null || refunded === null || refunded > captured)
+    return null;
   return captured - refunded;
 }
 
@@ -94,9 +95,7 @@ function parseMinorUnitDigits(value: string): bigint | null {
 }
 
 function isValidCurrencyScale(value: number): boolean {
-  return (
-    Number.isInteger(value) && value >= 0 && value <= MAX_CURRENCY_SCALE
-  );
+  return Number.isInteger(value) && value >= 0 && value <= MAX_CURRENCY_SCALE;
 }
 
 function formatMoneyMinorUnits(value: bigint, currencyScale: number): string {

@@ -49,9 +49,7 @@ const PlatformDashboardLocaleContext = createContext<"zh" | "en">("zh");
 function PlatformDashboardLoading() {
   const locale = useContext(PlatformDashboardLocaleContext);
   const message =
-    locale === "en"
-      ? "Loading the mall console…"
-      : "正在加载商城后台…";
+    locale === "en" ? "Loading the mall console…" : "正在加载商城后台…";
 
   return (
     <section

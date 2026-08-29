@@ -177,8 +177,9 @@ export function RefundEditor({
                             key={payment.payment_id}
                             value={payment.payment_id}
                         >
-                            {payment.merchant_order_id || payment.payment_id} · 剩余{" "}
-                            {remainingRefundAmount(payment)} {payment.currency}
+                            {payment.merchant_order_id || payment.payment_id} ·
+                            剩余 {remainingRefundAmount(payment)}{" "}
+                            {payment.currency}
                         </option>
                     ))}
                 </select>
@@ -194,13 +195,16 @@ export function RefundEditor({
                         inputMode="decimal"
                         placeholder="按支付单币种填写"
                         aria-describedby={
-                            selectedPayment ? "refund-amount-remaining" : undefined
+                            selectedPayment
+                                ? "refund-amount-remaining"
+                                : undefined
                         }
                         onChange={(event) => onAmountChange(event.target.value)}
                     />
                     {selectedPayment && selectedRemaining ? (
                         <small id="refund-amount-remaining">
-                            剩余可退款 {selectedRemaining} {selectedPayment.currency}；最多{" "}
+                            剩余可退款 {selectedRemaining}{" "}
+                            {selectedPayment.currency}；最多{" "}
                             {selectedPayment.currency_scale} 位小数
                         </small>
                     ) : null}

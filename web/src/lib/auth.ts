@@ -410,11 +410,10 @@ export const auth = betterAuth({
           const bootstrapClaimToken = readSuperAdminBootstrapClaimToken(
             context?.headers,
           );
-          const bootstrapReservation =
-            await authorizeReservedSuperAdminInvite(
-              user.email,
-              bootstrapClaimToken,
-            );
+          const bootstrapReservation = await authorizeReservedSuperAdminInvite(
+            user.email,
+            bootstrapClaimToken,
+          );
           if (bootstrapReservation === "authorized") {
             return {
               data: { ...user, ...acceptedLegalData, role: "rootSuperAdmin" },

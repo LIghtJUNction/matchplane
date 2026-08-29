@@ -1,16 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const {
-  connect,
-  hasTrustedBrowserOrigin,
-  release,
-  transactionQuery,
-} = vi.hoisted(() => ({
-  connect: vi.fn(),
-  hasTrustedBrowserOrigin: vi.fn(),
-  release: vi.fn(),
-  transactionQuery: vi.fn(),
-}));
+const { connect, hasTrustedBrowserOrigin, release, transactionQuery } =
+  vi.hoisted(() => ({
+    connect: vi.fn(),
+    hasTrustedBrowserOrigin: vi.fn(),
+    release: vi.fn(),
+    transactionQuery: vi.fn(),
+  }));
 
 vi.mock("./lib/auth", () => ({
   authDatabase: { connect },
