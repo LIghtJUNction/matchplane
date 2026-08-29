@@ -5,7 +5,10 @@ import type {
     PaymentAdminRecord,
     RefundAdminRecord,
 } from "../api";
-import { remainingRefundAmount } from "../lib/payment-money";
+import {
+    formatStoredMoneyAmount,
+    remainingRefundAmount,
+} from "../lib/payment-money";
 
 export type FinanceView = "invoices" | "refunds";
 
@@ -47,13 +50,13 @@ export function FinanceRecordList(props: FinanceRecordListProps) {
             ? props.records.slice(0, 5).map((invoice) => ({
                   key: invoice.invoice_id,
                   title: invoice.invoice_number || invoice.kind,
-                  detail: `${invoice.status} · ${invoice.amount} ${invoice.currency}`,
+                  detail: `${invoice.status} · ${formatStoredMoneyAmount(invoice.amount, invoice.currency_scale) ?? "金额无效"} ${invoice.currency}`,
                   updatedAt: invoice.updated_at,
               }))
             : props.records.slice(0, 5).map((refund) => ({
                   key: refund.refund_id,
                   title: `退款 ${refund.payment_id.slice(0, 8)}`,
-                  detail: `${refund.status} · ${refund.amount} ${refund.currency}`,
+                  detail: `${refund.status} · ${formatStoredMoneyAmount(refund.amount, refund.currency_scale) ?? "金额无效"} ${refund.currency}`,
                   updatedAt: refund.updated_at,
               }));
 

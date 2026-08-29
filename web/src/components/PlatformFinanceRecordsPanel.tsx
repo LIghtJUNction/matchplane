@@ -15,7 +15,7 @@ import {
 } from "../api";
 import {
   isRefundablePayment,
-  isRefundAmountWithinRemaining,
+  refundAmountMinorUnits,
 } from "../lib/payment-money";
 import {
   FinanceRecordList,
@@ -201,7 +201,8 @@ export function PlatformFinanceRecordsPanel({
 
     const amount = refundAmount.trim();
     const reason = refundReason.trim();
-    if (!isRefundAmountWithinRemaining(selectedPayment, amount)) {
+    const amountMinorUnits = refundAmountMinorUnits(selectedPayment, amount);
+    if (amountMinorUnits === null) {
       onNotice("退款金额必须大于零、符合币种精度，且不得超过剩余可退款金额");
       return;
     }
@@ -209,7 +210,7 @@ export function PlatformFinanceRecordsPanel({
     const fingerprint = JSON.stringify([
       tenant.tenantId,
       selectedPayment.payment_id,
-      amount,
+      amountMinorUnits,
       reason,
     ]);
     let idempotency = refundIdempotencyRef.current;
@@ -228,7 +229,7 @@ export function PlatformFinanceRecordsPanel({
       await createAdminRefund({
         tenantId: tenant.tenantId,
         paymentId: selectedPayment.payment_id,
-        amount,
+        amount: amountMinorUnits,
         reason,
         idempotencyKey: idempotency.key,
       });

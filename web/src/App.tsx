@@ -322,6 +322,8 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     }
     if (paymentModeSwitchingRef.current) return;
     paymentModeSwitchingRef.current = true;
+    const switchRequestVersion = ++paymentSettingRequestRef.current;
+    setPaymentSettingStatus("loading");
 
     const nextMode = paymentMode === "test" ? "production" : "test";
     void switchPaymentMode({
@@ -331,7 +333,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       reason: `web-admin switch to ${nextMode}`,
     })
       .then((setting) => {
-        paymentSettingRequestRef.current += 1;
+        if (paymentSettingRequestRef.current !== switchRequestVersion) return;
         setPaymentMode(setting.active_mode);
         setPaymentModeVersion(setting.version);
         setPaymentSettingStatus("ready");
@@ -341,6 +343,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         );
       })
       .catch((error) => {
+        if (paymentSettingRequestRef.current !== switchRequestVersion) return;
         setPaymentSettingStatus("error");
         setModeDialogOpen(false);
         setNotice(error instanceof Error ? error.message : "支付模式切换失败");

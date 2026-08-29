@@ -111,6 +111,7 @@ export interface PaymentAdminRecord {
   gateway_kind: string;
   gateway_mode: string;
   payment_method: string;
+  /** Exact integer minor units; apply currency_scale only for display. */
   amount: string;
   captured_amount: string;
   refunded_amount: string;
@@ -130,6 +131,7 @@ export interface RefundAdminRecord {
   refund_id: string;
   tenant_id: string;
   payment_id: string;
+  /** Exact integer minor units; apply currency_scale only for display. */
   amount: string;
   commission_reversal_amount: string;
   currency: string;
@@ -150,6 +152,7 @@ export interface InvoiceAdminRecord {
   offline_deal_id?: string | null;
   correction_of_invoice_id?: string | null;
   kind: string;
+  /** Exact integer minor units; apply currency_scale only for display. */
   amount: string;
   currency: string;
   currency_scale: number;

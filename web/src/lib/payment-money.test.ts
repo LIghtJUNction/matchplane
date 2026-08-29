@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { PaymentAdminRecord } from "../api";
 import {
+  formatStoredMoneyAmount,
   isRefundablePayment,
   isRefundAmountWithinRemaining,
   parseMoneyMinorUnits,
+  refundAmountMinorUnits,
   remainingRefundAmount,
 } from "./payment-money";
 
@@ -38,8 +40,8 @@ function payment(
 }
 
 describe("payment money invariants", () => {
-  it("compares refund amounts exactly without binary floating point", () => {
-    const record = payment("9007199254740993.01", "0.02");
+  it("compares integer minor-unit records exactly beyond Number precision", () => {
+    const record = payment("900719925474099301", "2");
 
     expect(remainingRefundAmount(record)).toBe("9007199254740992.99");
     expect(isRefundAmountWithinRemaining(record, "9007199254740992.99")).toBe(
@@ -50,8 +52,16 @@ describe("payment money invariants", () => {
     );
   });
 
+  it("converts a validated major-unit refund to the API's integer minor units", () => {
+    const record = payment("12000", "0");
+
+    expect(refundAmountMinorUnits(record, "20.00")).toBe("2000");
+    expect(formatStoredMoneyAmount(record.captured_amount, 2)).toBe("120.00");
+    expect(formatStoredMoneyAmount("120.00", 2)).toBeNull();
+  });
+
   it("rejects zero, negative, over-precision, and over-refund requests", () => {
-    const record = payment("10.00", "3.25");
+    const record = payment("1000", "325");
 
     expect(remainingRefundAmount(record)).toBe("6.75");
     expect(isRefundAmountWithinRemaining(record, "0")).toBe(false);
@@ -62,15 +72,16 @@ describe("payment money invariants", () => {
   });
 
   it("removes fully refunded and malformed captured records from eligibility", () => {
-    expect(isRefundablePayment(payment("10.00", "10.00"))).toBe(false);
-    expect(isRefundablePayment(payment("10.00", "10.01"))).toBe(false);
-    expect(isRefundablePayment(payment("not-money", "0.00"))).toBe(false);
+    expect(isRefundablePayment(payment("1000", "1000"))).toBe(false);
+    expect(isRefundablePayment(payment("1000", "1001"))).toBe(false);
+    expect(isRefundablePayment(payment("10.00", "0"))).toBe(false);
   });
 
-  it("enforces the stored currency scale", () => {
+  it("enforces the stored currency scale and i128-compatible digit bound", () => {
     expect(parseMoneyMinorUnits("12", 0)).toBe(12n);
     expect(parseMoneyMinorUnits("12.1", 0)).toBeNull();
     expect(parseMoneyMinorUnits("12.345", 3)).toBe(12345n);
-    expect(parseMoneyMinorUnits("12.345", 29)).toBeNull();
+    expect(parseMoneyMinorUnits("12.345", 19)).toBeNull();
+    expect(parseMoneyMinorUnits("1".repeat(39), 0)).toBeNull();
   });
 });

@@ -31,11 +31,11 @@ const capturedPayment = {
   gateway_kind: "test",
   gateway_mode: "test",
   payment_method: "card",
-  amount: "120.00",
-  captured_amount: "120.00",
-  refunded_amount: "0.00",
-  commission_amount: "6.00",
-  commission_refunded_amount: "0.00",
+  amount: "12000",
+  captured_amount: "12000",
+  refunded_amount: "0",
+  commission_amount: "600",
+  commission_refunded_amount: "0",
   currency: "CNY",
   currency_scale: 2,
   status: "captured",
@@ -50,7 +50,7 @@ const invoice = {
   tenant_id: tenantId,
   payment_id: capturedPayment.payment_id,
   kind: "payment_invoice",
-  amount: "120.00",
+  amount: "12000",
   currency: "CNY",
   currency_scale: 2,
   description: "ORDER-001 invoice",
@@ -69,8 +69,8 @@ const refund = {
   refund_id: "55555555-5555-4555-8555-555555555555",
   tenant_id: tenantId,
   payment_id: capturedPayment.payment_id,
-  amount: "20.00",
-  commission_reversal_amount: "1.00",
+  amount: "2000",
+  commission_reversal_amount: "100",
   currency: "CNY",
   currency_scale: 2,
   reason: "customer request",
@@ -195,7 +195,7 @@ describe("PlatformFinanceRecordsPanel", () => {
       expect(api.createAdminRefund).toHaveBeenCalledWith({
         tenantId,
         paymentId: capturedPayment.payment_id,
-        amount: "20.00",
+        amount: "2000",
         reason: "客户申请退款",
         idempotencyKey: expect.stringMatching(/^web-refund-/),
       }),
@@ -265,11 +265,14 @@ describe("PlatformFinanceRecordsPanel", () => {
     const firstIdempotencyKey = api.createAdminRefund.mock.calls[0]?.[0]
       .idempotencyKey as string;
 
+    await user.clear(screen.getByLabelText("退款金额"));
+    await user.type(screen.getByLabelText("退款金额"), "20");
     await user.click(screen.getByRole("button", { name: "提交退款" }));
     await waitFor(() => expect(api.createAdminRefund).toHaveBeenCalledTimes(2));
-    expect(api.createAdminRefund.mock.calls[1]?.[0].idempotencyKey).toBe(
-      firstIdempotencyKey,
-    );
+    expect(api.createAdminRefund.mock.calls[1]?.[0]).toMatchObject({
+      amount: "2000",
+      idempotencyKey: firstIdempotencyKey,
+    });
     expect(api.getPaymentAdminRecords).toHaveBeenCalledTimes(2);
     expect(api.getRefundAdminRecords).toHaveBeenCalledTimes(2);
     expect(api.getInvoiceAdminRecords).toHaveBeenCalledTimes(2);
@@ -277,7 +280,7 @@ describe("PlatformFinanceRecordsPanel", () => {
 
   it("rejects an over-refund before issuing a request", async () => {
     api.getPaymentAdminRecords.mockResolvedValue([
-      { ...capturedPayment, refunded_amount: "119.99" },
+      { ...capturedPayment, refunded_amount: "11999" },
     ]);
     const onNotice = vi.fn();
     const user = userEvent.setup();
