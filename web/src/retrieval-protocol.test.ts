@@ -90,6 +90,47 @@ describe("retrieval protocol v1", () => {
     });
   });
 
+  it.each([
+    ["a mobile number in reasons", { reasons: ["库存匹配，联系 13800138000"] }],
+    ["a Telegram URI", { metadata: { note: "https://t.me/seller_handle" } }],
+    ["a disguised WeChat handle", { metadata: { note: "微信号: seller_123" } }],
+  ])("rejects %s outside the consent flow", (_label, injected) => {
+    const parsed = parseRetrievalResult({
+      protocol: "matchplane.retrieval/v1",
+      request_id: requestId,
+      provider: { id: "child.index", version: "2026.08" },
+      candidates: [{
+        offer_id: offerId,
+        score: 0.91,
+        reasons: ["库存匹配"],
+        ...injected,
+      }],
+      degraded: false,
+    }, requestId, 10);
+
+    expect(parsed).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("consent-gated introduction flow"),
+    });
+  });
+
+  it("does not mistake a product barcode for a phone number", () => {
+    const parsed = parseRetrievalResult({
+      protocol: "matchplane.retrieval/v1",
+      request_id: requestId,
+      provider: { id: "child.index", version: "2026.08" },
+      candidates: [{
+        offer_id: offerId,
+        score: 0.91,
+        reasons: ["库存匹配"],
+        metadata: { gtin: "6901234567892" },
+      }],
+      degraded: false,
+    }, requestId, 10);
+
+    expect(parsed).toMatchObject({ ok: true });
+  });
+
   it("rejects a provider response that changes request scope or exceeds the limit", () => {
     const base = {
       protocol: "matchplane.retrieval/v1",

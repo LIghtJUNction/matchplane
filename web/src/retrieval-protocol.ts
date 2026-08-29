@@ -76,8 +76,12 @@ const CONTACT_FIELD_NAMES = new Set([
   "telegram",
   "skype",
 ]);
-const CONTACT_VALUE_PATTERN =
-  /(?:mailto:|tel:|sms:|https?:\/\/(?:wa\.me|api\.whatsapp\.com)\/|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)/i;
+const CONTACT_VALUE_PATTERNS = [
+  /(?:mailto:|tel:|sms:|(?:wechat|weixin|tg|skype|facetime):|https?:\/\/(?:wa\.me|api\.whatsapp\.com|t\.me|telegram\.me|line\.me)\/|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)/i,
+  /(?:^|[^\d])1[3-9]\d{9}(?:$|[^\d])/,
+  /\+\d[\d\s().-]{6,}\d/,
+  /(?:wechat|weixin|微信号|telegram|skype|whatsapp)(?:\s*(?:id|账号|帳號))?\s*[:=：]\s*[A-Z][A-Z0-9_.-]{4,}/i,
+];
 
 /** Parse and normalize the root-to-subplatform retrieval request envelope. */
 export function parseRetrievalQuery(
@@ -435,7 +439,9 @@ function containsContactMaterial(value: unknown): boolean {
     if (++visited > 4_096) return true;
     const current = pending.pop();
     if (typeof current === "string") {
-      if (CONTACT_VALUE_PATTERN.test(current)) return true;
+      if (CONTACT_VALUE_PATTERNS.some((pattern) => pattern.test(current))) {
+        return true;
+      }
       continue;
     }
     if (Array.isArray(current)) {
