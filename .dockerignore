@@ -11,9 +11,15 @@ web/.next
 web/out
 .turbo
 .playwright-cli
+.pi
+.scratch
+.memsearch
 output
 ci-artifacts-*
 deploy/compose/data
+deploy/compose/var
+capture-*.mjs
+capture-*.py
 **/*.pkg.tar.*
 **/*.rpm
 **/*.deb
