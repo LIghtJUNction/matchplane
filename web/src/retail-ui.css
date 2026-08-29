@@ -956,6 +956,22 @@ select {
   white-space: nowrap;
 }
 
+.marketplace-product-match-reasons {
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.18rem;
+  color: var(--retail-muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+  list-style: none;
+}
+
+.marketplace-product-match-reasons > li::before {
+  color: var(--retail-sage-ink);
+  content: "· ";
+}
+
 @media (hover: hover) and (pointer: fine) {
   .marketplace-product-card:hover .marketplace-product-media {
     border-color: var(--retail-line-strong);

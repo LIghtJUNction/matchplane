@@ -255,6 +255,32 @@ describe("MatchPlane workspaces", () => {
     expect(screen.getByText("独立打开")).toBeInTheDocument();
   });
 
+  it("keeps the server-resolved store identity when the client manifest is unavailable", async () => {
+    window.history.replaceState(null, "", "/store-a");
+
+    render(
+      <App
+        initialPath="/store-a"
+        initialStoreName="星辰二手车行"
+        initialStoreDescription="主营家用二手车与准新车。"
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "星辰二手车行" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("主营家用二手车与准新车。")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/platform/manifest?path=%2Fstore-a",
+        { headers: { accept: "application/json" } },
+      ),
+    );
+    expect(
+      screen.getByRole("heading", { name: "星辰二手车行" }),
+    ).toBeInTheDocument();
+  });
+
   it("treats a legacy seller URL as the public unified entry until the user signs in", async () => {
     window.history.replaceState(null, "", "/?role=seller");
     render(<App />);

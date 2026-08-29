@@ -72,7 +72,15 @@ const PlatformDashboard = dynamic(
   { loading: PlatformDashboardLoading },
 );
 
-export function App({ initialPath = "/" }: { initialPath?: string }) {
+export function App({
+  initialPath = "/",
+  initialStoreName,
+  initialStoreDescription,
+}: {
+  initialPath?: string;
+  initialStoreName?: string;
+  initialStoreDescription?: string;
+}) {
   const {
     theme,
     locale,
@@ -115,7 +123,12 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     storeConsoleRequestedSection,
     navigateToSubplatform,
     requestedRoleRef,
-  } = useSubplatformRoute({ initialPath, authResolved: false });
+  } = useSubplatformRoute({
+    initialPath,
+    initialStoreName,
+    initialStoreDescription,
+    authResolved: false,
+  });
 
   // Authentication session & authorization
   const { authUser, setAuthUser, authResolved, openSignIn, signOut } =

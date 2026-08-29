@@ -125,16 +125,57 @@ export function appCopy(locale: "zh" | "en") {
 
 interface UseSubplatformRouteOptions {
   initialPath?: string;
+  initialStoreName?: string;
+  initialStoreDescription?: string;
   authResolved: boolean;
+}
+
+interface InitialStoreIdentity {
+  path: string;
+  name?: string;
+  description?: string;
+}
+
+function withInitialStoreIdentity(
+  config: SubplatformConfig,
+  identity: InitialStoreIdentity,
+): SubplatformConfig {
+  if (!identity.name || config.slug === "root" || config.path !== identity.path)
+    return config;
+  const fallback = resolveSubplatform(identity.path);
+  const hasLoadedIdentity =
+    config.brandName !== fallback.brandName ||
+    config.label !== fallback.label ||
+    config.description !== fallback.description;
+  if (hasLoadedIdentity) return config;
+  const seeded = {
+    ...config,
+    brandName: identity.name,
+    label: identity.name,
+  };
+  if (identity.description) seeded.description = identity.description;
+  return seeded;
 }
 
 export function useSubplatformRoute({
   initialPath = "/",
+  initialStoreName,
+  initialStoreDescription,
   authResolved,
 }: UseSubplatformRouteOptions) {
+  const initialStoreIdentityRef = useRef<InitialStoreIdentity>({
+    path: resolveSubplatform(initialPath).path,
+    name: initialStoreName?.trim() || undefined,
+    description: initialStoreDescription?.trim() || undefined,
+  });
+  const seedInitialStoreIdentity = useCallback(
+    (config: SubplatformConfig) =>
+      withInitialStoreIdentity(config, initialStoreIdentityRef.current),
+    [],
+  );
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() =>
-    resolveSubplatform(initialPath),
+    seedInitialStoreIdentity(resolveSubplatform(initialPath)),
   );
   const [hydrated, setHydrated] = useState(false);
   const [accountSettingsSection, setAccountSettingsSection] =
@@ -161,19 +202,19 @@ export function useSubplatformRoute({
       const request = navigationRequestRef.current + 1;
       navigationRequestRef.current = request;
       const path = destination.pathname;
-      const fallback = resolveSubplatform(path);
+      const fallback = seedInitialStoreIdentity(resolveSubplatform(path));
       window.history.pushState(null, "", path);
       setSubplatform(fallback);
 
       try {
-        const loaded = await loadSubplatform(path);
+        const loaded = seedInitialStoreIdentity(await loadSubplatform(path));
         if (navigationRequestRef.current === request) setSubplatform(loaded);
         return loaded;
       } catch {
         return fallback;
       }
     },
-    [],
+    [seedInitialStoreIdentity],
   );
 
   useEffect(() => {
@@ -227,8 +268,12 @@ export function useSubplatformRoute({
         relativeBrowserLocation(searchParams),
       );
     }
-    setSubplatform(resolveSubplatform(requestedPath));
-    void loadSubplatform(requestedPath).then(setSubplatform);
+    setSubplatform(
+      seedInitialStoreIdentity(resolveSubplatform(requestedPath)),
+    );
+    void loadSubplatform(requestedPath).then((loaded) =>
+      setSubplatform(seedInitialStoreIdentity(loaded)),
+    );
     const requestedRole = roleFromLocation();
     requestedRoleRef.current = requestedRole;
     setRole(
@@ -240,14 +285,15 @@ export function useSubplatformRoute({
       const path = window.location.pathname;
       const request = navigationRequestRef.current + 1;
       navigationRequestRef.current = request;
-      setSubplatform(resolveSubplatform(path));
+      setSubplatform(seedInitialStoreIdentity(resolveSubplatform(path)));
       void loadSubplatform(path).then((loaded) => {
-        if (navigationRequestRef.current === request) setSubplatform(loaded);
+        if (navigationRequestRef.current === request)
+          setSubplatform(seedInitialStoreIdentity(loaded));
       });
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [seedInitialStoreIdentity]);
 
   useEffect(() => {
     if (!hydrated || !authResolved) return;

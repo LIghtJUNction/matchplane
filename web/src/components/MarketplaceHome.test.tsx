@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -162,6 +162,33 @@ describe("MarketplaceListingCard likes", () => {
     expect(
       screen.queryByRole("button", { name: /点赞/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows at most three canonical match reasons on compact result cards", () => {
+    render(
+      <MarketplaceListingCard
+        compact
+        listing={{
+          ...listing,
+          reasons: [
+            "价格符合预算",
+            "品类为 SUV",
+            "杭州现车",
+            "这一条不应显示",
+            "价格符合预算",
+          ],
+        }}
+        locale="zh"
+        onOpen={vi.fn()}
+      />,
+    );
+
+    const reasons = screen.getByRole("list", { name: "匹配理由" });
+    expect(reasons).toHaveTextContent("价格符合预算");
+    expect(reasons).toHaveTextContent("品类为 SUV");
+    expect(reasons).toHaveTextContent("杭州现车");
+    expect(reasons).not.toHaveTextContent("这一条不应显示");
+    expect(within(reasons).getAllByRole("listitem")).toHaveLength(3);
   });
 });
 
