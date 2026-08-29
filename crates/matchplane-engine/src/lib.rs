@@ -285,6 +285,7 @@ impl OrderBook {
         book.applied_events = snapshot.applied_events.into_iter().collect();
 
         for order in snapshot.orders {
+            book.validate_order_scope(&order.intent)?;
             if book
                 .orders
                 .insert(order.intent.order_id, order.clone())
@@ -425,12 +426,7 @@ impl OrderBook {
         command: &EngineCommand,
         intent: &OrderIntent,
     ) -> Result<(), EngineError> {
-        if intent.market_id != self.market_id {
-            return Err(EngineError::MarketMismatch {
-                expected: self.market_id,
-                actual: intent.market_id,
-            });
-        }
+        self.validate_order_scope(intent)?;
         if self.orders.contains_key(&intent.order_id) {
             return Err(EngineError::OrderAlreadyExists(intent.order_id));
         }
@@ -442,6 +438,24 @@ impl OrderBook {
             .is_some_and(|expires_at| command.occurred_at >= expires_at)
         {
             return Err(EngineError::OrderExpiredAtAdmission(intent.order_id));
+        }
+        Ok(())
+    }
+
+    fn validate_order_scope(&self, intent: &OrderIntent) -> Result<(), EngineError> {
+        if intent.market_id != self.market_id {
+            return Err(EngineError::MarketMismatch {
+                expected: self.market_id,
+                actual: intent.market_id,
+            });
+        }
+        if self.orders.values().next().is_some_and(|existing| {
+            existing.intent.tenant_id != intent.tenant_id
+                || existing.intent.domain_id != intent.domain_id
+        }) {
+            return Err(EngineError::EventInvariant(
+                "order authority scope does not match the market book".to_owned(),
+            ));
         }
         Ok(())
     }
@@ -493,12 +507,7 @@ impl OrderBook {
         intent: &OrderIntent,
         accepted_sequence: u64,
     ) -> Result<(), EngineError> {
-        if intent.market_id != self.market_id {
-            return Err(EngineError::MarketMismatch {
-                expected: self.market_id,
-                actual: intent.market_id,
-            });
-        }
+        self.validate_order_scope(intent)?;
         if self.orders.contains_key(&intent.order_id) {
             return Err(EngineError::OrderAlreadyExists(intent.order_id));
         }
@@ -517,6 +526,56 @@ impl OrderBook {
     }
 
     fn apply_trade(&mut self, trade: &Trade) -> Result<(), EngineError> {
+        if trade.market_id != self.market_id {
+            return Err(EngineError::MarketMismatch {
+                expected: self.market_id,
+                actual: trade.market_id,
+            });
+        }
+        if trade.maker_order_id == trade.taker_order_id {
+            return Err(EngineError::EventInvariant(
+                "trade maker and taker must be different orders".to_owned(),
+            ));
+        }
+        if trade.quantity.is_zero() {
+            return Err(NumericError::NonPositiveQuantity.into());
+        }
+
+        let maker = self.open_order(trade.maker_order_id)?;
+        let taker = self.open_order(trade.taker_order_id)?;
+        if maker.intent.tenant_id != trade.tenant_id
+            || taker.intent.tenant_id != trade.tenant_id
+            || maker.intent.domain_id != trade.domain_id
+            || taker.intent.domain_id != trade.domain_id
+            || maker.intent.market_id != trade.market_id
+            || taker.intent.market_id != trade.market_id
+        {
+            return Err(EngineError::EventInvariant(
+                "trade authority scope does not match both orders".to_owned(),
+            ));
+        }
+        if maker.intent.side == taker.intent.side {
+            return Err(EngineError::EventInvariant(
+                "trade orders must be on opposite sides".to_owned(),
+            ));
+        }
+        let (buy_order_id, sell_order_id) = match maker.intent.side {
+            OrderSide::Buy => (trade.maker_order_id, trade.taker_order_id),
+            OrderSide::Sell => (trade.taker_order_id, trade.maker_order_id),
+        };
+        if trade.buy_order_id != buy_order_id || trade.sell_order_id != sell_order_id {
+            return Err(EngineError::EventInvariant(
+                "trade side order IDs do not match the maker and taker".to_owned(),
+            ));
+        }
+        if trade.price != maker.intent.price {
+            return Err(EngineError::EventInvariant(
+                "trade price does not match the maker limit price".to_owned(),
+            ));
+        }
+
+        maker.remaining_quantity.checked_sub(trade.quantity)?;
+        taker.remaining_quantity.checked_sub(trade.quantity)?;
         self.decrease_order(trade.maker_order_id, trade.quantity)?;
         self.decrease_order(trade.taker_order_id, trade.quantity)
     }
@@ -686,8 +745,8 @@ mod tests {
     ) -> OrderIntent {
         OrderIntent {
             order_id: OrderId::new(),
-            tenant_id: TenantId::new(),
-            domain_id: DomainId::new(),
+            tenant_id: TenantId::from_uuid(market_id.into_uuid()),
+            domain_id: DomainId::from_uuid(market_id.into_uuid()),
             market_id,
             side,
             price: Price::new(price).expect("test price should be positive"),
@@ -852,6 +911,81 @@ mod tests {
             EngineError::Numeric(NumericError::NonPositiveQuantity)
         );
         assert!(book.order(zero_order_id).is_none());
+        assert_eq!(book.state_hash().expect("book should hash"), state_before);
+
+        let mut foreign = intent(market_id, OrderSide::Sell, 99, 1, timestamp(2));
+        let foreign_order_id = foreign.order_id;
+        foreign.tenant_id = TenantId::new();
+        let foreign_command = place(2, foreign.clone());
+        let foreign_event = OrderBook::event(
+            &foreign_command,
+            0,
+            MatchingEvent::OrderAccepted {
+                intent: foreign,
+                accepted_sequence: 2,
+            },
+        );
+        let foreign_error = book
+            .apply(&foreign_event)
+            .expect_err("cross-tenant order event must be rejected");
+        assert!(matches!(foreign_error, EngineError::EventInvariant(_)));
+        assert!(book.order(foreign_order_id).is_none());
+        assert_eq!(book.state_hash().expect("book should hash"), state_before);
+    }
+
+    #[test]
+    fn apply_should_reject_corrupt_trade_without_partially_decreasing_the_maker() {
+        let market_id = MarketId::new();
+        let maker = intent(market_id, OrderSide::Sell, 100, 5, timestamp(1));
+        let maker_order_id = maker.order_id;
+        let mut book = OrderBook::new(market_id);
+        book.process(&place(1, maker))
+            .expect("maker order should apply");
+
+        let taker = intent(market_id, OrderSide::Buy, 100, 5, timestamp(2));
+        let taker_order_id = taker.order_id;
+        let taker_command = place(2, taker.clone());
+        let events = book
+            .decide_place_limit_order(&taker_command, &taker)
+            .expect("crossing order should decide");
+        assert_eq!(events.len(), 2);
+        book.apply(&events[0])
+            .expect("taker acceptance should replay");
+        let state_before = book.state_hash().expect("book should hash");
+
+        let missing_taker_id = OrderId::new();
+        let mut missing_taker = events[1].clone();
+        let MatchingEvent::TradeExecuted { trade } = &mut missing_taker.payload else {
+            panic!("second event should be a trade");
+        };
+        trade.taker_order_id = missing_taker_id;
+        let error = book
+            .apply(&missing_taker)
+            .expect_err("trade with an unknown taker must fail atomically");
+        assert_eq!(error, EngineError::OrderNotFound(missing_taker_id));
+        assert_eq!(
+            book.order(maker_order_id)
+                .expect("maker must remain")
+                .remaining_quantity,
+            Quantity::new(5).expect("quantity should be valid"),
+        );
+        assert_eq!(
+            book.order(taker_order_id)
+                .expect("taker must remain")
+                .remaining_quantity,
+            Quantity::new(5).expect("quantity should be valid"),
+        );
+        assert_eq!(book.state_hash().expect("book should hash"), state_before);
+
+        let mut foreign_tenant = events[1].clone();
+        let MatchingEvent::TradeExecuted { trade } = &mut foreign_tenant.payload else {
+            panic!("second event should be a trade");
+        };
+        trade.tenant_id = TenantId::new();
+        let error = book
+            .apply(&foreign_tenant)
+            .expect_err("cross-tenant trade must fail atomically");
+        assert!(matches!(error, EngineError::EventInvariant(_)));
         assert_eq!(book.state_hash().expect("book should hash"), state_before);
     }
 

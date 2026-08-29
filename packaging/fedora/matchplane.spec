@@ -98,6 +98,7 @@ echo 'The PostgreSQL backup timer is installed disabled; production operators mu
 %{_docdir}/matchplane/marketplace-payments.md
 %{_docdir}/matchplane/cli-and-mcp.md
 %{_docdir}/matchplane/postgresql-backup-gate.md
+%{_docdir}/matchplane/*.json
 %{_datadir}/matchplane/skills
 %license %{_datadir}/licenses/matchplane/LICENSE
 

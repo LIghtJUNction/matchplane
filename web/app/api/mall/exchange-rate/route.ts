@@ -213,16 +213,22 @@ export async function POST(request: Request): Promise<Response> {
 
   let client: PoolClient | undefined;
   try {
+    throwIfRequestAborted(request.signal);
     const transactionClient = await authDatabase.connect();
     client = transactionClient;
+    throwIfRequestAborted(request.signal);
     await transactionClient.query("BEGIN");
+    throwIfRequestAborted(request.signal);
 
-    if (!(await lockActiveTenant(transactionClient, tenantId))) {
+    const tenantActive = await lockActiveTenant(transactionClient, tenantId);
+    throwIfRequestAborted(request.signal);
+    if (!tenantActive) {
       await transactionClient.query("ROLLBACK");
       return jsonError("商城不存在", 404);
     }
 
     const current = await readStoredExchangeRate(transactionClient, tenantId);
+    throwIfRequestAborted(request.signal);
     if (exchangeRateVersion(current) !== input.expectedVersion) {
       await transactionClient.query("ROLLBACK");
       return jsonError("货币设置已被其他人更新，请刷新后重试", 409);
@@ -239,7 +245,9 @@ export async function POST(request: Request): Promise<Response> {
       rateEffectiveDate: latest.effectiveDate,
       rateResponseDigest: latest.responseDigest,
       actorId: editor.actorId,
+      signal: request.signal,
     });
+    throwIfRequestAborted(request.signal);
     await transactionClient.query("COMMIT");
     return Response.json(
       { exchangeRate: toPublicExchangeRate(updated) },
@@ -247,6 +255,9 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
+    if (request.signal.aborted) {
+      return jsonError("汇率同步已取消，请稍后重试", 504);
+    }
     if (isExchangeRateConflict(error)) {
       return jsonError("货币设置已被其他人更新，请刷新后重试", 409);
     }
@@ -354,6 +365,7 @@ async function writeStoredExchangeRate(input: {
   rateEffectiveDate: string | null;
   rateResponseDigest: string | null;
   actorId: string;
+  signal?: AbortSignal;
 }): Promise<StoredExchangeRate> {
   const nextVersion = exchangeRateVersion(input.current) + 1;
   const parameters = [
@@ -386,6 +398,7 @@ async function writeStoredExchangeRate(input: {
     );
     const row = inserted.rows[0];
     if (!row) throw new Error("currency settings insert returned no row");
+    throwIfRequestAborted(input.signal);
     await writeAuditEvent(input, null, row);
     return row;
   }
@@ -417,6 +430,7 @@ async function writeStoredExchangeRate(input: {
   );
   const row = updated.rows[0];
   if (!row) throw new ExchangeRateConflictError();
+  throwIfRequestAborted(input.signal);
   await writeAuditEvent(input, input.current, row);
   return row;
 }
@@ -516,6 +530,13 @@ async function fetchLatestUsdRate(
     source: url.hostname,
     responseDigest: responseDigest(text),
   };
+}
+
+function throwIfRequestAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const error = new Error("exchange rate request aborted");
+  error.name = "AbortError";
+  throw error;
 }
 
 function mapProviderTransportError(error: unknown): ExchangeRateProviderError {

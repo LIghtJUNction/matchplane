@@ -177,6 +177,10 @@ if ! rg -Fq '"$repository_root"/docs/*.json' packaging/scripts/stage.sh; then
   echo 'staging must include all public Agent and subplatform JSON contracts' >&2
   exit 1
 fi
+if ! rg -Fq '%{_docdir}/matchplane/*.json' packaging/fedora/matchplane.spec; then
+  echo 'the Fedora package must own every staged public JSON contract' >&2
+  exit 1
+fi
 
 router_state_root='/etc/matchplane/secrets/root-email'
 if ! rg -q '^d /etc/matchplane/secrets/root-email 0770 root matchplane-web -$' \

@@ -371,6 +371,79 @@ describe("mall exchange-rate route", () => {
     expect(mocks.connect).not.toHaveBeenCalled();
   });
 
+  it("rolls back a provider sync aborted during the database update without writing an audit event", async () => {
+    const controller = new AbortController();
+    const client = transactionClient();
+    client.query.mockImplementation(async (sql) => {
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return {};
+      if (sql.includes("FROM tenants"))
+        return { rowCount: 1, rows: [{ id: mocks.tenantId }] };
+      if (sql.includes("FROM mall_currency_settings"))
+        return { rowCount: 1, rows: [current] };
+      if (sql.includes("UPDATE mall_currency_settings")) {
+        controller.abort();
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              ...current,
+              localCurrency: "JPY",
+              usdToLocalRate: "146.12",
+              rateSource: "api.frankfurter.app",
+              rateProvider: "frankfurter",
+              rateEffectiveDate: "2026-08-28",
+              rateResponseDigest: `sha256:${"b".repeat(64)}`,
+              rateUpdatedAt: "2026-08-28T06:00:00.000Z",
+              version: "4",
+            },
+          ],
+        };
+      }
+      if (sql.includes("INSERT INTO platform_audit_events"))
+        return { rowCount: 1, rows: [] };
+      return { rowCount: 1, rows: [] };
+    });
+    mocks.connect.mockResolvedValue(client);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              base: "USD",
+              date: "2026-08-28",
+              rates: { JPY: "146.12" },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const syncRequest = new Request(
+      "https://matchplane.test/api/mall/exchange-rate",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://matchplane.test",
+        },
+        body: JSON.stringify({ localCurrency: "JPY", expectedVersion: 3 }),
+        signal: controller.signal,
+      },
+    );
+
+    const response = await POST(syncRequest);
+
+    expect(response.status).toBe(504);
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(client.query).not.toHaveBeenCalledWith("COMMIT");
+    expect(
+      client.query.mock.calls.some(([sql]) =>
+        sql.includes("INSERT INTO platform_audit_events"),
+      ),
+    ).toBe(false);
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["default", undefined],
     ["custom", "https://rates.example/latest"],
