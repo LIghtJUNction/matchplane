@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isReservedSuperAdminEmail,
   matchesReservedSuperAdminInvite,
-  readSuperAdminBootstrapClaimDigest,
+  readSuperAdminBootstrapClaimToken,
   SUPER_ADMIN_BOOTSTRAP_COOKIE,
   superAdminBootstrapDigest,
 } from "./super-admin-bootstrap";
@@ -36,33 +36,40 @@ describe("super administrator bootstrap claim", () => {
       matchesReservedSuperAdminInvite(
         targetedInvite,
         "owner@example.com",
-        digest,
+        token,
       ),
     ).toBe(false);
   });
 
-  it("matches the reserved email only with the exact claim digest", () => {
+  it("matches the reserved email only with the original bearer token", () => {
     expect(
       matchesReservedSuperAdminInvite(
         invite,
         "OWNER@example.com",
-        superAdminBootstrapDigest(token),
+        token,
       ),
     ).toBe(true);
     expect(
       matchesReservedSuperAdminInvite(
         invite,
         "owner@example.com",
-        "0".repeat(64),
+        digest,
+      ),
+    ).toBe(false);
+    expect(
+      matchesReservedSuperAdminInvite(
+        invite,
+        "owner@example.com",
+        `mpsa_${"0".repeat(64)}`,
       ),
     ).toBe(false);
   });
 
   it("rejects ambiguous duplicate claim cookies", () => {
     const headers = new Headers({
-      cookie: `${SUPER_ADMIN_BOOTSTRAP_COOKIE}=${digest}; ${SUPER_ADMIN_BOOTSTRAP_COOKIE}=${digest}`,
+      cookie: `${SUPER_ADMIN_BOOTSTRAP_COOKIE}=${token}; ${SUPER_ADMIN_BOOTSTRAP_COOKIE}=${token}`,
     });
 
-    expect(readSuperAdminBootstrapClaimDigest(headers)).toBeNull();
+    expect(readSuperAdminBootstrapClaimToken(headers)).toBeNull();
   });
 });

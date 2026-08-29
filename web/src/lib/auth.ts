@@ -39,7 +39,7 @@ import { isUuid } from "./uuid";
 import {
   isReservedSuperAdminEmail,
   matchesReservedSuperAdminInvite,
-  readSuperAdminBootstrapClaimDigest,
+  readSuperAdminBootstrapClaimToken,
 } from "./super-admin-bootstrap";
 
 const database = new Pool({
@@ -407,13 +407,13 @@ export const auth = betterAuth({
             legalTermsVersion: legal.terms,
             legalPrivacyVersion: legal.privacy,
           };
-          const bootstrapClaimDigest = readSuperAdminBootstrapClaimDigest(
+          const bootstrapClaimToken = readSuperAdminBootstrapClaimToken(
             context?.headers,
           );
           const bootstrapReservation =
             await authorizeReservedSuperAdminInvite(
               user.email,
-              bootstrapClaimDigest,
+              bootstrapClaimToken,
             );
           if (bootstrapReservation === "authorized") {
             return {
@@ -466,7 +466,7 @@ export const auth = betterAuth({
 
 async function authorizeReservedSuperAdminInvite(
   email: string,
-  claimDigest: string | null,
+  claimToken: string | null,
 ): Promise<"none" | "reserved" | "authorized"> {
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
   if (!tenantId || !isUuid(tenantId)) return "none";
@@ -486,7 +486,7 @@ async function authorizeReservedSuperAdminInvite(
   );
   const invite = result.rows[0];
   if (!isReservedSuperAdminEmail(invite, email)) return "none";
-  return matchesReservedSuperAdminInvite(invite, email, claimDigest)
+  return matchesReservedSuperAdminInvite(invite, email, claimToken)
     ? "authorized"
     : "reserved";
 }

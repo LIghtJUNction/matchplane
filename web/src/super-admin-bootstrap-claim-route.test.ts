@@ -21,10 +21,7 @@ vi.mock("./lib/runtime", () => ({
 }));
 
 import { POST } from "../app/api/super-admin-bootstrap/claim/route";
-import {
-  SUPER_ADMIN_BOOTSTRAP_COOKIE,
-  superAdminBootstrapDigest,
-} from "./lib/super-admin-bootstrap";
+import { SUPER_ADMIN_BOOTSTRAP_COOKIE } from "./lib/super-admin-bootstrap";
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
 const token = `mpsa_${"a".repeat(64)}`;
@@ -64,17 +61,16 @@ describe("super administrator bootstrap reservation", () => {
 
   afterEach(() => vi.unstubAllEnvs());
 
-  it("binds the claimed token digest to the registering browser", async () => {
+  it("binds the original bearer to the registering browser's auth path", async () => {
     const response = await POST(request());
 
     expect(response.status).toBe(200);
     const cookie = response.headers.get("set-cookie") ?? "";
-    expect(cookie).toContain(
-      `${SUPER_ADMIN_BOOTSTRAP_COOKIE}=${superAdminBootstrapDigest(token)}`,
-    );
+    expect(cookie).toContain(`${SUPER_ADMIN_BOOTSTRAP_COOKIE}=${token}`);
     expect(cookie).toMatch(/HttpOnly/i);
     expect(cookie).toMatch(/SameSite=Strict/i);
     expect(cookie).toMatch(/Max-Age=600/i);
+    expect(cookie).toMatch(/Path=\/api\/auth/i);
     expect(cookie).not.toMatch(/; Secure/i);
     expect(release).toHaveBeenCalledOnce();
   });

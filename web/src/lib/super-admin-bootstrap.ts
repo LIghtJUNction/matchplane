@@ -15,8 +15,8 @@ export function superAdminBootstrapDigest(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
-/** Read one unambiguous HttpOnly bootstrap claim from an incoming Better Auth request. */
-export function readSuperAdminBootstrapClaimDigest(
+/** Read one unambiguous HttpOnly bootstrap token from an incoming Better Auth request. */
+export function readSuperAdminBootstrapClaimToken(
   headers: Headers | null | undefined,
 ): string | null {
   const cookie = headers?.get("cookie");
@@ -28,7 +28,7 @@ export function readSuperAdminBootstrapClaimDigest(
     if (claim !== null) return null;
     claim = value ?? "";
   }
-  return claim && /^[0-9a-f]{64}$/.test(claim) ? claim : null;
+  return claim && /^mpsa_[0-9a-f]{64}$/.test(claim) ? claim : null;
 }
 
 /** Identify an email held aside by either a targeted or already-claimed bootstrap invite. */
@@ -47,20 +47,21 @@ export function isReservedSuperAdminEmail(
   );
 }
 
-/** Require both the reserved email and the browser-bound token digest before promotion. */
+/** Require both the reserved email and the original browser-bound bearer before promotion. */
 export function matchesReservedSuperAdminInvite(
   invite: ReservedSuperAdminInvite | undefined,
   email: string,
-  claimDigest: string | null,
+  claimToken: string | null,
 ): boolean {
   if (
     !invite?.registrationEmail ||
-    !claimDigest ||
+    !claimToken ||
+    !/^mpsa_[0-9a-f]{64}$/.test(claimToken) ||
     !/^[0-9a-f]{64}$/.test(invite.tokenHash)
   )
     return false;
   const expected = Buffer.from(invite.tokenHash, "hex");
-  const claimed = Buffer.from(claimDigest, "hex");
+  const claimed = Buffer.from(superAdminBootstrapDigest(claimToken), "hex");
   return (
     expected.length === claimed.length &&
     timingSafeEqual(expected, claimed) &&

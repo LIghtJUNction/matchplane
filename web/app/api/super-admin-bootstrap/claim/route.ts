@@ -100,11 +100,13 @@ export async function POST(request: Request): Promise<Response> {
     // register that email first.
     response.cookies.set({
       name: SUPER_ADMIN_BOOTSTRAP_COOKIE,
-      value: superAdminBootstrapDigest(token),
+      // Keep the database's one-way token hash from becoming a pass-the-hash credential.
+      // The short-lived HttpOnly cookie carries the original bearer only to Better Auth.
+      value: token,
       httpOnly: true,
       sameSite: "strict",
       secure: isProductionEnvironment(),
-      path: "/",
+      path: "/api/auth",
       maxAge: SUPER_ADMIN_BOOTSTRAP_COOKIE_TTL_SECONDS,
     });
     return response;
