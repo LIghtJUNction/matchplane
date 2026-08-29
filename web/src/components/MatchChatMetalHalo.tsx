@@ -18,10 +18,6 @@ const NO_REFLECTION_TARGETS: ReadonlyArray<RefObject<HTMLElement | null>> = [];
 
 type Theme = "dark" | "light";
 type MetalFxComponent = typeof MetalFxExport;
-type LegacyMediaQueryList = {
-  addListener?: (listener: () => void) => void;
-  removeListener?: (listener: () => void) => void;
-};
 
 type MetalFxBoundaryProps = {
   children: ReactNode;
@@ -51,6 +47,21 @@ function documentTheme(): Theme {
   return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 }
 
+function releaseWebGlContext(gl: WebGLRenderingContext): void {
+  try {
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  } catch {
+    // The capability result should not depend on an optional cleanup extension.
+  }
+}
+
+function hasContextEventSurface(canvas: EventTarget): boolean {
+  return (
+    typeof canvas.addEventListener === "function" &&
+    typeof canvas.removeEventListener === "function"
+  );
+}
+
 function supportsMetalFx(): boolean {
   if (
     typeof ResizeObserver === "undefined" ||
@@ -69,13 +80,23 @@ function supportsMetalFx(): boolean {
       return false;
     }
 
-    const glCanvas = document.createElement("canvas");
-    const gl = glCanvas.getContext("webgl");
-    if (!gl) return false;
-
-    if (typeof gl.getExtension === "function") {
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    let gl: WebGLRenderingContext | null;
+    if (typeof OffscreenCanvas !== "undefined") {
+      const glCanvas = new OffscreenCanvas(1, 1);
+      if (!hasContextEventSurface(glCanvas)) return false;
+      gl = glCanvas.getContext("webgl", {
+        alpha: true,
+        premultipliedAlpha: false,
+        antialias: false,
+      });
+    } else {
+      const glCanvas = document.createElement("canvas");
+      if (!hasContextEventSurface(glCanvas)) return false;
+      gl = glCanvas.getContext("webgl");
     }
+
+    if (!gl) return false;
+    releaseWebGlContext(gl);
     return true;
   } catch {
     return false;
@@ -107,12 +128,11 @@ export function MatchChatMetalHalo({ active }: { active: boolean }) {
       setPageVisible(document.visibilityState !== "hidden");
     const syncTheme = () => setTheme(documentTheme());
 
-    const legacyMedia = media as unknown as LegacyMediaQueryList | undefined;
     syncMotion();
     if (typeof media?.addEventListener === "function") {
       media.addEventListener("change", syncMotion);
-    } else if (typeof legacyMedia?.addListener === "function") {
-      legacyMedia.addListener(syncMotion);
+    } else if (typeof media?.addListener === "function") {
+      media.addListener(syncMotion);
     }
     document.addEventListener("visibilitychange", syncVisibility);
 
@@ -137,8 +157,8 @@ export function MatchChatMetalHalo({ active }: { active: boolean }) {
     return () => {
       if (typeof media?.removeEventListener === "function") {
         media.removeEventListener("change", syncMotion);
-      } else if (typeof legacyMedia?.removeListener === "function") {
-        legacyMedia.removeListener(syncMotion);
+      } else if (typeof media?.removeListener === "function") {
+        media.removeListener(syncMotion);
       }
       document.removeEventListener("visibilitychange", syncVisibility);
       themeObserver?.disconnect();

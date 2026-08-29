@@ -36,6 +36,8 @@ type MediaHarness = {
   removeEventListener: ReturnType<typeof vi.fn>;
 };
 
+const originalOffscreenCanvas = globalThis.OffscreenCanvas;
+
 let reducedMotion: MediaHarness;
 let visibilityState: DocumentVisibilityState;
 let intersectionCallbacks: Set<IntersectionObserverCallback>;
@@ -100,6 +102,49 @@ function metalSlot(container: HTMLElement) {
   const slot = container.querySelector<HTMLElement>("[data-match-chat-metal]");
   expect(slot).not.toBeNull();
   return slot!;
+}
+
+type OffscreenCanvasMode =
+  | "supported"
+  | "null-context"
+  | "constructor-throws"
+  | "get-context-throws";
+
+function installOffscreenCanvas(mode: OffscreenCanvasMode) {
+  const loseContext = vi.fn();
+  const getExtension = vi.fn((name: string) =>
+    name === "WEBGL_lose_context" ? { loseContext } : null,
+  );
+  const getContext = vi.fn(
+    (_contextId: string, _options?: WebGLContextAttributes) => {
+      if (mode === "get-context-throws") {
+        throw new Error("mock OffscreenCanvas getContext failure");
+      }
+      return mode === "null-context" ? null : { getExtension };
+    },
+  );
+  const addEventListener = vi.fn();
+  const removeEventListener = vi.fn();
+
+  vi.stubGlobal(
+    "OffscreenCanvas",
+    class MockOffscreenCanvas {
+      readonly addEventListener = addEventListener;
+      readonly removeEventListener = removeEventListener;
+      readonly getContext = getContext;
+
+      constructor(
+        readonly width: number,
+        readonly height: number,
+      ) {
+        if (mode === "constructor-throws") {
+          throw new Error("mock OffscreenCanvas constructor failure");
+        }
+      }
+    },
+  );
+
+  return { getContext, getExtension, loseContext };
 }
 
 async function flushEnhancement() {
@@ -171,6 +216,7 @@ beforeEach(() => {
     "CanvasRenderingContext2D",
     class MockCanvasRenderingContext2D {},
   );
+  // SAFETY: this test double covers every context kind exercised by the capability probe.
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(((
     contextId: string,
   ) => {
@@ -179,12 +225,20 @@ beforeEach(() => {
       contextId === "webgl2" ||
       contextId === "experimental-webgl"
     ) {
-      return {
-        getExtension: vi.fn(() => ({ loseContext: vi.fn() })),
-      } as unknown as WebGLRenderingContext;
+      const context: WebGLRenderingContext = Object.create(
+        WebGLRenderingContext.prototype,
+      );
+      Object.defineProperty(context, "getExtension", {
+        value: vi.fn(() => ({ loseContext: vi.fn() })),
+      });
+      return context;
     }
     if (contextId === "2d") {
-      return { roundRect: vi.fn() } as unknown as CanvasRenderingContext2D;
+      const context: CanvasRenderingContext2D = Object.create(
+        CanvasRenderingContext2D.prototype,
+      );
+      Object.defineProperty(context, "roundRect", { value: vi.fn() });
+      return context;
     }
     return null;
   }) as HTMLCanvasElement["getContext"]);
@@ -199,6 +253,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  expect(globalThis.OffscreenCanvas).toBe(originalOffscreenCanvas);
   delete document.documentElement.dataset.theme;
 });
 
@@ -261,6 +316,63 @@ describe("MatchChatMetalHalo", () => {
       slot.querySelector("[data-mocked-metal-fx]"),
     ).not.toBeInTheDocument();
   });
+
+  it("keeps the static halo when OffscreenCanvas WebGL is null even if HTML WebGL works", async () => {
+    const offscreen = installOffscreenCanvas("null-context");
+    const { container, rerender } = render(
+      <MatchChatMetalHalo active={false} />,
+    );
+
+    rerender(<MatchChatMetalHalo active />);
+    act(() => reportIntersection(true));
+    await flushEnhancement();
+
+    const slot = metalSlot(container);
+    expect(offscreen.getContext).toHaveBeenCalledWith("webgl", {
+      alpha: true,
+      premultipliedAlpha: false,
+      antialias: false,
+    });
+    expect(slot).toHaveAttribute("data-renderer", "static");
+    expect(slot).toHaveAttribute("data-motion", "paused");
+    expect(metalMock.rendered).not.toHaveBeenCalled();
+  });
+
+  it("mounts the enhancement when OffscreenCanvas WebGL works", async () => {
+    const offscreen = installOffscreenCanvas("supported");
+    const { container, rerender } = render(
+      <MatchChatMetalHalo active={false} />,
+    );
+
+    rerender(<MatchChatMetalHalo active />);
+    act(() => reportIntersection(true));
+    await flushEnhancement();
+    await waitForMetalRuntime(container);
+
+    const slot = metalSlot(container);
+    expect(slot).toHaveAttribute("data-renderer", "metal-fx");
+    expect(offscreen.getExtension).toHaveBeenCalledWith("WEBGL_lose_context");
+    expect(offscreen.loseContext).toHaveBeenCalledOnce();
+  });
+
+  it.each(["constructor-throws", "get-context-throws"] as const)(
+    "keeps the static halo when OffscreenCanvas %s",
+    async (mode) => {
+      installOffscreenCanvas(mode);
+      const { container, rerender } = render(
+        <MatchChatMetalHalo active={false} />,
+      );
+
+      rerender(<MatchChatMetalHalo active />);
+      act(() => reportIntersection(true));
+      await flushEnhancement();
+
+      const slot = metalSlot(container);
+      expect(slot).toHaveAttribute("data-renderer", "static");
+      expect(slot).toHaveAttribute("data-motion", "paused");
+      expect(metalMock.rendered).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the ordinary static halo when WebGL is unavailable", async () => {
     vi.stubGlobal("WebGLRenderingContext", undefined);
