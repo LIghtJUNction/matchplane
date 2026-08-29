@@ -1,0 +1,66 @@
+{
+  "apiVersion": "matchplane.subplatform/v1",
+  "id": "good-cars",
+  "slug": "good-cars",
+  "displayName": "好车线下店",
+  "description": "先在线了解车况，再和店员预约线下看车。",
+  "marketplaceContract": "generic-v1",
+  "pricing": {
+    "mode": "fixed",
+    "currency": "CNY",
+    "currencyScale": 2,
+    "label": "售价"
+  },
+  "ui": {
+    "chat": {
+      "buyerHeadlines": [
+        "先说预算和用途，我帮你缩小范围",
+        "可以从家庭人数、里程和车况开始"
+      ],
+      "buyerHeadlinesEn": [
+        "Start with your budget and how you will use the car",
+        "Tell me about passengers, mileage, and condition"
+      ]
+    },
+    "copy": {
+      "listingEyebrow": "真实车源",
+      "listingLabel": "车辆",
+      "emptyBuyerTitle": "这家店暂时没有在售车辆",
+      "emptyBuyerDescription": "可以继续描述预算和用途，或浏览其他公开店铺。"
+    },
+    "filters": [
+      { "key": "brand", "label": "品牌", "source": "attribute", "attribute": "brand" },
+      { "key": "condition", "label": "车况", "source": "attribute", "attribute": "condition" },
+      { "key": "location", "label": "看车地点", "source": "attribute", "attribute": "location" },
+      { "key": "fuel_type", "label": "能源类型", "source": "attribute", "attribute": "fuel_type" }
+    ],
+    "supplyFields": [
+      { "key": "brand", "label": "品牌", "type": "text", "required": true },
+      { "key": "model", "label": "车型", "type": "text", "required": true },
+      { "key": "model_year", "label": "上牌年份", "type": "number", "required": true },
+      { "key": "mileage_km", "label": "行驶里程（公里）", "type": "number", "required": true },
+      { "key": "condition", "label": "车况", "type": "select", "required": true, "options": ["used", "refurbished"] },
+      { "key": "location", "label": "看车地点", "type": "text", "required": true },
+      { "key": "fuel_type", "label": "能源类型", "type": "select", "required": true, "options": ["燃油", "插混", "纯电"] },
+      { "key": "seats", "label": "座位数", "type": "number", "required": true },
+      { "key": "delivery_mode", "label": "交易方式", "type": "select", "required": true, "options": ["local_pickup"] }
+    ]
+  },
+  "rootApiVersion": "v1",
+  "entry": "src/index.ts",
+  "routes": ["/good-cars"],
+  "capabilities": ["demand", "supply", "public_catalog", "explainable_matching", "contact_exchange"],
+  "requiredScopes": ["marketplace:read", "marketplace:write"],
+  "agent": {
+    "protocol": "matchplane.agent/v1",
+    "stages": ["browse", "qualify", "viewing", "offline_deal"],
+    "skills": ["catalog.search", "vehicle.explain", "viewing.schedule"],
+    "mcpTools": ["catalog.search", "catalog.explain", "viewing.schedule"],
+    "mcpServerKey": "good-cars"
+  },
+  "assets": {
+    "staticDirectory": "dist",
+    "buildCommand": "bun run build",
+    "dependencyPolicy": "locked"
+  }
+}

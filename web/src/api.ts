@@ -11,6 +11,7 @@ import type {
   ShoppingMemoryMutation,
   ShoppingMemorySnapshot,
 } from "./shopping-memory-contract";
+import { createClientUuid } from "./lib/client-uuid";
 
 export type { MarketplaceAttachment } from "./media-attachment";
 
@@ -3659,7 +3660,7 @@ export function createAdminRefund(input: {
       amount: input.amount,
       reason: input.reason,
       idempotency_key:
-        input.idempotencyKey ?? `web-refund-${crypto.randomUUID()}`,
+        input.idempotencyKey ?? `web-refund-${createClientUuid()}`,
     }),
   });
 }
@@ -4018,7 +4019,7 @@ export function recordMarketplaceBehaviorEvent(input: {
         metadata: input.metadata ?? {},
         idempotency_key:
           input.idempotencyKey ??
-          `web-${input.eventType}-${crypto.randomUUID()}`,
+          `web-${input.eventType}-${createClientUuid()}`,
       }),
     },
     input.session,
@@ -4083,7 +4084,7 @@ export function createMarketplaceSalesHandoff(input: {
         ...(input.intentId ? { intent_id: input.intentId } : {}),
         summary: input.summary,
         idempotency_key:
-          input.idempotencyKey ?? `web-sales-handoff-${crypto.randomUUID()}`,
+          input.idempotencyKey ?? `web-sales-handoff-${createClientUuid()}`,
       }),
     },
     input.session,
@@ -4436,7 +4437,7 @@ export async function syncMarketplaceOfferToChild(input: {
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({
       protocol: "matchplane.catalog/v1",
-      request_id: crypto.randomUUID(),
+      request_id: createClientUuid(),
       scope: {
         tenant_id: input.tenantId,
         domain_id: input.domainId,
@@ -4479,7 +4480,7 @@ export async function uploadMarketplaceAttachment(input: {
   }
   const bytes = new Uint8Array(await input.file.arrayBuffer());
   const dataBase64 = bytesToBase64(bytes);
-  const requestId = crypto.randomUUID();
+  const requestId = createClientUuid();
   const response = await fetch(`${apiBase}/platform/media/upload`, {
     method: "POST",
     credentials: "include",

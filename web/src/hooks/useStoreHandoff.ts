@@ -17,6 +17,7 @@ import {
   type PartySession,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
+import { createClientUuid } from "../lib/client-uuid";
 import {
   clearPendingConversion,
   ensurePendingConversion,
@@ -101,7 +102,7 @@ export function useStoreHandoff({
       );
       if (!selected?.offerId)
         throw new Error("同意卡关联的商品已经下架，请继续咨询 AI 店长");
-      const proposedAttemptId = crypto.randomUUID();
+      const proposedAttemptId = createClientUuid();
       const pending = ensurePendingConversion({
         storePath: subplatform.path,
         offerId: selected.offerId,
@@ -410,7 +411,7 @@ export function useStoreHandoff({
       }
       try {
         const pendingOfferId = selected.offerId ?? listingId ?? selected.id;
-        const proposedAttemptId = crypto.randomUUID();
+        const proposedAttemptId = createClientUuid();
         const pending = ensurePendingConversion({
           storePath: selectedPath,
           offerId: pendingOfferId,

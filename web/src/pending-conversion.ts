@@ -1,3 +1,5 @@
+import { createClientUuid } from "./lib/client-uuid";
+
 export const PENDING_CONVERSION_KEY = "matchplane.pending-conversion.v1";
 export const PENDING_CONVERSION_TTL_MS = 30 * 60 * 1000;
 
@@ -76,7 +78,7 @@ export function savePendingConversion(
   const pending: PendingConversion = {
     version: 1,
     ...input,
-    conversionAttemptId: input.conversionAttemptId ?? crypto.randomUUID(),
+    conversionAttemptId: input.conversionAttemptId ?? createClientUuid(),
     createdAt: now,
     expiresAt: now + PENDING_CONVERSION_TTL_MS,
   };

@@ -17,6 +17,7 @@ import {
   subplatformCopy,
   type SubplatformConfig,
 } from "../subplatform";
+import { createClientUuid } from "../lib/client-uuid";
 import type { AssetListing, WorkspaceRole } from "../types";
 
 // The script-only sandbox intentionally has an opaque `null` origin, so postMessage cannot name
@@ -459,7 +460,7 @@ async function submitPluginListing(
     const externalKey =
       typeof supply.externalKey === "string" && supply.externalKey.trim()
         ? boundedText(supply.externalKey, 256, "内部编号")
-        : `offer-${crypto.randomUUID()}`;
+        : `offer-${createClientUuid()}`;
     const displayName = boundedText(supply.displayName, 500, "供给名称");
     const pricing = pricingFor(input.subplatform);
     const usesLegacyMarketplace =
@@ -595,8 +596,5 @@ function createContextToken(): string {
   ) {
     throw new Error("当前运行环境不支持安全的插件上下文令牌");
   }
-  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return createClientUuid();
 }

@@ -794,6 +794,29 @@ pub struct SellerPromotionEventOutcome {
 }
 
 impl PgStore {
+    /// Returns the existing party projection for one Better Auth identity and platform path.
+    ///
+    /// The gateway must use this stable party ID when encrypting the contact envelope.  The
+    /// upsert below also resolves an existing link, so resolving it before encryption keeps the
+    /// contact AAD aligned with the row that will actually be persisted.
+    pub async fn marketplace_party_id_for_auth_user(
+        &self,
+        tenant_id: TenantId,
+        auth_user_id: Uuid,
+        platform_path: &str,
+    ) -> Result<Option<MarketplacePartyId>, StorageError> {
+        let party_id = sqlx::query_scalar(
+            "SELECT party_id FROM marketplace_party_auth_links \
+             WHERE tenant_id = $1 AND auth_user_id = $2 AND platform_path = $3",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(auth_user_id)
+        .bind(platform_path)
+        .fetch_optional(self.pool())
+        .await?;
+        Ok(party_id.map(MarketplacePartyId::from_uuid))
+    }
+
     /// Registers a protected marketplace party.
     pub async fn create_marketplace_party(
         &self,

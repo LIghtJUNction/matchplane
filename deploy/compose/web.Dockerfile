@@ -35,6 +35,8 @@ RUN node node_modules/next/dist/bin/next build
 # Next 16 preserves the path relative to outputFileTracingRoot in the
 # standalone bundle. Normalize both the monorepo (`standalone/web`) and the
 # package-local (`standalone`) layouts before copying into the runtime image.
+# Next may trace the dynamic public manifest route into standalone. Public assets are copied
+# separately below so the runtime tree remains limited to compiled application files.
 RUN set -eux; \
     mkdir -p /app/standalone; \
     if [ -f /app/.next/standalone/server.js ]; then \
@@ -75,7 +77,8 @@ RUN set -eux; \
     else \
       echo 'Next standalone server.js was not produced' >&2; \
       exit 1; \
-    fi
+    fi; \
+    rm -rf /app/standalone/public /app/standalone/web/public
 RUN node /app/scripts/validate-standalone-output.mjs /app/standalone
 
 FROM node:22-trixie-slim@sha256:f4c1b09232a0ae8f765093968ec82107a1be65cb0bfb36fc831195794f139568 AS runner

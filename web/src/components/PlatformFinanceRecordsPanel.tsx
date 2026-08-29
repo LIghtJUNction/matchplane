@@ -22,6 +22,7 @@ import {
   type FinanceView,
   RefundEditor,
 } from "./PlatformFinanceRecordViews";
+import { createClientUuid } from "../lib/client-uuid";
 
 type PlatformFinanceTenantState =
   | { status: "unverified" }
@@ -217,7 +218,7 @@ export function PlatformFinanceRecordsPanel({
     if (idempotency?.fingerprint !== fingerprint) {
       idempotency = {
         fingerprint,
-        key: `web-refund-${crypto.randomUUID()}`,
+        key: `web-refund-${createClientUuid()}`,
       };
       refundIdempotencyRef.current = idempotency;
     }

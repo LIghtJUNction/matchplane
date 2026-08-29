@@ -28,6 +28,7 @@ import type {
   ShoppingMemoryFact,
   ShoppingMemorySnapshot,
 } from "../shopping-memory-contract";
+import { createClientUuid } from "../lib/client-uuid";
 import { WorkspaceSettingsDialog } from "./WorkspaceSettingsDialog";
 
 interface ShoppingMemoryPanelProps {
@@ -122,7 +123,7 @@ export function ShoppingMemoryPanel({
     const request = suggestion.trim();
     if (!memory || !request || working) return;
     const userMessage: RevisionMessage = {
-      id: crypto.randomUUID(),
+      id: createClientUuid(),
       role: "user",
       text: request,
     };
@@ -140,7 +141,7 @@ export function ShoppingMemoryPanel({
       setConversation((current) => [
         ...current,
         {
-          id: crypto.randomUUID(),
+          id: createClientUuid(),
           role: "assistant",
           text: result.message,
         },
@@ -170,7 +171,7 @@ export function ShoppingMemoryPanel({
       setConversation((current) => [
         ...current,
         {
-          id: crypto.randomUUID(),
+          id: createClientUuid(),
           role: "assistant",
           text: copy.deleted,
         },

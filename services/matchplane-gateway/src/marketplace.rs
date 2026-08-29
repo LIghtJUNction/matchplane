@@ -457,7 +457,7 @@ pub(super) async fn ensure_party_session(
             "child platform sessions require domain_id".to_owned(),
         ));
     }
-    let party_id = if platform_path == "/" {
+    let requested_party_id = if platform_path == "/" {
         request
             .party_id
             .as_deref()
@@ -467,6 +467,14 @@ pub(super) async fn ensure_party_session(
     } else {
         MarketplacePartyId::from_uuid(scoped_party_uuid(auth_user_id, &platform_path))
     };
+    // Existing account-to-party links may use an operator-assigned ID rather than the
+    // deterministic first-login ID. Resolve that ID before encrypting the contact so the AAD
+    // matches the row selected by ensure_marketplace_party.
+    let party_id = state
+        .store
+        .marketplace_party_id_for_auth_user(tenant_id, auth_user_id, &platform_path)
+        .await?
+        .unwrap_or(requested_party_id);
     // Session refreshes may create the participant before a platform-owned contact form has
     // collected any channel.  An empty encrypted object is safer than publishing an implicit
     // account field; the configured package can save channels explicitly later.

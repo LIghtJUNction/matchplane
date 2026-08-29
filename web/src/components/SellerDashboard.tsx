@@ -31,6 +31,7 @@ import {
   type MarketplaceAttachment,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
+import { createClientUuid } from "../lib/client-uuid";
 import type { InterfaceLocale } from "../lib/preferences";
 import { localizedSubplatformCopy } from "../lib/localized-copy";
 import {
@@ -680,7 +681,7 @@ export function SellerDashboard({
     event.preventDefault();
     const normalizedName = displayName.trim();
     const normalizedCategory = category.trim();
-    const normalizedKey = externalKey.trim() || `offer-${crypto.randomUUID()}`;
+    const normalizedKey = externalKey.trim() || `offer-${createClientUuid()}`;
     const normalizedCurrency = currency.trim().toUpperCase();
     const normalizedAmount = toMinorUnits(askingAmount, pricingScale);
     const normalizedStock = Number.parseInt(stockQuantity, 10);

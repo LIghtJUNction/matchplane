@@ -58,6 +58,7 @@ import {
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import { authClient, authFetchOptions } from "../lib/auth-client";
+import { createClientUuid } from "../lib/client-uuid";
 import {
   clearChatDraft,
   readChatDraft,
@@ -359,7 +360,7 @@ function parseStoredMessages(value: unknown): ChatMessage[] {
       return [];
     return [
       {
-        id: typeof id === "string" && id ? id : crypto.randomUUID(),
+        id: typeof id === "string" && id ? id : createClientUuid(),
         role,
         text,
         ...(choices ? { choices } : {}),
@@ -378,16 +379,16 @@ function readStoredConversation(
       window.sessionStorage.getItem(key) ?? "null",
     );
     if (!value || typeof value !== "object" || Array.isArray(value))
-      return { id: crypto.randomUUID(), messages: [] };
+      return { id: createClientUuid(), messages: [] };
     const storedOwner = (value as { owner?: unknown }).owner;
-    if (storedOwner !== owner) return { id: crypto.randomUUID(), messages: [] };
+    if (storedOwner !== owner) return { id: createClientUuid(), messages: [] };
     const id = (value as { id?: unknown }).id;
     return {
-      id: typeof id === "string" && id ? id : crypto.randomUUID(),
+      id: typeof id === "string" && id ? id : createClientUuid(),
       messages: parseStoredMessages((value as { messages?: unknown }).messages),
     };
   } catch {
-    return { id: crypto.randomUUID(), messages: [] };
+    return { id: createClientUuid(), messages: [] };
   }
 }
 
@@ -991,7 +992,7 @@ export function MatchChat({
         setMessages((current) => [
           ...current,
           {
-            id: `route-${crypto.randomUUID()}`,
+            id: `route-${createClientUuid()}`,
             role: "assistant",
             text: runtime.sellerLocated(target.displayName),
           },
@@ -1108,9 +1109,9 @@ export function MatchChat({
       setMessage("");
       const submittedAttachments = conversationAttachments;
       setConversationAttachments([]);
-      const requestId = crypto.randomUUID();
+      const requestId = createClientUuid();
       if (!conversationIdRef.current) {
-        conversationIdRef.current = crypto.randomUUID();
+        conversationIdRef.current = createClientUuid();
       }
       const conversationId = conversationIdRef.current;
       const retryBaseMessages = failedUserMessageId
@@ -1715,7 +1716,7 @@ export function MatchChat({
       const failedUserMessageId = chatError?.failedUserMessageId;
       setChatError(null);
       setMessage("");
-      const requestId = crypto.randomUUID();
+      const requestId = createClientUuid();
       const userMessage: ChatMessage = {
         id: `${requestId}-user`,
         role: "user",
@@ -1788,7 +1789,7 @@ export function MatchChat({
                   handoff: {
                     type: "human_handoff" as const,
                     requestId: reply.requestId,
-                    conversionAttemptId: crypto.randomUUID(),
+                    conversionAttemptId: createClientUuid(),
                     intent: handoff.intent,
                     productIds: handoff.productIds,
                     status: "confirmation_required" as const,
@@ -2089,7 +2090,7 @@ export function MatchChat({
     if (sending) return;
     window.sessionStorage.removeItem(conversationStorageKey);
     clearStoredDraft();
-    setActiveHistoryId(crypto.randomUUID());
+    setActiveHistoryId(createClientUuid());
     setChatError(null);
     setMessage("");
     setMessages([]);
@@ -2147,7 +2148,7 @@ export function MatchChat({
     );
     if (id !== activeHistoryId) return;
     window.sessionStorage.removeItem(conversationStorageKey);
-    setActiveHistoryId(crypto.randomUUID());
+    setActiveHistoryId(createClientUuid());
     setChatError(null);
     setMessages([]);
     setConversationAttachments([]);

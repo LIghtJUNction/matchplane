@@ -109,16 +109,20 @@ test("Dockerfile validates the normalized release tree in the builder", () => {
     "utf8",
   );
   const normalization = dockerfile.indexOf("mkdir -p /app/standalone");
-  const pruning = dockerfile.indexOf(
+  const sourcePruning = dockerfile.indexOf(
     "rm -rf /app/standalone/app /app/standalone/src",
+  );
+  const publicPruning = dockerfile.indexOf(
+    "rm -rf /app/standalone/public /app/standalone/web/public",
   );
   const validation = dockerfile.indexOf(
     "node /app/scripts/validate-standalone-output.mjs /app/standalone",
   );
   const runner = dockerfile.indexOf(" AS runner");
   assert.ok(normalization >= 0, "Docker normalization step is missing");
-  assert.equal(pruning, -1, "traced source must be excluded during the Next build");
-  assert.ok(validation > normalization, "release validation must follow normalization");
+  assert.equal(sourcePruning, -1, "traced source must be excluded during the Next build");
+  assert.ok(publicPruning > normalization, "traced public assets must be pruned before validation");
+  assert.ok(validation > publicPruning, "release validation must follow public pruning");
   assert.ok(runner > validation, "release validation must run in the builder");
 });
 

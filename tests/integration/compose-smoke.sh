@@ -8,9 +8,17 @@ http_json_root=${MATCHPLANE_SMOKE_TMPDIR:-$repository_root/.scratch/ci-smoke}
 mkdir -p "$http_json_root"
 HTTP_JSON_WORK_DIRECTORY=$(mktemp -d "$http_json_root/compose-http-json.XXXXXX")
 export HTTP_JSON_WORK_DIRECTORY
+# The public storefront smoke runs against its own deterministic root tenant.  The core and
+# generic marketplace fixtures retain their independent tenant IDs and are not affected.
+export MATCHPLANE_ROOT_TENANT_ID=00000000-0000-7000-8000-000000001000
+export MATCHPLANE_ROOT_PLATFORM_ORGANIZATION_ID=00000000-0000-7000-8000-000000001002
 env_file="$repository_root/.env.example"
 if [[ -f "$repository_root/.env" ]]; then env_file="$repository_root/.env"; fi
 compose=(docker compose --env-file "$env_file" -f "$repository_root/deploy/compose/compose.yaml")
+# Pass the effective development secret to the shell test so its Better Auth cookie signatures
+# match the web container.  Deployments can override this with BETTER_AUTH_SECRET or the
+# test-only MATCHPLANE_SMOKE_AUTH_SECRET variable.
+export BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-matchplane_dev_only_auth_secret_change_in_production}
 
 # The smoke stack is disposable. Always remove its containers, network, and volumes when the
 # test exits, including assertion failures, so a local or CI interruption cannot leave Kafka and
@@ -40,6 +48,10 @@ trap cleanup EXIT
   --username "${MATCHPLANE_POSTGRES_USER:-matchplane}" \
   --dbname "${MATCHPLANE_POSTGRES_DB:-matchplane}" \
   <"$repository_root/tests/integration/fixture.sql" >/dev/null
+"${compose[@]}" exec -T postgres psql \
+  --username "${MATCHPLANE_POSTGRES_USER:-matchplane}" \
+  --dbname "${MATCHPLANE_POSTGRES_DB:-matchplane}" \
+  <"$repository_root/tests/integration/good-cars-fixture.sql" >/dev/null
 web_base=${MATCHPLANE_WEB_BASE_URL:-http://127.0.0.1:${MATCHPLANE_WEB_HOST_PORT:-4173}}
 http_json_pipe "$web_base/api/health/web" --location |
   jq -e '.status == "ok" and .service == "matchplane-web"' >/dev/null
@@ -48,3 +60,4 @@ http_json_expect_status 401 "$auth_response" \
   "$web_base/api/platform/api-keys?organizationId=00000000-0000-0000-0000-000000000001" --location
 jq -e 'type == "object"' "$auth_response" >/dev/null
 "$repository_root/tests/integration/smoke.sh"
+bash "$repository_root/tests/integration/good-cars-smoke.sh"
