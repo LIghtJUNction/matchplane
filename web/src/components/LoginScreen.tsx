@@ -1,6 +1,13 @@
 "use client";
 
-import { type SyntheticEvent, useEffect, useId, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type SyntheticEvent,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint } from "lucide-react";
 import { Button } from "@appica/ui-react/button";
 import { Input } from "@appica/ui-react/input";
@@ -725,6 +732,26 @@ export function LoginScreen({
   // deployment can actually deliver an SMS code for them.
   const phoneIdentifierEnabled = capabilities.phoneOtp && !emailOnlyIdentifier;
   const activeMethodTabId = `${authMethodsId}-${method}-tab`;
+  const moveMethodTab = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    currentMethod: AuthMethod,
+  ) => {
+    const currentIndex = availableMethods.indexOf(currentMethod);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight")
+      nextIndex = (currentIndex + 1) % availableMethods.length;
+    else if (event.key === "ArrowLeft")
+      nextIndex =
+        (currentIndex - 1 + availableMethods.length) % availableMethods.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = availableMethods.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextMethod = availableMethods[nextIndex];
+    if (!nextMethod) return;
+    switchMethod(nextMethod);
+    document.getElementById(`${authMethodsId}-${nextMethod}-tab`)?.focus();
+  };
   const registrationHref = `/register?next=${encodeURIComponent(next)}`;
   const loginHref = `/login?next=${encodeURIComponent(next)}`;
 
@@ -796,7 +823,9 @@ export function LoginScreen({
                 role="tab"
                 aria-controls={`${authMethodsId}-panel`}
                 aria-selected={method === "password"}
+                tabIndex={method === "password" ? 0 : -1}
                 onClick={() => switchMethod("password")}
+                onKeyDown={(event) => moveMethodTab(event, "password")}
               >
                 {copy.password}
               </button>
@@ -808,7 +837,9 @@ export function LoginScreen({
                   role="tab"
                   aria-controls={`${authMethodsId}-panel`}
                   aria-selected={method === "email-otp"}
+                  tabIndex={method === "email-otp" ? 0 : -1}
                   onClick={() => switchMethod("email-otp")}
+                  onKeyDown={(event) => moveMethodTab(event, "email-otp")}
                 >
                   {copy.emailOtp}
                 </button>
@@ -821,7 +852,9 @@ export function LoginScreen({
                   role="tab"
                   aria-controls={`${authMethodsId}-panel`}
                   aria-selected={method === "magic-link"}
+                  tabIndex={method === "magic-link" ? 0 : -1}
                   onClick={() => switchMethod("magic-link")}
+                  onKeyDown={(event) => moveMethodTab(event, "magic-link")}
                 >
                   {copy.magicLink}
                 </button>

@@ -9,7 +9,7 @@ import {
   RefreshCw,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   activateFederationBinding,
@@ -39,7 +39,13 @@ export function RemoteStoreOnboarding({
     expiresAt: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [bindingsStatus, setBindingsStatus] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
+  const [bindingsError, setBindingsError] = useState<string | null>(null);
   const observedFreshDomainsRef = useRef(false);
+  const bindingsRequestRef = useRef(0);
+  const mountedRef = useRef(true);
   const freshDomains =
     domainsResource.status === "ready" ? domainsResource.data : null;
   const activeDomains = useMemo(
@@ -48,7 +54,35 @@ export function RemoteStoreOnboarding({
   );
   const previousDomains = bootstrapResourceData(domainsResource);
 
-  const refresh = async () => setBindings(await getFederationBindings());
+  const refresh = useCallback(async () => {
+    const requestId = ++bindingsRequestRef.current;
+    setBindingsStatus("loading");
+    setBindingsError(null);
+    try {
+      const items = await getFederationBindings();
+      if (mountedRef.current && requestId === bindingsRequestRef.current) {
+        setBindings(items);
+        setBindingsStatus("ready");
+      }
+      return items;
+    } catch (error) {
+      if (mountedRef.current && requestId === bindingsRequestRef.current) {
+        setBindingsStatus("error");
+        setBindingsError(
+          error instanceof Error ? error.message : "远程店铺读取失败",
+        );
+      }
+      throw error;
+    }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      bindingsRequestRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     if (!freshDomains) return;
@@ -64,19 +98,11 @@ export function RemoteStoreOnboarding({
   }, [activeDomains, freshDomains]);
 
   useEffect(() => {
-    let mounted = true;
-    void getFederationBindings()
-      .then((items) => {
-        if (mounted) setBindings(items);
-      })
-      .catch((error) => {
-        if (mounted)
-          onNotice(error instanceof Error ? error.message : "远程店铺读取失败");
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [onNotice]);
+    void refresh().catch((error) => {
+      if (mountedRef.current)
+        onNotice(error instanceof Error ? error.message : "远程店铺读取失败");
+    });
+  }, [onNotice, refresh]);
 
   const createInvite = async () => {
     if (domainsResource.status !== "ready") {
@@ -284,9 +310,40 @@ export function RemoteStoreOnboarding({
           <strong>已接入的远程店铺</strong>
           <small>持久连接；可随时检查或主动断开</small>
         </div>
-        <span>{bindings.length} 家</span>
+        <span>
+          {bindingsStatus === "loading" && bindings.length === 0
+            ? "读取中"
+            : bindingsStatus === "error" && bindings.length === 0
+              ? "不可用"
+              : `${bindings.length} 家`}
+        </span>
       </div>
       <div className="remote-store-list" aria-label="已接入的远程店铺">
+        {bindingsStatus === "loading" ? (
+          <p className="platform-access-empty" role="status">
+            {bindings.length > 0
+              ? "正在更新远程店铺状态…"
+              : "正在读取远程店铺…"}
+          </p>
+        ) : null}
+        {bindingsStatus === "error" ? (
+          <div className="hosted-store-load-error" role="alert">
+            <div>
+              <strong>远程店铺读取失败</strong>
+              <p>{bindingsError ?? "暂时无法确认已接入的远程店铺。"}</p>
+            </div>
+            <Button
+              variant="outline"
+              size="md"
+              className="min-h-11"
+              type="button"
+              onClick={() => void refresh().catch(() => undefined)}
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+              重新读取
+            </Button>
+          </div>
+        ) : null}
         {bindings.length ? (
           bindings.map((binding) => (
             <div className="remote-store-row" key={binding.id}>
@@ -333,7 +390,7 @@ export function RemoteStoreOnboarding({
                     size="md"
                     className="min-h-11"
                     type="button"
-                    disabled={loading}
+                    disabled={loading || bindingsStatus === "loading"}
                     onClick={() => void activate(binding)}
                   >
                     确认接入
@@ -348,7 +405,7 @@ export function RemoteStoreOnboarding({
                     size="md"
                     className="min-h-11"
                     type="button"
-                    disabled={loading}
+                    disabled={loading || bindingsStatus === "loading"}
                     onClick={() => void probe(binding)}
                   >
                     <RefreshCw size={14} aria-hidden="true" />
@@ -359,7 +416,7 @@ export function RemoteStoreOnboarding({
                     size="md"
                     className="min-h-11"
                     type="button"
-                    disabled={loading}
+                    disabled={loading || bindingsStatus === "loading"}
                     onClick={() => void revoke(binding)}
                   >
                     断开
@@ -368,9 +425,11 @@ export function RemoteStoreOnboarding({
               )}
             </div>
           ))
-        ) : (
-          <p className="platform-access-empty">还没有接入远程店铺。</p>
-        )}
+        ) : bindingsStatus === "ready" ? (
+          <p className="platform-access-empty" role="status">
+            还没有接入远程店铺。
+          </p>
+        ) : null}
       </div>
     </section>
   );

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -33,6 +33,55 @@ beforeEach(() => {
 });
 
 describe("RemoteStoreOnboarding", () => {
+  it("shows truthful binding loading and error states with a working retry", async () => {
+    const initialRequest = deferred<FederationBindingRecord[]>();
+    api.getFederationBindings.mockReset().mockReturnValueOnce(initialRequest.promise);
+    render(
+      <RemoteStoreOnboarding
+        domainsResource={{ status: "ready", data: [domain("domain-a")] }}
+        onNotice={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+      "正在读取远程店铺",
+    );
+    expect(screen.queryByText("还没有接入远程店铺。")).not.toBeInTheDocument();
+
+    await act(async () => initialRequest.reject(new Error("连接超时")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("连接超时");
+    expect(screen.queryByText("还没有接入远程店铺。")).not.toBeInTheDocument();
+
+    api.getFederationBindings.mockResolvedValueOnce([binding]);
+    await userEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    expect(await screen.findByText("华东家电店")).toBeInTheDocument();
+  });
+
+  it("keeps the newest binding response when requests finish out of order", async () => {
+    const firstRequest = deferred<FederationBindingRecord[]>();
+    const secondRequest = deferred<FederationBindingRecord[]>();
+    api.getFederationBindings
+      .mockReset()
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockReturnValueOnce(secondRequest.promise);
+    const props = {
+      domainsResource: {
+        status: "ready" as const,
+        data: [domain("domain-a")],
+      },
+    };
+    const { rerender } = render(
+      <RemoteStoreOnboarding {...props} onNotice={vi.fn()} />,
+    );
+    rerender(<RemoteStoreOnboarding {...props} onNotice={vi.fn()} />);
+
+    await act(async () => secondRequest.resolve([binding]));
+    expect(await screen.findByText("华东家电店")).toBeInTheDocument();
+    await act(async () => firstRequest.resolve([]));
+    expect(screen.getByText("华东家电店")).toBeInTheDocument();
+    expect(screen.queryByText("还没有接入远程店铺。")).not.toBeInTheDocument();
+  });
+
   it("auto-selects the only fresh active domain for controlled enrollment", async () => {
     const user = userEvent.setup();
     render(
@@ -125,6 +174,16 @@ describe("RemoteStoreOnboarding", () => {
     expect(api.createFederationInvite).not.toHaveBeenCalled();
   });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+}
 
 function domain(id: string): PlatformDomainRecord {
   return {

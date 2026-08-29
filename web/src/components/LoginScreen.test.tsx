@@ -90,6 +90,33 @@ describe("LoginScreen", () => {
     );
   });
 
+  it("supports arrow, Home, and End navigation for authentication tabs", async () => {
+    window.history.replaceState(null, "", "/login");
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ emailOtp: true, magicLink: true, passkey: true }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const user = userEvent.setup();
+    render(<LoginScreen intent="sign-in" />);
+
+    const password = await screen.findByRole("tab", { name: "密码" });
+    const emailOtp = screen.getByRole("tab", { name: "验证码" });
+    const magicLink = screen.getByRole("tab", { name: "免密链接" });
+    expect(password).toHaveAttribute("tabindex", "0");
+    expect(emailOtp).toHaveAttribute("tabindex", "-1");
+
+    password.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(emailOtp).toHaveFocus();
+    expect(emailOtp).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{End}");
+    expect(magicLink).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(password).toHaveFocus();
+  });
+
   it("opens the password reset flow directly from account settings", async () => {
     window.history.replaceState(
       null,
