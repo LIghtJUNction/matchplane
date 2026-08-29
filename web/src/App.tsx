@@ -567,6 +567,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
               >
                 {role === "buyer" && subplatform.slug === "root" ? (
                   <MarketplaceHome
+                    brandName={subplatform.brandName}
                     catalogResolved={catalogResolved}
                     catalogError={catalogError}
                     listings={listings}
