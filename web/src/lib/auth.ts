@@ -36,6 +36,11 @@ import {
   readManagedWeChatOAuthConfig,
 } from "./wechat-oauth-config";
 import { isUuid } from "./uuid";
+import {
+  isReservedSuperAdminEmail,
+  matchesReservedSuperAdminInvite,
+  readSuperAdminBootstrapClaimDigest,
+} from "./super-admin-bootstrap";
 
 const database = new Pool({
   connectionString:
@@ -381,7 +386,7 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
-        before: async (user) => {
+        before: async (user, context) => {
           const legal = await currentLegalVersions();
           const acceptedTermsVersion = legalVersionFromUser(
             user,
@@ -402,10 +407,23 @@ export const auth = betterAuth({
             legalTermsVersion: legal.terms,
             legalPrivacyVersion: legal.privacy,
           };
-          if (await hasReservedSuperAdminInvite(user.email)) {
+          const bootstrapClaimDigest = readSuperAdminBootstrapClaimDigest(
+            context?.headers,
+          );
+          const bootstrapReservation =
+            await authorizeReservedSuperAdminInvite(
+              user.email,
+              bootstrapClaimDigest,
+            );
+          if (bootstrapReservation === "authorized") {
             return {
               data: { ...user, ...acceptedLegalData, role: "rootSuperAdmin" },
             };
+          }
+          if (bootstrapReservation === "reserved") {
+            // Do not let an unproved password signup squat the operator's reserved email. The
+            // browser that claimed the CLI token carries the only valid promotion proof.
+            throw new Error("超级管理员注册链接无效或已过期");
           }
           if (!allowDevAuthBootstrap && !(await isRootEmailAuthConfigured())) {
             throw new Error("普通用户注册暂未开放");
@@ -446,14 +464,20 @@ export const auth = betterAuth({
   },
 });
 
-async function hasReservedSuperAdminInvite(email: string): Promise<boolean> {
+async function authorizeReservedSuperAdminInvite(
+  email: string,
+  claimDigest: string | null,
+): Promise<"none" | "reserved" | "authorized"> {
   const tenantId = process.env.MATCHPLANE_ROOT_TENANT_ID?.trim();
-  if (!tenantId || !isUuid(tenantId)) return false;
+  if (!tenantId || !isUuid(tenantId)) return "none";
   const result = await authDatabase.query<{
-    registration_email: string | null;
-    target_email: string | null;
+    registrationEmail: string | null;
+    targetEmail: string | null;
+    tokenHash: string;
   }>(
-    `SELECT registration_email, target_email
+    `SELECT registration_email AS "registrationEmail",
+            target_email AS "targetEmail",
+            token_hash AS "tokenHash"
        FROM root_superadmin_invites
       WHERE tenant_id = $1::uuid
         AND used_at IS NULL
@@ -461,12 +485,10 @@ async function hasReservedSuperAdminInvite(email: string): Promise<boolean> {
     [tenantId],
   );
   const invite = result.rows[0];
-  if (!invite?.registration_email) return false;
-  return (
-    invite.registration_email.toLowerCase() === email.toLowerCase() &&
-    (!invite.target_email ||
-      invite.target_email.toLowerCase() === email.toLowerCase())
-  );
+  if (!isReservedSuperAdminEmail(invite, email)) return "none";
+  return matchesReservedSuperAdminInvite(invite, email, claimDigest)
+    ? "authorized"
+    : "reserved";
 }
 
 async function currentLegalVersions(): Promise<{

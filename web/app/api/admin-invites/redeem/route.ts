@@ -95,28 +95,29 @@ export async function POST(request: Request): Promise<Response> {
       await client.query("ROLLBACK");
       return jsonError("子平台管理员邀请不能指向根组织", 409);
     }
-    const claimIsActive = Boolean(
-      invite.claimedBy &&
-        invite.claimedBy !== session.user.id &&
-        (!invite.claimExpiresAt ||
-          new Date(invite.claimExpiresAt).getTime() > Date.now()),
-    );
-    if (claimIsActive) {
+    // A claim is an account binding, not a lease that another account may inherit. If the
+    // process dies after Better Auth grants the role but before used_at is persisted, allowing
+    // takeover after claim_expires_at would grant the same bearer invite to two accounts.
+    // Known pre-application failures clear the claim below; an uncertain crash remains safely
+    // retryable only by the same verified account.
+    if (invite.claimedBy && invite.claimedBy !== session.user.id) {
       await client.query("ROLLBACK");
-      return jsonError("管理员注册链接正在由其他账号兑换，请稍后重试", 409);
+      return jsonError("管理员注册链接已绑定到其他账号", 409);
     }
 
     // Claim the invite in a short transaction before calling Better Auth. Better Auth owns the
-    // user and organization records and uses its own adapter connection, so the claim lease is
-    // the cross-store guard that prevents a crash between role application and used_at from
-    // allowing a different account to reuse the token. The same user can safely retry while the
-    // lease is active because role application is idempotent.
+    // user and organization records and uses its own adapter connection, so this durable account
+    // binding prevents a crash between role application and used_at from allowing a different
+    // account to reuse the token. The same user can safely retry because role application is
+    // idempotent.
     const claimed = await client.query(
       `UPDATE platform_admin_invites
           SET claimed_by = $2::uuid,
               claimed_at = clock_timestamp(),
               claim_expires_at = clock_timestamp() + interval '10 minutes'
-        WHERE id = $1::uuid AND used_at IS NULL`,
+        WHERE id = $1::uuid
+          AND used_at IS NULL
+          AND (claimed_by IS NULL OR claimed_by = $2::uuid)`,
       [invite.inviteId, session.user.id],
     );
     if (claimed.rowCount !== 1) {
@@ -161,8 +162,8 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (invite && !roleApplicationAttempted) {
-      // Release a failed claim immediately when possible. If the database is unavailable, the
-      // lease expires on its own and the same user can retry without issuing a replacement link.
+      // Release a known pre-application failure immediately when possible. If cleanup cannot
+      // finish, the account binding remains and the same user can retry without a replacement.
       await client
         .query("BEGIN")
         .then(async () => {
@@ -178,11 +179,11 @@ export async function POST(request: Request): Promise<Response> {
           await client.query("ROLLBACK").catch(() => undefined);
         });
     } else if (invite && roleApplicationAttempted) {
-      // Keep the short claim lease. A retry by the same verified user can idempotently apply the
-      // role again and mark the invite; a different account must not inherit a role from a token
-      // whose cross-store completion is still uncertain.
+      // Keep the durable account binding. A retry by the same verified user can idempotently
+      // apply the role again and mark the invite; a different account must not inherit a role
+      // from a token whose cross-store completion is still uncertain.
       console.warn(
-        "platform admin invite role applied; retaining claim lease after completion failure",
+        "platform admin invite role applied; retaining account binding after completion failure",
         {
           inviteId: invite.inviteId,
           userId: session.user.id,
