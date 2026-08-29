@@ -21,7 +21,14 @@ impl PgStore {
     pub async fn claim_outbox(&self, limit: i64) -> Result<Vec<OutboxMessage>, StorageError> {
         let claim_token = Uuid::now_v7();
         let rows = sqlx::query(
-            "WITH candidates AS ( \
+            "WITH exhausted AS ( \
+                 UPDATE outbox_events \
+                    SET status = 'failed', claimed_at = NULL, claim_token = NULL, \
+                        last_error = COALESCE(last_error, 'delivery claim lease expired after attempt limit') \
+                  WHERE status = 'publishing' \
+                    AND attempts >= $2 \
+                    AND claimed_at < clock_timestamp() - INTERVAL '60 seconds' \
+             ), candidates AS ( \
                  SELECT candidate.event_id FROM outbox_events AS candidate \
                  WHERE candidate.available_at <= clock_timestamp() \
                    AND candidate.attempts < $2 \
