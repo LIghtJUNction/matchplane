@@ -157,6 +157,10 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: cargo test --locked -p matchplane-storage --test outbox_claims -- --ignored
+      - name: Test federation expiry authority against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test federation_expiry -- --ignored
       - name: Test durable book recovery source against PostgreSQL
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
