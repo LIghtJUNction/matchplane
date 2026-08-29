@@ -152,8 +152,7 @@ export function platformRouterPolicyIssues(
 }
 
 export function readEnvironmentProviderStatus(
-  environment: PlatformRouterProviderEnvironment =
-    process.env as PlatformRouterProviderEnvironment,
+  environment: PlatformRouterProviderEnvironment = process.env as PlatformRouterProviderEnvironment,
 ): EnvironmentProviderStatus {
   const endpoint = environment.MATCHPLANE_ROUTER_AI_URL?.trim() || null;
   const model = environment.MATCHPLANE_ROUTER_AI_MODEL?.trim() || null;
@@ -184,7 +183,8 @@ export function readEnvironmentProviderStatus(
     protocol,
     present,
     configured:
-      present && platformRouterPolicyIssues(candidate, originAllowlist).length === 0,
+      present &&
+      platformRouterPolicyIssues(candidate, originAllowlist).length === 0,
     originAllowlist,
   };
 }
