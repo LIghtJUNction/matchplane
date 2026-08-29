@@ -20,6 +20,17 @@ function matchMedia(reducedMotion: boolean) {
   return { addEventListener, removeEventListener };
 }
 
+function legacyMatchMedia() {
+  vi.spyOn(window, "matchMedia").mockReturnValue({
+    matches: false,
+    media: "(prefers-reduced-motion: reduce)",
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  } as unknown as MediaQueryList);
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -146,6 +157,86 @@ describe("AssistantThinkingStatus", () => {
       "change",
       expect.any(Function),
     );
+  });
+
+  it.each([
+    "missing",
+    "legacy",
+  ] as const)("stays static when matchMedia is %s", async (support) => {
+    if (support === "missing") {
+      vi.stubGlobal("matchMedia", undefined);
+    } else {
+      legacyMatchMedia();
+    }
+
+    const { container } = render(
+      <AssistantThinkingStatus locale="en" mode="shopping" />,
+    );
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    const visual = container.querySelector("[data-assistant-liquid]");
+    expect(visual).toHaveAttribute("data-renderer", "static");
+    expect(visual).toHaveAttribute("data-motion", "paused");
+    expect(container.querySelector("[data-gooey-svg]")).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Replying…" })).toBeVisible();
+  });
+
+  it("stays static without MutationObserver", async () => {
+    matchMedia(false);
+    vi.stubGlobal("MutationObserver", undefined);
+    const { container } = render(
+      <AssistantThinkingStatus locale="zh" mode="shopping" />,
+    );
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    const visual = container.querySelector("[data-assistant-liquid]");
+    expect(visual).toHaveAttribute("data-renderer", "static");
+    expect(container.querySelector("[data-gooey-svg]")).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "正在回复…" })).toBeVisible();
+  });
+
+  it("fails closed when the liquid runtime throws after loading", async () => {
+    matchMedia(false);
+    const expectedError = new Error("ResizeObserver construction failed");
+    const resizeObserverConstructed = vi.fn();
+    class ThrowingResizeObserver {
+      constructor() {
+        resizeObserverConstructed();
+        throw expectedError;
+      }
+    }
+    vi.stubGlobal("ResizeObserver", ThrowingResizeObserver);
+
+    const originalConsoleError = console.error;
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      const expectedReactNoise = args.some(
+        (argument) =>
+          argument === expectedError ||
+          (typeof argument === "string" &&
+            argument.includes(expectedError.message)),
+      );
+      if (!expectedReactNoise) originalConsoleError(...args);
+    });
+
+    const { container } = render(
+      <AssistantThinkingStatus locale="en" mode="seller" />,
+    );
+    await waitFor(() => expect(resizeObserverConstructed).toHaveBeenCalled());
+    const visual = container.querySelector("[data-assistant-liquid]");
+    await waitFor(() =>
+      expect(visual).toHaveAttribute("data-renderer", "static"),
+    );
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(resizeObserverConstructed).toHaveBeenCalledOnce();
+    expect(container.querySelector("[data-gooey-svg]")).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Replying…" })).toBeVisible();
   });
 
   it("keeps a static fallback when the enhancement is unsupported", async () => {

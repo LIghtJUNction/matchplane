@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
 import styles from "./AssistantLiquidIndicator.module.css";
 
@@ -8,6 +16,51 @@ export type AssistantLiquidActivity = "shopping" | "store" | "seller";
 
 type LiquidComponent = typeof import("liquid-gooey")["Liquid"];
 type Point = { x: number; y: number };
+
+type LiquidErrorBoundaryProps = {
+  children: ReactNode;
+  fallback: ReactNode;
+  onFailure: () => void;
+};
+
+type LiquidErrorBoundaryState = { failed: boolean };
+
+class LiquidErrorBoundary extends Component<
+  LiquidErrorBoundaryProps,
+  LiquidErrorBoundaryState
+> {
+  state: LiquidErrorBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): LiquidErrorBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onFailure();
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function StaticLiquidMarker() {
+  return (
+    <span className={styles.fallback}>
+      <span className={styles.fallbackDrop} />
+      <span className={styles.fallbackDrop} />
+    </span>
+  );
+}
+
+function hasLiquidRuntimeCapabilities() {
+  return (
+    typeof MutationObserver === "function" &&
+    typeof ResizeObserver === "function" &&
+    typeof window.requestAnimationFrame === "function" &&
+    typeof window.cancelAnimationFrame === "function"
+  );
+}
 
 const paths: Record<
   AssistantLiquidActivity,
@@ -51,11 +104,31 @@ function useMotionGate(rootRef: RefObject<HTMLDivElement | null>) {
   const [inView, setInView] = useState(true);
 
   useEffect(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => setReducedMotion(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
+    try {
+      if (typeof window.matchMedia !== "function") return;
+
+      const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+      if (
+        typeof media?.addEventListener !== "function" ||
+        typeof media.removeEventListener !== "function"
+      ) {
+        return;
+      }
+
+      const reduced = media.matches;
+      const sync = () => setReducedMotion(media.matches);
+      media.addEventListener("change", sync);
+      setReducedMotion(reduced);
+      return () => {
+        try {
+          media.removeEventListener("change", sync);
+        } catch {
+          // A partial runtime must not break the static fallback during cleanup.
+        }
+      };
+    } catch {
+      setReducedMotion(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -86,15 +159,18 @@ export function AssistantLiquidIndicator({
   const rootRef = useRef<HTMLDivElement>(null);
   const [Liquid, setLiquid] = useState<LiquidComponent | null>(null);
   const [phase, setPhase] = useState(false);
+  const [enhancementFailed, setEnhancementFailed] = useState(false);
   const enhancementAllowed = useMotionGate(rootRef);
+  const disableEnhancement = useCallback(() => {
+    setEnhancementFailed(true);
+  }, []);
 
   useEffect(() => {
     if (
       !enhancementAllowed ||
+      enhancementFailed ||
       Liquid !== null ||
-      typeof ResizeObserver === "undefined" ||
-      typeof window.requestAnimationFrame !== "function" ||
-      typeof window.cancelAnimationFrame !== "function"
+      !hasLiquidRuntimeCapabilities()
     ) {
       return;
     }
@@ -105,14 +181,14 @@ export function AssistantLiquidIndicator({
         if (!cancelled) setLiquid(() => module.Liquid);
       })
       .catch(() => {
-        // The visual enhancement is optional; the static marker remains.
+        if (!cancelled) disableEnhancement();
       });
     return () => {
       cancelled = true;
     };
-  }, [Liquid, enhancementAllowed]);
+  }, [Liquid, disableEnhancement, enhancementAllowed, enhancementFailed]);
 
-  const enhanced = Liquid !== null && enhancementAllowed;
+  const enhanced = Liquid !== null && enhancementAllowed && !enhancementFailed;
 
   useEffect(() => {
     if (!enhanced) return;
@@ -136,35 +212,37 @@ export function AssistantLiquidIndicator({
       data-renderer={enhanced ? "liquid-gooey" : "static"}
     >
       {enhanced ? (
-        <Liquid
-          className={styles.liquid}
-          blur={3}
-          contrast={20}
-          fill="var(--assistant-liquid-fill)"
-          filterPadding={4}
-          waviness={0}
+        <LiquidErrorBoundary
+          fallback={<StaticLiquidMarker />}
+          onFailure={disableEnhancement}
         >
-          {positions.map((position, index) => (
-            <Liquid.Item
-              key={index}
-              className={styles.item}
-              x={position.x}
-              y={position.y}
-              radius={4}
-              transition={{
-                duration: 280,
-                ease: "cubic-bezier(0.22, 1, 0.36, 1)",
-              }}
-            >
-              <span className={styles.drop} />
-            </Liquid.Item>
-          ))}
-        </Liquid>
+          <Liquid
+            className={styles.liquid}
+            blur={3}
+            contrast={20}
+            fill="var(--assistant-liquid-fill)"
+            filterPadding={4}
+            waviness={0}
+          >
+            {positions.map((position, index) => (
+              <Liquid.Item
+                key={index}
+                className={styles.item}
+                x={position.x}
+                y={position.y}
+                radius={4}
+                transition={{
+                  duration: 280,
+                  ease: "cubic-bezier(0.22, 1, 0.36, 1)",
+                }}
+              >
+                <span className={styles.drop} />
+              </Liquid.Item>
+            ))}
+          </Liquid>
+        </LiquidErrorBoundary>
       ) : (
-        <span className={styles.fallback}>
-          <span className={styles.fallbackDrop} />
-          <span className={styles.fallbackDrop} />
-        </span>
+        <StaticLiquidMarker />
       )}
     </div>
   );
