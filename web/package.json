@@ -28,7 +28,9 @@
     "ai": "^7.0.73",
     "better-auth": "1.7.0-rc.6",
     "ipaddr.js": "2.5.0",
+    "liquid-gooey": "0.2.1",
     "lucide-react": "1.31.0",
+    "metal-fx": "1.0.4",
     "motion": "13.1.0",
     "next": "16.3.1",
     "nodemailer": "^9.0.5",
@@ -37,7 +39,6 @@
     "react-dom": "19.2.8",
     "server-only": "0.0.1",
     "sharp": "0.35.3",
-    "thinking-orbs": "0.3.1",
     "undici": "7.29.0",
     "zod": "^4.4.3"
   },
@@ -55,5 +56,8 @@
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
+  },
+  "patchedDependencies": {
+    "metal-fx@1.0.4": "patches/metal-fx@1.0.4.patch"
   }
 }

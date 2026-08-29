@@ -52,6 +52,12 @@ vi.mock("../lib/marketplace-session", () => ({
   getMarketplaceSession,
 }));
 
+vi.mock("./MatchChatMetalHalo", () => ({
+  MatchChatMetalHalo: ({ active }: { active: boolean }) => (
+    <span data-match-chat-metal data-active={String(active)} />
+  ),
+}));
+
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
   isLiveMarketplaceEnabled: () => true,
@@ -192,8 +198,13 @@ describe("MatchChat sending state", () => {
     const input = screen.getByRole("textbox", {
       name: "告诉 MatchPlane 你的需求",
     });
+    const halo = document.querySelector("[data-match-chat-metal]");
 
+    expect(input).not.toHaveFocus();
+    expect(halo).toHaveAttribute("data-active", "false");
     await user.type(input, "寻找合适的方案");
+    expect(input).toHaveFocus();
+    expect(halo).toHaveAttribute("data-active", "true");
     await user.click(screen.getByRole("button", { name: "发送需求" }));
 
     expect(onSearchTrace).toHaveBeenCalledWith(null);
@@ -206,6 +217,12 @@ describe("MatchChat sending state", () => {
     expect(screen.getByText("寻找合适的方案")).toBeInTheDocument();
     expect(screen.queryByText(/我先|AI 已|整理成一份/)).not.toBeInTheDocument();
     expect(document.querySelector(".assistant-thinking-status")).not.toBeNull();
+    expect(
+      document.querySelector(
+        '[data-assistant-liquid][data-activity="shopping"]',
+      ),
+    ).toHaveAttribute("aria-hidden", "true");
+    expect(halo).toHaveAttribute("data-active", "false");
 
     expect(document.querySelector(".home-chat")).toHaveClass(
       "has-conversation",
@@ -217,6 +234,13 @@ describe("MatchChat sending state", () => {
     ).not.toBeNull();
 
     resolveRoute.current?.();
+    expect(
+      await screen.findByText("这是模型生成的导购回答。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "正在回复…" }),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector("[data-assistant-liquid]")).toBeNull();
   });
 
   it("keeps a failed request reason retryable after resetting prior provenance", async () => {
@@ -255,6 +279,7 @@ describe("MatchChat sending state", () => {
     expect(
       document.querySelector(".match-chat-message.is-assistant"),
     ).toBeNull();
+    expect(document.querySelector("[data-assistant-liquid]")).toBeNull();
 
     askMallShoppingAssistant.mockResolvedValueOnce({
       requestId: "44444444-4444-4444-8444-444444444444",
@@ -268,6 +293,7 @@ describe("MatchChat sending state", () => {
       await screen.findByText("可以。你具体想找什么？"),
     ).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-assistant-liquid]")).toBeNull();
     expect(
       document.querySelectorAll(".match-chat-message.is-user"),
     ).toHaveLength(1);

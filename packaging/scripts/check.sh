@@ -167,12 +167,32 @@ for staged_path in \
   '/usr/sbin/matchplane-postgres-backup-prepare' \
   '/usr/bin/matchplane-postgres-backup-verify' \
   'packaging/systemd/\*\.timer' \
-  'postgres-backup.conf'; do
+  'postgres-backup.conf' \
+  'liquid-gooey\.LICENSE' \
+  'metal-fx\.LICENSE' \
+  'web-THIRD_PARTY_NOTICES\.md'; do
   if ! rg -q "$staged_path" packaging/scripts/stage.sh; then
     echo "packaging stage is missing $staged_path" >&2
     exit 1
   fi
 done
+if ! rg -Fq '%license %{_datadir}/licenses/matchplane/metal-fx.LICENSE' \
+  packaging/fedora/matchplane.spec; then
+  echo 'the Fedora package must list the metal-fx license' >&2
+  exit 1
+fi
+metal_patch=patches/metal-fx@1.0.4.patch
+web_metal_patch=web/patches/metal-fx@1.0.4.patch
+for patch_path in "$metal_patch" "$web_metal_patch"; do
+  if [[ ! -f $patch_path ]]; then
+    echo "required metal-fx patch is missing: $patch_path" >&2
+    exit 1
+  fi
+done
+if ! cmp -s "$metal_patch" "$web_metal_patch"; then
+  echo 'root and web metal-fx patches must be identical' >&2
+  exit 1
+fi
 if ! rg -Fq '"$repository_root"/docs/*.json' packaging/scripts/stage.sh; then
   echo 'staging must include all public Agent and subplatform JSON contracts' >&2
   exit 1

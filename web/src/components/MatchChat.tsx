@@ -83,6 +83,7 @@ import {
 } from "../pending-conversion";
 import type { AssetListing } from "../types";
 import { AssistantThinkingStatus } from "./AssistantThinkingStatus";
+import { MatchChatMetalHalo } from "./MatchChatMetalHalo";
 import { ConversationHistoryPanel } from "./ConversationHistoryPanel";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
 import { ShoppingMemoryPanel } from "./ShoppingMemoryPanel";
@@ -106,7 +107,7 @@ const HOME_PLACEHOLDER_EXAMPLES = {
   en: ["Describe what you want and your budget"],
 } as const;
 
-function useHomePlaceholder(
+function homePlaceholderFor(
   locale: InterfaceLocale,
   _enabled: boolean,
   configuredPhrases?: string[],
@@ -805,7 +806,7 @@ export function MatchChat({
     );
   }
   const hideMarketingHeading = home && !showCompactMarketplaceHeading;
-  const homePlaceholder = useHomePlaceholder(
+  const homePlaceholder = homePlaceholderFor(
     locale,
     home && isRoot && !isSeller && !message && !composerFocused,
     subplatform.ui?.chat?.homePlaceholderPhrases,
@@ -2604,15 +2605,24 @@ export function MatchChat({
             (!message.trim() && !conversationAttachments.length) || sending
           }
         >
-          {sending ? (
-            <LoaderCircle
-              className="match-chat-spinner"
-              size={18}
-              aria-hidden="true"
-            />
-          ) : (
-            <ArrowUp size={18} aria-hidden="true" />
-          )}
+          <MatchChatMetalHalo
+            active={
+              composerFocused &&
+              Boolean(message.trim() || conversationAttachments.length) &&
+              !sending
+            }
+          />
+          <span className="relative z-10 inline-flex">
+            {sending ? (
+              <LoaderCircle
+                className="match-chat-spinner"
+                size={18}
+                aria-hidden="true"
+              />
+            ) : (
+              <ArrowUp size={18} aria-hidden="true" />
+            )}
+          </span>
         </Button>
         {home ? <div className="home-chat-toolbar">{chatActions}</div> : null}
       </form>

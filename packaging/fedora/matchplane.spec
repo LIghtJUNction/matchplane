@@ -98,9 +98,12 @@ echo 'The PostgreSQL backup timer is installed disabled; production operators mu
 %{_docdir}/matchplane/marketplace-payments.md
 %{_docdir}/matchplane/cli-and-mcp.md
 %{_docdir}/matchplane/postgresql-backup-gate.md
+%{_docdir}/matchplane/web-THIRD_PARTY_NOTICES.md
 %{_docdir}/matchplane/*.json
 %{_datadir}/matchplane/skills
 %license %{_datadir}/licenses/matchplane/LICENSE
+%license %{_datadir}/licenses/matchplane/liquid-gooey.LICENSE
+%license %{_datadir}/licenses/matchplane/metal-fx.LICENSE
 
 %changelog
 * Fri Aug 14 2026 LIghtJUNction <lightjunction.me@gmail.com> - %{version}-1

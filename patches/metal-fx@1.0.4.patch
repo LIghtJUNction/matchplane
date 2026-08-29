@@ -1,0 +1,40 @@
+diff --git a/dist/index.es.js b/dist/index.es.js
+index 93ff2e2beeeea960a7073331f2dcc3193f0dd560..4cd21a62944b520cb5e5cf4a6dec0d02e2277ce5 100644
+--- a/dist/index.es.js
++++ b/dist/index.es.js
+@@ -428,9 +428,9 @@ function et() {
+   }
+   if (!r) throw new Error("metal-fx: WebGL not supported");
+   const { program: a, buffer: s, uniforms: d } = ke(r), l = (u) => {
+-    u.preventDefault(), i && (i.contextLost = !0);
++    u.preventDefault(), (i == null ? void 0 : i.glCanvas) === o && (i.contextLost = !0);
+   }, c = () => {
+-    if (!i) return;
++    if ((i == null ? void 0 : i.glCanvas) !== o) return;
+     const u = ke(i.gl);
+     i.program = u.program, i.buffer = u.buffer, i.uniforms = u.uniforms, i.presetDirty = !0, i.contextLost = !1, le == null || le();
+   };
+@@ -443,6 +443,8 @@ function et() {
+     preset: je.chromatic.modes.dark,
+     presetDirty: !0,
+     contextLost: !1,
++    onContextLost: l,
++    onContextRestored: c,
+     useOffscreen: n,
+     frameBitmap: null,
+     startMs: performance.now(),
+@@ -461,11 +463,11 @@ function et() {
+   }, i;
+ }
+ function $t() {
+-  var r;
++  var d;
+   if (!i) return;
+-  const { gl: e, program: t, buffer: n, frameBitmap: o } = i;
++  const { gl: e, program: t, buffer: n, frameBitmap: o, glCanvas: r, onContextLost: a, onContextRestored: s } = i;
+   try {
+-    o == null || o.close(), e.deleteBuffer(n), e.deleteProgram(t), (r = e.getExtension("WEBGL_lose_context")) == null || r.loseContext();
++    r.removeEventListener("webglcontextlost", a, !1), r.removeEventListener("webglcontextrestored", s, !1), o == null || o.close(), e.deleteBuffer(n), e.deleteProgram(t), (d = e.getExtension("WEBGL_lose_context")) == null || d.loseContext();
+   } catch {
+   }
+   i = null;

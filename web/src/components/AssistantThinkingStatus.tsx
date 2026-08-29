@@ -1,20 +1,13 @@
 "use client";
 
-import { ThinkingOrb, type OrbState } from "thinking-orbs";
-
 import type { InterfaceLocale } from "../lib/preferences";
+import { AssistantLiquidIndicator } from "./AssistantLiquidIndicator";
 import styles from "./AssistantThinkingStatus.module.css";
 
 interface AssistantThinkingStatusProps {
   locale: InterfaceLocale;
   mode: "shopping" | "store" | "seller";
 }
-
-const modeState: Record<AssistantThinkingStatusProps["mode"], OrbState> = {
-  shopping: "searching",
-  store: "composing",
-  seller: "working",
-};
 
 export function AssistantThinkingStatus({
   locale,
@@ -46,9 +39,7 @@ export function AssistantThinkingStatus({
       role="status"
       aria-label={english ? "Replying…" : "正在回复…"}
     >
-      <span className={styles.orb} aria-hidden="true">
-        <ThinkingOrb state={modeState[mode]} size={20} theme="auto" />
-      </span>
+      <AssistantLiquidIndicator activity={mode} />
       <span className={styles.copy}>
         <strong>{copy.title}</strong>
         <span>{copy.detail}</span>

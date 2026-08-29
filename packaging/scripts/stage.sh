@@ -58,6 +58,12 @@ install -Dm0644 "$repository_root/packaging/sysusers/matchplane.conf" "$root/usr
 install -Dm0644 "$repository_root/packaging/tmpfiles/matchplane.conf" "$root/usr/lib/tmpfiles.d/matchplane.conf"
 install -Dm0644 "$repository_root/README.md" "$root/usr/share/doc/matchplane/README.md"
 install -Dm0644 "$repository_root/LICENSE" "$root/usr/share/licenses/matchplane/LICENSE"
+install -Dm0644 "$repository_root/web/licenses/liquid-gooey.LICENSE" \
+  "$root/usr/share/licenses/matchplane/liquid-gooey.LICENSE"
+install -Dm0644 "$repository_root/web/licenses/metal-fx.LICENSE" \
+  "$root/usr/share/licenses/matchplane/metal-fx.LICENSE"
+install -Dm0644 "$repository_root/web/THIRD_PARTY_NOTICES.md" \
+  "$root/usr/share/doc/matchplane/web-THIRD_PARTY_NOTICES.md"
 install -Dm0644 "$repository_root/ARCHITECTURE.md" "$root/usr/share/doc/matchplane/ARCHITECTURE.md"
 install -Dm0644 "$repository_root/docs/marketplace-payments.md" \
   "$root/usr/share/doc/matchplane/marketplace-payments.md"
