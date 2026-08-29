@@ -70,6 +70,26 @@ describe("retrieval protocol v1", () => {
     }
   });
 
+  it("rejects contact material smuggled through an otherwise bounded candidate", () => {
+    const parsed = parseRetrievalResult({
+      protocol: "matchplane.retrieval/v1",
+      request_id: requestId,
+      provider: { id: "child.index", version: "2026.08" },
+      candidates: [{
+        offer_id: offerId,
+        score: 0.91,
+        reasons: ["库存匹配"],
+        metadata: { seller_contact: { email: "seller@example.test" } },
+      }],
+      degraded: false,
+    }, requestId, 10);
+
+    expect(parsed).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("consent-gated introduction flow"),
+    });
+  });
+
   it("rejects a provider response that changes request scope or exceeds the limit", () => {
     const base = {
       protocol: "matchplane.retrieval/v1",

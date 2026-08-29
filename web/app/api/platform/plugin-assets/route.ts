@@ -141,17 +141,18 @@ export async function GET(request: Request): Promise<Response> {
     const content = await fs.readFile(fileReal);
     return new Response(content, {
       headers: {
-        "cache-control": requestedBuild
-          ? "public, max-age=31536000, immutable"
-          : "no-store",
+        // Visibility can depend on a Better Auth session or organization-scoped API key.
+        // A shared immutable cache would replay an invite-only artifact without re-running
+        // that authorization check, so even digest-addressed plugin responses stay uncacheable.
+        "cache-control": "private, no-store",
         "content-security-policy":
           "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
         "content-type":
           assetTypes[path.extname(fileReal).toLowerCase()] ??
           "application/octet-stream",
         // The host intentionally uses an opaque sandbox origin (`allow-scripts` without
-        // `allow-same-origin`).  Static module assets therefore need anonymous CORS/CORP;
-        // no cookies or credentials are accepted by this route.
+        // `allow-same-origin`). Static module assets therefore need anonymous CORS/CORP.
+        // Visibility is still enforced before the response and the response is never cached.
         "access-control-allow-origin": "*",
         "cross-origin-resource-policy": "cross-origin",
         "x-content-type-options": "nosniff",
