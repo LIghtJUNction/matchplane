@@ -27,7 +27,7 @@ export function PlatformFooter({ subplatform }: { subplatform: SubplatformConfig
   return (
     <footer className="app-footer">
       <span>© {new Date().getFullYear()} {subplatform.brandName}</span>
-      {subplatform.slug === "root" ? <span className="app-footer-legal"><a href="/terms">用户协议</a><a href="/privacy">隐私政策</a></span> : null}
+      {subplatform.slug === "root" ? <span className="app-footer-legal"><a href="/how">如何选购</a><a href="/terms">用户协议</a><a href="/privacy">隐私政策</a></span> : null}
       {settings?.icp_number ? (
         settings.icp_record_url ? (
           <a href={settings.icp_record_url} target="_blank" rel="noreferrer">
