@@ -294,13 +294,17 @@ describe("MatchPlane workspaces", () => {
     expect(
       await screen.findByRole("dialog", { name: /^我的店铺/ }),
     ).toBeInTheDocument();
-    const manageProducts = await screen.findByRole("button", {
-      name: "管理商品",
-    });
+    // HostedStoreOnboarding is loaded through next/dynamic; give the chunk time
+    // to resolve before asserting on store-card controls.
+    const manageProducts = await screen.findByRole(
+      "button",
+      { name: "管理商品" },
+      { timeout: 10_000 },
+    );
     expect(screen.queryByLabelText("店铺名称")).not.toBeInTheDocument();
     await user.click(manageProducts);
     expect(
-      await screen.findByRole("dialog", { name: "Store A" }),
+      await screen.findByRole("dialog", { name: "Store A" }, { timeout: 10_000 }),
     ).toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
     expect(window.location.href).not.toContain("/login");
