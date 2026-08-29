@@ -559,6 +559,11 @@ impl OrderBook {
                 "trade orders must be on opposite sides".to_owned(),
             ));
         }
+        if maker.accepted_sequence >= taker.accepted_sequence {
+            return Err(EngineError::EventInvariant(
+                "trade maker must have earlier price-time priority than the taker".to_owned(),
+            ));
+        }
         let (buy_order_id, sell_order_id) = match maker.intent.side {
             OrderSide::Buy => (trade.maker_order_id, trade.taker_order_id),
             OrderSide::Sell => (trade.taker_order_id, trade.maker_order_id),
@@ -571,6 +576,15 @@ impl OrderBook {
         if trade.price != maker.intent.price {
             return Err(EngineError::EventInvariant(
                 "trade price does not match the maker limit price".to_owned(),
+            ));
+        }
+        let taker_crosses_maker = match taker.intent.side {
+            OrderSide::Buy => trade.price <= taker.intent.price,
+            OrderSide::Sell => trade.price >= taker.intent.price,
+        };
+        if !taker_crosses_maker {
+            return Err(EngineError::EventInvariant(
+                "trade price does not satisfy the taker limit".to_owned(),
             ));
         }
 
@@ -985,6 +999,62 @@ mod tests {
         let error = book
             .apply(&foreign_tenant)
             .expect_err("cross-tenant trade must fail atomically");
+        assert!(matches!(error, EngineError::EventInvariant(_)));
+        assert_eq!(book.state_hash().expect("book should hash"), state_before);
+
+        let mut reversed_priority = events[1].clone();
+        let MatchingEvent::TradeExecuted { trade } = &mut reversed_priority.payload else {
+            panic!("second event should be a trade");
+        };
+        trade.maker_order_id = taker_order_id;
+        trade.taker_order_id = maker_order_id;
+        let error = book
+            .apply(&reversed_priority)
+            .expect_err("a newer order cannot be replayed as the maker");
+        assert!(matches!(error, EngineError::EventInvariant(_)));
+        assert_eq!(book.state_hash().expect("book should hash"), state_before);
+    }
+
+    #[test]
+    fn apply_should_reject_a_trade_that_does_not_cross_the_taker_limit() {
+        let market_id = MarketId::new();
+        let maker = intent(market_id, OrderSide::Sell, 110, 5, timestamp(1));
+        let tenant_id = maker.tenant_id;
+        let domain_id = maker.domain_id;
+        let maker_order_id = maker.order_id;
+        let mut book = OrderBook::new(market_id);
+        book.process(&place(1, maker))
+            .expect("maker order should rest");
+
+        let taker = intent(market_id, OrderSide::Buy, 100, 5, timestamp(2));
+        let taker_order_id = taker.order_id;
+        let taker_command = place(2, taker);
+        book.process(&taker_command)
+            .expect("non-crossing taker should rest");
+        let state_before = book.state_hash().expect("book should hash");
+        let corrupt_trade = OrderBook::event(
+            &taker_command,
+            1,
+            MatchingEvent::TradeExecuted {
+                trade: Trade {
+                    id: TradeId::new(),
+                    tenant_id,
+                    domain_id,
+                    market_id,
+                    maker_order_id,
+                    taker_order_id,
+                    buy_order_id: taker_order_id,
+                    sell_order_id: maker_order_id,
+                    price: Price::new(110).expect("maker price should be valid"),
+                    quantity: Quantity::new(1).expect("trade quantity should be valid"),
+                    occurred_at: timestamp(2),
+                },
+            },
+        );
+
+        let error = book
+            .apply(&corrupt_trade)
+            .expect_err("non-crossing trade must be rejected");
         assert!(matches!(error, EngineError::EventInvariant(_)));
         assert_eq!(book.state_hash().expect("book should hash"), state_before);
     }
