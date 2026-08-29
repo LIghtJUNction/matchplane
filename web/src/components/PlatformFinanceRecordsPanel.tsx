@@ -14,6 +14,10 @@ import {
   type RefundAdminRecord,
 } from "../api";
 import {
+  isRefundablePayment,
+  isRefundAmountWithinRemaining,
+} from "../lib/payment-money";
+import {
   FinanceRecordList,
   type FinanceView,
   RefundEditor,
@@ -76,6 +80,10 @@ export function PlatformFinanceRecordsPanel({
   const mountedRef = useRef(false);
   const refundSubmissionRef = useRef(0);
   const refundSubmittingRef = useRef(false);
+  const refundIdempotencyRef = useRef<{
+    fingerprint: string;
+    key: string;
+  } | null>(null);
 
   const loadPayments = useCallback(async () => {
     const requestVersion = ++requestVersions.current.payments;
@@ -145,6 +153,7 @@ export function PlatformFinanceRecordsPanel({
       requestVersions.current.invoices += 1;
       refundSubmissionRef.current += 1;
       refundSubmittingRef.current = false;
+      refundIdempotencyRef.current = null;
     };
   }, [apiAvailable, authorized, loadResources]);
 
@@ -169,8 +178,7 @@ export function PlatformFinanceRecordsPanel({
       return state.status === "ready" && state.data.length === 0;
     });
   const freshPayments = payments.status === "ready" ? payments.data : null;
-  const capturedPayments =
-    freshPayments?.filter((payment) => payment.status === "captured") ?? [];
+  const capturedPayments = freshPayments?.filter(isRefundablePayment) ?? [];
 
   async function submitRefund() {
     if (refundSubmittingRef.current) return;
@@ -191,6 +199,28 @@ export function PlatformFinanceRecordsPanel({
       return;
     }
 
+    const amount = refundAmount.trim();
+    const reason = refundReason.trim();
+    if (!isRefundAmountWithinRemaining(selectedPayment, amount)) {
+      onNotice("退款金额必须大于零、符合币种精度，且不得超过剩余可退款金额");
+      return;
+    }
+
+    const fingerprint = JSON.stringify([
+      tenant.tenantId,
+      selectedPayment.payment_id,
+      amount,
+      reason,
+    ]);
+    let idempotency = refundIdempotencyRef.current;
+    if (idempotency?.fingerprint !== fingerprint) {
+      idempotency = {
+        fingerprint,
+        key: `web-refund-${crypto.randomUUID()}`,
+      };
+      refundIdempotencyRef.current = idempotency;
+    }
+
     refundSubmittingRef.current = true;
     const submissionVersion = ++refundSubmissionRef.current;
     setRefundSaving(true);
@@ -198,14 +228,16 @@ export function PlatformFinanceRecordsPanel({
       await createAdminRefund({
         tenantId: tenant.tenantId,
         paymentId: selectedPayment.payment_id,
-        amount: refundAmount.trim(),
-        reason: refundReason.trim(),
+        amount,
+        reason,
+        idempotencyKey: idempotency.key,
       });
       if (
         !mountedRef.current ||
         refundSubmissionRef.current !== submissionVersion
       )
         return;
+      refundIdempotencyRef.current = null;
       setRefundPaymentId("");
       setRefundAmount("");
       setRefundReason("");

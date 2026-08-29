@@ -5,6 +5,7 @@ import type {
     PaymentAdminRecord,
     RefundAdminRecord,
 } from "../api";
+import { remainingRefundAmount } from "../lib/payment-money";
 
 export type FinanceView = "invoices" | "refunds";
 
@@ -139,6 +140,13 @@ export function RefundEditor({
         );
     }
 
+    const selectedPayment = capturedPayments.find(
+        (payment) => payment.payment_id === paymentId,
+    );
+    const selectedRemaining = selectedPayment
+        ? remainingRefundAmount(selectedPayment)
+        : null;
+
     return (
         <form
             className="admin-editor refund-editor"
@@ -166,8 +174,8 @@ export function RefundEditor({
                             key={payment.payment_id}
                             value={payment.payment_id}
                         >
-                            {payment.merchant_order_id || payment.payment_id} ·{" "}
-                            {payment.captured_amount} {payment.currency}
+                            {payment.merchant_order_id || payment.payment_id} · 剩余{" "}
+                            {remainingRefundAmount(payment)} {payment.currency}
                         </option>
                     ))}
                 </select>
@@ -177,12 +185,22 @@ export function RefundEditor({
                     <span>退款金额</span>
                     <input
                         required
+                        aria-label="退款金额"
                         value={amount}
                         disabled={saving}
                         inputMode="decimal"
                         placeholder="按支付单币种填写"
+                        aria-describedby={
+                            selectedPayment ? "refund-amount-remaining" : undefined
+                        }
                         onChange={(event) => onAmountChange(event.target.value)}
                     />
+                    {selectedPayment && selectedRemaining ? (
+                        <small id="refund-amount-remaining">
+                            剩余可退款 {selectedRemaining} {selectedPayment.currency}；最多{" "}
+                            {selectedPayment.currency_scale} 位小数
+                        </small>
+                    ) : null}
                 </label>
                 <label>
                     <span>退款原因</span>

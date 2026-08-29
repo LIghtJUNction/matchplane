@@ -3624,18 +3624,20 @@ export function getInvoiceSetting(tenantId?: string): Promise<InvoiceSetting> {
 export function getPaymentAdminRecords(
   tenantId?: string,
   limit = 25,
+  offset = 0,
 ): Promise<PaymentAdminRecord[]> {
   return paymentAdminRequest<PaymentAdminRecord[]>(
-    `payments?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+    `payments?limit=${limit}&offset=${offset}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
 }
 
 export function getRefundAdminRecords(
   tenantId?: string,
   limit = 25,
+  offset = 0,
 ): Promise<RefundAdminRecord[]> {
   return paymentAdminRequest<RefundAdminRecord[]>(
-    `refunds?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+    `refunds?limit=${limit}&offset=${offset}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
 }
 
@@ -3662,9 +3664,10 @@ export function createAdminRefund(input: {
 export function getInvoiceAdminRecords(
   tenantId?: string,
   limit = 25,
+  offset = 0,
 ): Promise<InvoiceAdminRecord[]> {
   return paymentAdminRequest<InvoiceAdminRecord[]>(
-    `invoices?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+    `invoices?limit=${limit}&offset=${offset}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
 }
 

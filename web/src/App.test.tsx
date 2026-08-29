@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -660,6 +660,67 @@ describe("MatchPlane workspaces", () => {
         return url === "/api/admin/payment-mode" && init?.method === "POST";
       }),
     ).toBe(false);
+  });
+
+  it("blocks a payment switch until the current server version is verified", async () => {
+    vi.stubEnv("NEXT_PUBLIC_MATCHPLANE_LIVE_MODE", "true");
+    const fallbackFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    let resolveSetting!: (response: Response) => void;
+    const pendingSetting = new Promise<Response>((resolve) => {
+      resolveSetting = resolve;
+    });
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.startsWith("/api/admin/payment-mode")) return pendingSetting;
+      return fallbackFetch(input, init);
+    });
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/?role=platform");
+    window.sessionStorage.setItem("matchplane.test-auth", "true");
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "商城后台" });
+    await user.click(screen.getByRole("tab", { name: "支付（可选）" }));
+    await user.click(screen.getByRole("button", { name: "切换支付模式" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "支付模式正在读取，完成验证后再切换",
+    );
+    expect(
+      vi.mocked(globalThis.fetch).mock.calls.some(([input, request]) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return url.startsWith("/api/admin/payment-mode") && request?.method === "POST";
+      }),
+    ).toBe(false);
+
+    await act(async () => {
+      resolveSetting(
+        Response.json({
+          tenant_id: "11111111-1111-4111-8111-111111111111",
+          active_mode: "production",
+          updated_by: "root-admin",
+          version: 7,
+          updated_at: "2026-08-26T00:00:00.000Z",
+        }),
+      );
+      await pendingSetting;
+    });
+    expect(await screen.findByText("生产模式")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "切换支付模式" }));
+    expect(
+      screen.getByRole("alertdialog", { name: "切换到测试模式？" }),
+    ).toBeInTheDocument();
   });
 
   it("persists a live payment switch with the server version and response-owned mode", async () => {

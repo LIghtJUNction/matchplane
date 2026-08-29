@@ -197,6 +197,7 @@ describe("PlatformFinanceRecordsPanel", () => {
         paymentId: capturedPayment.payment_id,
         amount: "20.00",
         reason: "客户申请退款",
+        idempotencyKey: expect.stringMatching(/^web-refund-/),
       }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -261,10 +262,49 @@ describe("PlatformFinanceRecordsPanel", () => {
     );
     expect(screen.getByLabelText("退款金额")).toHaveValue("20.00");
     expect(screen.getByLabelText("退款原因")).toHaveValue("保留输入");
-    expect(api.createAdminRefund).toHaveBeenCalledTimes(1);
-    expect(api.getPaymentAdminRecords).toHaveBeenCalledTimes(1);
-    expect(api.getRefundAdminRecords).toHaveBeenCalledTimes(1);
-    expect(api.getInvoiceAdminRecords).toHaveBeenCalledTimes(1);
+    const firstIdempotencyKey = api.createAdminRefund.mock.calls[0]?.[0]
+      .idempotencyKey as string;
+
+    await user.click(screen.getByRole("button", { name: "提交退款" }));
+    await waitFor(() => expect(api.createAdminRefund).toHaveBeenCalledTimes(2));
+    expect(api.createAdminRefund.mock.calls[1]?.[0].idempotencyKey).toBe(
+      firstIdempotencyKey,
+    );
+    expect(api.getPaymentAdminRecords).toHaveBeenCalledTimes(2);
+    expect(api.getRefundAdminRecords).toHaveBeenCalledTimes(2);
+    expect(api.getInvoiceAdminRecords).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects an over-refund before issuing a request", async () => {
+    api.getPaymentAdminRecords.mockResolvedValue([
+      { ...capturedPayment, refunded_amount: "119.99" },
+    ]);
+    const onNotice = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <PlatformFinanceRecordsPanel
+        authorized
+        apiAvailable
+        tenant={verifiedTenant}
+        onNotice={onNotice}
+      />,
+    );
+
+    await screen.findByText(/支付 1 笔/);
+    await user.click(screen.getByRole("button", { name: "退款与退款申请" }));
+    expect(screen.getByRole("option", { name: /剩余 0.01 CNY/ })).toBeVisible();
+    await user.selectOptions(screen.getByLabelText("支付单"), [
+      capturedPayment.payment_id,
+    ]);
+    await user.type(screen.getByLabelText("退款金额"), "0.02");
+    await user.type(screen.getByLabelText("退款原因"), "超过剩余金额");
+    await user.click(screen.getByRole("button", { name: "提交退款" }));
+
+    expect(onNotice).toHaveBeenCalledWith(
+      "退款金额必须大于零、符合币种精度，且不得超过剩余可退款金额",
+    );
+    expect(api.createAdminRefund).not.toHaveBeenCalled();
   });
 
   it("ignores a superseded completion after the API availability boundary resets", async () => {

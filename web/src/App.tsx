@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -89,6 +90,11 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
   const [pluginFailed, setPluginFailed] = useState(false);
   const [paymentMode, setPaymentMode] = useState<"test" | "production">("test");
   const [paymentModeVersion, setPaymentModeVersion] = useState(1);
+  const [paymentSettingStatus, setPaymentSettingStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const paymentSettingRequestRef = useRef(0);
+  const paymentModeSwitchingRef = useRef(false);
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [buyerAssistantOpen, setBuyerAssistantOpen] = useState(false);
   const [rootSearchTrace, setRootSearchTrace] =
@@ -259,18 +265,44 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
     setPluginFailed(false);
   }, [subplatform.path, subplatform.pluginArtifact?.url]);
 
-  // Read payment settings in platform mode
+  // Read payment settings in platform mode. A tenant/role change invalidates late responses.
   useEffect(() => {
-    if (!hydrated || role !== "platform" || !isLiveMarketplaceEnabled()) return;
+    const requestVersion = ++paymentSettingRequestRef.current;
+    if (!hydrated || role !== "platform" || !isLiveMarketplaceEnabled()) {
+      setPaymentSettingStatus("idle");
+      return;
+    }
+    setPaymentSettingStatus("loading");
     void getPaymentSetting(subplatform.tenantId)
       .then((setting) => {
+        if (paymentSettingRequestRef.current !== requestVersion) return;
         setPaymentMode(setting.active_mode);
         setPaymentModeVersion(setting.version);
+        setPaymentSettingStatus("ready");
       })
       .catch((error) => {
+        if (paymentSettingRequestRef.current !== requestVersion) return;
+        setPaymentSettingStatus("error");
         setNotice(error instanceof Error ? error.message : "支付模式读取失败");
       });
+    return () => {
+      if (paymentSettingRequestRef.current === requestVersion) {
+        paymentSettingRequestRef.current += 1;
+      }
+    };
   }, [hydrated, role, subplatform.tenantId]);
+
+  const requestModeChange = useCallback(() => {
+    if (isLiveMarketplaceEnabled() && paymentSettingStatus !== "ready") {
+      setNotice(
+        paymentSettingStatus === "loading"
+          ? "支付模式正在读取，完成验证后再切换"
+          : "支付模式尚未验证，请刷新后重试",
+      );
+      return;
+    }
+    setModeDialogOpen(true);
+  }, [paymentSettingStatus]);
 
   const confirmModeChange = useCallback(() => {
     if (!isLiveMarketplaceEnabled()) {
@@ -283,6 +315,14 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       return;
     }
 
+    if (paymentSettingStatus !== "ready") {
+      setModeDialogOpen(false);
+      setNotice("支付模式尚未验证，请刷新后重试");
+      return;
+    }
+    if (paymentModeSwitchingRef.current) return;
+    paymentModeSwitchingRef.current = true;
+
     const nextMode = paymentMode === "test" ? "production" : "test";
     void switchPaymentMode({
       tenantId: subplatform.tenantId,
@@ -291,18 +331,30 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
       reason: `web-admin switch to ${nextMode}`,
     })
       .then((setting) => {
+        paymentSettingRequestRef.current += 1;
         setPaymentMode(setting.active_mode);
         setPaymentModeVersion(setting.version);
+        setPaymentSettingStatus("ready");
         setModeDialogOpen(false);
         setNotice(
           `支付系统已切换为${setting.active_mode === "test" ? "测试" : "生产"}模式`,
         );
       })
       .catch((error) => {
+        setPaymentSettingStatus("error");
         setModeDialogOpen(false);
         setNotice(error instanceof Error ? error.message : "支付模式切换失败");
+      })
+      .finally(() => {
+        paymentModeSwitchingRef.current = false;
       });
-  }, [locale, paymentMode, paymentModeVersion, subplatform.tenantId]);
+  }, [
+    locale,
+    paymentMode,
+    paymentModeVersion,
+    paymentSettingStatus,
+    subplatform.tenantId,
+  ]);
 
   const openStoreCenter = useCallback(() => {
     if (!authUser) {
@@ -363,7 +415,7 @@ export function App({ initialPath = "/" }: { initialPath?: string }) {
         <PlatformDashboard
           paymentMode={paymentMode}
           rootRole={authUser?.role}
-          onRequestModeChange={() => setModeDialogOpen(true)}
+          onRequestModeChange={requestModeChange}
           onBrandUpdated={(brand) =>
             setSubplatform((current) =>
               current.slug === "root"
