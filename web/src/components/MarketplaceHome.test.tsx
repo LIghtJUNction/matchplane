@@ -188,6 +188,7 @@ describe("MarketplaceHome actions", () => {
   it("keeps the inline shopping prompt as the root primary task", () => {
     renderHome();
 
+    expect(screen.getByText("MatchPlane")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "说说你想找什么。", level: 1 }),
     ).toBeInTheDocument();
@@ -195,6 +196,15 @@ describe("MarketplaceHome actions", () => {
       screen.getByRole("textbox", { name: "购物需求" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("这些结果来自哪里")).not.toBeInTheDocument();
+  });
+
+  it("surfaces the configured marketplace brand above the chat task", () => {
+    renderHome({ brandName: "青禾商城" });
+
+    expect(screen.getByText("青禾商城")).toBeInTheDocument();
+    expect(
+      screen.getByText(/青禾商城 会检索公开店铺/),
+    ).toBeInTheDocument();
   });
 
   it.each([
