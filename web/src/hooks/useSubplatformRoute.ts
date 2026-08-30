@@ -10,7 +10,7 @@ import type { WorkspaceRole } from "../types";
 import { requiresAuthenticatedWorkspace } from "./useAuthSession";
 
 export type AccountSettingsSection = "profile" | "account" | "stores";
-export type StoreConsoleSection = "products" | "customers";
+export type StoreConsoleSection = "today" | "products" | "customers";
 
 function roleFromLocation(): WorkspaceRole {
   if (typeof window === "undefined") return "buyer";
@@ -184,7 +184,7 @@ export function useSubplatformRoute({
   const [storeConsoleRequestedStoreId, setStoreConsoleRequestedStoreId] =
     useState<string | null>(null);
   const [storeConsoleRequestedSection, setStoreConsoleRequestedSection] =
-    useState<StoreConsoleSection>("products");
+    useState<StoreConsoleSection>("today");
 
   const requestedRoleRef = useRef<WorkspaceRole>(roleFromLocation());
   const navigationRequestRef = useRef(0);
@@ -242,18 +242,26 @@ export function useSubplatformRoute({
     if (requestedStoreId) {
       setStoreConsoleRequested(true);
       setStoreConsoleRequestedStoreId(requestedStoreId);
+      const requestedSection = searchParams.get("storeConsoleSection");
       setStoreConsoleRequestedSection(
-        searchParams.get("storeConsoleSection") === "customers"
+        requestedSection === "customers"
           ? "customers"
-          : "products",
+          : requestedSection === "products"
+            ? "products"
+            : "today",
       );
       searchParams.delete("storeConsole");
       searchParams.delete("storeConsoleSection");
       cleanWorkspaceTarget = true;
-    } else if (searchParams.get("console") === "products") {
+    } else if (
+      searchParams.get("console") === "products" ||
+      searchParams.get("console") === "customers"
+    ) {
       setStoreConsoleRequested(true);
       setStoreConsoleRequestedStoreId(null);
-      setStoreConsoleRequestedSection("products");
+      setStoreConsoleRequestedSection(
+        searchParams.get("console") === "customers" ? "customers" : "products",
+      );
       searchParams.delete("console");
       cleanWorkspaceTarget = true;
     }

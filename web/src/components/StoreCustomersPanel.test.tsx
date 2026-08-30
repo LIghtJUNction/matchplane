@@ -33,6 +33,8 @@ const customer = {
   favorite: false,
   contactConsentStatus: "not_requested" as const,
   staffNotes: null,
+  nextAction: null,
+  nextActionAt: null,
   lastActivityAt: "2026-08-23T04:00:00.000Z",
   createdAt: "2026-08-23T04:00:00.000Z",
   version: 1,
@@ -112,6 +114,27 @@ describe("StoreCustomersPanel", () => {
       ),
     ).toBeVisible();
     expect(within(emptyDetail).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("reveals and focuses a customer requested by the today workspace", async () => {
+    const focusedCustomer = {
+      ...customer,
+      id: "44444444-4444-4444-8444-444444444444",
+      displayName: "重点客户",
+    };
+    getStoreCustomers.mockResolvedValue([customer, focusedCustomer]);
+
+    render(
+      <StoreCustomersPanel
+        storeId="store-1"
+        locale="zh"
+        focusCustomerId={focusedCustomer.id}
+      />,
+    );
+
+    const focusedRow = await screen.findByRole("button", { name: /重点客户/ });
+    await waitFor(() => expect(document.activeElement).toBe(focusedRow));
+    expect(screen.getAllByText("重点客户").length).toBeGreaterThan(0);
   });
 
   it("renders a useful empty state", async () => {

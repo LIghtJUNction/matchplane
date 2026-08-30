@@ -336,6 +336,13 @@ describe("MatchPlane workspaces", () => {
         { timeout: 10_000 },
       ),
     ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "今日待办" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "今日待办" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(window.location.pathname).toBe("/");
     expect(window.location.href).not.toContain("/login");
   }, 30_000);
@@ -397,6 +404,10 @@ describe("MatchPlane workspaces", () => {
     expect(
       screen.getByRole("heading", { name: "Store A" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "商品" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(window.location.search).not.toContain("console");
   });
 

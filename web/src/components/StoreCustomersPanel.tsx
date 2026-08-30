@@ -11,7 +11,7 @@ import {
   Star,
   UserRound,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getStoreCustomers,
@@ -33,9 +33,11 @@ const STAGES: StoreCustomerRecord["stage"][] = [
 export function StoreCustomersPanel({
   storeId,
   locale,
+  focusCustomerId,
 }: {
   storeId: string;
   locale: InterfaceLocale;
+  focusCustomerId?: string | null;
 }) {
   const english = locale === "en";
   const [customers, setCustomers] = useState<StoreCustomerRecord[]>([]);
@@ -47,6 +49,7 @@ export function StoreCustomersPanel({
   const [stageFilter, setStageFilter] = useState<"all" | StoreCustomerRecord["stage"]>("all");
   const [query, setQuery] = useState("");
   const [notesDraft, setNotesDraft] = useState("");
+  const customerButtonRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const load = async () => {
     setLoading(true);
@@ -109,6 +112,24 @@ export function StoreCustomersPanel({
   useEffect(() => {
     setNotesDraft(selected?.staffNotes ?? "");
   }, [selected?.id, selected?.staffNotes]);
+
+  useEffect(() => {
+    if (
+      loading ||
+      !focusCustomerId ||
+      !customers.some((customer) => customer.id === focusCustomerId)
+    ) {
+      return;
+    }
+    setFavoriteOnly(false);
+    setStageFilter("all");
+    setQuery("");
+    setSelectedId(focusCustomerId);
+    const frame = window.requestAnimationFrame(() => {
+      customerButtonRefs.current.get(focusCustomerId)?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [customers, focusCustomerId, loading]);
 
   const patch = async (
     customer: StoreCustomerRecord,
@@ -289,6 +310,10 @@ export function StoreCustomersPanel({
                 className={selectedId === customer.id ? "is-selected" : ""}
               >
                 <button
+                  ref={(node) => {
+                    if (node) customerButtonRefs.current.set(customer.id, node);
+                    else customerButtonRefs.current.delete(customer.id);
+                  }}
                   className="store-customer-row"
                   type="button"
                   onClick={() => setSelectedId(customer.id)}

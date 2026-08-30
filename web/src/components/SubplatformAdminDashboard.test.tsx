@@ -3,18 +3,47 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./SellerDashboard", () => ({
-  SellerDashboard: () => <div>products-panel</div>,
+  SellerDashboard: ({ focusOfferId }: { focusOfferId?: string | null }) => (
+    <div>products-panel{focusOfferId ? `:${focusOfferId}` : ""}</div>
+  ),
+}));
+vi.mock("./StoreTodayPanel", () => ({
+  StoreTodayPanel: ({
+    onOpenCustomers,
+    onOpenProducts,
+  }: {
+    onOpenCustomers: (customerId?: string) => void;
+    onOpenProducts: (offerId?: string) => void;
+  }) => (
+    <div>
+      today-panel
+      <button type="button" onClick={() => onOpenCustomers("customer-focus")}>
+        focus-customer
+      </button>
+      <button type="button" onClick={() => onOpenProducts("offer-focus")}>
+        focus-offer
+      </button>
+    </div>
+  ),
 }));
 vi.mock("./StoreCustomersPanel", async () => {
   const { useEffect } = await import("react");
 
   return {
-    StoreCustomersPanel: () => {
+    StoreCustomersPanel: ({
+      focusCustomerId,
+    }: {
+      focusCustomerId?: string | null;
+    }) => {
       useEffect(() => {
         void fetch("/test/customers");
       }, []);
 
-      return <div>customers-panel</div>;
+      return (
+        <div>
+          customers-panel{focusCustomerId ? `:${focusCustomerId}` : ""}
+        </div>
+      );
     },
   };
 });
@@ -150,6 +179,7 @@ describe("SubplatformAdminDashboard", () => {
   it("keeps mall email infrastructure out of a store owner's workspace", () => {
     renderDashboard();
 
+    expect(screen.getByRole("tab", { name: "今日待办" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "商品" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "财务" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "店铺资料" })).toBeInTheDocument();
@@ -163,15 +193,59 @@ describe("SubplatformAdminDashboard", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("mounts only products on first render", () => {
+  it("mounts only today on first render", () => {
     renderDashboard();
 
-    expect(screen.getByText("products-panel")).toBeVisible();
-    expect(screen.queryByText("customers-panel")).not.toBeInTheDocument();
+    expect(screen.getByText(/today-panel/)).toBeVisible();
+    expect(screen.queryByText(/products-panel/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/customers-panel/)).not.toBeInTheDocument();
     expect(screen.queryByText("finance-panel")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("store-state")).not.toBeInTheDocument();
     expect(screen.queryByText("team-panel")).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("passes precise focus ids from today into existing customer and offer panels", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    await user.click(screen.getByRole("button", { name: "focus-customer" }));
+    expect(screen.getByText("customers-panel:customer-focus")).toBeVisible();
+
+    await user.click(screen.getByRole("tab", { name: "今日待办" }));
+    await user.click(screen.getByRole("button", { name: "focus-offer" }));
+    expect(screen.getByText("products-panel:offer-focus")).toBeVisible();
+  });
+
+  it("preserves explicit product and customer initial sections", () => {
+    const products = render(
+      <SubplatformAdminDashboard
+        locale="zh"
+        onNotice={vi.fn()}
+        subplatform={subplatform}
+        store={store}
+        canManageStore
+        onStoreUpdated={vi.fn()}
+        initialSection="products"
+      />,
+    );
+    expect(screen.getByText("products-panel")).toBeVisible();
+    expect(screen.queryByText(/today-panel/)).not.toBeInTheDocument();
+    products.unmount();
+
+    render(
+      <SubplatformAdminDashboard
+        locale="zh"
+        onNotice={vi.fn()}
+        subplatform={subplatform}
+        store={store}
+        canManageStore
+        onStoreUpdated={vi.fn()}
+        initialSection="customers"
+      />,
+    );
+    expect(screen.getByText("customers-panel")).toBeVisible();
+    expect(screen.queryByText(/today-panel/)).not.toBeInTheDocument();
   });
 
   it("initializes each section once and preserves panel state across visits", async () => {

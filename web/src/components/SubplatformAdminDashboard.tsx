@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@appica/ui-react/tabs";
 import {
+  CalendarDays,
   Moon,
   Package,
   ReceiptText,
@@ -21,8 +22,10 @@ import { SellerDashboard } from "./SellerDashboard";
 import { StoreCustomersPanel } from "./StoreCustomersPanel";
 import { StoreFinancePanel } from "./StoreFinancePanel";
 import { StoreManagementPanel } from "./StoreManagementPanel";
+import { StoreTodayPanel } from "./StoreTodayPanel";
 
 type StoreConsoleSection =
+  | "today"
   | "products"
   | "customers"
   | "finance"
@@ -37,7 +40,7 @@ export function SubplatformAdminDashboard({
   store,
   canManageStore,
   onStoreUpdated,
-  initialSection = "products",
+  initialSection = "today",
 }: {
   locale: InterfaceLocale;
   onNotice: (message: string) => void;
@@ -45,12 +48,16 @@ export function SubplatformAdminDashboard({
   store: StoreSummary;
   canManageStore: boolean;
   onStoreUpdated: (store: StoreSummary) => void;
-  initialSection?: "products" | "customers";
+  initialSection?: "today" | "products" | "customers";
 }) {
   const [section, setSection] = useState<StoreConsoleSection>(initialSection);
   const [visitedSections, setVisitedSections] = useState<
     ReadonlySet<StoreConsoleSection>
   >(() => new Set([initialSection]));
+  const [focusedCustomerId, setFocusedCustomerId] = useState<string | null>(
+    null,
+  );
+  const [focusedOfferId, setFocusedOfferId] = useState<string | null>(null);
   const english = locale === "en";
 
   const activateSection = (nextSection: StoreConsoleSection) => {
@@ -64,6 +71,14 @@ export function SubplatformAdminDashboard({
       visited.has(nextSection) ? visited : new Set(visited).add(nextSection),
     );
     setSection(nextSection);
+  };
+  const openCustomers = (customerId?: string) => {
+    setFocusedCustomerId(customerId ?? null);
+    activateSection("customers");
+  };
+  const openProducts = (offerId?: string) => {
+    setFocusedOfferId(offerId ?? null);
+    activateSection("products");
   };
 
   return (
@@ -113,6 +128,10 @@ export function SubplatformAdminDashboard({
               }
               className="w-max min-w-max"
             >
+              <TabsTrigger value="today" className="min-h-11">
+                <CalendarDays size={16} aria-hidden="true" />
+                {english ? "Today" : "今日待办"}
+              </TabsTrigger>
               <TabsTrigger value="products" className="min-h-11">
                 <Package size={16} aria-hidden="true" />
                 {english ? "Products" : "商品"}
@@ -155,6 +174,17 @@ export function SubplatformAdminDashboard({
       </div>
 
       <div className="store-console-content">
+        {visitedSections.has("today") ? (
+          <div hidden={section !== "today"}>
+            <StoreTodayPanel
+              locale={locale}
+              store={store}
+              subplatform={subplatform}
+              onOpenCustomers={openCustomers}
+              onOpenProducts={openProducts}
+            />
+          </div>
+        ) : null}
         {visitedSections.has("products") ? (
           <div hidden={section !== "products"}>
             <SellerDashboard
@@ -163,12 +193,17 @@ export function SubplatformAdminDashboard({
               subplatform={subplatform}
               store={store}
               canManageStore={canManageStore}
+              focusOfferId={focusedOfferId}
             />
           </div>
         ) : null}
         {visitedSections.has("customers") ? (
           <div hidden={section !== "customers"}>
-            <StoreCustomersPanel storeId={store.id} locale={locale} />
+            <StoreCustomersPanel
+              storeId={store.id}
+              locale={locale}
+              focusCustomerId={focusedCustomerId}
+            />
           </div>
         ) : null}
         {canManageStore && visitedSections.has("finance") ? (

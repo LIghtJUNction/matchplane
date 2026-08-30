@@ -29,6 +29,8 @@ const customerRow = {
     analysis: "询问交付时间，购买意向高。",
     intent_strength: "high",
     product_ids: ["01a0291f-e2d6-7ff0-8e03-8560fb2ef34f"],
+    next_action: "发送完整规格清单",
+    next_action_at: "2026-08-30T09:30:00.000Z",
   },
   handoffStatus: "requested",
   stage: "qualified",
@@ -81,6 +83,8 @@ describe("store customers route", () => {
         displayName: "测试客户",
         analysis: "询问交付时间，购买意向高。",
         intent: "high",
+        nextAction: "发送完整规格清单",
+        nextActionAt: "2026-08-30T09:30:00.000Z",
         favorite: true,
         products: [
           expect.objectContaining({ name: "测试商品", price: "CNY 99.00" }),

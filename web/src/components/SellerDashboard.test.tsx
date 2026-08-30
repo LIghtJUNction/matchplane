@@ -131,6 +131,28 @@ describe("SellerDashboard product publishing", () => {
     ).toBeInTheDocument();
   });
 
+  it("reveals and focuses an offer requested by the today workspace", async () => {
+    const activeOffer = marketplaceOffer({ status: "active", version: 4 });
+    api.getMarketplaceOffers.mockResolvedValueOnce([activeOffer]);
+
+    render(
+      <SellerDashboard
+        locale="zh"
+        onNotice={vi.fn()}
+        subplatform={subplatform}
+        focusOfferId={activeOffer.offer_id}
+      />,
+    );
+
+    await screen.findAllByText(activeOffer.display_name);
+    const offerRow = document.querySelector(
+      '#seller-panel-history li[tabindex="-1"]',
+    );
+    expect(offerRow).not.toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(offerRow));
+    expect(screen.getByRole("heading", { name: "商品列表" })).toBeVisible();
+  });
+
   it("prefills an active generic offer and resubmits it with its optimistic version", async () => {
     const activeOffer = marketplaceOffer({ status: "active", version: 4 });
     api.getMarketplaceOffers.mockResolvedValueOnce([activeOffer]);

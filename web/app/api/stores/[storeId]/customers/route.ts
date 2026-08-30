@@ -265,6 +265,8 @@ function serializeCustomer(row: CustomerRow) {
     favorite: row.favorite,
     contactConsentStatus: row.contactConsentStatus,
     staffNotes: row.staffNotes,
+    nextAction: boundedText(summary.next_action, 500) || null,
+    nextActionAt: boundedText(summary.next_action_at, 80) || null,
     lastActivityAt: row.lastActivityAt,
     createdAt: row.createdAt,
     version: Number(row.version),

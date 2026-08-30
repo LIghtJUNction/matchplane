@@ -59,6 +59,7 @@ interface SellerDashboardProps {
   subplatform: SubplatformConfig;
   store?: StoreSummary;
   canManageStore?: boolean;
+  focusOfferId?: string | null;
   agentDraft?: {
     narrative: string;
     intentId?: string;
@@ -134,6 +135,7 @@ export function SellerDashboard({
   subplatform,
   store,
   canManageStore = false,
+  focusOfferId,
   agentDraft = null,
 }: SellerDashboardProps) {
   const [externalKey, setExternalKey] = useState("");
@@ -223,6 +225,7 @@ export function SellerDashboard({
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submissions, setSubmissions] = useState<SellerRecord[]>([]);
+  const submissionRowRefs = useRef(new Map<string, HTMLLIElement>());
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
   const [submissionsError, setSubmissionsError] = useState<string | null>(null);
   const [editingOffer, setEditingOffer] = useState<MarketplaceOffer | null>(
@@ -627,6 +630,23 @@ export function SellerDashboard({
   useEffect(() => {
     void loadSubmissions();
   }, [loadSubmissions]);
+
+  useEffect(() => {
+    if (
+      submissionsLoading ||
+      !focusOfferId ||
+      !submissions.some(
+        (submission) => sellerRecordId(submission) === focusOfferId,
+      )
+    ) {
+      return;
+    }
+    setActivePanel("history");
+    const frame = window.requestAnimationFrame(() => {
+      submissionRowRefs.current.get(focusOfferId)?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusOfferId, submissions, submissionsLoading]);
 
   useEffect(() => {
     setCurrency(pricingCurrency ?? "");
@@ -1865,8 +1885,16 @@ export function SellerDashboard({
               const withdrawing = offer
                 ? withdrawingOfferIds.has(offer.offer_id)
                 : false;
+              const submissionId = sellerRecordId(submission);
               return (
-                <li key={sellerRecordId(submission)}>
+                <li
+                  key={submissionId}
+                  ref={(node) => {
+                    if (node) submissionRowRefs.current.set(submissionId, node);
+                    else submissionRowRefs.current.delete(submissionId);
+                  }}
+                  tabIndex={-1}
+                >
                   <div>
                     <strong>{submission.display_name}</strong>
                     <small>

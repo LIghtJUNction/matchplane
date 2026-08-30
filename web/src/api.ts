@@ -2174,6 +2174,8 @@ export interface StoreCustomerRecord {
   favorite: boolean;
   contactConsentStatus: "not_requested" | "pending" | "accepted" | "declined";
   staffNotes: string | null;
+  nextAction: string | null;
+  nextActionAt: string | null;
   lastActivityAt: string;
   createdAt: string;
   version: number;
