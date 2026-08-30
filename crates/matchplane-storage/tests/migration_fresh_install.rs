@@ -45,7 +45,7 @@ async fn fresh_install_should_apply_every_embedded_migration(
     let latest_applied: bool = sqlx::query_scalar(
         "SELECT EXISTS (\
            SELECT 1 FROM _sqlx_migrations \
-            WHERE version = 202608300001 AND success\
+            WHERE version = 202608300002 AND success\
          )",
     )
     .fetch_one(&pool)
@@ -89,6 +89,168 @@ async fn fresh_install_should_apply_every_embedded_migration(
     .fetch_one(&pool)
     .await?;
     assert!(product_template_index.contains("(tenant_id, store_id, product_template_id, status)"));
+
+    let acquisition_link_columns: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT column_name, data_type, is_nullable
+           FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'marketplace_acquisition_links'
+          ORDER BY ordinal_position",
+    )
+    .fetch_all(&pool)
+    .await?;
+    let acquisition_link_columns: HashMap<_, _> = acquisition_link_columns
+        .into_iter()
+        .map(|(name, data_type, nullable)| (name, (data_type, nullable)))
+        .collect();
+    for (name, data_type, nullable) in [
+        ("id", "uuid", "NO"),
+        ("tenant_id", "uuid", "NO"),
+        ("domain_id", "uuid", "NO"),
+        ("store_id", "uuid", "NO"),
+        ("offer_id", "uuid", "NO"),
+        ("token_digest", "bytea", "NO"),
+        ("channel_key", "text", "NO"),
+        ("source_ref", "text", "YES"),
+        ("campaign_ref", "text", "YES"),
+        ("status", "text", "NO"),
+        ("expires_at", "timestamp with time zone", "YES"),
+        ("version", "bigint", "NO"),
+        ("created_at", "timestamp with time zone", "NO"),
+        ("updated_at", "timestamp with time zone", "NO"),
+    ] {
+        assert_eq!(
+            acquisition_link_columns.get(name),
+            Some(&(data_type.to_owned(), nullable.to_owned())),
+            "missing or malformed acquisition link column {name}",
+        );
+    }
+    for forbidden in [
+        "token",
+        "raw_token",
+        "phone",
+        "phone_number",
+        "wechat_id",
+        "ip",
+        "ip_address",
+        "user_agent",
+        "user_id",
+        "auth_user_id",
+    ] {
+        assert!(
+            !acquisition_link_columns.contains_key(forbidden),
+            "privacy-forbidden acquisition link column {forbidden}",
+        );
+    }
+
+    let acquisition_link_constraints: HashMap<String, String> = sqlx::query_as(
+        "SELECT conname, pg_get_constraintdef(oid)
+           FROM pg_constraint
+          WHERE conrelid = 'marketplace_acquisition_links'::regclass",
+    )
+    .fetch_all(&pool)
+    .await?
+    .into_iter()
+    .collect();
+    for required in [
+        "marketplace_acquisition_links_channel_key_format",
+        "marketplace_acquisition_links_source_ref_bounds",
+        "marketplace_acquisition_links_campaign_ref_bounds",
+        "marketplace_acquisition_links_status_check",
+        "marketplace_acquisition_links_expiry_check",
+        "marketplace_acquisition_links_version_check",
+        "marketplace_acquisition_links_domain_fk",
+        "marketplace_acquisition_links_store_scope_fk",
+    ] {
+        assert!(
+            acquisition_link_constraints.contains_key(required),
+            "missing acquisition link constraint {required}",
+        );
+    }
+    assert!(
+        acquisition_link_constraints
+            .get("marketplace_acquisition_links_token_digest_size")
+            .is_some_and(|definition| definition.contains("octet_length(token_digest) = 32")),
+        "link tokens must remain fixed-size SHA-256 digests",
+    );
+    assert!(
+        acquisition_link_constraints
+            .get("marketplace_acquisition_links_offer_scope_fk")
+            .is_some_and(|definition| definition.contains(
+                "FOREIGN KEY (tenant_id, domain_id, store_id, offer_id) REFERENCES marketplace_offers(tenant_id, domain_id, store_id, id)",
+            )),
+        "acquisition offers must prove their complete canonical store scope",
+    );
+    assert!(
+        acquisition_link_constraints
+            .get("marketplace_acquisition_links_token_digest_unique")
+            .is_some_and(|definition| definition.contains("UNIQUE (token_digest)")),
+        "each public acquisition token digest must be globally unique",
+    );
+
+    let touchpoint_columns: Vec<String> = sqlx::query_scalar(
+        "SELECT column_name
+           FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'marketplace_acquisition_touchpoints'
+          ORDER BY ordinal_position",
+    )
+    .fetch_all(&pool)
+    .await?;
+    assert_eq!(
+        touchpoint_columns,
+        vec![
+            "id",
+            "tenant_id",
+            "link_id",
+            "anonymous_subject_digest",
+            "event_type",
+            "occurred_at",
+        ],
+        "touchpoints must not acquire identity, request-header, or free-form payload columns",
+    );
+    let touchpoint_constraints: HashMap<String, String> = sqlx::query_as(
+        "SELECT conname, pg_get_constraintdef(oid)
+           FROM pg_constraint
+          WHERE conrelid = 'marketplace_acquisition_touchpoints'::regclass",
+    )
+    .fetch_all(&pool)
+    .await?
+    .into_iter()
+    .collect();
+    assert!(
+        touchpoint_constraints
+            .get("marketplace_acquisition_touchpoints_subject_digest_size")
+            .is_some_and(|definition| {
+                definition.contains("octet_length(anonymous_subject_digest) = 32")
+            }),
+        "anonymous subjects must remain fixed-size SHA-256 digests",
+    );
+    assert!(
+        touchpoint_constraints
+            .get("marketplace_acquisition_touchpoints_event_type_check")
+            .is_some_and(|definition| definition.contains("landing_viewed")),
+        "phase-one touchpoint events must remain allow-listed",
+    );
+    let landing_idempotency = touchpoint_constraints
+        .get("marketplace_acquisition_touchpoints_landing_idempotency")
+        .expect("missing landing idempotency constraint");
+    assert!(
+        landing_idempotency
+            .contains("UNIQUE (tenant_id, link_id, anonymous_subject_digest, event_type)"),
+        "landing attribution must be idempotent per link and anonymous subject",
+    );
+    let touchpoint_index_present: bool = sqlx::query_scalar(
+        "SELECT to_regclass(
+             'public.marketplace_acquisition_touchpoints_link_time_idx'
+         ) IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert!(
+        touchpoint_index_present,
+        "acquisition touchpoint reporting index was not installed",
+    );
 
     let columns: Vec<ColumnMetadata> = sqlx::query_as(
         "SELECT column_name AS name, data_type, is_nullable AS nullable, \
