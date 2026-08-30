@@ -207,6 +207,28 @@ export async function POST(request: Request): Promise<Response> {
   const client = await authDatabase.connect();
   try {
     await client.query("BEGIN");
+    // The endpoint probe runs before the transaction. Lock and re-read the binding so a
+    // concurrent revoke or failed health check cannot be overwritten by this stale success.
+    const lockedBindingResult = await client.query<{ status: string }>(
+      `SELECT status
+         FROM platform_federation_bindings
+        WHERE id = $1::uuid AND tenant_id = $2::uuid
+        FOR UPDATE`,
+      [binding.id, binding.tenantId],
+    );
+    const lockedBinding = lockedBindingResult.rows[0];
+    if (!lockedBinding || lockedBinding.status === "revoked") {
+      await client.query("ROLLBACK");
+      return jsonError("联邦绑定已在激活期间撤销", 409);
+    }
+    if (lockedBinding.status === "degraded") {
+      await client.query("ROLLBACK");
+      return jsonError("联邦 MCP 健康状态已在激活期间降级，请重新执行健康检查", 409);
+    }
+    if (lockedBinding.status !== "pending" && lockedBinding.status !== "active") {
+      await client.query("ROLLBACK");
+      return jsonError("联邦绑定状态不允许激活", 409);
+    }
     const existing = await client.query<{ id: string; state: string }>(
     `SELECT id::text, state
          FROM subplatform_registrations
@@ -224,18 +246,18 @@ export async function POST(request: Request): Promise<Response> {
       // A health probe deliberately moves a binding to degraded and the child-route query
       // excludes it. Do not let an operator retry the activation form and silently bypass that
       // isolation without a successful explicit health check.
-      if (binding.status === "degraded") {
-        await client.query("ROLLBACK");
-        return jsonError("联邦 MCP 当前健康检查失败，请检查服务后重新执行健康检查", 409);
-      }
-      await client.query(
+      const activatedBinding = await client.query(
         `UPDATE platform_federation_bindings
             SET organization_id = $2::uuid, registration_id = $3::uuid, status = 'active',
                 token_env = $4, activated_by = $5, activated_at = COALESCE(activated_at, clock_timestamp()),
                 updated_at = clock_timestamp()
-          WHERE id = $1::uuid`,
+          WHERE id = $1::uuid AND status IN ('pending', 'active')`,
         [binding.id, organizationId, existing.rows[0].id, tokenEnv, guard.admin.userId],
       );
+      if (activatedBinding.rowCount !== 1) {
+        await client.query("ROLLBACK");
+        return jsonError("联邦绑定状态已在激活期间改变", 409);
+      }
       await client.query("COMMIT");
       return NextResponse.json({
         bindingId: binding.id,
@@ -285,14 +307,18 @@ export async function POST(request: Request): Promise<Response> {
         guard.admin.userId,
       ],
     );
-    await client.query(
+    const activatedBinding = await client.query(
       `UPDATE platform_federation_bindings
           SET organization_id = $2::uuid, registration_id = $3::uuid, status = 'active',
               token_env = $4, activated_by = $5, activated_at = COALESCE(activated_at, clock_timestamp()),
               updated_at = clock_timestamp()
-        WHERE id = $1::uuid AND status <> 'revoked'`,
+        WHERE id = $1::uuid AND status IN ('pending', 'active')`,
       [binding.id, organizationId, registrationId, tokenEnv, guard.admin.userId],
     );
+    if (activatedBinding.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return jsonError("联邦绑定状态已在激活期间改变", 409);
+    }
     await client.query("COMMIT");
     return NextResponse.json({
       bindingId: binding.id,

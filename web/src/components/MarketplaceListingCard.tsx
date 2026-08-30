@@ -57,6 +57,15 @@ export function MarketplaceListingCard({
   const specs =
     keySpecs(listing) ||
     (listing.subtitle !== sellerLabel ? listing.subtitle : "");
+  const matchReasons = compact
+    ? Array.from(
+        new Set(
+          (listing.reasons ?? [])
+            .map((reason) => reason.trim())
+            .filter((reason) => reason.length > 0),
+        ),
+      ).slice(0, 3)
+    : [];
 
   return (
     <article
@@ -103,7 +112,9 @@ export function MarketplaceListingCard({
             onClick={() => {
               if (!onLike || viewerLikeCount >= 5) return;
               setLiking(true);
-              void onLike().finally(() => setLiking(false));
+              void onLike()
+                .catch(() => undefined)
+                .finally(() => setLiking(false));
             }}
           >
             <Heart
@@ -133,12 +144,12 @@ export function MarketplaceListingCard({
             <span>{sellerLabel}</span>
           </div>
         ) : null}
-        {compact && listing.reasons?.length ? (
+        {matchReasons.length ? (
           <ul
             className="marketplace-product-match-reasons"
             aria-label={locale === "en" ? "Why it matches" : "匹配理由"}
           >
-            {listing.reasons.slice(0, 3).map((reason) => (
+            {matchReasons.map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
           </ul>

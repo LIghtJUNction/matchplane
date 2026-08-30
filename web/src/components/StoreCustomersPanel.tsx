@@ -1,9 +1,13 @@
+import { Button } from "@appica/ui-react/button";
+import { Card, CardDescription } from "@appica/ui-react/card";
+import { Input } from "@appica/ui-react/input";
 import {
   AlertCircle,
   LoaderCircle,
   Package,
   RefreshCw,
   Save,
+  Search,
   Star,
   UserRound,
 } from "lucide-react";
@@ -41,6 +45,7 @@ export function StoreCustomersPanel({
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [stageFilter, setStageFilter] = useState<"all" | StoreCustomerRecord["stage"]>("all");
+  const [query, setQuery] = useState("");
   const [notesDraft, setNotesDraft] = useState("");
 
   const load = async () => {
@@ -52,7 +57,7 @@ export function StoreCustomersPanel({
       setSelectedId((current) =>
         current && next.some((customer) => customer.id === current)
           ? current
-          : (next[0]?.id ?? null),
+          : null,
       );
     } catch (cause) {
       setError(
@@ -71,14 +76,32 @@ export function StoreCustomersPanel({
     void load();
   }, [storeId]);
 
-  const visibleCustomers = useMemo(
-    () =>
-      customers.filter(
-        (customer) =>
-          (!favoriteOnly || customer.favorite) &&
-          (stageFilter === "all" || customer.stage === stageFilter),
-      ),
-    [customers, favoriteOnly, stageFilter],
+  const visibleCustomers = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return customers.filter((customer) => {
+      const matchesQuery = normalizedQuery
+        ? [
+            customer.displayName,
+            customer.analysis,
+            ...customer.products.map((product) => product.name),
+          ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
+        : true;
+      return (
+        matchesQuery &&
+        (!favoriteOnly || customer.favorite) &&
+        (stageFilter === "all" || customer.stage === stageFilter)
+      );
+    });
+  }, [customers, favoriteOnly, query, stageFilter]);
+  const summary = useMemo(
+    () => ({
+      total: customers.length,
+      favorites: customers.filter((customer) => customer.favorite).length,
+      consented: customers.filter(
+        (customer) => customer.contactConsentStatus === "accepted",
+      ).length,
+    }),
+    [customers],
   );
   const selected =
     customers.find((customer) => customer.id === selectedId) ?? null;
@@ -136,7 +159,7 @@ export function StoreCustomersPanel({
         <div>
           <p>{english ? "CUSTOMER SIGNALS" : "客户信号"}</p>
           <h2 id="store-customers-title">
-            {english ? "Customer follow-up" : "客户跟进"}
+            {english ? "Customer management" : "客户管理"}
           </h2>
           <span>
             {english
@@ -144,18 +167,34 @@ export function StoreCustomersPanel({
               : "查看 AI 识别的意向、关注商品和跟进阶段。联系方式仍受用户同意保护。"}
           </span>
         </div>
-        <button
-          className="store-customers-refresh"
+        <Button
+          variant="outline"
+          size="md"
+          className="min-h-11"
           type="button"
           disabled={loading}
           onClick={() => void load()}
         >
           <RefreshCw size={16} aria-hidden="true" />
           {english ? "Refresh" : "刷新"}
-        </button>
+        </Button>
       </div>
 
       <div className="store-customers-filters" aria-label={english ? "Customer filters" : "客户筛选"}>
+        <label className="store-customers-search relative min-w-0 flex-1 sm:max-w-sm">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            size={16}
+            aria-hidden="true"
+          />
+          <Input
+            value={query}
+            aria-label={english ? "Search customers" : "搜索客户"}
+            placeholder={english ? "Search name, intent, or product" : "搜索姓名、意向或商品"}
+            className="min-h-11 pl-9"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
         <label>
           <input
             type="checkbox"
@@ -182,13 +221,57 @@ export function StoreCustomersPanel({
         </label>
       </div>
 
+      <div
+        className="store-customers-summary grid grid-cols-3 gap-2 sm:gap-3"
+        role="group"
+        aria-label={english ? "Customer summary" : "客户概览"}
+      >
+        <Card
+          className="min-w-0"
+          contentProps={{ className: "justify-between gap-1 sm:p-3" }}
+        >
+          <CardDescription>
+            {english ? "Qualified customers" : "高意向客户"}
+          </CardDescription>
+          <p className="text-xl font-semibold tabular-nums text-foreground sm:text-2xl">
+            {summary.total}
+          </p>
+        </Card>
+        <Card
+          className="min-w-0"
+          contentProps={{ className: "justify-between gap-1 sm:p-3" }}
+        >
+          <CardDescription>{english ? "Favorites" : "已收藏"}</CardDescription>
+          <p className="text-xl font-semibold tabular-nums text-foreground sm:text-2xl">
+            {summary.favorites}
+          </p>
+        </Card>
+        <Card
+          className="min-w-0"
+          contentProps={{ className: "justify-between gap-1 sm:p-3" }}
+        >
+          <CardDescription>
+            {english ? "Contact consent" : "已同意联系"}
+          </CardDescription>
+          <p className="text-xl font-semibold tabular-nums text-foreground sm:text-2xl">
+            {summary.consented}
+          </p>
+        </Card>
+      </div>
+
       {error ? (
         <div className="store-customers-error" role="alert">
           <AlertCircle size={18} aria-hidden="true" />
           <span>{error}</span>
-          <button type="button" onClick={() => void load()}>
+          <Button
+            variant="outline"
+            size="md"
+            className="min-h-11"
+            type="button"
+            onClick={() => void load()}
+          >
             {english ? "Retry" : "重试"}
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -318,8 +401,10 @@ export function StoreCustomersPanel({
                     placeholder={english ? "Next action, timing, constraints…" : "下一步、时间、约束…"}
                   />
                 </label>
-                <button
-                  className="button button-dark"
+                <Button
+                  variant="primary"
+                  size="md"
+                  className="min-h-11"
                   type="button"
                   disabled={
                     updatingId === selected.id ||
@@ -335,23 +420,42 @@ export function StoreCustomersPanel({
                     : english
                       ? "Save notes"
                       : "保存备注"}
-                </button>
+                </Button>
               </section>
             </article>
-          ) : null}
+          ) : (
+            <aside
+              className="store-customers-state is-empty store-customer-detail-empty"
+              aria-labelledby="store-customer-detail-empty-title"
+            >
+              <UserRound size={25} aria-hidden="true" />
+              <h3 id="store-customer-detail-empty-title">
+                {english ? "Select a customer" : "选择一位客户"}
+              </h3>
+              <p>
+                {english
+                  ? "Choose a customer to review intent, interested products, contact consent, and staff notes."
+                  : "选择客户后，这里会显示意向分析、关注商品、联系方式同意状态和店员备注。"}
+              </p>
+            </aside>
+          )}
         </div>
       ) : (
         <div className="store-customers-state is-empty">
           <strong>{english ? "No matching customers" : "没有符合筛选条件的客户"}</strong>
-          <button
+          <Button
+            variant="ghost"
+            size="md"
+            className="min-h-11"
             type="button"
             onClick={() => {
               setFavoriteOnly(false);
               setStageFilter("all");
+              setQuery("");
             }}
           >
             {english ? "Clear filters" : "清除筛选"}
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="store-customers-state is-empty">

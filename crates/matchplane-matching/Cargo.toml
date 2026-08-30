@@ -1,0 +1,33 @@
+[package]
+name = "matchplane-matching"
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.97"
+description = "Provider-neutral deterministic and AI-assisted candidate matching kernel"
+license = "MIT"
+repository = "https://github.com/LIghtJUNction/matchplane"
+documentation = "https://docs.rs/matchplane-matching"
+readme = "README.md"
+keywords = ["matching", "recommendation", "ranking", "ai", "routing"]
+categories = ["algorithms", "text-processing"]
+publish = true
+include = ["src/**/*.rs", "tests/**/*.rs", "README.md", "LICENSE"]
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+
+[lints.rust]
+future_incompatible = { level = "warn", priority = -1 }
+missing_debug_implementations = "warn"
+missing_docs = "deny"
+nonstandard_style = { level = "deny", priority = -1 }
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+redundant_clone = "warn"
+todo = "deny"
+unimplemented = "deny"

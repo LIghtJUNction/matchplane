@@ -1,9 +1,10 @@
 import { authDatabase } from "./lib/auth";
+import { fetchPinnedPublicText } from "./lib/pinned-public-endpoint";
 import {
   hasOnlyPublicAddresses,
   isPrivateOrReservedIpLiteral,
 } from "./lib/public-endpoint";
-import { runtimeEnvironment } from "./lib/runtime";
+import { isProductionEnvironment, runtimeEnvironment } from "./lib/runtime";
 import { isUuid } from "./lib/uuid";
 
 /**
@@ -44,9 +45,9 @@ export interface SubplatformMcpProbeResult {
  *
  * Supported shape:
  * {
- *   "used-car": {
+ *   "store-a": {
  *     "url": "https://agent.example/mcp",
- *     "tokenEnv": "MATCHPLANE_USED_CAR_MCP_TOKEN"
+ *     "tokenEnv": "MATCHPLANE_STORE_A_MCP_TOKEN"
  *   }
  * }
  *
@@ -224,7 +225,7 @@ export async function invokeSubplatformMcpTool(input: {
   actorSubject: string;
   fetcher?: typeof fetch;
 }): Promise<SubplatformMcpCallResult> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher;
   const headers = new Headers({
     accept: "application/json",
     "content-type": "application/json",
@@ -236,9 +237,10 @@ export async function invokeSubplatformMcpTool(input: {
     headers.set("authorization", `Bearer ${input.endpoint.bearerToken}`);
 
   let response: Response;
+  let responseText: string | undefined;
   try {
-    response = await fetcher(input.endpoint.url, {
-      method: "POST",
+    ({ response, text: responseText } = await postMcpRequest({
+      endpoint: input.endpoint,
       headers,
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -246,12 +248,8 @@ export async function invokeSubplatformMcpTool(input: {
         method: "tools/call",
         params: { name: input.toolName, arguments: input.arguments },
       }),
-      signal: AbortSignal.timeout(input.endpoint.timeoutMs),
-      // The endpoint was validated before routing. Do not let a reachable public
-      // endpoint redirect this server-side client into an unvalidated private host.
-      redirect: "error",
-      cache: "no-store",
-    });
+      fetcher,
+    }));
   } catch (error) {
     return {
       ok: false,
@@ -260,7 +258,7 @@ export async function invokeSubplatformMcpTool(input: {
     };
   }
 
-  const body = await readJsonResponse(response);
+  const body = await readJsonResponse(response, responseText);
   if (!body.ok) return body;
   return {
     ok: response.ok && !hasMcpError(body.payload),
@@ -274,7 +272,7 @@ export async function probeSubplatformMcpEndpoint(input: {
   endpoint: SubplatformMcpEndpoint;
   fetcher?: typeof fetch;
 }): Promise<SubplatformMcpProbeResult> {
-  const fetcher = input.fetcher ?? fetch;
+  const fetcher = input.fetcher;
   const headers = new Headers({
     accept: "application/json",
     "content-type": "application/json",
@@ -282,8 +280,8 @@ export async function probeSubplatformMcpEndpoint(input: {
   if (input.endpoint.bearerToken)
     headers.set("authorization", `Bearer ${input.endpoint.bearerToken}`);
   try {
-    const response = await fetcher(input.endpoint.url, {
-      method: "POST",
+    const { response, text } = await postMcpRequest({
+      endpoint: input.endpoint,
       headers,
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -295,11 +293,9 @@ export async function probeSubplatformMcpEndpoint(input: {
           clientInfo: { name: "matchplane", version: "1" },
         },
       }),
-      signal: AbortSignal.timeout(input.endpoint.timeoutMs),
-      redirect: "error",
-      cache: "no-store",
+      fetcher,
     });
-    const body = await readJsonResponse(response);
+    const body = await readJsonResponse(response, text);
     const result = body.payload.result;
     if (
       !response.ok ||
@@ -376,10 +372,61 @@ function isLoopback(hostname: string): boolean {
   );
 }
 
+async function postMcpRequest(input: {
+  endpoint: SubplatformMcpEndpoint;
+  headers: Headers;
+  body: string;
+  fetcher?: typeof fetch;
+}): Promise<{ response: Response; text?: string }> {
+  const deadline = AbortSignal.timeout(input.endpoint.timeoutMs);
+  if (input.fetcher) {
+    if (!isExplicitTestEnvironment()) {
+      throw new Error("subplatform MCP test transport is disabled");
+    }
+    const response = await input.fetcher(input.endpoint.url, {
+      method: "POST",
+      headers: input.headers,
+      body: input.body,
+      signal: deadline,
+      redirect: "error",
+      cache: "no-store",
+    });
+    return { response };
+  }
+
+  let url: URL;
+  try {
+    url = new URL(input.endpoint.url);
+  } catch {
+    throw new Error("subplatform MCP endpoint is invalid");
+  }
+  return fetchPinnedPublicText(url, {
+    method: "POST",
+    headers: input.headers,
+    body: input.body,
+    signal: deadline,
+    requestTimeoutMs: input.endpoint.timeoutMs,
+    responseBodyTimeoutMs: input.endpoint.timeoutMs,
+    responseLimitBytes: MAX_RESPONSE_BYTES,
+    allowLoopback:
+      !isProductionEnvironment() && isLoopback(url.hostname.toLowerCase()),
+  });
+}
+
+function isExplicitTestEnvironment(): boolean {
+  return (
+    process.env.NODE_ENV === "test" && runtimeEnvironment() !== "production"
+  );
+}
+
 async function readJsonResponse(
   response: Response,
+  boundedText?: string,
 ): Promise<SubplatformMcpCallResult> {
   try {
+    if (boundedText !== undefined) {
+      return parseJsonResponseText(response, boundedText);
+    }
     const declaredLength = Number.parseInt(
       response.headers.get("content-length") ?? "",
       10,
@@ -428,21 +475,7 @@ async function readJsonResponse(
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    const text = new TextDecoder().decode(bytes);
-    const contentType =
-      response.headers.get("content-type")?.toLowerCase() ?? "";
-    const payloadText = contentType.includes("text/event-stream")
-      ? lastSseData(text)
-      : text;
-    const payload = JSON.parse(payloadText) as unknown;
-    if (!isRecord(payload)) {
-      return {
-        ok: false,
-        status: 502,
-        payload: { error: "subplatform MCP response must be a JSON object" },
-      };
-    }
-    return { ok: true, status: response.status, payload };
+    return parseJsonResponseText(response, new TextDecoder().decode(bytes));
   } catch {
     return {
       ok: false,
@@ -450,6 +483,35 @@ async function readJsonResponse(
       payload: { error: "subplatform MCP response was not valid JSON" },
     };
   }
+}
+
+function parseJsonResponseText(
+  response: Response,
+  text: string,
+): SubplatformMcpCallResult {
+  const contentType =
+    response.headers.get("content-type")?.toLowerCase() ?? "";
+  const payloadText = contentType.includes("text/event-stream")
+    ? lastSseData(text)
+    : text;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(payloadText) as unknown;
+  } catch {
+    return {
+      ok: false,
+      status: 502,
+      payload: { error: "subplatform MCP response was not valid JSON" },
+    };
+  }
+  if (!isRecord(payload)) {
+    return {
+      ok: false,
+      status: 502,
+      payload: { error: "subplatform MCP response must be a JSON object" },
+    };
+  }
+  return { ok: true, status: response.status, payload };
 }
 
 function lastSseData(value: string): string {

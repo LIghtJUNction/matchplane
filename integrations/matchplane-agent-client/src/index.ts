@@ -968,15 +968,7 @@ export class MatchPlaneAgentClient {
       ...input,
       side,
     });
-    const capability = result as Partial<PartyCapability>;
-    return {
-      ...capability,
-      side,
-      platform_path:
-        typeof capability.platform_path === "string"
-          ? capability.platform_path
-          : input.platform_path,
-    } as PartyCapability;
+    return parsePartyCapability(result, input);
   }
 
   async createIntent(
@@ -1110,6 +1102,18 @@ export class MatchPlaneAgentClient {
     capability: PartyCapability,
     input: T,
   ): T & { platform_path: string } {
+    assertUsablePartyCapability(capability);
+    const values = input as Record<string, unknown>;
+    for (const [field, expected] of [
+      ["tenant_id", capability.tenant_id],
+      ["domain_id", capability.domain_id],
+      ["participant_id", capability.party_id],
+      ["supply_party_id", capability.party_id],
+    ] as const) {
+      if (field in values && values[field] !== expected) {
+        throw new Error(`marketplace ${field} must match the party capability`);
+      }
+    }
     return { ...input, platform_path: capability.platform_path };
   }
 
@@ -1147,9 +1151,17 @@ export class MatchPlaneAgentClient {
     const headers = new Headers({
       accept: "application/json",
       "content-type": "application/json",
-      "x-matchplane-api-key": this.apiKey,
     });
-    if (partyToken) headers.set("authorization", `Bearer ${partyToken}`);
+    if (partyToken === undefined) {
+      headers.set("x-matchplane-api-key", this.apiKey);
+    } else {
+      if (!isSafeBearerToken(partyToken)) {
+        throw new Error("marketplace party capability token is invalid");
+      }
+      // Party-authenticated calls intentionally carry only the short-lived bearer. Sending the
+      // organization API key as well would widen the secret and identity boundary at the gateway.
+      headers.set("authorization", `Bearer ${partyToken}`);
+    }
     const response = await this.fetchWithDeadline(`${this.baseUrl}/api/mcp`, {
       method: "POST",
       headers,
@@ -2053,6 +2065,85 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function parsePartyCapability(
+  value: unknown,
+  expected: {
+    tenant_id: string;
+    domain_id: string;
+    platform_path: string;
+    side: AgentSide;
+  },
+): PartyCapability {
+  if (!isRecord(value)) throw new Error("marketplace capability is invalid");
+  if (
+    value.tenant_id !== expected.tenant_id ||
+    value.domain_id !== expected.domain_id ||
+    value.platform_path !== expected.platform_path ||
+    value.side !== expected.side ||
+    !isBoundedString(value.party_id, 200) ||
+    !isSafeBearerToken(value.access_token) ||
+    value.cost_bearer !== "caller"
+  ) {
+    throw new Error("marketplace capability scope is invalid");
+  }
+  if (
+    value.role !== undefined &&
+    value.role !== (expected.side === "demand" ? "buyer" : "seller") &&
+    value.role !== "both"
+  ) {
+    throw new Error("marketplace capability side is invalid");
+  }
+  if (!isFutureTimestamp(value.access_token_expires_at)) {
+    throw new Error("marketplace capability expiry is invalid");
+  }
+  return {
+    tenant_id: expected.tenant_id,
+    domain_id: expected.domain_id,
+    party_id: value.party_id,
+    side: expected.side,
+    ...(value.role === undefined
+      ? {}
+      : { role: value.role as "buyer" | "seller" | "both" }),
+    access_token: value.access_token,
+    access_token_expires_at: value.access_token_expires_at,
+    platform_path: expected.platform_path,
+    cost_bearer: "caller",
+  };
+}
+
+function assertUsablePartyCapability(
+  value: unknown,
+): asserts value is PartyCapability {
+  if (
+    !isRecord(value) ||
+    !isBoundedString(value.tenant_id, 200) ||
+    !isBoundedString(value.domain_id, 200) ||
+    !isBoundedString(value.party_id, 200) ||
+    (value.side !== "demand" && value.side !== "supply") ||
+    !isPlatformPath(value.platform_path) ||
+    !isSafeBearerToken(value.access_token) ||
+    value.cost_bearer !== "caller" ||
+    !isFutureTimestamp(value.access_token_expires_at)
+  ) {
+    throw new Error("marketplace party capability is invalid or expired");
+  }
+}
+
+function isSafeBearerToken(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 16 &&
+    value.length <= 4096 &&
+    !/[\s\u0000-\u001f\u007f]/.test(value)
+  );
+}
+
+function isFutureTimestamp(value: unknown): value is string {
+  if (!isBoundedString(value, 80)) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && timestamp > Date.now();
+}
+
 function isAbortSignal(value: unknown): value is AbortSignal {
   return (
     isRecord(value) &&
@@ -2247,14 +2338,14 @@ function normalizeBaseUrl(value: string): string {
       "MatchPlane baseUrl must be an origin without credentials or a path",
     );
   }
-  const runtimeProcess = (
-    globalThis as { process?: { env?: Record<string, string | undefined> } }
-  ).process;
-  if (
-    runtimeProcess?.env?.NODE_ENV === "production" &&
-    parsed.protocol !== "https:"
-  ) {
-    throw new Error("MatchPlane baseUrl must use HTTPS in production");
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("MatchPlane baseUrl must use HTTP or HTTPS");
+  }
+  const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+  if (parsed.protocol === "http:" && !loopbackHosts.has(parsed.hostname)) {
+    throw new Error(
+      "MatchPlane baseUrl must use HTTPS outside loopback development",
+    );
   }
   return parsed.origin;
 }

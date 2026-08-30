@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@appica/ui-react/button";
 import { type SyntheticEvent, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -224,20 +225,24 @@ export function StoreManagementPanel({
           {canManageStore && (status === "active" || status === "closed") && (
             <div className="store-lifecycle-action-wrapper">
               {status === "active" && !confirmingClose && (
-                <button
+                <Button
+                  variant="destructive"
+                  size="md"
+                  className="min-h-11"
                   type="button"
-                  className="button button-danger-subtle"
                   onClick={() => setConfirmingClose(true)}
                   disabled={lifecycleLoading || loading}
                 >
                   <PowerOff size={15} aria-hidden="true" />
                   {isEn ? "Pause operations (Close)" : "暂停营业（关闭店铺）"}
-                </button>
+                </Button>
               )}
               {status === "closed" && (
-                <button
+                <Button
+                  variant="primary"
+                  size="md"
+                  className="min-h-11"
                   type="button"
-                  className="button button-dark"
                   onClick={() => void handleLifecycleChange("reopen")}
                   disabled={lifecycleLoading || loading}
                 >
@@ -249,7 +254,7 @@ export function StoreManagementPanel({
                     : isEn
                       ? "Reopen store"
                       : "恢复营业（重新开店）"}
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -260,7 +265,9 @@ export function StoreManagementPanel({
           <div className="store-lifecycle-confirm" role="alert">
             <div className="store-lifecycle-confirm-content">
               <strong>
-                {isEn ? "Pause store operations?" : "确定要暂停营业（关闭店铺）吗？"}
+                {isEn
+                  ? "Pause store operations?"
+                  : "确定要暂停营业（关闭店铺）吗？"}
               </strong>
               <p>
                 {isEn
@@ -269,9 +276,11 @@ export function StoreManagementPanel({
               </p>
             </div>
             <div className="store-lifecycle-confirm-actions">
-              <button
+              <Button
+                variant="destructive"
+                size="md"
+                className="min-h-11"
                 type="button"
-                className="button button-danger"
                 onClick={() => void handleLifecycleChange("close")}
                 disabled={lifecycleLoading}
               >
@@ -283,15 +292,17 @@ export function StoreManagementPanel({
                   : isEn
                     ? "Confirm pause operations"
                     : "确认暂停营业"}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
+                size="md"
+                className="min-h-11"
                 type="button"
-                className="button button-ghost"
                 onClick={() => setConfirmingClose(false)}
                 disabled={lifecycleLoading}
               >
                 {isEn ? "Cancel" : "取消"}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -335,8 +346,10 @@ export function StoreManagementPanel({
           </span>
         </div>
         {canManageStore ? (
-          <button
-            className="button button-dark"
+          <Button
+            variant="primary"
+            size="md"
+            className="min-h-11"
             type="submit"
             disabled={saving || loading || lifecycleLoading}
           >
@@ -348,7 +361,7 @@ export function StoreManagementPanel({
               : isEn
                 ? "Save store details"
                 : "保存店铺资料"}
-          </button>
+          </Button>
         ) : (
           <p className="store-management-readonly">
             {isEn

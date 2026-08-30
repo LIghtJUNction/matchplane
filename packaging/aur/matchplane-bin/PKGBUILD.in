@@ -6,10 +6,10 @@ pkgdesc='Federated AI matching infrastructure (prebuilt binaries)'
 arch=('x86_64')
 url='https://github.com/LIghtJUNction/matchplane'
 license=('MIT')
-depends=('bubblewrap' 'ca-certificates' 'gcc-libs' 'git' 'glibc' 'nodejs>=22.12.0' 'openssl' 'zlib')
+depends=('bash' 'bubblewrap' 'ca-certificates' 'coreutils' 'gcc-libs' 'git' 'glibc' 'nodejs>=22.12.0' 'openssl' 'postgresql-libs' 'util-linux' 'zlib')
 provides=('matchplane')
 conflicts=('matchplane' 'matchplane-git')
-backup=('etc/matchplane/matchplane.env')
+backup=('etc/matchplane/matchplane.env' 'etc/matchplane/postgres-backup.conf')
 install=matchplane.install
 source=("matchplane-${pkgver}-linux-x86_64.tar.zst::https://github.com/LIghtJUNction/matchplane/releases/download/v${pkgver}/matchplane-${pkgver}-linux-x86_64.tar.zst")
 sha256sums=('__SHA256__')

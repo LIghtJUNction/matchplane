@@ -1,13 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": [
-    "subplatforms/auto/**"
-  ],
   "workspaces": {
     "web": {
       "entry": [
         "app/**/*.{ts,tsx}",
         "src/**/*.test.{ts,tsx}",
+        "src/lib/platform-router-config/fixtures/transaction-child.ts",
         "public/**/*.js",
         "src/api.ts",
         "src/catalog-{projection,protocol}.ts",
@@ -19,14 +17,17 @@
         "src/retrieval-protocol.ts",
         "src/shopping-{intent,memory-contract}.ts",
         "src/store-finance.ts",
+        "src/storefront-lifecycle.postgres.ts",
         "src/subplatform.ts",
         "src/types.ts"
       ]
     },
     "integrations/matchplane-agent-client": {
       "entry": [
-        "src/index.ts",
         "examples/*.ts"
+      ],
+      "ignoreBinaries": [
+        "tsc"
       ]
     }
   }

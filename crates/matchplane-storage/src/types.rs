@@ -152,6 +152,30 @@ pub enum MatchCommitOutcome {
     Duplicate,
 }
 
+/// One exact aggregate level in a PostgreSQL-authoritative order-book projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BookProjectionLevel {
+    /// Exact integer price text.
+    pub price: String,
+    /// Exact integer aggregate quantity text.
+    pub quantity: String,
+}
+
+/// Latest PostgreSQL-authoritative full order-book projection used to repair derived caches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BookProjection {
+    /// Market whose full book is represented.
+    pub market_id: MarketId,
+    /// Last applied market command sequence.
+    pub sequence: u64,
+    /// Aggregate bids in highest-price-first order.
+    pub bids: Vec<BookProjectionLevel>,
+    /// Aggregate asks in lowest-price-first order.
+    pub asks: Vec<BookProjectionLevel>,
+    /// Matching-engine state checksum.
+    pub state_hash: PayloadHash,
+}
+
 /// Latest checksum-protected order-book snapshot and its replay position.
 #[derive(Debug, Clone)]
 pub struct BookSnapshot {

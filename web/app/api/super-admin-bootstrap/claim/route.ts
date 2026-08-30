@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { NextResponse } from "next/server";
 
 import { authDatabase } from "../../../../src/lib/auth";
@@ -8,6 +6,12 @@ import {
   RequestBodyTooLargeError,
 } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { isProductionEnvironment } from "../../../../src/lib/runtime";
+import {
+  SUPER_ADMIN_BOOTSTRAP_COOKIE,
+  SUPER_ADMIN_BOOTSTRAP_COOKIE_TTL_SECONDS,
+  superAdminBootstrapDigest,
+} from "../../../../src/lib/super-admin-bootstrap";
 import { isUuid } from "../../../../src/lib/uuid";
 
 export const runtime = "nodejs";
@@ -63,7 +67,7 @@ export async function POST(request: Request): Promise<Response> {
           AND used_at IS NULL
           AND expires_at > clock_timestamp()
         FOR UPDATE`,
-      [tenantId, digest(token)],
+      [tenantId, superAdminBootstrapDigest(token)],
     );
     const invite = inviteResult.rows[0];
     if (
@@ -87,20 +91,31 @@ export async function POST(request: Request): Promise<Response> {
       [tenantId, email],
     );
     await client.query("COMMIT");
-    return NextResponse.json(
+    const response = NextResponse.json(
       { claimed: true },
       { headers: { "cache-control": "no-store" } },
     );
+    // The reservation email is guessable. Bind its privilege-bearing signup to the browser
+    // that proved possession of the CLI token instead of promoting whichever account races to
+    // register that email first.
+    response.cookies.set({
+      name: SUPER_ADMIN_BOOTSTRAP_COOKIE,
+      // Keep the database's one-way token hash from becoming a pass-the-hash credential.
+      // The short-lived HttpOnly cookie carries the original bearer only to Better Auth.
+      value: token,
+      httpOnly: true,
+      sameSite: "strict",
+      secure: isProductionEnvironment(),
+      path: "/api/auth",
+      maxAge: SUPER_ADMIN_BOOTSTRAP_COOKIE_TTL_SECONDS,
+    });
+    return response;
   } catch {
     await client.query("ROLLBACK").catch(() => undefined);
     return error("超级管理员注册链接暂时不可用", 503);
   } finally {
     client.release();
   }
-}
-
-function digest(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function isEmail(value: string): boolean {

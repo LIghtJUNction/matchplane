@@ -114,6 +114,96 @@ async fn failed_head_should_block_later_records_during_backoff(
 
 #[sqlx::test]
 #[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn exhausted_poison_head_should_not_retry_or_release_its_key(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    create_outbox_table(&pool).await?;
+    insert_message(&pool, "market-a", 1).await?;
+    insert_message(&pool, "market-a", 2).await?;
+    insert_message(&pool, "market-b", 1).await?;
+    sqlx::query(
+        "UPDATE outbox_events SET attempts = 11 \
+         WHERE message_key = 'market-a' AND shard_sequence = 1",
+    )
+    .execute(&pool)
+    .await?;
+
+    let store = PgStore::from_pool(pool.clone());
+    let mut claimed = store.claim_outbox(10).await?;
+    let poison_index = claimed
+        .iter()
+        .position(|message| message.message_key == "market-a")
+        .expect("the poison head should receive its final claim");
+    let poison = claimed.swap_remove(poison_index);
+    assert_eq!(poison.attempts, 12);
+    store
+        .mark_outbox_failed(
+            poison.event_id,
+            poison.claim_token,
+            poison.attempts,
+            "broker rejected the record permanently",
+        )
+        .await?;
+
+    let other = claimed
+        .pop()
+        .expect("the independent key should have been claimed");
+    store
+        .mark_outbox_published(other.event_id, other.claim_token)
+        .await?;
+    insert_message(&pool, "market-b", 2).await?;
+
+    let next = store.claim_outbox(10).await?;
+    assert_eq!(next.len(), 1);
+    assert_eq!(next[0].message_key, "market-b");
+    assert_eq!(next[0].shard_sequence, 2);
+    let poison_state: (String, i32) =
+        sqlx::query_as("SELECT status, attempts FROM outbox_events WHERE event_id = $1")
+            .bind(poison.event_id.into_uuid())
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(poison_state, ("failed".to_owned(), 12));
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
+async fn exhausted_stale_claim_should_become_terminal_failed(
+    pool: PgPool,
+) -> Result<(), StorageError> {
+    create_outbox_table(&pool).await?;
+    insert_message(&pool, "market-a", 1).await?;
+    insert_message(&pool, "market-a", 2).await?;
+    sqlx::query(
+        "UPDATE outbox_events \
+         SET status = 'publishing', attempts = 12, \
+             claimed_at = clock_timestamp() - INTERVAL '61 seconds', claim_token = $1 \
+         WHERE message_key = 'market-a' AND shard_sequence = 1",
+    )
+    .bind(Uuid::now_v7())
+    .execute(&pool)
+    .await?;
+
+    let store = PgStore::from_pool(pool.clone());
+    assert!(store.claim_outbox(10).await?.is_empty());
+
+    let poison_state: (String, Option<Uuid>, Option<String>) = sqlx::query_as(
+        "SELECT status, claim_token, last_error FROM outbox_events \
+         WHERE message_key = 'market-a' AND shard_sequence = 1",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(poison_state.0, "failed");
+    assert!(poison_state.1.is_none());
+    assert_eq!(
+        poison_state.2.as_deref(),
+        Some("delivery claim lease expired after attempt limit")
+    );
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this test target explicitly"]
 async fn published_head_should_release_the_next_sequence(pool: PgPool) -> Result<(), StorageError> {
     create_outbox_table(&pool).await?;
     insert_message(&pool, "market-a", 1).await?;

@@ -1,26 +1,100 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Badge } from "@appica/ui-react/badge";
+import { Button } from "@appica/ui-react/button";
 import { RefreshCw } from "lucide-react";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import { z } from "zod";
 
 import { SectionHeading } from "./Primitives";
 
-interface LoginMethodStatus {
-  emailOtp: boolean;
-  phoneOtp: boolean;
-  magicLink: boolean;
-  passkey: boolean;
-  social: string[];
-  primary: string[];
+const OAUTH_PROVIDER_IDS = [
+  "national_identity",
+  "wechat",
+  "qq",
+  "alipay",
+  "google",
+] as const;
+
+type OAuthProviderId = (typeof OAUTH_PROVIDER_IDS)[number];
+type ProviderId =
+  | "password"
+  | "passkey"
+  | "email_otp_magic_link"
+  | "phone_otp"
+  | OAuthProviderId;
+
+const OAUTH_PROVIDER_SCHEMA = z.enum(OAUTH_PROVIDER_IDS);
+const LOGIN_METHOD_STATUS_SCHEMA = z.object({
+  password: z.boolean(),
+  emailOtp: z.boolean(),
+  phoneOtp: z.boolean(),
+  magicLink: z.boolean(),
+  passkey: z.boolean(),
+  social: z.array(OAUTH_PROVIDER_SCHEMA).max(OAUTH_PROVIDER_IDS.length),
+  primary: z.array(OAUTH_PROVIDER_SCHEMA).max(OAUTH_PROVIDER_IDS.length),
+  oauthCallbacks: z.object({
+    national_identity: z.url(),
+    wechat: z.url(),
+    qq: z.url(),
+    alipay: z.url(),
+    google: z.url(),
+  }),
+});
+
+type LoginMethodStatus = z.infer<typeof LOGIN_METHOD_STATUS_SCHEMA>;
+
+interface MethodDefinition {
+  id: ProviderId;
+  name: string;
+  active: string;
+  inactive: string;
+  environment?: { name: string; note: string }[];
 }
 
-/**
- * Read-only status board for the mall's sign-in methods. WeChat and SMS
- * credentials deliberately live in deployment environment variables — never in
- * the database or the browser — so this panel reports what the running server
- * has detected and tells the operator exactly which variables complete each
- * method.
- */
+const METHODS: MethodDefinition[] = [
+  {
+    id: "password",
+    name: "密码",
+    active: "当前 Web 进程内置启用",
+    inactive: "当前 Web 进程未启用",
+  },
+  {
+    id: "passkey",
+    name: "Passkey",
+    active: "当前 Web 进程支持指纹、面容或安全密钥",
+    inactive: "当前 Web 进程未启用",
+  },
+  {
+    id: "email_otp_magic_link",
+    name: "邮箱验证码 / 免密链接",
+    active: "当前 Web 进程已连接可用的账号邮件通道",
+    inactive: "当前进程尚未启用；请在下方“账号邮件”面板查看配置",
+  },
+  {
+    id: "phone_otp",
+    name: "手机号验证码",
+    active: "当前 Web 进程可以投递短信验证码",
+    inactive: "当前进程尚未启用；请在下方“短信登录”面板查看配置",
+  },
+  {
+    id: "national_identity",
+    name: "国家网络身份认证",
+    active: "当前 Web 进程已启用此 OAuth 登录方式",
+    inactive: "当前进程尚未启用；请在下方国家网络身份认证面板查看配置",
+  },
+  {
+    id: "wechat",
+    name: "微信登录",
+    active: "当前 Web 进程已启用此 OAuth 登录方式",
+    inactive: "当前进程尚未启用；请在下方微信扫码登录面板查看配置",
+  },
+  oauthDefinition("qq", "QQ", "QQ"),
+  oauthDefinition("alipay", "支付宝", "ALIPAY"),
+  oauthDefinition("google", "Google", "GOOGLE"),
+];
+
+/** Read-only view of capabilities active in this running Better Auth process. */
 export function LoginMethodsPanel() {
   const [status, setStatus] = useState<LoginMethodStatus | null>(null);
   const [checking, setChecking] = useState(true);
@@ -32,18 +106,11 @@ export function LoginMethodsPanel() {
     try {
       const response = await fetch("/api/auth/providers", {
         headers: { accept: "application/json" },
+        credentials: "include",
         cache: "no-store",
       });
       if (!response.ok) throw new Error();
-      const body = (await response.json()) as Partial<LoginMethodStatus>;
-      setStatus({
-        emailOtp: body.emailOtp === true,
-        phoneOtp: body.phoneOtp === true,
-        magicLink: body.magicLink === true,
-        passkey: body.passkey !== false,
-        social: Array.isArray(body.social) ? body.social : [],
-        primary: Array.isArray(body.primary) ? body.primary : [],
-      });
+      setStatus(LOGIN_METHOD_STATUS_SCHEMA.parse(await response.json()));
     } catch {
       setStatus(null);
       setError("登录方式检测失败，请稍后重试。");
@@ -56,9 +123,6 @@ export function LoginMethodsPanel() {
     void refresh();
   }, [refresh]);
 
-  const wechatEnabled = status?.social.includes("wechat") === true;
-  const phoneEnabled = status?.phoneOtp === true;
-
   return (
     <section
       className="surface login-methods-panel"
@@ -70,89 +134,34 @@ export function LoginMethodsPanel() {
         titleId="login-methods-title"
       />
       <p className="subplatform-intro">
-        密码和 Passkey 始终可用。微信、手机验证码等方式配置完成后会自动出现在登录页；
-        这里显示服务器当前检测到的状态。
+        “已启用”只表示当前运行中的 Web
+        进程实际开放该能力，不表示已保存凭据或存在待重启变更。
+        微信、国家网络身份、账号邮件和短信的保存状态请以下方各自配置面板为准。
       </p>
       {status ? (
         <div className="provider-list" aria-label="登录方式状态">
-          <MethodRow
-            name="密码"
-            detail="邮箱注册账号的默认方式"
-            enabled
-          />
-          <MethodRow
-            name="Passkey"
-            detail="指纹、面容或安全密钥"
-            enabled={status.passkey}
-          />
-          <MethodRow
-            name="微信登录"
-            detail={
-              wechatEnabled
-                ? "已出现在登录页“其他方式”中"
-                : "在服务器环境变量中填写微信开放平台凭据"
-            }
-            enabled={wechatEnabled}
-          />
-          {!wechatEnabled ? (
-            <EnvChecklist
-              label="微信登录所需环境变量"
-              items={[
-                { name: "MATCHPLANE_WECHAT_OAUTH_CLIENT_ID", note: "微信开放平台 AppID" },
-                { name: "MATCHPLANE_WECHAT_OAUTH_CLIENT_SECRET", note: "微信开放平台 AppSecret" },
-                {
-                  name: "MATCHPLANE_WECHAT_OAUTH_AUTHORIZATION_URL / _TOKEN_URL / _USERINFO_URL",
-                  note: "三个网关地址需同时填写；支持 OIDC 的网关可只填 MATCHPLANE_WECHAT_OAUTH_DISCOVERY_URL",
-                },
-                {
-                  name: "MATCHPLANE_WECHAT_OAUTH_SCOPES",
-                  note: "可选，逗号分隔，默认 snsapi_login（微信开放平台网站扫码登录）",
-                },
-              ]}
-            />
-          ) : null}
-          <MethodRow
-            name="手机号验证码"
-            detail={
-              phoneEnabled
-                ? "登录页支持输入手机号获取短信验证码"
-                : "接入一个 HTTPS 短信网关即可开启"
-            }
-            enabled={phoneEnabled}
-          />
-          {!phoneEnabled ? (
-            <EnvChecklist
-              label="手机号验证码所需环境变量"
-              items={[
-                {
-                  name: "MATCHPLANE_SMS_PROVIDER_URL",
-                  note: "HTTPS 短信网关地址；服务器会 POST { phoneNumber, code, purpose }",
-                },
-                {
-                  name: "MATCHPLANE_SMS_PROVIDER_TOKEN",
-                  note: "可选，作为 Bearer token 随请求发送",
-                },
-              ]}
-            />
-          ) : null}
-          <MethodRow
-            name="邮箱验证码 / 免密链接"
-            detail={
-              status.emailOtp
-                ? "跟随下方“账号邮件”配置，已可用"
-                : "在下方“账号邮件”里配置 SMTP 后自动开启"
-            }
-            enabled={status.emailOtp}
-          />
-          {status.social.filter((provider) => provider !== "wechat").length ? (
-            <MethodRow
-              name="其他第三方登录"
-              detail={status.social
-                .filter((provider) => provider !== "wechat")
-                .join("、")}
-              enabled
-            />
-          ) : null}
+          {METHODS.map((method) => {
+            const enabled = isEnabled(method.id, status);
+            const callbackUrl = isOAuthProvider(method.id)
+              ? status.oauthCallbacks[method.id]
+              : undefined;
+            return (
+              <Fragment key={method.id}>
+                <MethodRow
+                  name={method.name}
+                  detail={enabled ? method.active : method.inactive}
+                  enabled={enabled}
+                  callbackUrl={callbackUrl}
+                />
+                {!enabled && method.environment ? (
+                  <EnvChecklist
+                    label={`${method.name}所需环境变量`}
+                    items={method.environment}
+                  />
+                ) : null}
+              </Fragment>
+            );
+          })}
         </div>
       ) : (
         <p className="subplatform-intro" role={error ? "alert" : "status"}>
@@ -161,18 +170,19 @@ export function LoginMethodsPanel() {
       )}
       <div className="login-methods-footer">
         <p>
-          修改环境变量后需要重启 Web 服务；登录页最多在 60 秒内更新。QQ、支付宝、Google
-          使用相同的 <code>MATCHPLANE_&lt;提供方&gt;_OAUTH_*</code> 变量；
-          国家网络身份认证在下方单独配置。
+          QQ、支付宝和 Google 可使用对应的{" "}
+          <code>MATCHPLANE_&lt;提供方&gt;_OAUTH_*</code>
+          部署变量；变量变更需重启 Web 服务后才会成为当前进程能力。
         </p>
-        <button
+        <Button
           type="button"
+          variant="outline"
           disabled={checking}
           onClick={() => void refresh()}
         >
           <RefreshCw size={15} aria-hidden="true" />
           {checking ? "检测中…" : "重新检测"}
-        </button>
+        </Button>
       </div>
     </section>
   );
@@ -182,20 +192,27 @@ function MethodRow({
   name,
   detail,
   enabled,
+  callbackUrl,
 }: {
   name: string;
   detail: string;
   enabled: boolean;
+  callbackUrl?: string;
 }) {
   return (
     <div className="provider-row login-method-row">
       <span>
         <strong>{name}</strong>
         <small>{detail}</small>
+        {callbackUrl ? (
+          <small>
+            回调地址：<code>{callbackUrl}</code>
+          </small>
+        ) : null}
       </span>
-      <b className={enabled ? "status-chip is-on" : "status-chip"}>
+      <Badge size="xs" variant={enabled ? "success" : "outline"}>
         {enabled ? "已启用" : "未启用"}
-      </b>
+      </Badge>
     </div>
   );
 }
@@ -217,4 +234,43 @@ function EnvChecklist({
       ))}
     </div>
   );
+}
+
+function oauthDefinition(
+  id: OAuthProviderId,
+  name: string,
+  environmentPrefix: string,
+): MethodDefinition {
+  const prefix = `MATCHPLANE_${environmentPrefix}_OAUTH_`;
+  return {
+    id,
+    name: `${name} 登录`,
+    active: "当前 Web 进程已启用此 OAuth 登录方式",
+    inactive: "当前 Web 进程尚未启用；补齐部署变量并重启后生效",
+    environment: [
+      { name: `${prefix}CLIENT_ID`, note: "提供方分配的 Client ID" },
+      { name: `${prefix}CLIENT_SECRET`, note: "通过服务器受保护环境注入" },
+      { name: `${prefix}DISCOVERY_URL`, note: "可选的 OIDC discovery 地址" },
+      {
+        name: `${prefix}AUTHORIZATION_URL`,
+        note: "非 discovery 模式需与 token、userinfo 同时填写",
+      },
+      { name: `${prefix}TOKEN_URL`, note: "OAuth token 端点" },
+      { name: `${prefix}USERINFO_URL`, note: "OAuth userinfo 端点" },
+    ],
+  };
+}
+
+function isEnabled(id: ProviderId, status: LoginMethodStatus): boolean {
+  if (id === "password") return status.password;
+  if (id === "passkey") return status.passkey;
+  if (id === "email_otp_magic_link") {
+    return status.emailOtp && status.magicLink;
+  }
+  if (id === "phone_otp") return status.phoneOtp;
+  return status.primary.includes(id) || status.social.includes(id);
+}
+
+function isOAuthProvider(id: ProviderId): id is OAuthProviderId {
+  return OAUTH_PROVIDER_IDS.includes(id as OAuthProviderId);
 }

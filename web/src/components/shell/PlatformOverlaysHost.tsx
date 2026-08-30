@@ -1,32 +1,103 @@
 "use client";
 
+import { createContext, useContext, useState } from "react";
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "motion/react";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@appica/ui-react/tabs";
 import { LogOut, ShieldCheck, Store, UserRound, X } from "lucide-react";
 
-import { ListingSheet } from "../ListingSheet";
 import { ModeDialog } from "../Overlays";
 import { WorkspaceSettingsDialog } from "../WorkspaceSettingsDialog";
-import { SubplatformAdminDashboard } from "../SubplatformAdminDashboard";
 import { PreferenceControls } from "../PreferenceControls";
-import { PersonalProfilePanel } from "../PersonalProfilePanel";
-import { ChangePasswordPanel } from "../ChangePasswordPanel";
-import { IdentityBindingsPanel } from "../IdentityBindingsPanel";
-import { PasskeyPanel } from "../PasskeyPanel";
-import { SessionPanel } from "../SessionPanel";
-import { HostedStoreOnboarding } from "../HostedStoreOnboarding";
 
 import type { AssetListing, WorkspaceRole } from "../../types";
 import type { SubplatformConfig } from "../../subplatform";
 import type { StoreSummary } from "../../api";
-import type { InterfaceLocale, InterfacePalette, InterfaceTheme } from "../../lib/preferences";
+import type {
+  InterfaceLocale,
+  InterfacePalette,
+  InterfaceTextSize,
+  InterfaceTheme,
+} from "../../lib/preferences";
 import type { AuthenticatedUser } from "../../hooks/useAuthSession";
 import {
-  requestedStoreConsoleSection,
   roleLabel,
   type AccountSettingsSection,
+  type StoreConsoleSection,
 } from "../../hooks/useSubplatformRoute";
 import type { StoreConsoleContext } from "../../hooks/useOwnedStores";
 import { isLiveMarketplaceEnabled } from "../../api";
+
+const DeferredOverlayLocaleContext = createContext<InterfaceLocale>("zh");
+
+function DeferredOverlayStatus() {
+  const locale = useContext(DeferredOverlayLocaleContext);
+  const message = locale === "en" ? "Loading…" : "正在加载…";
+
+  return (
+    <p
+      className="workspace-settings-section"
+      role="status"
+      aria-label={message}
+      aria-busy="true"
+    >
+      {message}
+    </p>
+  );
+}
+
+const DeferredListingSheet = dynamic(
+  () => import("../ListingSheet").then((module) => module.ListingSheet),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredSubplatformAdminDashboard = dynamic(
+  () =>
+    import("../SubplatformAdminDashboard").then(
+      (module) => module.SubplatformAdminDashboard,
+    ),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredPersonalProfilePanel = dynamic(
+  () =>
+    import("../PersonalProfilePanel").then(
+      (module) => module.PersonalProfilePanel,
+    ),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredChangePasswordPanel = dynamic(
+  () =>
+    import("../ChangePasswordPanel").then(
+      (module) => module.ChangePasswordPanel,
+    ),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredIdentityBindingsPanel = dynamic(
+  () =>
+    import("../IdentityBindingsPanel").then(
+      (module) => module.IdentityBindingsPanel,
+    ),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredPasskeyPanel = dynamic(
+  () => import("../PasskeyPanel").then((module) => module.PasskeyPanel),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredSessionPanel = dynamic(
+  () => import("../SessionPanel").then((module) => module.SessionPanel),
+  { loading: DeferredOverlayStatus },
+);
+const DeferredHostedStoreOnboarding = dynamic(
+  () =>
+    import("../HostedStoreOnboarding").then(
+      (module) => module.HostedStoreOnboarding,
+    ),
+  { loading: DeferredOverlayStatus },
+);
 
 interface PlatformOverlaysHostProps {
   authUser: AuthenticatedUser | null;
@@ -34,18 +105,24 @@ interface PlatformOverlaysHostProps {
   locale: InterfaceLocale;
   theme: InterfaceTheme;
   palette: InterfacePalette;
+  textSize: InterfaceTextSize;
   onThemeChange: (theme: InterfaceTheme) => void;
   onLocaleChange: (locale: InterfaceLocale) => void;
   onPaletteChange: (palette: InterfacePalette) => void;
+  onTextSizeChange: (textSize: InterfaceTextSize) => void;
   subplatform: SubplatformConfig;
   fullscreenPlugin: boolean;
   storeConsoleOpen: boolean;
   setStoreConsoleOpen: (open: boolean) => void;
+  storeConsoleSection: StoreConsoleSection;
   storeConsoleContext: StoreConsoleContext | null;
-  setStoreConsoleContext: React.Dispatch<React.SetStateAction<StoreConsoleContext | null>>;
+  setStoreConsoleContext: React.Dispatch<
+    React.SetStateAction<StoreConsoleContext | null>
+  >;
   canManageStoreConsole: boolean;
   ownedStores: StoreSummary[];
   setOwnedStores: React.Dispatch<React.SetStateAction<StoreSummary[]>>;
+  ownedStoresError: string | null;
   ownedStoresResolved: boolean;
   openStoreConsoleFor: (store: StoreSummary) => Promise<void>;
   accountSettingsSection: AccountSettingsSection | null;
@@ -70,18 +147,22 @@ export function PlatformOverlaysHost({
   locale,
   theme,
   palette,
+  textSize,
   onThemeChange,
   onLocaleChange,
   onPaletteChange,
+  onTextSizeChange,
   subplatform,
   fullscreenPlugin,
   storeConsoleOpen,
   setStoreConsoleOpen,
+  storeConsoleSection,
   storeConsoleContext,
   setStoreConsoleContext,
   canManageStoreConsole,
   ownedStores,
   setOwnedStores,
+  ownedStoresError,
   ownedStoresResolved,
   openStoreConsoleFor,
   accountSettingsSection,
@@ -99,6 +180,12 @@ export function PlatformOverlaysHost({
   setNotice,
   ui,
 }: PlatformOverlaysHostProps) {
+  const [accountTask, setAccountTask] = useState<"security" | "appearance">(
+    "security",
+  );
+  const [visitedAccountTasks, setVisitedAccountTasks] = useState<
+    ReadonlySet<"security" | "appearance">
+  >(() => new Set(["security"]));
   const selectedManagedStore = listing
     ? (ownedStores.find(
         (store) =>
@@ -107,9 +194,17 @@ export function PlatformOverlaysHost({
       ) ?? null)
     : null;
 
+  const activateAccountTask = (task: "security" | "appearance") => {
+    setVisitedAccountTasks((visited) =>
+      visited.has(task) ? visited : new Set(visited).add(task),
+    );
+    setAccountTask(task);
+  };
+
   return (
-    <>
-      {!authUser || !storeConsoleContext ? null : (
+    <DeferredOverlayLocaleContext.Provider value={locale}>
+      <>
+        {!authUser || !storeConsoleContext ? null : (
         <WorkspaceSettingsDialog
           open={storeConsoleOpen}
           onClose={() => setStoreConsoleOpen(false)}
@@ -122,26 +217,28 @@ export function PlatformOverlaysHost({
           closeLabel={ui.closeStoreConsole}
           backdropLabel={ui.closeStoreConsoleDialog}
         >
-          <SubplatformAdminDashboard
-            locale={locale}
-            onNotice={setNotice}
-            subplatform={storeConsoleContext.subplatform}
-            store={storeConsoleContext.store}
-            canManageStore={canManageStoreConsole}
-            initialSection={requestedStoreConsoleSection()}
-            onStoreUpdated={(updated) => {
-              setStoreConsoleContext((current) =>
-                current && current.store.id === updated.id
-                  ? { ...current, store: { ...current.store, ...updated } }
-                  : current,
-              );
-              setOwnedStores((current) =>
-                current.map((store) =>
-                  store.id === updated.id ? { ...store, ...updated } : store,
-                ),
-              );
-            }}
-          />
+          {storeConsoleOpen ? (
+            <DeferredSubplatformAdminDashboard
+              locale={locale}
+              onNotice={setNotice}
+              subplatform={storeConsoleContext.subplatform}
+              store={storeConsoleContext.store}
+              canManageStore={canManageStoreConsole}
+              initialSection={storeConsoleSection}
+              onStoreUpdated={(updated) => {
+                setStoreConsoleContext((current) =>
+                  current && current.store.id === updated.id
+                    ? { ...current, store: { ...current.store, ...updated } }
+                    : current,
+                );
+                setOwnedStores((current) =>
+                  current.map((store) =>
+                    store.id === updated.id ? { ...store, ...updated } : store,
+                  ),
+                );
+              }}
+            />
+          ) : null}
         </WorkspaceSettingsDialog>
       )}
 
@@ -160,7 +257,7 @@ export function PlatformOverlaysHost({
             accountSettingsSection === "account"
               ? ui.account
               : accountSettingsSection === "stores"
-                ? `${ui.myStores}${ownedStoresResolved ? ` · ${ownedStores.length}` : ""}`
+                ? `${ui.myStores}${ownedStoresResolved && !ownedStoresError ? ` · ${ownedStores.length}` : ""}`
                 : ui.profile
           }
           description={
@@ -196,7 +293,10 @@ export function PlatformOverlaysHost({
               id: "stores",
               label: ui.myStores,
               icon: Store,
-              count: ownedStoresResolved ? ownedStores.length : undefined,
+              count:
+                ownedStoresResolved && !ownedStoresError
+                  ? ownedStores.length
+                  : undefined,
             },
           ]}
           navigationLabel={locale === "en" ? "Account settings" : "账号设置"}
@@ -241,49 +341,101 @@ export function PlatformOverlaysHost({
                   </button>
                 </div>
               </section>
-              <section
-                className="workspace-settings-section"
-                aria-labelledby="workspace-preferences-title"
+              <Tabs
+                value={accountTask}
+                onValueChange={(value) =>
+                  activateAccountTask(value as "security" | "appearance")
+                }
+                variant="pill"
+                size="md"
+                className="min-w-0"
               >
-                <div className="workspace-settings-section-heading">
-                  <h3 id="workspace-preferences-title">
-                    {locale === "en" ? "Display and language" : "显示与语言"}
-                  </h3>
-                </div>
-                <PreferenceControls
-                  theme={theme}
-                  locale={locale}
-                  palette={palette}
-                  onThemeChange={onThemeChange}
-                  onLocaleChange={onLocaleChange}
-                  onPaletteChange={onPaletteChange}
-                />
-              </section>
-              <ChangePasswordPanel
-                email={authUser.email}
-                locale={locale}
-                onNotice={setNotice}
-              />
-              <IdentityBindingsPanel
-                locale={locale}
-                subplatform={subplatform}
-                onNotice={setNotice}
-              />
-              <PasskeyPanel
-                locale={locale}
-                subplatform={subplatform}
-                accountLabel={authUser.email}
-                onNotice={setNotice}
-              />
-              <SessionPanel
-                locale={locale}
-                subplatform={subplatform}
-                onNotice={setNotice}
-              />
+                <TabsList
+                  aria-label={
+                    locale === "en" ? "Account sections" : "账号二级分区"
+                  }
+                  className="w-full min-w-max overflow-x-auto"
+                >
+                  <TabsTrigger
+                    id="workspace-account-security-tab"
+                    value="security"
+                    className="min-h-11"
+                  >
+                    {locale === "en" ? "Security" : "安全"}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    id="workspace-account-appearance-tab"
+                    value="appearance"
+                    className="min-h-11"
+                  >
+                    {locale === "en" ? "Appearance" : "外观"}
+                  </TabsTrigger>
+                </TabsList>
+                {visitedAccountTasks.has("security") ? (
+                  <TabsContent
+                    id="workspace-account-security-panel"
+                    value="security"
+                    keepMounted
+                  >
+                    <DeferredChangePasswordPanel
+                      email={authUser.email}
+                      locale={locale}
+                      onNotice={setNotice}
+                    />
+                    <DeferredIdentityBindingsPanel
+                      locale={locale}
+                      subplatform={subplatform}
+                      onNotice={setNotice}
+                    />
+                    <DeferredPasskeyPanel
+                      locale={locale}
+                      subplatform={subplatform}
+                      accountLabel={authUser.email}
+                      onNotice={setNotice}
+                    />
+                    <DeferredSessionPanel
+                      locale={locale}
+                      subplatform={subplatform}
+                      onNotice={setNotice}
+                    />
+                  </TabsContent>
+                ) : null}
+                {visitedAccountTasks.has("appearance") ? (
+                  <TabsContent
+                    id="workspace-account-appearance-panel"
+                    value="appearance"
+                    keepMounted
+                  >
+                    <section
+                      className="workspace-settings-section"
+                      aria-labelledby="workspace-preferences-title"
+                    >
+                      <div className="workspace-settings-section-heading">
+                        <h3 id="workspace-preferences-title">
+                          {locale === "en"
+                            ? "Display and language"
+                            : "显示与语言"}
+                        </h3>
+                      </div>
+                      <PreferenceControls
+                        mode="panel"
+                        theme={theme}
+                        locale={locale}
+                        palette={palette}
+                        textSize={textSize}
+                        onThemeChange={onThemeChange}
+                        onLocaleChange={onLocaleChange}
+                        onPaletteChange={onPaletteChange}
+                        onTextSizeChange={onTextSizeChange}
+                      />
+                    </section>
+                  </TabsContent>
+                ) : null}
+              </Tabs>
             </div>
           ) : accountSettingsSection === "stores" ? (
             <div className="workspace-settings-overview">
-              <HostedStoreOnboarding
+              <DeferredHostedStoreOnboarding
                 locale={locale}
                 onNotice={setNotice}
                 initialStores={ownedStores}
@@ -291,39 +443,41 @@ export function PlatformOverlaysHost({
                 onManageStore={(store) => void openStoreConsoleFor(store)}
               />
             </div>
-          ) : (
-            <PersonalProfilePanel
-              onNotice={setNotice}
+          ) : accountSettingsSection === "profile" ? (
+            <DeferredPersonalProfilePanel
+              locale={locale}
               onAvatarChanged={(image) =>
                 setAuthUser((current) =>
                   current ? { ...current, image } : current,
                 )
               }
             />
-          )}
+          ) : null}
         </WorkspaceSettingsDialog>
       )}
 
-      <ListingSheet
-        listing={listing}
-        subplatform={subplatform}
-        locale={locale}
-        onClose={closeListing}
-        contactDisabled={!isLiveMarketplaceEnabled()}
-        onManage={
-          selectedManagedStore
-            ? () => {
-                closeListing();
-                if (typeof window !== "undefined") {
-                  window.location.assign(
-                    `${selectedManagedStore.path}?console=products`,
-                  );
+      {listing ? (
+        <DeferredListingSheet
+          listing={listing}
+          subplatform={subplatform}
+          locale={locale}
+          onClose={closeListing}
+          contactDisabled={!isLiveMarketplaceEnabled()}
+          onManage={
+            selectedManagedStore
+              ? () => {
+                  closeListing();
+                  if (typeof window !== "undefined") {
+                    window.location.assign(
+                      `${selectedManagedStore.path}?console=products`,
+                    );
+                  }
                 }
-              }
-            : undefined
-        }
-        onContact={onContactListing}
-      />
+              : undefined
+          }
+          onContact={onContactListing}
+        />
+      ) : null}
 
       <ModeDialog
         open={modeDialogOpen}
@@ -354,7 +508,8 @@ export function PlatformOverlaysHost({
             </button>
           </motion.div>
         ) : null}
-      </AnimatePresence>
-    </>
+        </AnimatePresence>
+      </>
+    </DeferredOverlayLocaleContext.Provider>
   );
 }

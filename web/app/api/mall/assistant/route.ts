@@ -5,17 +5,24 @@ import { NextResponse } from "next/server";
 import { admitPlatformAiCall } from "../../../../src/platform-ai-admission";
 import {
   answerPlatformShoppingQuestion,
+  isPlatformRouterConfigured,
   PlatformAssistantUnavailableError,
   PlatformRouterQuotaExceededError,
   type ShoppingConversationMessage,
 } from "../../../../src/platform-router";
-import { readPublicStores } from "../../../../src/store-directory";
+import {
+  MAX_PUBLIC_STORES,
+  PublicStoreDirectoryBudgetExceededError,
+  readPublicStores,
+} from "../../../../src/store-directory";
+import { PublicOfferSearchBudgetExceededError } from "../../../../src/storefront-search";
 import { auth, authDatabase } from "../../../../src/lib/auth";
 import {
   readJsonBody,
   RequestBodyTooLargeError,
 } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
+import { getPlatformRouterEffectiveStatus } from "../../../../src/lib/platform-router-config";
 import { configuredTenantId } from "../../../../src/lib/store-access";
 import {
   parseShoppingMemoryMutation,
@@ -35,6 +42,25 @@ const GLOBAL_LIMIT = 120;
 export async function POST(request: Request): Promise<Response> {
   if (!hasTrustedBrowserOrigin(request))
     return error("请求来源未被商城信任", 403);
+  const requestId = randomUUID();
+  const providerStatus = getPlatformRouterEffectiveStatus();
+  if (!providerStatus.ready)
+    return error(
+      "商城 AI 导购正在配置中，请稍后再试。",
+      503,
+      { "x-request-id": requestId },
+      {
+        code: "upstream_configuration",
+        status: "degraded",
+        retryable: false,
+        requestId,
+        provider: {
+          source: providerStatus.source,
+          issues: providerStatus.issues,
+          credentialConfigured: providerStatus.credentialConfigured,
+        },
+      },
+    );
   let body: { messages?: unknown; question?: unknown; storePath?: unknown };
   try {
     body = (await readJsonBody(request, 16 * 1024)) as typeof body;
@@ -54,20 +80,25 @@ export async function POST(request: Request): Promise<Response> {
   const requestedStorePath = normalizeStorePath(body.storePath);
   if (body.storePath !== undefined && !requestedStorePath)
     return error("店铺地址无效", 400);
+  if (!isPlatformRouterConfigured())
+    return error("商品搜索尚未配置完整，请稍后再试。", 503);
   const tenantId = configuredTenantId();
   if (!tenantId) return error("商城尚未完成初始化", 503);
-  const requestId = randomUUID();
   const identity = await shoppingIdentity(request);
   try {
-    let stores = await readPublicStores(tenantId);
-    if (requestedStorePath) {
-      stores = stores.filter((store) => store.path === requestedStorePath);
-      if (!stores.length) return error("没有找到这个店铺", 404);
+    const stores = requestedStorePath
+      ? await readPublicStores(tenantId, { path: requestedStorePath })
+      : await readPublicStores(tenantId, { limit: MAX_PUBLIC_STORES + 1 });
+    if (!requestedStorePath && stores.length > MAX_PUBLIC_STORES) {
+      throw new PublicStoreDirectoryBudgetExceededError(stores.length);
+    }
+    if (requestedStorePath && !stores.length) {
+      return error("没有找到这个店铺", 404);
     }
     let memory = identity.authUserId
       ? await readShoppingMemory(tenantId, identity.authUserId).catch(() => {
           process.stderr.write(
-            "[mall-assistant] shopping memory lookup failed\n",
+            `[mall-assistant] ${JSON.stringify({ requestId, status: "memory_lookup_failed" })}\n`,
           );
           return null;
         })
@@ -124,10 +155,13 @@ export async function POST(request: Request): Promise<Response> {
         });
         if (!admitted) throw new PlatformRouterQuotaExceededError();
       },
+      requestId,
+      signal: request.signal,
     });
     await recordAssistantUsage({
       requestId,
       subject: identity.subject,
+      platformPath: requestedStorePath ?? "/",
       question,
       model: reply.model,
       usage: reply.usage,
@@ -140,27 +174,75 @@ export async function POST(request: Request): Promise<Response> {
         answer: reply.text,
         recommendations: reply.recommendations,
         uiActions: reply.uiActions,
+        ...(reply.searchTrace ? { searchTrace: reply.searchTrace } : {}),
+        ...(reply.outcome ? { outcome: reply.outcome } : {}),
       },
-      { headers: { "cache-control": "no-store" } },
+      { headers: { "cache-control": "no-store", "x-request-id": requestId } },
     );
     if (identity.newCookie)
       response.cookies.set(GUEST_COOKIE, identity.newCookie, guestCookie());
     return response;
   } catch (cause) {
+    if (cause instanceof PublicStoreDirectoryBudgetExceededError) {
+      process.stderr.write(
+        `[mall-assistant] ${JSON.stringify({
+          requestId,
+          status: cause.code,
+          actual: cause.actual,
+          maximum: cause.maximum,
+        })}\n`,
+      );
+      return error(
+        "商城店铺目录超过导购处理上限。",
+        503,
+        { "x-request-id": requestId },
+        { code: cause.code, retryable: false, requestId },
+      );
+    }
+    if (cause instanceof PublicOfferSearchBudgetExceededError) {
+      process.stderr.write(
+        `[mall-assistant] ${JSON.stringify({
+          requestId,
+          status: cause.code,
+          budget: cause.budget,
+          actual: cause.actual,
+          maximum: cause.maximum,
+        })}\n`,
+      );
+      return error(
+        "商品检索超过导购处理上限。",
+        503,
+        { "x-request-id": requestId },
+        { code: cause.code, retryable: false, requestId },
+      );
+    }
     if (cause instanceof PlatformRouterQuotaExceededError)
-      return error(cause.message, 429, { "retry-after": "3600" });
+      return error(
+        cause.message,
+        429,
+        { "retry-after": "3600", "x-request-id": requestId },
+        { code: "platform_quota", retryable: true, requestId },
+      );
     if (cause instanceof PlatformAssistantUnavailableError)
-      return error(cause.message, 502);
-    process.stderr.write("[mall-assistant] request failed\n");
-    return error("商品搜索暂时不可用，请稍后再试。", 503);
+      return providerErrorResponse(cause, requestId);
+    process.stderr.write(
+      `[mall-assistant] ${JSON.stringify({ requestId, status: "internal_error" })}\n`,
+    );
+    return error(
+      "商品搜索暂时不可用，请稍后再试。",
+      503,
+      { "x-request-id": requestId },
+      { code: "assistant_unavailable", retryable: true, requestId },
+    );
   }
 }
 
 async function recordAssistantUsage(input: {
   requestId: string;
   subject: string;
+  platformPath: string;
   question: string;
-  model: string | null;
+  model: string;
   usage: {
     promptTokens: number;
     completionTokens: number;
@@ -175,7 +257,7 @@ async function recordAssistantUsage(input: {
        VALUES (
                      $1::uuid,
                      $2,
-                     '/',
+                     $11,
                      $3,
                      '[]'::jsonb,
                      jsonb_build_object(
@@ -190,7 +272,7 @@ async function recordAssistantUsage(input: {
      INSERT INTO platform_ai_usage
        (id, match_request_id, auth_user_id, platform_path, source, cost_bearer, model,
         max_input_characters, max_output_tokens, prompt_tokens, completion_tokens, total_tokens, model_calls, degraded)
-     SELECT $4::uuid, id, $2, '/', 'ai', 'platform', $5, 12000, 320, $6, $7, $8, $10, false FROM request`,
+     SELECT $4::uuid, id, $2, $11, 'ai', 'platform', $5, 12000, 320, $6, $7, $8, $10, false FROM request`,
     [
       input.requestId,
       input.subject,
@@ -201,8 +283,8 @@ async function recordAssistantUsage(input: {
       input.usage?.completionTokens ?? null,
       input.usage?.totalTokens ?? null,
       JSON.stringify(input.toolCalls.slice(0, 16)),
-      // Preserve factual 0 for deterministic paths; never invent a model call.
       Math.max(0, Math.min(16, Math.trunc(input.modelCalls) || 0)),
+      input.platformPath,
     ],
   );
 }
@@ -281,7 +363,6 @@ function normalizeStorePath(value: unknown): string | null {
   return /^\/[a-z0-9][a-z0-9-]{1,62}$/.test(normalized) ? normalized : null;
 }
 
-
 function minimizeQuestion(value: string): string {
   return value
     .slice(0, 2_000)
@@ -308,13 +389,63 @@ function readCookie(header: string | null, name: string): string | null {
   return null;
 }
 
+function providerErrorResponse(
+  cause: PlatformAssistantUnavailableError,
+  requestId: string,
+): Response {
+  const headers: Record<string, string> = { "x-request-id": requestId };
+  let status = 503;
+  let code = `provider_${cause.kind}`;
+  if (
+    cause.kind === "connect_timeout" ||
+    cause.kind === "first_byte_timeout" ||
+    cause.kind === "total_timeout"
+  ) {
+    status = 504;
+    headers["retry-after"] = "5";
+  } else if (cause.kind === "network_policy") {
+    status = 503;
+    code = "upstream_configuration";
+  } else if (
+    cause.kind === "no_final_text" ||
+    cause.kind === "malformed_response" ||
+    cause.kind === "upstream_http"
+  ) {
+    status = 502;
+    if (cause.retryable) headers["retry-after"] = "5";
+  } else if (cause.kind === "quota") {
+    headers["retry-after"] = "60";
+  } else if (cause.kind === "tool_failure") {
+    if (cause.retryable) headers["retry-after"] = "5";
+  } else if (cause.kind === "aborted") {
+    status = 499;
+    code = "request_aborted";
+  }
+  return error(cause.message, status, headers, {
+    code,
+    retryable: cause.retryable,
+    requestId,
+  });
+}
+
 function error(
   message: string,
   status: number,
   headers: Record<string, string> = {},
+  metadata?: {
+    code: string;
+    retryable: boolean;
+    requestId: string;
+    status?: "degraded";
+    provider?: {
+      source: "managed" | "environment" | "unconfigured";
+      issues: string[];
+      credentialConfigured: boolean;
+    };
+  },
 ): Response {
   return NextResponse.json(
-    { error: message },
+    { error: message, ...(metadata ?? {}) },
     { status, headers: { "cache-control": "no-store", ...headers } },
   );
 }

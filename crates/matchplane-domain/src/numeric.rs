@@ -24,7 +24,7 @@ pub enum NumericError {
 }
 
 /// A strictly positive, market-scaled integer price.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct Price(i128);
 
@@ -61,6 +61,15 @@ impl Price {
     }
 }
 
+impl<'de> Deserialize<'de> for Price {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::new(i128::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
 impl fmt::Display for Price {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(formatter)
@@ -68,7 +77,7 @@ impl fmt::Display for Price {
 }
 
 /// A non-negative, market-scaled integer quantity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct Quantity(i128);
 
@@ -137,6 +146,15 @@ impl Quantity {
     }
 }
 
+impl<'de> Deserialize<'de> for Quantity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::from_non_negative(i128::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
 impl fmt::Display for Quantity {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(formatter)
@@ -178,7 +196,7 @@ impl fmt::Display for Amount {
 }
 
 /// A decimal scale stored on a market.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct Scale(u8);
 
@@ -200,5 +218,31 @@ impl Scale {
     #[must_use]
     pub const fn value(self) -> u8 {
         self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for Scale {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::new(u8::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Price, Quantity, Scale};
+
+    #[test]
+    fn deserialization_preserves_numeric_invariants() {
+        assert!(serde_json::from_str::<Price>("-1").is_err());
+        assert!(serde_json::from_str::<Price>("0").is_err());
+        assert!(serde_json::from_str::<Quantity>("-1").is_err());
+        assert!(matches!(
+            serde_json::from_str::<Quantity>("0").map(Quantity::value),
+            Ok(0)
+        ));
+        assert!(serde_json::from_str::<Scale>("19").is_err());
     }
 }

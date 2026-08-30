@@ -1,50 +1,27 @@
 import { lookup } from "node:dns/promises";
-import { BlockList, isIP } from "node:net";
+import { isIP } from "node:net";
+
+import ipaddr from "ipaddr.js";
 
 export type ResolveAddresses = (hostname: string) => Promise<readonly string[]>;
 
-const RESERVED_IPV4_ADDRESSES = new BlockList();
-const RESERVED_IPV6_ADDRESSES = new BlockList();
-
-for (const [network, prefix] of [
-  ["0.0.0.0", 8],
-  ["10.0.0.0", 8],
-  ["100.64.0.0", 10],
-  ["127.0.0.0", 8],
-  ["169.254.0.0", 16],
-  ["172.16.0.0", 12],
-  ["192.0.0.0", 24],
-  ["192.0.2.0", 24],
-  ["192.88.99.0", 24],
-  ["192.168.0.0", 16],
-  ["198.18.0.0", 15],
-  ["198.51.100.0", 24],
-  ["203.0.113.0", 24],
-  ["224.0.0.0", 4],
-] as const) {
-  RESERVED_IPV4_ADDRESSES.addSubnet(network, prefix, "ipv4");
-}
-
-for (const [network, prefix] of [
-  ["::", 128],
-  ["::1", 128],
-  ["::ffff:0:0", 96],
-  ["100::", 64],
-  ["2001:db8::", 32],
-  ["fc00::", 7],
-  ["fe80::", 10],
-  ["ff00::", 8],
-] as const) {
-  RESERVED_IPV6_ADDRESSES.addSubnet(network, prefix, "ipv6");
-}
+// IANA currently allocates global IPv6 unicast from this envelope; deny unallocated space by default.
+const CURRENT_GLOBAL_IPV6_UNICAST = ipaddr.parseCIDR("2000::/3");
 
 /** Return true for IP literals that must never be reached through a server-side configurable URL. */
 export function isPrivateOrReservedIpLiteral(hostname: string): boolean {
   const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
   const family = isIP(normalized);
-  if (family === 4) return RESERVED_IPV4_ADDRESSES.check(normalized, "ipv4");
-  if (family === 6) return RESERVED_IPV6_ADDRESSES.check(normalized, "ipv6");
-  return false;
+  if (family === 0) return false;
+
+  try {
+    const address = ipaddr.process(normalized);
+    if (address.range() !== "unicast") return true;
+    if (family === 6 && address.kind() === "ipv4") return true;
+    return family === 6 && !address.match(CURRENT_GLOBAL_IPV6_UNICAST);
+  } catch {
+    return true;
+  }
 }
 
 /** Resolve a URL immediately before a request and fail closed unless every address is public. */
@@ -69,7 +46,7 @@ export async function hasOnlyPublicAddresses(
   }
 }
 
-async function resolvePublicAddresses(
+export async function resolvePublicAddresses(
   hostname: string,
 ): Promise<readonly string[]> {
   const answers = await lookup(hostname, { all: true, verbatim: true });

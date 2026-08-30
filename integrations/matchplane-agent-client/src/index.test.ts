@@ -24,19 +24,22 @@ function fakeFetch() {
       body.method === "tools/call" &&
       body.params?.name === "marketplace.agent.session"
     ) {
+      const args = body.params.arguments ?? {};
+      const side = args.side === "supply" ? "supply" : "demand";
       return new Response(
         JSON.stringify({
           jsonrpc: "2.0",
           id: "1",
           result: {
             structuredContent: {
-              tenant_id: "t",
-              domain_id: "d",
+              tenant_id: args.tenant_id,
+              domain_id: args.domain_id,
               party_id: "p",
-              side: "demand",
-              role: "buyer",
-              access_token: "secret",
+              side,
+              role: side === "demand" ? "buyer" : "seller",
+              access_token: "party-token-secret",
               access_token_expires_at: "2099-01-01T00:00:00Z",
+              platform_path: args.platform_path,
               cost_bearer: "caller",
             },
           },
@@ -66,14 +69,14 @@ describe("MatchPlane external Agent client", () => {
       platformPath: "/",
       status: "delegated",
       routePlan: [
-        { path: "/used-car" },
-        { path: "/used-car/premium" },
+        { path: "/store-a" },
+        { path: "/store-a/premium" },
         { path: "not-a-path" },
       ],
       routing: {},
     };
-    expect(routePlanPaths(result)).toEqual(["/used-car", "/used-car/premium"]);
-    expect(terminalRoutePlanPaths(result)).toEqual(["/used-car/premium"]);
+    expect(routePlanPaths(result)).toEqual(["/store-a", "/store-a/premium"]);
+    expect(terminalRoutePlanPaths(result)).toEqual(["/store-a/premium"]);
   });
 
   it("routes a caller-funded narrative through the platform tree", async () => {
@@ -86,7 +89,7 @@ describe("MatchPlane external Agent client", () => {
 
     const result = await client.routePlatformIntent({
       narrative: "帮我找到适合通勤的方案",
-      platform_path: "/used-car",
+      platform_path: "/store-a",
       idempotency_key: "route-1",
     });
 
@@ -96,7 +99,7 @@ describe("MatchPlane external Agent client", () => {
     };
     expect(body.params?.name).toBe("platform.match");
     expect(body.params?.arguments?.narrative).toBe("帮我找到适合通勤的方案");
-    expect(body.params?.arguments?.platformPath).toBe("/used-car");
+    expect(body.params?.arguments?.platformPath).toBe("/store-a");
     expect(body.params?.arguments?.idempotency_key).toBe("route-1");
   });
 
@@ -129,7 +132,7 @@ describe("MatchPlane external Agent client", () => {
       const retrieval = {
         protocol: "matchplane.retrieval/v1",
         request_id: requestId,
-        provider: { id: "used-car.search", version: "2026.08", model: null },
+        provider: { id: "store-a.search", version: "2026.08", model: null },
         candidates: [
           {
             asset_id: "123e4567-e89b-12d3-a456-426614174002",
@@ -144,7 +147,7 @@ describe("MatchPlane external Agent client", () => {
       expect(String(url)).toBe(
         "https://matx.tech/api/platform/retrieval/query",
       );
-      expect(body.scope?.platform_path).toBe("/used-car");
+      expect(body.scope?.platform_path).toBe("/store-a");
       expect(body.input?.narrative).toBe("预算内的通勤方案");
       expect(body.limit).toBe(2);
       return new Response(JSON.stringify(retrieval), {
@@ -161,7 +164,7 @@ describe("MatchPlane external Agent client", () => {
     const result = await client.queryRetrieval({
       tenant_id: "123e4567-e89b-12d3-a456-426614174000",
       domain_id: "123e4567-e89b-12d3-a456-426614174001",
-      platform_path: "/used-car",
+      platform_path: "/store-a",
       narrative: "预算内的通勤方案",
       requirements: { budget_max: 100000 },
       request_id: requestId,
@@ -368,7 +371,7 @@ describe("MatchPlane external Agent client", () => {
     const capability = await client.openMarketplaceSession({
       tenant_id: "tenant",
       domain_id: "domain",
-      platform_path: "/used-car",
+      platform_path: "/store-a",
       side: "supply",
     });
     await client.matchDemands(capability, {
@@ -382,7 +385,7 @@ describe("MatchPlane external Agent client", () => {
       params?: { name?: string; arguments?: Record<string, unknown> };
     };
     expect(body.params?.name).toBe("marketplace.demand.match");
-    expect(body.params?.arguments?.platform_path).toBe("/used-car");
+    expect(body.params?.arguments?.platform_path).toBe("/store-a");
     expect(body.params?.arguments?.offer_id).toBe(
       "123e4567-e89b-12d3-a456-426614174003",
     );
@@ -411,7 +414,7 @@ describe("MatchPlane external Agent client", () => {
     const capability = await client.openMarketplaceSession({
       tenant_id: "tenant",
       domain_id: "domain",
-      platform_path: "/used-car",
+      platform_path: "/store-a",
       side: "demand",
     });
     expect(capability.role).toBe("buyer");
@@ -429,13 +432,13 @@ describe("MatchPlane external Agent client", () => {
       narrative: "找一个合适的供给",
       idempotency_key: "intent-1",
     });
-    expect(new Headers(fake.calls[1]?.init?.headers).get("authorization")).toBe(
-      "Bearer secret",
-    );
+    const partyHeaders = new Headers(fake.calls[1]?.init?.headers);
+    expect(partyHeaders.get("authorization")).toBe("Bearer party-token-secret");
+    expect(partyHeaders.get("x-matchplane-api-key")).toBeNull();
     const secondBody = JSON.parse(String(fake.calls[1]?.init?.body)) as {
       params?: { arguments?: { platform_path?: string } };
     };
-    expect(secondBody.params?.arguments?.platform_path).toBe("/used-car");
+    expect(secondBody.params?.arguments?.platform_path).toBe("/store-a");
 
     await client.requestContact(capability, {
       tenant_id: "tenant",
@@ -450,7 +453,7 @@ describe("MatchPlane external Agent client", () => {
     expect(contactBody.params?.name).toBe(
       "marketplace.introduction.contact.request",
     );
-    expect(contactBody.params?.arguments?.platform_path).toBe("/used-car");
+    expect(contactBody.params?.arguments?.platform_path).toBe("/store-a");
 
     await client.consentContact(capability, {
       tenant_id: "tenant",
@@ -467,6 +470,70 @@ describe("MatchPlane external Agent client", () => {
       idempotency_key: "contact-release-1",
     });
     expect(fake.calls).toHaveLength(5);
+  });
+
+  it("rejects malformed or confused party capabilities instead of falling back to the API key", async () => {
+    let calls = 0;
+    const client = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: async (_url, init) => {
+        calls += 1;
+        const body = JSON.parse(String(init?.body)) as {
+          params?: { arguments?: Record<string, unknown> };
+        };
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: {
+              structuredContent: {
+                ...body.params?.arguments,
+                party_id: "p",
+                side: "demand",
+                role: "buyer",
+                access_token_expires_at: "2099-01-01T00:00:00Z",
+                cost_bearer: "caller",
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+    await expect(
+      client.openMarketplaceSession({
+        tenant_id: "tenant",
+        domain_id: "domain",
+        platform_path: "/store-a",
+        side: "demand",
+      }),
+    ).rejects.toThrow("capability scope is invalid");
+    expect(calls).toBe(1);
+
+    const fake = fakeFetch();
+    const scopedClient = new MatchPlaneAgentClient({
+      baseUrl: "https://matx.tech",
+      apiKey: "mpk_test",
+      fetchImpl: fake.fetchImpl,
+    });
+    const capability = await scopedClient.openMarketplaceSession({
+      tenant_id: "tenant",
+      domain_id: "domain",
+      platform_path: "/store-a",
+      side: "demand",
+    });
+    await expect(
+      scopedClient.createIntent(capability, {
+        tenant_id: "other-tenant",
+        domain_id: "domain",
+        participant_id: "p",
+        side: "demand",
+        narrative: "找一个合适的供给",
+        idempotency_key: "intent-1",
+      }),
+    ).rejects.toThrow("tenant_id must match the party capability");
+    expect(fake.calls).toHaveLength(1);
   });
 
   it("rejects platform-funded external handoffs before a network call", async () => {
@@ -535,7 +602,7 @@ describe("MatchPlane external Agent client", () => {
     expect(requestSignal).toBeInstanceOf(AbortSignal);
   });
 
-  it("rejects a malformed base URL with a stable validation error", () => {
+  it("rejects malformed and cleartext remote base URLs while allowing local development", () => {
     expect(
       () =>
         new MatchPlaneAgentClient({
@@ -543,6 +610,27 @@ describe("MatchPlane external Agent client", () => {
           apiKey: "mpk_test",
         }),
     ).toThrow("valid absolute URL");
+    expect(
+      () =>
+        new MatchPlaneAgentClient({
+          baseUrl: "ftp://localhost",
+          apiKey: "mpk_test",
+        }),
+    ).toThrow("must use HTTP or HTTPS");
+    expect(
+      () =>
+        new MatchPlaneAgentClient({
+          baseUrl: "http://agent.example",
+          apiKey: "mpk_test",
+        }),
+    ).toThrow("must use HTTPS outside loopback");
+    expect(
+      () =>
+        new MatchPlaneAgentClient({
+          baseUrl: "http://127.0.0.1:3000",
+          apiKey: "mpk_test",
+        }),
+    ).not.toThrow();
   });
 
   it("rejects an unbounded external Agent request timeout", () => {
@@ -589,7 +677,7 @@ describe("MatchPlane external Agent client", () => {
       protocol: "matchplane.agent/v1",
       request_id: "123e4567-e89b-12d3-a456-426614174000",
       stage: "inventory",
-      scope: { platform_path: "/used-car" },
+      scope: { platform_path: "/store-a" },
       intent: {
         narrative: "找符合约束的供给",
         requirements: { budget: 100000 },
@@ -644,7 +732,7 @@ describe("MatchPlane external Agent client", () => {
       protocol: "matchplane.agent/v1",
       request_id: "123e4567-e89b-12d3-a456-426614174000",
       stage: "merchant",
-      scope: { platform_path: "/used-car" },
+      scope: { platform_path: "/store-a" },
       intent: { narrative: "找供给方", requirements: {} },
       skill: "matchplane.matching.v1",
       allowed_mcp_tools: ["merchant.search"],
@@ -715,7 +803,7 @@ describe("MatchPlane external Agent client", () => {
       protocol: "matchplane.agent/v1",
       request_id: "123e4567-e89b-12d3-a456-426614174000",
       stage: "inventory",
-      scope: { platform_path: "/used-car" },
+      scope: { platform_path: "/store-a" },
       intent: { narrative: "验证预算边界", requirements: {} },
       skill: "matchplane.matching.v1",
       allowed_mcp_tools: ["inventory.search"],
@@ -755,7 +843,7 @@ describe("MatchPlane external Agent client", () => {
       protocol: "matchplane.agent/v1",
       request_id: "123e4567-e89b-12d3-a456-426614174000",
       stage: "inventory",
-      scope: { platform_path: "/used-car" },
+      scope: { platform_path: "/store-a" },
       intent: { narrative: "验证快照降级", requirements: {} },
       skill: "matchplane.matching.v1",
       allowed_mcp_tools: ["inventory.search"],
@@ -857,7 +945,7 @@ describe("MatchPlane external Agent client", () => {
       protocol: "matchplane.agent/v1",
       request_id: "123e4567-e89b-12d3-a456-426614174000",
       stage: "inventory",
-      scope: { platform_path: "/used-car" },
+      scope: { platform_path: "/store-a" },
       intent: { narrative: "验证 MCP 错误", requirements: {} },
       skill: "matchplane.matching.v1",
       allowed_mcp_tools: ["inventory.search"],

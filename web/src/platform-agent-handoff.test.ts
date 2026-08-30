@@ -14,7 +14,7 @@ const valid = {
 
 describe("caller-funded Agent handoff", () => {
   it("normalizes paths and preserves the bounded caller budget", () => {
-    expect(normalizePlatformPath("//used-car//")).toBe("/used-car");
+    expect(normalizePlatformPath("//store-a//")).toBe("/store-a");
     const result = parseAgentHandoff(valid);
     expect(result.ok).toBe(true);
     if (result.ok) {

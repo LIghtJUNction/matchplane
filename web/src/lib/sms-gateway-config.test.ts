@@ -61,6 +61,16 @@ describe("managed SMS gateway config", () => {
     expect(saved.tokenConfigured).toBe(false);
   });
 
+  it("rejects a plain-HTTP loopback gateway in production", () => {
+    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+    expect(() =>
+      saveManagedSmsGatewayConfig({
+        enabled: true,
+        gatewayUrl: "http://localhost:9080/send",
+      }),
+    ).toThrow("短信网关地址");
+  });
+
   it("rejects unsafe gateway addresses", () => {
     for (const gatewayUrl of [
       "",

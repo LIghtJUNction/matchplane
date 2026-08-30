@@ -153,17 +153,17 @@ Rust网关暴露了一个小型、与垂直关联的持久化契约。它是平�
 
 | 资源 | 接口 | 权限与用途 |
 | --- | --- | --- |
-|参与者（参与者） | `POST /v1/marketplace/participants` | 在`marketplace_sides`中注册一个或双侧内核能力的带域参与方；不要求垂直角色标签。
-|意图（意向） | `POST /v1/marketplace/intents` | 认证参与方创建`demand`或`supply`意向，并可携带不透明JSON`attributes`和`terms`。
-|意图（意向） | `GET /v1/marketplace/intents/{id}?tenant_id=&participant_id=` | 参与方读取自己的意向。
-|报价（募集资金） | `POST /v1/marketplace/offers` | 已认证募集方创建草稿募集意向；对于服务或其他垂直`asset_id`任选。
-|报价（募集资金） | `PATCH /v1/marketplace/offers/{id}` | 创建者或同域修改的`admin/both`能力以`expected_version`替换可编辑字段；active/withdrawn后回到草稿，必须重新审核。
-|报价（募集资金） | `POST /v1/marketplace/offers/{id}/withdraw` | 创建者或同域的 `admin/both` 能力以 `expected_version` 下架草稿/活动消耗，保留版本和审计历史。
-|报价（募集资金） | `POST /v1/marketplace/intents/{id}/matches` | 持有方（需求方）获取活跃投票候选。若未配置检索提供者，可走确定性属性回退。
-|需求（需求发现） | `POST /v1/marketplace/offers/{offer_id}/demand-matches` | 持有方（募集方）只能搜寻已明确允许募集方发现的需求摘要；结果明确需求参与者ID或联系方式。需求方可通过`PATCH /v1/marketplace/intents/{intent_id}/discovery`随时撤回后续发现。
-|报价（募集资金） | `POST /v1/admin/marketplace/offers/{id}/activate` | 运营者或垂直审核流程发布草稿。
-|介绍（引入） | `POST /v1/marketplace/introductions` | 持有方（需求方）记录单个代理勾选的股东意向、份额与确定原因。不会释放股票信息。
-|介绍（引入） | `GET /v1/marketplace/introductions?tenant_id=&participant_id=` | 双方可读取引入投影，但交易所价值。
+| 参与者（参与者） | `POST /v1/marketplace/participants` | 在`marketplace_sides`中注册一个或双侧内核能力的带域参与方；不要求垂直角色标签。
+| 意图（意向） | `POST /v1/marketplace/intents` | 认证参与方创建`demand`或`supply`意向，并可携带不透明JSON`attributes`和`terms`。
+| 意图（意向） | `GET /v1/marketplace/intents/{id}?tenant_id=&participant_id=` | 参与方读取自己的意向。
+| 报价（募集资金） | `POST /v1/marketplace/offers` | 已认证募集方创建草稿募集意向；对于服务或其他垂直`asset_id`任选。
+| 报价（募集资金） | `PATCH /v1/marketplace/offers/{id}` | 创建者或同域修改的`admin/both`能力以`expected_version`替换可编辑字段；active/withdrawn后回到草稿，必须重新审核。
+| 报价（募集资金） | `POST /v1/marketplace/offers/{id}/withdraw` | 创建者或同域的 `admin/both` 能力以 `expected_version` 下架草稿/活动消耗，保留版本和审计历史。
+| 报价（募集资金） | `POST /v1/marketplace/intents/{id}/matches` | 持有方（需求方）获取活跃投票候选。若未配置检索提供者，可走确定性属性回退。
+| 需求（需求发现） | `POST /v1/marketplace/offers/{offer_id}/demand-matches` | 持有方（募集方）只能搜寻已明确允许募集方发现的需求摘要；结果明确需求参与者ID或联系方式。需求方可通过`PATCH /v1/marketplace/intents/{intent_id}/discovery`随时撤回后续发现。
+| 报价（募集资金） | `POST /v1/admin/marketplace/offers/{id}/activate` | 运营者或垂直审核流程发布草稿。
+| 介绍（引入） | `POST /v1/marketplace/introductions` | 持有方（需求方）记录单个代理勾选的股东意向、份额与确定原因。不会释放股票信息。
+| 介绍（引入） | `GET /v1/marketplace/introductions?tenant_id=&participant_id=` | 双方可读取引入投影，但交易所价值。
 
 所有读取接受主叫生成的 id 和幂等键。每个 party-auth 请求还必须携带 `x-matchplane-platform-path`（由能力交换返回的规范路径）。网关会验证短期方承载令牌、精确梯度节点路径、租户/域作用域、需求/过渡角色、激活生命周期、过渡以及跨方不变。`attributes` 与 `terms` 必须是时间 JSON对象，不会被根解释为车辆字段。分数和理由是 AI 建议输出，股市释放仍是独立的、需要一致的状态转换，受现有 `introduction/contact` 契约约束。
 
@@ -201,12 +201,13 @@ POST /api/platform/retrieval/query
 - 结果桥是"单向数据 + 双向选中"：
   - host 发送 `{ protocol: "matchplane.plugin/v1", type: "match.results", version: 1, contextToken, payload: { listings: [...] } }`，最多包含 100 条由 host 拥有且公开的结果关联。
   - 援方会话的`platform.context`可附带`agentDraft`（`narrative`、任选`intentId`、不透明`attributes`与`attributes`）插件。它只是聊天材料的可编辑草稿，不是已发布援方，也没有提出代币、曼哈顿或支付权限；必须让援方检查并通过`listing.submit`显然，可行仍会做架构、机场和权限。稿草在路由到子平台后会通过新的上下文消息补发，避免聊天与表单脱节。
-  - 插件发送`{ type: "listing.open", contextToken, payload: { listingId } }`；主机会忽略当前快照之外的id。
-  这种约束在保留垂直化渲染能力的同时，将作用域、联系人同意与支付行为留在根服务侧。
+  - 插件发送 `{ type: "listing.open", contextToken, payload: { listingId } }`；host 会忽略当前快照之外的 id。
+  - 买方 `platform.context` 只附带 `auth.status = pending|authenticated|anonymous`，不附带用户资料、cookie 或 token。插件可发送带 `requestId` 的 `auth.open`、`demand.open` 与 `listing.like`；host 分别负责 Better Auth 跳转、打开当前子平台内的根托管会话，以及调用已认证点赞 API，并返回对应的 `*.result`。匿名点赞意图只在根的 `sessionStorage` 中保存供给 id、平台路径和期望计数，登录返回同一路径后由根恢复；凭据始终不会进入 iframe。
+  这种约束在保留垂直化渲染能力的同时，将认证、作用域、联系人同意与支付行为留在根服务侧。
 - 路径仅在清单校验、API兼容、CSP/资源检查、包扫描和运营审计通过后才激活。取消或吊销会删除路径，但根账号与历史会保留。
   生产环境下，web页面和清单接口会独立校验完整的递归路径是否解析到激活不可变注册；`public/`下静态文件不构成激活授权。
 - 清单与插件资产读取与代理路由共享 `membership_policy`可见性检查。公开注册可在未认领成员关系时获取；邀请制发布在调用方更好的身份验证用户或带作用域的代理密钥进行授权该组织子树时，返回相同的未找到（未找到）响应。
 
-## 本仓库内布局
+## 仓库边界
 
-汽车队列是 Git 子模块，位于 `subplatforms/auto`。其他垂直应在各自仓库遵循相同一致性；根仓库仅保存 gitlink 与注册元数据，不会复制第二套实现。
+商店包在各自独立仓库中遵循本合约。核心仓库不保存商店 gitlink、不递归签出实例，也不复制任何商店实现；canonical path 始终来自活动 registry/manifest 记录。运营方可对外部签出运行 `just subplatform-package-check <path>` 或 `just subplatform-package-build-check <path>`。

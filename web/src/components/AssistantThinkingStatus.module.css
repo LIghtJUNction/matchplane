@@ -1,0 +1,30 @@
+.status {
+  width: fit-content;
+  min-height: 2.75rem;
+  display: inline-grid;
+  grid-template-columns: 1.25rem minmax(0, auto);
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.72rem;
+  border: 1px solid var(--line, rgba(23, 23, 23, 0.12));
+  border-radius: 0.8rem;
+  background: var(--retail-surface-raised, var(--paper, #fff));
+  color: var(--ink-soft, #303030);
+}
+
+.copy {
+  display: grid;
+  gap: 0.08rem;
+}
+
+.copy strong {
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.copy span {
+  color: var(--muted, #686864);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}

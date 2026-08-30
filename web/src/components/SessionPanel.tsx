@@ -121,11 +121,11 @@ export function SessionPanel({ locale, subplatform, onNotice }: SessionPanelProp
         <ShieldCheck size={20} aria-hidden="true" />
       </div>
       <div className="session-panel-actions">
-        <Button variant="outline" type="button" onClick={() => void load()} disabled={loading || Boolean(revoking)}>
+        <Button className="min-h-11" size="md" variant="outline" type="button" onClick={() => void load()} disabled={loading || Boolean(revoking)}>
           <RefreshCw size={16} aria-hidden="true" />
           {copy.refresh}
         </Button>
-        {otherSessions.length ? <Button variant="outline" type="button" onClick={() => void revokeOthers()} disabled={loading || Boolean(revoking)}>
+        {otherSessions.length ? <Button className="min-h-11" size="md" variant="outline" type="button" onClick={() => void revokeOthers()} disabled={loading || Boolean(revoking)}>
           <LogOut size={16} aria-hidden="true" />
           {revoking === "others" ? copy.revoking : copy.revokeOthers}
         </Button> : null}
@@ -141,7 +141,7 @@ export function SessionPanel({ locale, subplatform, onNotice }: SessionPanelProp
                   <strong>{isCurrent ? copy.current : describeDevice(session.userAgent, locale)}</strong>
                   <small>{session.updatedAt ? `${copy.activeAt} ${formatDate(session.updatedAt, locale)}` : copy.activeSession}</small>
                 </span>
-                {!isCurrent ? <Button variant="outline" size="icon-sm" type="button" aria-label={`${copy.revoke} ${describeDevice(session.userAgent, locale)}`} disabled={Boolean(revoking)} onClick={() => void revoke(session)}><LogOut size={16} aria-hidden="true" /></Button> : null}
+                {!isCurrent ? <Button className="min-h-11 min-w-11" variant="outline" size="icon-sm" type="button" aria-label={`${copy.revoke} ${describeDevice(session.userAgent, locale)}`} disabled={Boolean(revoking)} onClick={() => void revoke(session)}><LogOut size={16} aria-hidden="true" /></Button> : null}
               </li>
             );
           })}

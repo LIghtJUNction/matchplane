@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -58,10 +58,20 @@ describe("StoreCustomersPanel", () => {
 
     render(<StoreCustomersPanel storeId="store-1" locale="zh" />);
 
-    expect((await screen.findAllByText("测试客户")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("测试客户")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /测试客户/ }));
+
     expect(screen.getAllByText(/明确询问交付时间/).length).toBeGreaterThan(0);
     expect(screen.getByText("测试商品")).toBeVisible();
     expect(screen.getByText("未请求")).toBeVisible();
+    expect(screen.getByText("高意向客户")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "搜索客户" })).toBeVisible();
+
+    const search = screen.getByRole("textbox", { name: "搜索客户" });
+    await user.type(search, "不存在");
+    expect(screen.getByText("没有符合筛选条件的客户")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "清除筛选" }));
+    expect(screen.getAllByText("测试客户").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "收藏客户" }));
     expect(updateStoreCustomer).toHaveBeenCalledWith(
@@ -76,6 +86,32 @@ describe("StoreCustomersPanel", () => {
         expect.objectContaining({ staffNotes: "明天下午回访" }),
       ),
     );
+  });
+
+  it("keeps the 320/390 summary in one row and explains the unselected 1280 detail pane", async () => {
+    getStoreCustomers.mockResolvedValue([customer]);
+    render(<StoreCustomersPanel storeId="store-1" locale="zh" />);
+
+    await screen.findByText("测试客户");
+
+    const summary = screen.getByRole("group", { name: "客户概览" });
+    expect(summary).toHaveClass("grid-cols-3");
+    expect(summary).not.toHaveClass("grid-cols-1");
+    expect(summary.querySelectorAll('[data-slot="card"]')).toHaveLength(3);
+    expect(within(summary).getByText("高意向客户")).toBeVisible();
+    expect(within(summary).getByText("已收藏")).toBeVisible();
+    expect(within(summary).getByText("已同意联系")).toBeVisible();
+
+    const emptyDetail = screen.getByRole("complementary", {
+      name: "选择一位客户",
+    });
+    expect(emptyDetail).toHaveClass("store-customer-detail-empty");
+    expect(
+      within(emptyDetail).getByText(
+        "选择客户后，这里会显示意向分析、关注商品、联系方式同意状态和店员备注。",
+      ),
+    ).toBeVisible();
+    expect(within(emptyDetail).queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders a useful empty state", async () => {

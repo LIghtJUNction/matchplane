@@ -6,7 +6,7 @@
 
 ### 同一部署内嵌子平台
 
-这是MatchPlane当前路径：根管理员在控制台登录Git仓库或压缩包，提交固定修订、源摘要和`matchplane.subplatform/v1`清单。内置的独立`matchplane-subplatform-builder`通过短租约领取默认登记，生成不可变构建摘要；管理员显式激活后，子平台挂在一个`parentOrganizationId`下，使用路径例如`/used-car`。多个子平台占用一个web进程和根代理，不需要启动多个Next.js进程。若没有部署构建器，登记会停止在`validated`，不会伪装成已激活。
+这是 MatchPlane 当前路径：根管理员在控制台登记独立商店 Git 仓库或压缩包，提交固定修订、源摘要和 `matchplane.subplatform/v1` 清单。内置的独立 `matchplane-subplatform-builder` 通过短租约领取登记，生成不可变构建摘要；管理员显式激活后，子平台挂在一个 `parentOrganizationId` 下，使用合成示例路径 `/store-a`。多个子平台共用一个 Web 进程和根 Agent，不需要启动多个 Next.js 进程。若没有部署 builder，登记会停在 `validated`，不会伪装成已激活。核心仓库不递归签出或内置任何商店实例。
 
 子平台自己的搜索、支持库和领域 UI 插件包同样是 MCP 服务内；根只做身份、权限、路由和审计。
 
@@ -66,8 +66,8 @@ PATCH /api/platform/federation/bindings   {"status":"revoked"}
 对于已经独立运行、但暂时只提供 MCP 的子平台，建议先走上述签名入驻；内嵌包或迁移期间也可以先配置管理员配置服务端端点（不是浏览器配置）：
 
 ```dotenv
-MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON={"used-car":{"url":"https://car.example.com/mcp","tokenEnv":"MATCHPLANE_USED_CAR_MCP_TOKEN"}}
-MATCHPLANE_USED_CAR_MCP_TOKEN=server-side-secret
+MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON={"store-a":{"url":"https://store-a-agent.example/mcp","tokenEnv":"MATCHPLANE_STORE_A_MCP_TOKEN"}}
+MATCHPLANE_STORE_A_MCP_TOKEN=server-side-secret
 ```
 
 环境变量兼容路径只建立工具转发，不会产生持久化平台；生产接入应使用签名入驻身份、手动激活、秘密引用和撤销。不要将永久API密钥设置平台身份，也不会将承载写入Git仓库、清单或浏览器。

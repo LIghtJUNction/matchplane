@@ -322,6 +322,8 @@ export function IdentityBindingsPanel({
             <em>{copy.bound}</em>
           ) : identity.email && identity.emailOtp ? (
             <Button
+              className="min-h-11"
+              size="md"
               variant="outline"
               type="button"
               disabled={loading || savingEmail}
@@ -350,6 +352,8 @@ export function IdentityBindingsPanel({
             <em>{copy.bound}</em>
           ) : identity.phoneOtp ? (
             <Button
+              className="min-h-11"
+              size="md"
               variant="outline"
               type="button"
               onClick={() => {
@@ -379,6 +383,8 @@ export function IdentityBindingsPanel({
                 <em>{copy.bound}</em>
               ) : configured ? (
                 <Button
+                  className="min-h-11"
+                  size="md"
                   variant="outline"
                   type="button"
                   disabled={Boolean(linkingProvider) || loading}
@@ -423,10 +429,18 @@ export function IdentityBindingsPanel({
               placeholder={copy.codePlaceholder}
             />
           </label>
-          <Button type="submit" variant="outline" disabled={savingEmail}>
+          <Button
+            className="min-h-11"
+            size="md"
+            type="submit"
+            variant="outline"
+            disabled={savingEmail}
+          >
             {savingEmail ? copy.saving : copy.confirmEmail}
           </Button>
           <Button
+            className="min-h-11"
+            size="md"
             type="button"
             variant="outline"
             disabled={savingEmail}
@@ -476,7 +490,13 @@ export function IdentityBindingsPanel({
               />
             </label>
           ) : null}
-          <Button type="submit" variant="outline" disabled={savingPhone}>
+          <Button
+            className="min-h-11"
+            size="md"
+            type="submit"
+            variant="outline"
+            disabled={savingPhone}
+          >
             {savingPhone
               ? copy.saving
               : phoneCodeSent
@@ -485,6 +505,8 @@ export function IdentityBindingsPanel({
           </Button>
           {phoneCodeSent ? (
             <Button
+              className="min-h-11"
+              size="md"
               type="button"
               variant="outline"
               disabled={savingPhone}

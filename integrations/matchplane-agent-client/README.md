@@ -14,8 +14,9 @@ The package exposes ESM at `dist/index.js` and keeps its TypeScript source as th
 Run `bun run build` before publishing a fork or an internal mirror.
 
 Keep the API key and returned party capability in the Agent's server-side secret store. Do not
-bundle this package into a browser application. Treat `access_token_expires_at` as a hard 15-minute
-deadline and request a fresh capability after it expires.
+bundle this package into a browser application. Remote origins must use HTTPS (cleartext HTTP is
+accepted only for loopback development). Treat `access_token_expires_at` as a hard 15-minute deadline;
+the client rejects expired capabilities and requests must open a fresh session.
 
 ```ts
 import { MatchPlaneAgentClient, terminalRoutePlanPaths } from "@matchplane/agent-client";
@@ -144,8 +145,9 @@ router remains bounded and is only used by the first-party chat when no external
 公开的匿名需求摘要；该查询不会返回参与者 ID 或联系方式，也不会代替需求方发起引介。完整的 buyer/seller 服务器端示例见 [`examples/buyer-agent.ts`](examples/buyer-agent.ts) 和
 [`examples/seller-agent.ts`](examples/seller-agent.ts)。两者共享同一个 SDK 和 MCP 协议：买方用
 `side: "demand"` 创建 intent、选择 offer、发起 introduction；供给方用 `side: "supply"` 发布
-offer、读取自己可见的 introductions，并在人工或 Agent 策略确认后调用 `consentContact`。只有双方
-都同意，平台才会进入 contact release 阶段；示例不会把微信、手机号等联系方式放进 listing 或
+offer、读取自己可见的 introductions。只有经过认证的供给方明确同意后，调用方才可把已审核的
+introduction ID 放进 `MATCHPLANE_CONSENTED_INTRODUCTION_ID` 并调用 `consentContact`；未设置时示例
+默认不授权。只有双方都同意，平台才会进入 contact release 阶段；示例不会把微信、手机号等联系方式放进 listing 或
 模型 prompt。
 
 ## Multi-step Skills

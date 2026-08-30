@@ -1,0 +1,29 @@
+image:
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+web:
+  image:
+    digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  betterAuthUrl: https://matchplane.example
+  trustedOrigins: https://matchplane.example
+  platformRouterStorage:
+    storageClass: production-retain
+subplatformBuilder:
+  enabled: false
+runtime:
+  environment: production
+  nodeId: 018f6b6d-2f41-7cc1-9000-000000000001
+  paymentCallbackOrigin: https://matchplane.example
+  serviceSecrets:
+    web: matchplane-runtime-web
+    gateway: matchplane-runtime-gateway
+    payment-service: matchplane-runtime-payment
+    event-relay: matchplane-runtime-relay
+    matcher: matchplane-runtime-matcher
+    projector: matchplane-runtime-projector
+    vector-worker: matchplane-runtime-vector
+    federation-hub: matchplane-runtime-federation
+    migration: matchplane-runtime-migration
+  kafkaTlsSecrets:
+    event-relay: matchplane-kafka-relay
+    matcher: matchplane-kafka-matcher
+    projector: matchplane-kafka-projector

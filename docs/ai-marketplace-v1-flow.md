@@ -56,8 +56,8 @@ the seller/package Agent and the child adapter still own the interpretation and 
 1. Send the selected file/photo to the package media adapter.
 2. The adapter validates MIME/size, scans it, stores it under a content-addressed key, and returns
    an opaque `attachment_ref` plus dimensions/hash.
-3. The package Agent reads the attachment and proposes schema fields (for a vehicle package this
-   can include model, year, mileage, price and photos).
+3. The package Agent reads the attachment and proposes its own schema fields (for a synthetic
+   store these can include product kind, condition, price, and photos).
 4. The UI places the proposal in the manual editor. The seller reviews, edits and confirms it.
 5. `marketplace.offer.create` stores the package-owned attributes/terms and the attachment refs as
    JSON. The root does not store raw binary or infer fields.
@@ -96,11 +96,11 @@ manifest-approved endpoint, and revalidates returned canonical offers before ren
 
 ```json
 {
-  "narrative": "需要一台适合长途、预算 15 万以内的车",
+  "narrative": "需要一件符合条件、预算 1000 元以内的商品",
   "attributes": {
-    "category": "vehicle",
-    "budget_max_minor": "15000000",
-    "use_case": ["long_distance"]
+    "category": "synthetic-product",
+    "budget_max_minor": "100000",
+    "use_case": ["example"]
   },
   "terms": { "currency": "CNY", "currency_scale": 2 },
   "attachments": [
@@ -109,5 +109,5 @@ manifest-approved endpoint, and revalidates returned canonical offers before ren
 }
 ```
 
-The `vehicle` keys above are an example supplied by the auto package; they are not part of the
-root ABI. A different package can use the same transport with different attributes and terms.
+The synthetic keys above are supplied by the example store fixture; they are not part of the root
+ABI. Every package can use the same transport with its own attributes and terms.

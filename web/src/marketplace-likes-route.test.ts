@@ -46,7 +46,7 @@ beforeEach(() => {
           {
             supplyPartyId: partyId,
             displayName: "测试商品",
-            storePath: "/used-car",
+            storePath: "/store-a",
           },
         ],
       };
@@ -145,7 +145,7 @@ describe("marketplace likes", () => {
             {
               supplyPartyId: partyId,
               displayName: "测试商品",
-              storePath: "/used-car",
+              storePath: "/store-a",
             },
           ],
         };

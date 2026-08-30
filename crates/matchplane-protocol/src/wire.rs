@@ -66,6 +66,14 @@ pub enum WireError {
     /// Payload bytes do not match the mandatory digest.
     #[error("event envelope payload hash does not match payload bytes")]
     PayloadHashMismatch,
+    /// The declared Protobuf message type does not match the subscribed protocol.
+    #[error("message type {actual:?} does not match expected type {expected}")]
+    MessageType {
+        /// Expected fully qualified Protobuf message name.
+        expected: &'static str,
+        /// Message name declared by the envelope.
+        actual: String,
+    },
     /// The stream-kind enum is unknown or inappropriate.
     #[error("stream kind {0} is invalid")]
     StreamKind(i32),
@@ -101,13 +109,30 @@ pub fn decode_event_envelope(bytes: &[u8]) -> Result<EventEnvelope<Vec<u8>>, Wir
     envelope_from_wire(&wire)
 }
 
+/// Decodes an envelope and requires one fully qualified Protobuf payload type.
+///
+/// # Errors
+///
+/// Returns [`WireError`] when metadata, timestamp, payload hash, or the declared message type is
+/// invalid.
+pub fn decode_event_envelope_as(
+    bytes: &[u8],
+    expected_message_type: &'static str,
+) -> Result<EventEnvelope<Vec<u8>>, WireError> {
+    let wire = v1::EventEnvelope::decode(bytes)?;
+    ensure_message_type(&wire, expected_message_type)?;
+    envelope_from_wire(&wire)
+}
+
 /// Decodes and validates a matching command envelope.
 ///
 /// # Errors
 ///
 /// Returns [`WireError`] for malformed metadata, payload hashes, or command fields.
 pub fn decode_command_envelope(bytes: &[u8]) -> Result<DecodedCommand, WireError> {
+    const MESSAGE_TYPE: &str = "matchplane.v1.MatchingCommand";
     let wire = v1::EventEnvelope::decode(bytes)?;
+    ensure_message_type(&wire, MESSAGE_TYPE)?;
     let envelope = envelope_from_wire(&wire)?;
     let matching = v1::MatchingCommand::decode(wire.payload.as_slice())?;
     let command = matching.command.ok_or(WireError::Missing("command"))?;
@@ -288,6 +313,16 @@ fn envelope_to_wire(
     }
 }
 
+fn ensure_message_type(wire: &v1::EventEnvelope, expected: &'static str) -> Result<(), WireError> {
+    if wire.message_type == expected {
+        return Ok(());
+    }
+    Err(WireError::MessageType {
+        expected,
+        actual: wire.message_type.clone(),
+    })
+}
+
 fn envelope_from_wire(wire: &v1::EventEnvelope) -> Result<EventEnvelope<Vec<u8>>, WireError> {
     let actual_hash = PayloadHash::from_bytes(&wire.payload);
     if wire.payload_hash.as_slice() != actual_hash.into_bytes() {
@@ -349,4 +384,43 @@ where
 
 fn parse_i128(field: &'static str, value: &str) -> Result<i128, WireError> {
     value.parse().map_err(|_| WireError::Integer { field })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_decoder_should_reject_a_different_declared_message_type() {
+        let bytes = v1::EventEnvelope {
+            message_type: "matchplane.v1.OrderBookDelta".to_owned(),
+            ..v1::EventEnvelope::default()
+        }
+        .encode_to_vec();
+
+        assert!(matches!(
+            decode_command_envelope(&bytes),
+            Err(WireError::MessageType {
+                expected: "matchplane.v1.MatchingCommand",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn typed_event_decoder_should_check_type_before_domain_metadata() {
+        let bytes = v1::EventEnvelope {
+            message_type: "matchplane.v1.MatchingFact".to_owned(),
+            ..v1::EventEnvelope::default()
+        }
+        .encode_to_vec();
+
+        assert!(matches!(
+            decode_event_envelope_as(&bytes, "matchplane.v1.OrderBookDelta"),
+            Err(WireError::MessageType {
+                expected: "matchplane.v1.OrderBookDelta",
+                ..
+            })
+        ));
+    }
 }

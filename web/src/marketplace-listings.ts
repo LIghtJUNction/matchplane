@@ -1,5 +1,6 @@
 import type { RecommendedBackendListing } from "./api";
 import { localizedSubplatformCopy } from "./lib/localized-copy";
+import { boundedMatchReasons } from "./storefront-ranking-shared";
 import {
   subplatformFieldLabel,
   subplatformFieldValue,
@@ -57,6 +58,14 @@ function mapRecommendation(
   const money = recommendationMoney(item, terms);
   const intentId = stringValue(item.intent_id);
   const dynamicItem: UnknownFields = item;
+  const matchScore = finiteNumber(item.match_score);
+  const canonicalReasons = boundedReasonList(
+    item.match_reasons ?? (intentId ? dynamicItem.reasons : undefined),
+  );
+  const canonicalRisks = boundedReasonList(
+    item.match_risks ?? (intentId ? dynamicItem.risks : undefined),
+  );
+  const providerHints = boundedReasonList(item.provider_hints);
 
   const listing: AssetListing = {
     id,
@@ -93,22 +102,12 @@ function mapRecommendation(
     listing.priceCurrency = money.currency;
     listing.priceCurrencyScale = money.scale;
   }
-  const reasons =
-    item.match_reasons ?? stringList(dynamicItem.reasons) ?? undefined;
-  const risks =
-    item.match_risks ?? stringList(dynamicItem.risks) ?? undefined;
-  if (reasons?.length) listing.reasons = reasons;
-  if (risks?.length) listing.risks = risks;
-  // Only surface a score when the server returned a real finite value.
-  // Missing scores must stay undefined — never invent 0% for an intent hit.
-  if (
-    typeof item.match_score === "number" &&
-    Number.isFinite(item.match_score)
-  ) {
-    listing.matchScore = Math.round(
-      Math.max(0, Math.min(1, item.match_score)) * 100,
-    );
+  if (matchScore !== undefined) {
+    listing.matchScore = Math.round(Math.max(0, Math.min(1, matchScore)) * 100);
   }
+  if (canonicalReasons) listing.reasons = canonicalReasons;
+  if (canonicalRisks) listing.risks = canonicalRisks;
+  if (providerHints) listing.providerHints = providerHints;
 
   return listing;
 }
@@ -246,15 +245,15 @@ function firstString(value: UnknownFields, keys: string[]): string | undefined {
   return undefined;
 }
 
-function stringList(value: unknown): string[] | null {
-  if (!Array.isArray(value)) return null;
-  const strings: string[] = [];
-  for (const item of value) {
-    const candidate = stringValue(item);
-    if (candidate) strings.push(candidate);
-    if (strings.length === 8) break;
-  }
-  return strings;
+function boundedReasonList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const reasons = boundedMatchReasons(
+    value.flatMap((item) => {
+      const candidate = stringValue(item);
+      return candidate ? [candidate] : [];
+    }),
+  );
+  return reasons.length ? reasons : undefined;
 }
 
 function objectValue(value: unknown): UnknownFields | null {
@@ -275,6 +274,12 @@ function stringMap(value: unknown): { [key: string]: string } {
     if (text) result[key] = text;
   }
   return result;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function integerValue(value: unknown): number | undefined {

@@ -7,12 +7,6 @@ import { ChevronRight, Sparkles } from "lucide-react";
 import type { Accent } from "../types";
 
 export const spring = { type: "spring" as const, bounce: 0, duration: 0.38 };
-export const momentumSpring = {
-  type: "spring" as const,
-  bounce: 0.18,
-  duration: 0.4,
-};
-
 export function Brand({
   label = "MatchPlane",
   logoUrl,
@@ -63,12 +57,14 @@ export function SectionHeading({
   title,
   titleId,
   action,
+  actionClassName,
   onAction,
 }: {
   eyebrow?: string;
   title: string;
   titleId?: string;
   action?: string;
+  actionClassName?: string;
   onAction?: () => void;
 }) {
   return (
@@ -78,7 +74,11 @@ export function SectionHeading({
         <h2 id={titleId}>{title}</h2>
       </div>
       {action ? (
-        <button className="text-action" type="button" onClick={onAction}>
+        <button
+          className={`text-action${actionClassName ? ` ${actionClassName}` : ""}`}
+          type="button"
+          onClick={onAction}
+        >
           {action}
           <ChevronRight size={17} aria-hidden="true" />
         </button>

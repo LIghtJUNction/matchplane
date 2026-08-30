@@ -1,10 +1,15 @@
 import { authDatabase } from "./lib/auth";
 import type { RecommendedBackendListing } from "./api";
-import type { PublicStore } from "./store-directory";
+import { MAX_PUBLIC_STORES, type PublicStore } from "./store-directory";
 import {
-  evaluateShoppingIntent,
-  type PublicShoppingIntent,
-} from "./shopping-intent";
+  boundedMatchReasons,
+  comparePublicStorefrontOffers,
+  rankPublicStorefrontCandidates,
+  type PublicOfferSearchSort,
+} from "./storefront-ranking";
+import { MAX_LEXICAL_RANK_TOTAL_CANDIDATES } from "./storefront-ranking-contract";
+import { isSafePublicAttributeKey } from "./storefront-ranking-shared";
+import type { PublicShoppingIntent } from "./shopping-intent";
 
 interface PublicOfferRow {
   id: string;
@@ -25,12 +30,37 @@ interface PublicOfferRow {
 const HOSTED_MEDIA_REFERENCE =
   /^media:\/\/hosted\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 
-export type PublicOfferSearchSort =
-  | "relevance"
-  | "latest"
-  | "popularity"
-  | "price_asc"
-  | "price_desc";
+/** Maximum store scopes admitted to one public-offer SQL query; excess fails closed. */
+export const MAX_PUBLIC_OFFER_SEARCH_STORE_IDS = MAX_PUBLIC_STORES;
+const MAX_PUBLIC_OFFER_SEARCH_NARRATIVE_CHARACTERS = 8_000;
+export const MAX_PUBLIC_OFFER_SEARCH_CANDIDATES =
+  MAX_LEXICAL_RANK_TOTAL_CANDIDATES;
+
+const MAX_PUBLIC_OFFER_SEARCH_STORE_PATHS = MAX_PUBLIC_OFFER_SEARCH_STORE_IDS;
+const PUBLIC_OFFER_SEARCH_CANDIDATE_SENTINEL =
+  MAX_PUBLIC_OFFER_SEARCH_CANDIDATES + 1;
+
+export type PublicOfferSearchBudget =
+  | "store_ids"
+  | "store_paths"
+  | "narrative_characters"
+  | "candidates";
+
+/** Typed, observable refusal instead of silently truncating retrieval work. */
+export class PublicOfferSearchBudgetExceededError extends Error {
+  readonly code = "public_offer_search_budget_exceeded";
+
+  constructor(
+    readonly budget: PublicOfferSearchBudget,
+    readonly actual: number,
+    readonly maximum: number,
+  ) {
+    super(
+      `public storefront search ${budget} budget exceeded: ${actual} > ${maximum}`,
+    );
+    this.name = "PublicOfferSearchBudgetExceededError";
+  }
+}
 
 export interface PublicOfferSearchInput {
   stores: PublicStore[];
@@ -54,13 +84,46 @@ export interface PublicOfferSearchPage {
 export async function searchPublicStoreOffers(
   input: PublicOfferSearchInput,
 ): Promise<RecommendedBackendListing[]> {
-  return (await searchPublicStoreOfferPage(input)).items;
+  return searchPublicStoreOffersFromDatabase(authDatabase, input);
+}
+
+/** Database reader seam used by the production offer path and PostgreSQL contract tests. */
+export async function searchPublicStoreOffersFromDatabase(
+  database: Pick<typeof authDatabase, "query">,
+  input: PublicOfferSearchInput,
+): Promise<RecommendedBackendListing[]> {
+  return (await searchPublicStoreOfferPageFromDatabase(database, input)).items;
 }
 
 /** Read a bounded, deterministic page that can be safely exposed to an AI retrieval tool. */
 export async function searchPublicStoreOfferPage(
   input: PublicOfferSearchInput,
 ): Promise<PublicOfferSearchPage> {
+  return searchPublicStoreOfferPageFromDatabase(authDatabase, input);
+}
+
+/** Database reader seam for the bounded production offer page. */
+async function searchPublicStoreOfferPageFromDatabase(
+  database: Pick<typeof authDatabase, "query">,
+  input: PublicOfferSearchInput,
+): Promise<PublicOfferSearchPage> {
+  assertPublicOfferSearchBudget(
+    "store_ids",
+    input.stores.length,
+    MAX_PUBLIC_OFFER_SEARCH_STORE_IDS,
+  );
+  assertPublicOfferSearchBudget(
+    "store_paths",
+    input.storePaths?.length ?? 0,
+    MAX_PUBLIC_OFFER_SEARCH_STORE_PATHS,
+  );
+  assertPublicOfferSearchBudget(
+    "narrative_characters",
+    [...input.narrative].length,
+    MAX_PUBLIC_OFFER_SEARCH_NARRATIVE_CHARACTERS,
+  );
+
+  const executeQuery = database.query.bind(database);
   const limit = Math.max(1, Math.min(48, input.limit ?? 24));
   const offset = Math.max(0, Math.min(500, input.offset ?? 0));
   const requestedPaths = new Set(
@@ -69,10 +132,15 @@ export async function searchPublicStoreOfferPage(
   const scopedStores = requestedPaths.size
     ? input.stores.filter((store) => requestedPaths.has(store.path))
     : input.stores;
-  if (!scopedStores.length)
+  const uniqueStores = [
+    ...new Map(scopedStores.map((store) => [store.id, store])).values(),
+  ];
+  if (!uniqueStores.length)
     return { items: [], total: 0, offset, limit, hasMore: false };
-  const storeIds = scopedStores.map((store) => store.id);
-  const result = await authDatabase.query<PublicOfferRow>(
+  const storeIds = uniqueStores.map((store) => store.id);
+  const tenantIds = uniqueStores.map((store) => store.tenantId);
+  const domainIds = uniqueStores.map((store) => store.domainId);
+  const result = (await executeQuery(
     `WITH ranked_offers AS (
        SELECT offer.id::text,
             offer.tenant_id::text AS "tenantId",
@@ -92,68 +160,96 @@ export async function searchPublicStoreOfferPage(
                 WHERE like_row.tenant_id = offer.tenant_id
                   AND like_row.offer_id = offer.id),
               0
-            )::text AS "likeTotal",
-            CASE WHEN length(trim($2::text)) = 0 THEN 0::real
-                 ELSE ts_rank_cd(
-                   to_tsvector('simple', offer.display_name || ' ' || coalesce(offer.attributes ->> 'description', '')),
-                   websearch_to_tsquery('simple', $2::text)
-                 ) END AS relevance,
-            row_number() OVER (
-              PARTITION BY store.id
-              ORDER BY
-                CASE WHEN length(trim($2::text)) = 0 THEN 0::real
-                     ELSE ts_rank_cd(
-                       to_tsvector('simple', offer.display_name || ' ' || coalesce(offer.attributes ->> 'description', '')),
-                       websearch_to_tsquery('simple', $2::text)
-                     ) END DESC,
-                offer.published_at DESC NULLS LAST,
-                offer.id
-            ) AS store_rank
+            )::text AS "likeTotal"
        FROM marketplace_offers offer
+       JOIN unnest($1::uuid[], $2::uuid[], $3::uuid[])
+         AS requested_store(store_id, tenant_id, domain_id)
+         ON requested_store.store_id = offer.store_id
+        AND requested_store.tenant_id = offer.tenant_id
+        AND requested_store.domain_id = offer.domain_id
        JOIN stores store
          ON store.tenant_id = offer.tenant_id
+        AND store.domain_id = offer.domain_id
         AND store.id = offer.store_id
         AND store.status = 'active'
         AND store.visibility = 'public'
+       JOIN domains domain
+         ON domain.tenant_id = store.tenant_id
+        AND domain.id = store.domain_id
+        AND domain.status = 'active'
        LEFT JOIN subplatform_registrations registration
          ON registration.id = store.current_registration_id
+        AND registration.tenant_id = store.tenant_id
+        AND registration.domain_id = store.domain_id
+        AND registration.slug = store.slug
+        AND registration.state = 'active'
+       LEFT JOIN platform_federation_bindings binding
+         ON binding.id = store.federation_binding_id
+        AND binding.tenant_id = store.tenant_id
+        AND binding.domain_id = store.domain_id
+        AND binding.slug = store.slug
+        AND binding.organization_id = store.organization_id
+        AND binding.registration_id = registration.id
+        AND binding.status = 'active'
        JOIN store_path_aliases alias
          ON alias.tenant_id = store.tenant_id
         AND alias.store_id = store.id
         AND alias.is_canonical = true
-      WHERE offer.store_id = ANY($1::uuid[])
-        AND offer.status = 'active'
+      WHERE offer.status = 'active'
         AND (offer.expires_at IS NULL OR offer.expires_at > clock_timestamp())
+        AND (store.integration_kind = 'hosted' OR registration.id IS NOT NULL)
+        AND (store.integration_kind <> 'external' OR binding.id IS NOT NULL)
+        AND (
+          store.integration_kind = 'hosted'
+          OR registration.source_kind <> 'remote'
+          OR binding.id IS NOT NULL
+        )
     )
      SELECT id, "tenantId", "domainId", "displayName", attributes, terms,
             "storeName", "storeSlug", "storePath", "integrationKind", "supplyFields",
             "publishedAt", "likeTotal"
        FROM ranked_offers
-      WHERE store_rank <= 100
-      ORDER BY relevance DESC, "publishedAt" DESC NULLS LAST, id
-      LIMIT 2000`,
-    [storeIds, input.narrative.slice(0, 8_000)],
-  );
-
-  const ranked = rankRows(result.rows, input.narrative, input.intent);
-  const sort = input.sort ?? "relevance";
-  if (sort !== "relevance")
-    ranked.sort((left, right) =>
-      compareRankedOffers(left.row, right.row, sort),
+      ORDER BY "publishedAt" DESC NULLS LAST, id
+      LIMIT ${PUBLIC_OFFER_SEARCH_CANDIDATE_SENTINEL}`,
+    [storeIds, tenantIds, domainIds],
+  )) as { rows: PublicOfferRow[] };
+  if (result.rows.length > MAX_PUBLIC_OFFER_SEARCH_CANDIDATES) {
+    throw new PublicOfferSearchBudgetExceededError(
+      "candidates",
+      result.rows.length,
+      MAX_PUBLIC_OFFER_SEARCH_CANDIDATES,
     );
+  }
+
+  const ranked = await rankPublicStorefrontCandidates(
+    result.rows.map((row) => ({
+      row,
+      displayName: row.displayName,
+      attributes: publicAttributes(
+        row.attributes,
+        row.integrationKind,
+        row.supplyFields,
+      ),
+      terms: publicTerms(row.terms),
+    })),
+    input.narrative,
+    input.intent,
+  );
+  const sort = input.sort ?? "relevance";
+  if (sort !== "relevance") {
+    ranked.sort((left, right) =>
+      comparePublicStorefrontOffers(left.row, right.row, sort),
+    );
+  }
   const publicOffers = ranked.flatMap(
     ({
       row,
+      attributes,
+      terms,
       score,
       overlapLabels,
       intentReasons,
     }): RecommendedBackendListing[] => {
-      const attributes = publicAttributes(
-        row.attributes,
-        row.integrationKind,
-        row.supplyFields,
-      );
-      const terms = publicTerms(row.terms);
       const imageUrl = firstPublicImageUrl(attributes.attachments);
       if (
         !text(attributes.description) ||
@@ -175,16 +271,20 @@ export async function searchPublicStoreOfferPage(
           store_name: row.storeName,
           like_total: row.likeTotal ?? "0",
           ...(imageUrl ? { image_url: imageUrl } : {}),
-          match_score: score,
-          match_reasons: [
-            ...intentReasons,
-            ...(overlapLabels.length
-              ? [
-                  `在${row.storeName}找到，名称或介绍与“${overlapLabels.slice(0, 4).join("、")}”相关`,
-                ]
-              : [`来自${row.storeName}的在售商品`]),
-          ].slice(0, 8),
-          match_risks: [],
+          ...(score === undefined
+            ? {}
+            : {
+                match_score: score,
+                match_reasons: boundedMatchReasons([
+                  ...intentReasons,
+                  ...(overlapLabels.length
+                    ? [
+                        `名称或公开属性与“${overlapLabels.slice(0, 4).join("、")}”相关`,
+                      ]
+                    : []),
+                ]),
+                match_risks: [],
+              }),
           status: "active",
         },
       ];
@@ -199,97 +299,14 @@ export async function searchPublicStoreOfferPage(
   };
 }
 
-function compareRankedOffers(
-  left: PublicOfferRow,
-  right: PublicOfferRow,
-  sort: Exclude<PublicOfferSearchSort, "relevance">,
-): number {
-  if (sort === "latest")
-    return String(right.publishedAt ?? "").localeCompare(
-      String(left.publishedAt ?? ""),
-    );
-  if (sort === "popularity")
-    return compareBigInt(
-      integerText(right.likeTotal),
-      integerText(left.likeTotal),
-    );
-  const direction = sort === "price_asc" ? 1 : -1;
-  const leftPrice = publicPrice(left.terms);
-  const rightPrice = publicPrice(right.terms);
-  const currencyOrder = leftPrice.currency.localeCompare(rightPrice.currency);
-  if (currencyOrder) return currencyOrder;
-  const scale = Math.max(leftPrice.scale, rightPrice.scale);
-  const leftAmount = leftPrice.amount * 10n ** BigInt(scale - leftPrice.scale);
-  const rightAmount =
-    rightPrice.amount * 10n ** BigInt(scale - rightPrice.scale);
-  return direction * compareBigInt(leftAmount, rightAmount);
-}
-
-function publicPrice(value: unknown): {
-  currency: string;
-  amount: bigint;
-  scale: number;
-} {
-  const terms = record(value);
-  const rawScale = Number(terms.currency_scale);
-  return {
-    currency: text(terms.currency),
-    amount: integerText(terms.amount_minor),
-    scale: Number.isInteger(rawScale) ? Math.max(0, Math.min(18, rawScale)) : 0,
-  };
-}
-
-function integerText(value: unknown): bigint {
-  const textValue = String(value ?? "");
-  return /^\d+$/.test(textValue) ? BigInt(textValue) : 0n;
-}
-
-function compareBigInt(left: bigint, right: bigint): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function rankRows(
-  rows: PublicOfferRow[],
-  narrative: string,
-  intent?: PublicShoppingIntent,
-): Array<{
-  row: PublicOfferRow;
-  score: number;
-  overlapLabels: string[];
-  intentReasons: string[];
-}> {
-  const queryTokens = tokenize(narrative);
-  return rows
-    .flatMap((row, index) => {
-      const attributes = publicAttributes(
-        row.attributes,
-        row.integrationKind,
-        row.supplyFields,
-      );
-      const terms = publicTerms(row.terms);
-      const evaluation = evaluateShoppingIntent(attributes, terms, intent);
-      if (!evaluation.eligible) return [];
-      const description = text(attributes.description);
-      const haystackTokens = new Set(
-        tokenize(`${row.displayName}\n${description}`),
-      );
-      const overlapLabels = queryTokens.filter((token) =>
-        haystackTokens.has(token),
-      );
-      const lexicalScore = queryTokens.length
-        ? 0.35 + overlapLabels.length / Math.max(4, queryTokens.length)
-        : 0.35;
-      const score = Math.min(0.99, lexicalScore + evaluation.boost);
-      return [
-        { row, score, overlapLabels, intentReasons: evaluation.reasons, index },
-      ];
-    })
-    .sort(
-      (left, right) =>
-        right.overlapLabels.length - left.overlapLabels.length ||
-        right.score - left.score ||
-        left.index - right.index,
-    );
+function assertPublicOfferSearchBudget(
+  budget: PublicOfferSearchBudget,
+  actual: number,
+  maximum: number,
+): void {
+  if (actual > maximum) {
+    throw new PublicOfferSearchBudgetExceededError(budget, actual, maximum);
+  }
 }
 
 function publicAttributes(
@@ -305,7 +322,8 @@ function publicAttributes(
     ? supplyFields.flatMap((field): string[] => {
         const item = record(field);
         return typeof item.key === "string" &&
-          /^[A-Za-z0-9_.-]{1,128}$/.test(item.key)
+          /^[A-Za-z0-9_.-]{1,128}$/.test(item.key) &&
+          isSafePublicAttributeKey(item.key)
           ? [item.key]
           : [];
       })
@@ -435,15 +453,6 @@ function safePublicUrl(value: unknown): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function tokenize(value: string): string[] {
-  const normalized = value.toLocaleLowerCase().slice(0, 8_000);
-  const words = normalized.match(/[a-z0-9][a-z0-9._:-]*/g) ?? [];
-  const cjk = [...normalized.matchAll(/[\u3400-\u9fff]/g)].map(
-    ([character]) => character,
-  );
-  return [...new Set([...words, ...cjk])].slice(0, 512);
 }
 
 function record(value: unknown): Record<string, unknown> {

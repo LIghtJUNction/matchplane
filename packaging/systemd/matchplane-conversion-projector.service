@@ -1,0 +1,27 @@
+[Unit]
+Description=MatchPlane marketplace conversion projector
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/matchplane/services/conversion-projector.env
+
+[Service]
+Type=simple
+User=matchplane-conversion
+Group=matchplane-conversion
+SupplementaryGroups=matchplane
+EnvironmentFile=/etc/matchplane/matchplane.env
+EnvironmentFile=/etc/matchplane/services/conversion-projector.env
+ExecStart=/usr/bin/matchplane serve conversion-projector
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

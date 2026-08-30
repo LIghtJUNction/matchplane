@@ -16,7 +16,7 @@ function uploadRequest() {
   return {
     protocol: "matchplane.media/v1",
     request_id: requestId,
-    scope: { tenant_id: tenantId, domain_id: domainId, platform_path: "/used-car" },
+    scope: { tenant_id: tenantId, domain_id: domainId, platform_path: "/store-a" },
     attachment: {
       kind: "image",
       file_name: "front.png",
@@ -36,7 +36,7 @@ describe("media attachment ABI v1", () => {
     const parsed = parseMediaUploadRequest(uploadRequest());
     expect(parsed).toMatchObject({ ok: true });
     if (parsed.ok) {
-      expect(parsed.value.scope.platform_path).toBe("/used-car");
+      expect(parsed.value.scope.platform_path).toBe("/store-a");
       expect(parsed.value.attachment.size_bytes).toBe(3);
     }
   });
@@ -56,7 +56,7 @@ describe("media attachment ABI v1", () => {
           protocol: "matchplane.media/v1",
           request_id: requestId,
           attachment: {
-            attachment_ref: "media://used-car/front.png",
+            attachment_ref: "media://store-a/front.png",
             kind: "image",
             file_name: "front.png",
             media_type: "image/png",
@@ -73,7 +73,7 @@ describe("media attachment ABI v1", () => {
     if (!extracted.ok) return;
     const parsed = parseMediaUploadResponse(extracted.value, requestId);
     expect(parsed).toMatchObject({ ok: true });
-    if (parsed.ok) expect(parsed.value.attachment.attachment_ref).toBe("media://used-car/front.png");
+    if (parsed.ok) expect(parsed.value.attachment.attachment_ref).toBe("media://store-a/front.png");
   });
 
   it("requires the child response to preserve the request id", () => {
@@ -81,7 +81,7 @@ describe("media attachment ABI v1", () => {
       protocol: "matchplane.media/v1",
       request_id: tenantId,
       attachment: {
-        attachment_ref: "media://used-car/front.png",
+        attachment_ref: "media://store-a/front.png",
         kind: "image",
         file_name: "front.png",
         media_type: "image/png",

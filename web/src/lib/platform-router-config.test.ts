@@ -1,72 +1,107 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
-  listManagedPlatformRouterModels,
-  modelReasoningEffortsFromRecord,
-} from "./platform-router-config";
+  normalizeEndpoint,
+  normalizeManagedRouterInput,
+  normalizeProtocol,
+  PlatformRouterConfigValidationError,
+} from "./platform-router-config/contract";
 
-describe("model reasoning capability metadata", () => {
-  it("uses provider-declared levels without guessing from the model name", () => {
-    expect(
-      modelReasoningEffortsFromRecord({
-        id: "provider-specific-model",
-        supported_reasoning_efforts: ["minimal", "low", "high", "xhigh"],
-      }),
-    ).toEqual(["minimal", "low", "high", "xhigh"]);
+describe("managed router provider contract", () => {
+  it.each([
+    "openai-compatible",
+    "anthropic-messages",
+    "gemini-generate-content",
+  ] as const)("accepts the known %s protocol", (protocol) => {
+    expect(normalizeProtocol(protocol)).toBe(protocol);
   });
 
-  it("accepts nested capability metadata and returns no levels when none are declared", () => {
-    expect(
-      modelReasoningEffortsFromRecord({
-        capabilities: { reasoning: { levels: ["fast", "deep"] } },
-      }),
-    ).toEqual(["fast", "deep"]);
-    expect(modelReasoningEffortsFromRecord({ id: "unknown-model" })).toEqual(
-      [],
+  it("rejects unknown protocols", () => {
+    expect(() => normalizeProtocol("openrouter-chat")).toThrow(
+      PlatformRouterConfigValidationError,
     );
-    expect(
-      modelReasoningEffortsFromRecord({ capabilities: "malformed" }),
-    ).toEqual([]);
-  });
-});
-
-describe("managed router model discovery", () => {
-  it("rejects an endpoint when DNS includes a private address", async () => {
-    const fetcher = vi.fn<typeof fetch>();
-
-    await expect(
-      listManagedPlatformRouterModels({
-        endpoint: "https://provider.example",
-        protocol: "openai-compatible",
-        apiKey: "secret",
-        fetcher,
-        resolveAddresses: async () => ["93.184.216.34", "10.0.0.1"],
-      }),
-    ).rejects.toThrow("公网地址");
-    expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("disables redirects after resolving a public endpoint", async () => {
-    const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
-      expect(init?.redirect).toBe("error");
-      expect(init?.cache).toBe("no-store");
-      return new Response(
-        JSON.stringify({ data: [{ id: "provider/model" }] }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      );
+  it.each([
+    "https://provider.example/v1",
+    "https://api.anthropic.com",
+    "https://generativelanguage.googleapis.com",
+  ])("accepts a safe HTTPS provider base: %s", (endpoint) => {
+    expect(normalizeEndpoint(endpoint)).toBe(endpoint);
+  });
+
+  it.each([
+    "http://provider.example",
+    "https://user:password@provider.example",
+    "https://provider.example/v1?key=value",
+    "https://provider.example/v1#fragment",
+    "https://127.0.0.1/v1",
+  ])("rejects an unsafe provider base: %s", (endpoint) => {
+    expect(() => normalizeEndpoint(endpoint)).toThrow(
+      PlatformRouterConfigValidationError,
+    );
+  });
+
+  it("requires a bounded nonempty manual model ID without changing stored schema", () => {
+    const input = {
+      endpoint: "https://api.anthropic.com",
+      model: "claude-sonnet-4-6",
+      protocol: "anthropic-messages" as const,
+      enabled: true,
+      apiKey: "write-only-and-not-stored-here",
+    };
+    const normalized = normalizeManagedRouterInput(
+      input,
+      "platform-router-key-11111111-1111-4111-8111-111111111111.key",
+    );
+
+    expect(normalized).toMatchObject({
+      endpoint: input.endpoint,
+      model: input.model,
+      protocol: input.protocol,
+      enabled: true,
+      credentialFile:
+        "platform-router-key-11111111-1111-4111-8111-111111111111.key",
     });
-
-    await expect(
-      listManagedPlatformRouterModels({
-        endpoint: "https://provider.example",
-        protocol: "openai-compatible",
-        apiKey: "secret",
-        fetcher,
-        resolveAddresses: async () => ["93.184.216.34"],
-      }),
-    ).resolves.toEqual([{ id: "provider/model", reasoningEfforts: [] }]);
+    expect(normalized).not.toHaveProperty("apiKey");
+    for (const model of [
+      " ",
+      "x".repeat(257),
+      "model with spaces",
+      "model\nheader",
+      "/leading/path",
+      "model@revision",
+    ]) {
+      expect(() =>
+        normalizeManagedRouterInput(
+          { ...input, model },
+          normalized.credentialFile,
+        ),
+      ).toThrow(PlatformRouterConfigValidationError);
+    }
+    expect(
+      normalizeManagedRouterInput(
+        {
+          ...input,
+          endpoint: "https://provider.example",
+          protocol: "openai-compatible",
+          model: "accounts/fireworks/models/deepseek-r1:free",
+        },
+        normalized.credentialFile,
+      ).model,
+    ).toBe("accounts/fireworks/models/deepseek-r1:free");
+    for (const model of ["models/gemini-2.5-flash", "gemini:latest"]) {
+      expect(() =>
+        normalizeManagedRouterInput(
+          {
+            ...input,
+            endpoint: "https://generativelanguage.googleapis.com",
+            protocol: "gemini-generate-content",
+            model,
+          },
+          normalized.credentialFile,
+        ),
+      ).toThrow(PlatformRouterConfigValidationError);
+    }
   });
 });

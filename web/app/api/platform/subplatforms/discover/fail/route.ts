@@ -24,7 +24,10 @@ export async function POST(request: Request): Promise<Response> {
   const retryable = input.retryable === true;
   const result = await authDatabase.query(
     `UPDATE subplatform_source_intakes
-        SET state = CASE WHEN $4::boolean THEN 'queued' ELSE 'rejected' END,
+        SET state = CASE
+              WHEN $4::boolean AND discover_attempts < 20 THEN 'queued'
+              ELSE 'rejected'
+            END,
             discover_lease_id = NULL, discover_started_at = NULL, error = $3, updated_at = clock_timestamp()
       WHERE id = $1::uuid AND discover_lease_id = $2::uuid AND state = 'discovering'
       RETURNING id::text AS "intakeId", state, error`,

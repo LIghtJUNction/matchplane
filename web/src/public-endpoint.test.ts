@@ -12,9 +12,16 @@ describe("public outbound endpoint validation", () => {
       "10.0.0.1",
       "169.254.169.254",
       "192.0.2.1",
+      "240.0.0.1",
+      "255.255.255.255",
       "::1",
+      "::127.0.0.1",
       "fc00::1",
       "fe80::1",
+      "64:ff9b::a9fe:a9fe",
+      "64:ff9b:1::7f00:1",
+      "2002:7f00:1::",
+      "4000::1",
       "::ffff:127.0.0.1",
     ]) {
       expect(isPrivateOrReservedIpLiteral(address), address).toBe(true);
@@ -30,6 +37,11 @@ describe("public outbound endpoint validation", () => {
       hasOnlyPublicAddresses("https://provider.example/v1/models", async () => [
         "93.184.216.34",
         "10.0.0.1",
+      ]),
+    ).resolves.toBe(false);
+    await expect(
+      hasOnlyPublicAddresses("https://provider.example/v1/models", async () => [
+        "64:ff9b::a9fe:a9fe",
       ]),
     ).resolves.toBe(false);
     await expect(

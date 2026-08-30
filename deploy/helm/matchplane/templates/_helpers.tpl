@@ -47,11 +47,34 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+  Managed platform-router state must survive Web pod replacement. The application lock is local
+  to a Pod/PID namespace, so this rollout deliberately permits exactly one Web writer. The chart
+  either retains its own PVC or mounts an operator-provided claim.
+*/}}
+{{- define "matchplane.platformRouterClaimName" -}}
+{{- $storage := required "web.platformRouterStorage is required" .Values.web.platformRouterStorage -}}
+{{- if not $storage.enabled -}}
+{{- fail "web.platformRouterStorage.enabled must be true while the Web deployment is enabled" -}}
+{{- end -}}
+{{- if $storage.existingClaim -}}
+{{- $storage.existingClaim -}}
+{{- else -}}
+{{- $_ := required "web.platformRouterStorage.accessModes must not be empty" $storage.accessModes -}}
+{{- $_ := required "web.platformRouterStorage.size is required when existingClaim is empty" $storage.size -}}
+{{- if and (eq .Values.runtime.environment "production") (not $storage.storageClass) -}}
+{{- fail "web.platformRouterStorage.storageClass is required in production when existingClaim is empty" -}}
+{{- end -}}
+{{- printf "%s-platform-router-state" (include "matchplane.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
   Runtime credentials are intentionally selected per workload. The legacy
   runtime.existingSecret value remains a development/test fallback only; a
   production render fails unless every workload has its own secret. Each
-  workload secret must expose database-url and valkey-url. This keeps a
-  compromised public service from inheriting the payment/migration identity.
+  workload secret must expose database-url; cache-using workloads also expose
+  valkey-url. This keeps a compromised public service from inheriting the
+  payment/migration identity.
 */}}
 {{- define "matchplane.runtimeSecret" -}}
 {{- $root := .root -}}
@@ -108,11 +131,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ $root.Values.runtime.kafkaSslCertificateLocation | quote }}
 - name: MATCHPLANE_KAFKA_SSL_KEY_LOCATION
   value: {{ $root.Values.runtime.kafkaSslKeyLocation | quote }}
+{{- if ne $service "conversion-projector" }}
 - name: MATCHPLANE_VALKEY_URL
   valueFrom:
     secretKeyRef:
       name: {{ include "matchplane.runtimeSecret" (dict "root" $root "service" $service) }}
       key: valkey-url
+{{- end }}
 - name: MATCHPLANE_LOG_FILTER
   value: {{ $root.Values.runtime.logFilter | quote }}
 - name: MATCHPLANE_OTLP_ENDPOINT
@@ -139,4 +164,16 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   value: {{ $root.Values.runtime.gatewayAdminTokenPath | quote }}
 - name: MATCHPLANE_PAYMENT_CALLBACK_ORIGIN
   value: {{ $root.Values.runtime.paymentCallbackOrigin | quote }}
+{{- if eq $service "conversion-projector" }}
+- name: MATCHPLANE_CONVERSION_PROJECTOR_ENABLED
+  value: "true"
+- name: MATCHPLANE_CONVERSION_PROJECTOR_BATCH_SIZE
+  value: {{ $root.Values.conversionProjector.batchSize | quote }}
+- name: MATCHPLANE_CONVERSION_PROJECTOR_POLL_MS
+  value: {{ $root.Values.conversionProjector.pollMs | quote }}
+- name: MATCHPLANE_CONVERSION_PROJECTOR_POOL_SIZE
+  value: {{ $root.Values.conversionProjector.poolSize | quote }}
+- name: MATCHPLANE_CONVERSION_PROJECTOR_DEGRADED_AFTER_SECONDS
+  value: {{ $root.Values.conversionProjector.degradedAfterSeconds | quote }}
+{{- end }}
 {{- end }}

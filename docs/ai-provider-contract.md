@@ -1,61 +1,75 @@
-# AI 模型接入边界
+# AI Provider Contract
 
-MatchPlane 的根平台只需要一个受限的“平台路由器”模型调用，不把供应商 SDK 或 API key 放进 Rust 核心，也不把模型调用下放给子平台。`web/src/platform-router.ts` 支持三种服务端线协议：OpenAI-compatible Chat Completions、Anthropic Messages、Gemini GenerateContent。服务端读取 `MATCHPLANE_ROUTER_AI_URL`、`MATCHPLANE_ROUTER_AI_KEY`、`MATCHPLANE_ROUTER_AI_MODEL` 和 `MATCHPLANE_ROUTER_AI_PROTOCOL`，只发送已激活候选节点的公开路由描述，严格限制工具参数为候选 slug，并把模型不可用时的策略降级记录为 `degraded`。
+MatchPlane's root platform uses one server-side provider configuration for its hosted router. Provider credentials remain in protected server storage and are never sent to the browser, child platforms, external agents, or logs.
 
-因此接入模型的最短路径不是修改 Agent 或子平台，而是在平台边界接一个模型网关：
+The configuration contract supports exactly three wire protocols:
 
-```text
-MatchPlane router
-      │ OpenAI-compatible /v1/chat/completions
-      ▼
-LiteLLM / Vercel AI Gateway / vLLM / Ollama / 自建兼容网关
-      │
-      ├── OpenAI、Anthropic、Google、DeepSeek、通义、智谱……
-      └── provider/model 级别的 fallback、预算与审计
-```
+- `openai-compatible`
+- `anthropic-messages`
+- `gemini-generate-content`
 
-## 选型
+No endpoint, model, or vendor is mandatory. A TokenRhythm/DeepSeek OpenAI-compatible deployment is valid, as are the official Anthropic and Gemini API roots when paired with their respective protocols.
 
-- 需要统一接入很多原生协议、做模型路由、fallback、预算和用量统计时，优先使用自托管 LiteLLM；把 MatchPlane 的 URL 指向 LiteLLM 的 OpenAI-compatible 入口，`MODEL` 使用网关支持的 `provider/model` 名称。
-- 已经运行 Vercel/Next.js，并希望在 TypeScript 中使用原生 provider、结构化输出和工具调用时，可在网关层增加 Vercel AI SDK（`ai` 加对应的 `@ai-sdk/*` provider）。不要把这些 provider 包塞进 Rust 核心。
-- MCP 是 Agent 的工具/数据边界，不是模型协议。子平台的向量检索、商品索引和领域 Skill 通过 MCP 暴露；根路由器只决定是否把请求转发给已授权节点。
-- 只有一个 OpenAI-compatible 服务时，使用默认协议即可。
-- 直接接 Anthropic Messages 时，将协议设为 `anthropic-messages`，endpoint 通常为 `/v1/messages`；认证使用服务端 `x-api-key` 头。
-- 直接接 Gemini 时，将协议设为 `gemini-generate-content`，endpoint 可以是 `https://generativelanguage.googleapis.com/v1beta`，模型名使用 Gemini 的模型名；认证使用服务端 `x-goog-api-key` 头。
-- 如果网关已经统一了多家模型，继续用 `openai-compatible`，把 provider/model 的选择留给网关做 fallback、预算和审计。
+## Effective configuration
 
-## 生产约束
+A configuration is AI-ready only when all of the following are true:
 
-1. `MATCHPLANE_ROUTER_AI_KEY` 只能存在 web 服务端密钥文件，不得使用 `NEXT_PUBLIC_` 前缀，也不得下发给浏览器或外部 Agent。
-2. 通过网关的模型 allowlist 固定可用模型；MatchPlane 只接受环境变量指定的模型，不接受用户输入的 URL、模型名或 provider 名。
-3. 网关必须提供 HTTPS、请求 deadline、最大输入/输出 token、并发/速率限制、fallback 和用量账单。MatchPlane 自身仍保留 4 秒调用超时、小时级 admission、路由步数与扇出上限。
-4. 记录 request id、model、token usage、degraded 和成本归属 `platform`，不要记录 API key、完整用户隐私文本或联系人。
-5. 模型只能在授权候选集合内选择，不得创建平台路径、商家 ID、商品 ID，也不得直接执行交易或联系人交换。
+1. The protocol is one of the three known values above.
+2. The model ID is a nonempty, at-most-256-character provider identifier: it starts with an ASCII letter or digit and otherwise uses only ASCII letters, digits, `.`, `_`, `-`, `/`, or `:`. Gemini model IDs additionally reject `/` and `:` because they are inserted into the native model path.
+3. The endpoint is HTTPS, has no userinfo, query, or fragment, and is otherwise accepted by the public-endpoint safety checks.
+4. A server-side credential is configured.
+5. The configuration is enabled.
+6. If an origin allowlist is configured, the endpoint's exact origin is allowed.
 
-## 推荐配置
+The rootSuperAdmin WebUI managed state is authoritative whenever managed state exists. This remains true when the managed configuration is disabled, incomplete, or unreadable: MatchPlane fails closed instead of silently falling back to environment credentials. Environment endpoint/model/protocol differences are reported as non-secret informational conflicts.
 
-开发环境可以把 `MATCHPLANE_ROUTER_AI_URL` 指向本机 LiteLLM/vLLM/Ollama 兼容端点；生产环境必须是 HTTPS：
+`MATCHPLANE_ROUTER_AI_*` is an operational fallback only when no managed state exists. Browser-safe status responses may report the effective source, endpoint origin, model, protocol, credential presence, policy issues, conflicts, and `originAllowlistApplied`. They never report a required provider tuple, API key, fingerprint, credential file, or provider response body.
+
+## Optional origin allowlist
+
+`MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS` is an optional comma-separated list of exact HTTPS origins:
 
 ```dotenv
-MATCHPLANE_ROUTER_AI_URL=https://llm-gateway.example.com/v1/chat/completions
-MATCHPLANE_ROUTER_AI_KEY=server-side-secret
-MATCHPLANE_ROUTER_AI_MODEL=openai/gpt-4o-mini
-MATCHPLANE_ROUTER_AI_PROTOCOL=openai-compatible
-MATCHPLANE_ROUTER_AI_TOOL_MODE=required
-MATCHPLANE_ROUTER_AI_MAX_TOKENS=512
-MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS=20000
+MATCHPLANE_ROUTER_AI_ALLOWED_ORIGINS=https://api.anthropic.com,https://generativelanguage.googleapis.com
 ```
 
-配置 web 服务并重启后，根管理员可在“平台管理 → AI 与登录”点击“测试连接”。该按钮调用
-`POST /api/platform/ai/test`，只发送固定的健康检查文本和 `max_tokens=1`，不会把浏览器输入、密钥或
-模型响应内容传给前端；返回 `ready` 后再打开买方/卖方对话验证实际路由。未配置或上游不可用时，页面会
-明确显示 `unconfigured`/`failed`，生产路由继续使用可审计的受控降级，不会伪装成 AI 成功。
+Each entry must contain only a scheme, host, and optional port. Paths, queries, fragments, userinfo, empty entries, and non-HTTPS origins are invalid and fail closed. An empty or unset variable permits any public HTTPS origin; runtime DNS and transport safety checks still apply.
 
-`MATCHPLANE_ROUTER_AI_PROTOCOL` 只接受 `openai-compatible`、`anthropic-messages` 或
-`gemini-generate-content`；用户请求不能选择协议、endpoint 或模型。Gemini 的 endpoint 不要带 API key
-查询参数，密钥只放在服务端 secret manager。`MATCHPLANE_ROUTER_AI_TOTAL_TIMEOUT_MS` controls the total wall-clock budget for one recursive
-platform route (default 20 seconds, hard maximum 60 seconds). Each provider request remains
-bounded to four seconds, and once the shared deadline is reached the router records an explicit
-policy fallback instead of waiting through every remaining platform hop.
+The allowlist applies equally to managed and environment configurations. Status reports only whether the allowlist is applied, not its entries.
 
-外部买家/卖家 Agent 的模型由调用方自己选择并承担 token 成本；它们只使用 `matchplane.agent/v1` handoff、平台 MCP 和短期能力凭证，不共享根平台的模型 key。
+## Manual model configuration
+
+There is no official portable model-list API shared by the three protocols or by OpenAI-compatible providers. Administrators must copy the exact model ID from their provider's documentation and test it before activation.
+
+The WebUI therefore uses a required manual model input and protocol-specific guidance. It does not offer a model dropdown or contact a provider to discover models. `POST /api/platform/ai/models` remains for one compatibility release as an authenticated rootSuperAdmin-only tombstone; it returns HTTP `410` with code `manual_model_configuration_required` and never contacts a provider.
+
+Examples:
+
+```dotenv
+# TokenRhythm / DeepSeek through an OpenAI-compatible endpoint
+MATCHPLANE_ROUTER_AI_URL=https://tokenrhythm.studio
+MATCHPLANE_ROUTER_AI_MODEL=deepseek-v4-flash-0731
+MATCHPLANE_ROUTER_AI_PROTOCOL=openai-compatible
+
+# Official Anthropic root
+MATCHPLANE_ROUTER_AI_URL=https://api.anthropic.com
+MATCHPLANE_ROUTER_AI_MODEL=claude-sonnet-4-6
+MATCHPLANE_ROUTER_AI_PROTOCOL=anthropic-messages
+
+# Official Gemini root
+MATCHPLANE_ROUTER_AI_URL=https://generativelanguage.googleapis.com
+MATCHPLANE_ROUTER_AI_MODEL=gemini-2.5-flash
+MATCHPLANE_ROUTER_AI_PROTOCOL=gemini-generate-content
+```
+
+Model availability and identifiers change over time; these examples illustrate contract shape, not a guaranteed catalogue.
+
+## Managed lifecycle and secrets
+
+The WebUI lifecycle is: **save candidate → server-side connection test → explicit atomic activation**. Saving or testing a candidate never replaces the active configuration. Only a ready test attestation enables activation.
+
+The API key field is write-only. Leaving it empty retains the protected candidate/active key when allowed by the lifecycle; reads return only `credentialConfigured`. The stored generation schema and versioned credential reference remain unchanged.
+
+Configuration audit records may contain actor, time, endpoint origin, model, protocol, enabled state, key-changed state, and request ID. They must not contain keys, fingerprints, provider response bodies, private user text, or contact details.
+
+External buyer and seller agents choose and pay for their own models. They use the bounded `matchplane.agent/v1` handoff, platform MCP tools, and short-lived capabilities; they never share the root platform provider key.

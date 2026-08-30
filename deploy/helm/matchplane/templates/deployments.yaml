@@ -1,4 +1,7 @@
 {{- $root := . -}}
+{{- if ne (int .Values.conversionProjector.batchSize) 1 -}}
+{{- fail "conversionProjector.batchSize must be exactly 1 while the projector is serial" -}}
+{{- end -}}
 {{- $services := list
   (dict "name" "gateway" "binary" "matchplane-gateway" "replicas" .Values.gateway.replicas "port" 8080)
   (dict "name" "payment-service" "binary" "matchplane-payment-service" "replicas" .Values.paymentService.replicas "port" 8080)
@@ -7,6 +10,9 @@
   (dict "name" "vector-worker" "binary" "matchplane-vector-worker" "replicas" .Values.workers.vectorWorkerReplicas)
   (dict "name" "federation-hub" "binary" "matchplane-federation-hub" "replicas" .Values.federationHub.replicas "port" 50051)
 -}}
+{{- if .Values.conversionProjector.enabled -}}
+{{- $services = append $services (dict "name" "conversion-projector" "binary" "matchplane-conversion-projector" "replicas" .Values.conversionProjector.replicas "port" 8080) -}}
+{{- end -}}
 {{- range $index, $service := $services }}
 {{- if $index }}
 ---
@@ -49,7 +55,7 @@ spec:
               containerPort: {{ . }}
               protocol: TCP
           {{- end }}
-          {{- if or (eq $service.name "gateway") (eq $service.name "payment-service") }}
+          {{- if or (eq $service.name "gateway") (eq $service.name "payment-service") (eq $service.name "conversion-projector") }}
           readinessProbe:
             httpGet:
               path: /health/ready
@@ -132,8 +138,12 @@ metadata:
     {{- include "matchplane.labels" $root | nindent 4 }}
     app.kubernetes.io/component: web
 spec:
-  replicas: {{ $root.Values.web.replicas }}
+  # Literal defense-in-depth: schema validation owns the value contract, while this prevents
+  # --skip-schema-validation from ever creating more than the one supported Web writer.
+  replicas: 1
   revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "matchplane.selectorLabels" $root | nindent 6 }}
@@ -149,6 +159,88 @@ spec:
       securityContext:
         {{- toYaml $root.Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: 30
+      # The PVC root is private to this capability-free startup gate. It creates only the dedicated
+      # child mounted by Web, then proves the CSI path supports the required durable write sequence.
+      initContainers:
+        - name: prepare-platform-router-state
+          image: {{ include "matchplane.webImage" $root }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command:
+            - /usr/local/bin/node
+            - -e
+            - |
+              const fs = require("node:fs");
+              const path = require("node:path");
+              const staging = "/var/lib/matchplane/platform-router-volume";
+              const state = path.join(staging, "root-email");
+              process.umask(0o007);
+              if (fs.existsSync(state)) {
+                const entry = fs.lstatSync(state);
+                if (entry.isSymbolicLink() || !entry.isDirectory()) {
+                  throw new Error("root-email must be a non-symlink directory");
+                }
+              } else {
+                fs.mkdirSync(state, { mode: 0o770 });
+                // Clear a setgid bit inherited from a CSI-managed parent; existing modes are never repaired.
+                fs.chmodSync(state, 0o770);
+              }
+              const mode = fs.lstatSync(state).mode & 0o7777;
+              if (mode !== 0o770) {
+                throw new Error(`root-email mode must be exactly 0770, found ${mode.toString(8)}`);
+              }
+              fs.accessSync(state, fs.constants.R_OK | fs.constants.W_OK | fs.constants.X_OK);
+              const nonce = `${process.pid}-${Date.now()}`;
+              const pending = path.join(state, `.matchplane-mount-probe-${nonce}.pending`);
+              const committed = path.join(state, `.matchplane-mount-probe-${nonce}.committed`);
+              let pendingExists = false;
+              let committedExists = false;
+              let probe;
+              let directory;
+              let primaryFailure;
+              let cleanupFailure;
+              try {
+                probe = fs.openSync(pending, "wx", 0o600);
+                pendingExists = true;
+                fs.writeSync(probe, "mount-probe\n");
+                fs.fsyncSync(probe);
+                fs.closeSync(probe);
+                probe = undefined;
+                fs.renameSync(pending, committed);
+                pendingExists = false;
+                committedExists = true;
+                directory = fs.openSync(state, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+                fs.fsyncSync(directory);
+                fs.unlinkSync(committed);
+                committedExists = false;
+                fs.fsyncSync(directory);
+              } catch (error) {
+                primaryFailure = error;
+              }
+              const cleanup = (operation) => {
+                try {
+                  operation();
+                } catch (error) {
+                  cleanupFailure ??= error;
+                }
+              };
+              if (probe !== undefined) cleanup(() => fs.closeSync(probe));
+              if (directory !== undefined) cleanup(() => fs.closeSync(directory));
+              if (pendingExists) cleanup(() => fs.rmSync(pending, { force: true }));
+              if (committedExists) cleanup(() => fs.rmSync(committed, { force: true }));
+              if (primaryFailure !== undefined) throw primaryFailure;
+              if (cleanupFailure !== undefined) throw cleanupFailure;
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ $root.Values.podSecurityContext.runAsUser }}
+            runAsGroup: {{ $root.Values.podSecurityContext.runAsGroup }}
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: platform-router-state
+              mountPath: /var/lib/matchplane/platform-router-volume
+              readOnly: false
       containers:
         - name: web
           image: {{ include "matchplane.webImage" $root }}
@@ -306,6 +398,10 @@ spec:
             - name: admin-bearer-secrets
               mountPath: /run/matchplane/admin-secrets
               readOnly: true
+            - name: platform-router-state
+              mountPath: /etc/matchplane/secrets/root-email
+              subPath: root-email
+              readOnly: false
           {{- if $root.Values.web.artifactPvc }}
             - name: subplatform-artifacts
               mountPath: {{ $root.Values.web.artifactRoot | quote }}
@@ -329,6 +425,9 @@ spec:
           resources:
             {{- toYaml (default $root.Values.resources $root.Values.web.resources) | nindent 12 }}
       volumes:
+        - name: platform-router-state
+          persistentVolumeClaim:
+            claimName: {{ include "matchplane.platformRouterClaimName" $root }}
         - name: admin-bearer-secrets
           projected:
             defaultMode: 0440

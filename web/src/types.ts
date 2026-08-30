@@ -37,8 +37,11 @@ export interface AssetListing {
   matchScore?: number;
   accent: Accent;
   facts: Array<{ label: string; value: string; key?: string }>;
+  /** Verified deterministic matcher evidence. */
   reasons?: string[];
   risks?: string[];
+  /** Advisory explanations supplied by store retrieval, separate from matcher evidence. */
+  providerHints?: string[];
   trust?: string[];
   seller?: string;
   response?: string;

@@ -2,6 +2,14 @@ import { chmodSync, closeSync, fsyncSync, openSync, readFileSync, renameSync, un
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
+import { ResponseBodyTooLargeError } from "./body-limit";
+import {
+  fetchPinnedPublicText,
+  PinnedPublicEndpointError,
+  PinnedPublicRedirectError,
+} from "./pinned-public-endpoint";
+import { isProductionEnvironment } from "./runtime";
+
 const SECRET_ROOT = "/etc/matchplane/secrets/root-email";
 const CONFIG_PATH = path.join(SECRET_ROOT, "wechat-oauth.json");
 const SECRET_PATH = path.join(SECRET_ROOT, "wechat-oauth-app-secret");
@@ -11,7 +19,10 @@ const SECRET_PATH = path.join(SECRET_ROOT, "wechat-oauth-app-secret");
 export const WECHAT_QR_AUTHORIZATION_URL = "https://open.weixin.qq.com/connect/qrconnect#wechat_redirect";
 export const WECHAT_TOKEN_URL = "https://api.weixin.qq.com/sns/oauth2/access_token";
 export const WECHAT_USERINFO_URL = "https://api.weixin.qq.com/sns/userinfo";
-export const WECHAT_DEFAULT_SCOPES = ["snsapi_login"] as const;
+const WECHAT_DEFAULT_SCOPES = ["snsapi_login"] as const;
+const WECHAT_REQUEST_TIMEOUT_MS = 5_000;
+const WECHAT_RESPONSE_BODY_TIMEOUT_MS = 5_000;
+const WECHAT_RESPONSE_LIMIT_BYTES = 64 * 1024;
 
 interface StoredWeChatOAuthConfig {
   enabled: boolean;
@@ -67,6 +78,7 @@ export function saveManagedWeChatOAuthConfig(input: {
     tokenUrl: normalizeWeChatUrl(input.tokenUrl?.trim() || WECHAT_TOKEN_URL, "令牌地址", false),
     userInfoUrl: normalizeWeChatUrl(input.userInfoUrl?.trim() || WECHAT_USERINFO_URL, "用户信息地址", false),
   };
+  assertManagedWeChatEgressPolicy(config);
   if (input.appSecret !== undefined) writeProtected(SECRET_PATH, input.appSecret, "AppSecret");
   const configured = Boolean(readOptional(SECRET_PATH));
   if (config.enabled && !configured) throw new Error("启用前请填写 AppSecret");
@@ -77,14 +89,14 @@ export function saveManagedWeChatOAuthConfig(input: {
 /**
  * WeChat's sns endpoints predate standard OAuth2: they only speak WeChat's own
  * protocol. The adapters below are applied when the configured endpoints are
- * WeChat-hosted; a standards-compliant proxy or mock gateway on another host
- * keeps the default generic OAuth behaviour.
+ * WeChat-hosted. A standards-compliant proxy or mock gateway remains available
+ * outside production; production managed configuration fails closed because
+ * Better Auth's generic transport cannot enforce this module's DNS pinning.
  */
 export function isWeChatNativeEndpoint(value: string | undefined): boolean {
   if (!value) return false;
   try {
-    const hostname = new URL(value).hostname;
-    return hostname === "weixin.qq.com" || hostname.endsWith(".weixin.qq.com");
+    return isAllowedWeChatRequestDestination(new URL(value));
   } catch {
     return false;
   }
@@ -106,7 +118,7 @@ export interface WeChatOAuthTokens {
  */
 export function createWeChatTokenExchange(options: { tokenUrl: string; appId: string; appSecret: string }) {
   return async (data: { code: string }): Promise<WeChatOAuthTokens> => {
-    const url = new URL(options.tokenUrl);
+    const url = parseWeChatRequestUrl(options.tokenUrl, "微信令牌");
     url.searchParams.set("appid", options.appId);
     url.searchParams.set("secret", options.appSecret);
     url.searchParams.set("code", data.code);
@@ -148,7 +160,7 @@ export function createWeChatUserInfoLoader(options: { userInfoUrl: string }) {
     // WeChat never returns an email; the synthetic Better Auth address must stay unverified.
     const identity: WeChatUserProfile = { openid, emailVerified: false };
     if (typeof tokens.raw?.unionid === "string") identity.unionid = tokens.raw.unionid;
-    const url = new URL(options.userInfoUrl);
+    const url = parseWeChatRequestUrl(options.userInfoUrl, "微信用户信息");
     url.searchParams.set("access_token", accessToken);
     url.searchParams.set("openid", openid);
     url.searchParams.set("lang", "zh_CN");
@@ -162,9 +174,36 @@ export function createWeChatUserInfoLoader(options: { userInfoUrl: string }) {
 }
 
 async function fetchWeChatJson(url: URL, label: string): Promise<Record<string, unknown>> {
-  const response = await fetch(url.toString(), { method: "GET", headers: { accept: "application/json" } });
-  // WeChat serves JSON bodies with a text/plain content type; parse the raw text.
-  const text = await response.text();
+  if (!isAllowedWeChatRequestDestination(url)) throw new Error(`${label}请求地址不在微信官方域名 allowlist 内`);
+
+  let response: Response;
+  let text: string;
+  try {
+    ({ response, text } = await fetchPinnedPublicText(url, {
+      requestTimeoutMs: WECHAT_REQUEST_TIMEOUT_MS,
+      responseBodyTimeoutMs: WECHAT_RESPONSE_BODY_TIMEOUT_MS,
+      responseLimitBytes: WECHAT_RESPONSE_LIMIT_BYTES,
+    }));
+  } catch (error) {
+    if (error instanceof PinnedPublicEndpointError) {
+      throw new Error(`${label}请求地址未通过公共网络边界检查`);
+    }
+    if (error instanceof PinnedPublicRedirectError) {
+      throw new Error(`${label}请求不允许重定向`);
+    }
+    if (error instanceof ResponseBodyTooLargeError) {
+      throw new Error(`${label}响应体超过大小限制`);
+    }
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new Error(`${label}请求超时`);
+    }
+    // Do not propagate Undici errors containing the credential-bearing query URL.
+    throw new Error(`${label}请求失败`);
+  }
+  if (response.redirected || (response.status >= 300 && response.status < 400)) {
+    throw new Error(`${label}请求不允许重定向`);
+  }
+  // WeChat serves JSON bodies with a text/plain content type; parse the bounded raw text.
   let body: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(text);
@@ -180,13 +219,29 @@ async function fetchWeChatJson(url: URL, label: string): Promise<Record<string, 
   return body;
 }
 
+function parseWeChatRequestUrl(value: string, label: string): URL {
+  try {
+    const url = new URL(value);
+    if (!isAllowedWeChatRequestDestination(url) || url.search || url.hash) throw new Error();
+    return url;
+  } catch {
+    throw new Error(`${label}地址必须是无凭据、无查询参数或片段的微信官方 HTTPS 地址`);
+  }
+}
+
+function isAllowedWeChatRequestDestination(url: URL): boolean {
+  const hostname = url.hostname.toLowerCase();
+  const officialHostname = hostname === "weixin.qq.com" || hostname.endsWith(".weixin.qq.com");
+  return url.protocol === "https:" && !url.username && !url.password && !url.port && officialHostname;
+}
+
 function readString(body: Record<string, unknown>, key: string): string | undefined {
   const value = body[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function normalizeStoredConfig(value: Partial<StoredWeChatOAuthConfig>): StoredWeChatOAuthConfig {
-  return {
+  const config = {
     enabled: value.enabled === true,
     appId: boundedText(value.appId ?? "", "AppID", 512),
     scopes: normalizeScopes(value.scopes),
@@ -194,6 +249,20 @@ function normalizeStoredConfig(value: Partial<StoredWeChatOAuthConfig>): StoredW
     tokenUrl: normalizeWeChatUrl(value.tokenUrl, "令牌地址", false),
     userInfoUrl: normalizeWeChatUrl(value.userInfoUrl, "用户信息地址", false),
   };
+  assertManagedWeChatEgressPolicy(config);
+  return config;
+}
+
+function assertManagedWeChatEgressPolicy(config: StoredWeChatOAuthConfig): void {
+  if (!config.enabled || !isProductionEnvironment()) return;
+  if (
+    isWeChatNativeEndpoint(config.authorizationUrl) &&
+    isWeChatNativeEndpoint(config.tokenUrl) &&
+    isWeChatNativeEndpoint(config.userInfoUrl)
+  ) {
+    return;
+  }
+  throw new Error("生产环境仅允许微信官方 OAuth 地址");
 }
 
 function normalizeWeChatUrl(value: string | undefined, label: string, allowWeChatRedirectFragment: boolean): string {

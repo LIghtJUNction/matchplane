@@ -1882,6 +1882,8 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1896,6 +1898,23 @@ dependencies = [
  "subtle",
  "thiserror 2.0.20",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "matchplane-conversion-projector"
+version = "0.1.10"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "matchplane-config",
+ "matchplane-observability",
+ "matchplane-storage",
+ "metrics",
+ "serde",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -1980,6 +1999,7 @@ dependencies = [
  "matchplane-config",
  "matchplane-domain",
  "matchplane-http",
+ "matchplane-matching",
  "matchplane-observability",
  "matchplane-storage",
  "serde",
@@ -1988,6 +2008,7 @@ dependencies = [
  "thiserror 2.0.20",
  "time",
  "tokio",
+ "tower",
  "tower-http 0.7.0",
  "tracing",
  "uuid",
@@ -2021,6 +2042,15 @@ dependencies = [
  "rdkafka",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "matchplane-matching"
+version = "0.1.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2119,6 +2149,7 @@ dependencies = [
  "matchplane-events",
  "matchplane-observability",
  "matchplane-protocol",
+ "matchplane-storage",
  "prost",
  "rdkafka",
  "tokio",
@@ -2146,12 +2177,15 @@ name = "matchplane-storage"
 version = "0.1.10"
 dependencies = [
  "bigdecimal",
+ "hex",
  "matchplane-domain",
  "matchplane-engine",
  "matchplane-events",
+ "matchplane-matching",
  "matchplane-payments",
  "matchplane-protocol",
  "prost",
+ "rustix",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -2159,6 +2193,7 @@ dependencies = [
  "thiserror 2.0.20",
  "time",
  "tokio",
+ "url",
  "uuid",
 ]
 
@@ -5126,14 +5161,18 @@ name = "xtask"
 version = "0.1.10"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
+ "futures-util",
  "getrandom 0.3.4",
  "hex",
  "matchplane-config",
  "matchplane-domain",
  "matchplane-storage",
  "reqwest 0.13.4",
+ "rig-core",
  "rpassword",
+ "rustix",
  "scrypt",
  "secrecy",
  "serde",
@@ -5145,6 +5184,7 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

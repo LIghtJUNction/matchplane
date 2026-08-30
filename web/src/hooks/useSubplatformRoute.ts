@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   loadSubplatform,
   resolveSubplatform,
@@ -10,14 +10,15 @@ import type { WorkspaceRole } from "../types";
 import { requiresAuthenticatedWorkspace } from "./useAuthSession";
 
 export type AccountSettingsSection = "profile" | "account" | "stores";
+export type StoreConsoleSection = "products" | "customers";
 
-export function roleFromLocation(): WorkspaceRole {
+function roleFromLocation(): WorkspaceRole {
   if (typeof window === "undefined") return "buyer";
   const requested = new URLSearchParams(window.location.search).get("role");
   return requested === "platform" ? requested : "buyer";
 }
 
-export function relativeBrowserLocation(searchParams: URLSearchParams): string {
+function relativeBrowserLocation(searchParams: URLSearchParams): string {
   const query = searchParams.toString();
   return `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
 }
@@ -25,15 +26,6 @@ export function relativeBrowserLocation(searchParams: URLSearchParams): string {
 export function parentPlatformHref(path: string, role: WorkspaceRole): string {
   void path;
   return role === "buyer" ? "/" : `/?role=${encodeURIComponent(role)}`;
-}
-
-export function requestedStoreConsoleSection(): "products" | "customers" {
-  if (typeof window === "undefined") return "products";
-  return new URLSearchParams(window.location.search).get(
-    "storeConsoleSection",
-  ) === "customers"
-    ? "customers"
-    : "products";
 }
 
 export function roleLabel(
@@ -139,35 +131,92 @@ interface UseSubplatformRouteOptions {
   authResolved: boolean;
 }
 
+interface InitialStoreIdentity {
+  path: string;
+  name?: string;
+  description?: string;
+}
+
+function withInitialStoreIdentity(
+  config: SubplatformConfig,
+  identity: InitialStoreIdentity,
+): SubplatformConfig {
+  if (!identity.name || config.slug === "root" || config.path !== identity.path)
+    return config;
+  const fallback = resolveSubplatform(identity.path);
+  const hasLoadedIdentity =
+    config.brandName !== fallback.brandName ||
+    config.label !== fallback.label ||
+    config.description !== fallback.description;
+  if (hasLoadedIdentity) return config;
+  const seeded = {
+    ...config,
+    brandName: identity.name,
+    label: identity.name,
+  };
+  if (identity.description) seeded.description = identity.description;
+  return seeded;
+}
+
 export function useSubplatformRoute({
   initialPath = "/",
   initialStoreName,
   initialStoreDescription,
   authResolved,
 }: UseSubplatformRouteOptions) {
-  const seedStoreIdentity = (config: SubplatformConfig): SubplatformConfig => {
-    if (!initialStoreName || config.slug === "root") return config;
-    if (config.path !== resolveSubplatform(initialPath).path) return config;
-    return {
-      ...config,
-      brandName: initialStoreName,
-      label: initialStoreName,
-      ...(initialStoreDescription
-        ? { description: initialStoreDescription }
-        : {}),
-    };
-  };
+  const initialStoreIdentityRef = useRef<InitialStoreIdentity>({
+    path: resolveSubplatform(initialPath).path,
+    name: initialStoreName?.trim() || undefined,
+    description: initialStoreDescription?.trim() || undefined,
+  });
+  const seedInitialStoreIdentity = useCallback(
+    (config: SubplatformConfig) =>
+      withInitialStoreIdentity(config, initialStoreIdentityRef.current),
+    [],
+  );
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() =>
-    seedStoreIdentity(resolveSubplatform(initialPath)),
+    seedInitialStoreIdentity(resolveSubplatform(initialPath)),
   );
   const [hydrated, setHydrated] = useState(false);
   const [accountSettingsSection, setAccountSettingsSection] =
     useState<AccountSettingsSection | null>(null);
   const [storeConsoleRequested, setStoreConsoleRequested] = useState(false);
-  const [publishProductRequested, setPublishProductRequested] = useState(false);
+  const [storeConsoleRequestedStoreId, setStoreConsoleRequestedStoreId] =
+    useState<string | null>(null);
+  const [storeConsoleRequestedSection, setStoreConsoleRequestedSection] =
+    useState<StoreConsoleSection>("products");
 
   const requestedRoleRef = useRef<WorkspaceRole>(roleFromLocation());
+  const navigationRequestRef = useRef(0);
+
+  const navigateToSubplatform = useCallback(
+    async (target: string): Promise<SubplatformConfig> => {
+      const destination = new URL(target, window.location.origin);
+      if (
+        destination.origin !== window.location.origin ||
+        !destination.pathname.startsWith("/")
+      ) {
+        throw new Error("平台入口必须使用本站路径");
+      }
+
+      const request = navigationRequestRef.current + 1;
+      navigationRequestRef.current = request;
+      const path = destination.pathname;
+      const fallback = seedInitialStoreIdentity(resolveSubplatform(path));
+      window.history.pushState(null, "", path);
+      setSubplatform(fallback);
+
+      try {
+        const loaded = seedInitialStoreIdentity(await loadSubplatform(path));
+        if (navigationRequestRef.current === request) setSubplatform(loaded);
+        return loaded;
+      } catch {
+        return fallback;
+      }
+    },
+    [seedInitialStoreIdentity],
+  );
 
   useEffect(() => {
     const requestedPath = window.location.pathname;
@@ -190,13 +239,28 @@ export function useSubplatformRoute({
       searchParams.delete("stores");
       cleanWorkspaceTarget = true;
     }
-    if (searchParams.get("console") === "products") {
+    const requestedStoreId = searchParams.get("storeConsole")?.trim();
+    if (requestedStoreId) {
       setStoreConsoleRequested(true);
+      setStoreConsoleRequestedStoreId(requestedStoreId);
+      setStoreConsoleRequestedSection(
+        searchParams.get("storeConsoleSection") === "customers"
+          ? "customers"
+          : "products",
+      );
+      searchParams.delete("storeConsole");
+      searchParams.delete("storeConsoleSection");
+      cleanWorkspaceTarget = true;
+    } else if (searchParams.get("console") === "products") {
+      setStoreConsoleRequested(true);
+      setStoreConsoleRequestedStoreId(null);
+      setStoreConsoleRequestedSection("products");
       searchParams.delete("console");
       cleanWorkspaceTarget = true;
     }
-    if (searchParams.get("publish") === "1") {
-      setPublishProductRequested(true);
+    if (searchParams.has("publish")) {
+      searchParams.delete("publish");
+      cleanWorkspaceTarget = true;
     }
     if (cleanWorkspaceTarget) {
       window.history.replaceState(
@@ -205,15 +269,32 @@ export function useSubplatformRoute({
         relativeBrowserLocation(searchParams),
       );
     }
-    setSubplatform(seedStoreIdentity(resolveSubplatform(requestedPath)));
-    void loadSubplatform(requestedPath).then(setSubplatform);
+    setSubplatform(
+      seedInitialStoreIdentity(resolveSubplatform(requestedPath)),
+    );
+    void loadSubplatform(requestedPath).then((loaded) =>
+      setSubplatform(seedInitialStoreIdentity(loaded)),
+    );
     const requestedRole = roleFromLocation();
     requestedRoleRef.current = requestedRole;
     setRole(
       requiresAuthenticatedWorkspace(requestedRole) ? "buyer" : requestedRole,
     );
     setHydrated(true);
-  }, []);
+
+    const onPopState = () => {
+      const path = window.location.pathname;
+      const request = navigationRequestRef.current + 1;
+      navigationRequestRef.current = request;
+      setSubplatform(seedInitialStoreIdentity(resolveSubplatform(path)));
+      void loadSubplatform(path).then((loaded) => {
+        if (navigationRequestRef.current === request)
+          setSubplatform(seedInitialStoreIdentity(loaded));
+      });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [seedInitialStoreIdentity]);
 
   useEffect(() => {
     if (!hydrated || !authResolved) return;
@@ -252,8 +333,11 @@ export function useSubplatformRoute({
     setAccountSettingsSection,
     storeConsoleRequested,
     setStoreConsoleRequested,
-    publishProductRequested,
-    setPublishProductRequested,
+    storeConsoleRequestedStoreId,
+    setStoreConsoleRequestedStoreId,
+    storeConsoleRequestedSection,
+    setStoreConsoleRequestedSection,
+    navigateToSubplatform,
     requestedRoleRef,
   };
 }

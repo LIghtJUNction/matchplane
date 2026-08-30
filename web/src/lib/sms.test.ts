@@ -4,6 +4,26 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("./pinned-public-endpoint", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./pinned-public-endpoint")>()),
+  fetchPinnedPublicText: vi.fn(async (url: URL, options: {
+    method?: "GET" | "POST";
+    headers?: HeadersInit;
+    body?: BodyInit;
+    signal?: AbortSignal;
+  }) => {
+    const response = await fetch(url, {
+      method: options.method,
+      headers: options.headers,
+      body: options.body,
+      signal: options.signal,
+      redirect: "manual",
+      credentials: "omit",
+    });
+    return { response, text: await response.text() };
+  }),
+}));
+
 import { isPhoneOtpConfigured, sendConfiguredPhoneOtp, sendSmsGatewayConfigTest } from "./sms";
 import { saveManagedSmsGatewayConfig } from "./sms-gateway-config";
 
@@ -30,6 +50,16 @@ describe("isPhoneOtpConfigured", () => {
     expect(isPhoneOtpConfigured({ MATCHPLANE_SMS_PROVIDER_URL: "https://sms.example.test/send" })).toBe(true);
   });
 
+  it("rejects embedded credentials and production loopback endpoints", () => {
+    expect(isPhoneOtpConfigured({
+      MATCHPLANE_SMS_PROVIDER_URL: "https://token@sms.example.test/send",
+    })).toBe(false);
+    vi.stubEnv("MATCHPLANE_ENVIRONMENT", "production");
+    expect(isPhoneOtpConfigured({
+      MATCHPLANE_SMS_PROVIDER_URL: "http://localhost:9080/send",
+    })).toBe(false);
+  });
+
   it("prefers an enabled console-managed gateway over deployment variables", () => {
     saveManagedSmsGatewayConfig({ enabled: true, gatewayUrl: "https://managed.example.test/send" });
     expect(isPhoneOtpConfigured({})).toBe(true);
@@ -51,8 +81,8 @@ describe("sendConfiguredPhoneOtp", () => {
     await sendConfiguredPhoneOtp({ phoneNumber: "+8613800000000", code: "123456" });
 
     expect(fetcher).toHaveBeenCalledTimes(1);
-    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("http://localhost:9080/send");
+    const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toBe("http://localhost:9080/send");
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer gateway-secret");
     expect(JSON.parse(String(init.body))).toEqual({
       phoneNumber: "+8613800000000",

@@ -33,7 +33,7 @@ describe("user notifications route", () => {
             kind: "offer_liked",
             title: "商品收到新的赞",
             body: "测试商品",
-            actionPath: "/used-car?console=products",
+            actionPath: "/store-a?console=products",
             createdAt: "2026-08-22T10:00:00.000Z",
             read: false,
           },

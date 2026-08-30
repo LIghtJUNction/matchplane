@@ -11,9 +11,11 @@ web/.next
 web/out
 .turbo
 .playwright-cli
+.pi
+.scratch
+.memsearch
 output
 ci-artifacts-*
-subplatforms/auto/node_modules
 deploy/compose/data
 deploy/compose/var
 # PR / challenge documentation and screenshots — keep in git for review, omit from image context

@@ -23,6 +23,7 @@ FROM oven/bun:1.3.14-debian@sha256:431b37ce1acfed987e4f5b6c86a9f210ff63285a912fc
 
 WORKDIR /app
 COPY web/package.json web/bun.lock ./
+COPY web/patches ./patches
 RUN bun install --frozen-lockfile
 COPY web/ ./
 
@@ -75,6 +76,7 @@ RUN set -eux; \
       echo 'Next standalone server.js was not produced' >&2; \
       exit 1; \
     fi
+RUN node /app/scripts/validate-standalone-output.mjs /app/standalone
 
 FROM node:22-trixie-slim@sha256:f4c1b09232a0ae8f765093968ec82107a1be65cb0bfb36fc831195794f139568 AS runner
 
@@ -86,6 +88,8 @@ WORKDIR /app
 COPY --from=builder --chown=node:node /app/standalone ./
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/THIRD_PARTY_NOTICES.md ./THIRD_PARTY_NOTICES.md
+COPY --from=builder --chown=node:node /app/licenses ./licenses
 COPY --from=cli-builder /build/out/matchplane /usr/local/bin/matchplane
 
 USER node

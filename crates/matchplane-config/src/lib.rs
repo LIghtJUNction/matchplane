@@ -37,6 +37,16 @@ pub struct AppConfig {
     pub node_id: String,
     /// HTTP listen address.
     pub http_addr: String,
+    /// Whether the standalone conversion projector may claim work.
+    pub conversion_projector_enabled: bool,
+    /// Serial conversion claim size. Retained as a deployment compatibility gate and fixed at one.
+    pub conversion_projector_batch_size: u16,
+    /// Empty-loop polling interval in milliseconds.
+    pub conversion_projector_poll_ms: u64,
+    /// PostgreSQL pool size dedicated to conversion projection.
+    pub conversion_projector_pool_size: u32,
+    /// Oldest unresolved age that degrades projector readiness.
+    pub conversion_projector_degraded_after_seconds: u64,
     /// gRPC listen address.
     pub grpc_addr: String,
     /// PostgreSQL connection URL.
@@ -82,6 +92,16 @@ pub struct ValidatedConfig {
     pub node_id: FederationNodeId,
     /// Parsed HTTP listen address.
     pub http_addr: SocketAddr,
+    /// Whether the standalone conversion projector may claim work.
+    pub conversion_projector_enabled: bool,
+    /// Serial conversion claim size. Retained as a deployment compatibility gate and fixed at one.
+    pub conversion_projector_batch_size: u16,
+    /// Empty-loop polling interval in milliseconds.
+    pub conversion_projector_poll_ms: u64,
+    /// PostgreSQL pool size dedicated to conversion projection.
+    pub conversion_projector_pool_size: u32,
+    /// Oldest unresolved age that degrades projector readiness.
+    pub conversion_projector_degraded_after_seconds: u64,
     /// Parsed gRPC listen address.
     pub grpc_addr: SocketAddr,
     /// PostgreSQL connection URL.
@@ -136,6 +156,18 @@ pub enum ConfigError {
     /// Production mode rejected an insecure value.
     #[error("production configuration is insecure: {0}")]
     InsecureProduction(&'static str),
+    /// A numeric workload setting is outside its fail-closed range.
+    #[error("configuration value {field} must be in {minimum}..={maximum}, got {actual}")]
+    OutOfRange {
+        /// Environment variable name.
+        field: &'static str,
+        /// Inclusive lower bound.
+        minimum: u64,
+        /// Inclusive upper bound.
+        maximum: u64,
+        /// Rejected value.
+        actual: u64,
+    },
     /// A required endpoint is empty.
     #[error("configuration value {0} cannot be empty")]
     Empty(&'static str),
@@ -174,6 +206,11 @@ impl AppConfig {
             .set_default("service_role", "generic")?
             .set_default("node_id", "00000000-0000-7000-8000-00000000000a")?
             .set_default("http_addr", "0.0.0.0:8080")?
+            .set_default("conversion_projector_enabled", false)?
+            .set_default("conversion_projector_batch_size", 1)?
+            .set_default("conversion_projector_poll_ms", 1_000)?
+            .set_default("conversion_projector_pool_size", 5)?
+            .set_default("conversion_projector_degraded_after_seconds", 300)?
             .set_default("grpc_addr", "0.0.0.0:50051")?
             .set_default(
                 "database_url",
@@ -225,6 +262,12 @@ impl AppConfig {
                     field: "MATCHPLANE_HTTP_ADDR",
                     source,
                 })?,
+            conversion_projector_enabled: self.conversion_projector_enabled,
+            conversion_projector_batch_size: self.conversion_projector_batch_size,
+            conversion_projector_poll_ms: self.conversion_projector_poll_ms,
+            conversion_projector_pool_size: self.conversion_projector_pool_size,
+            conversion_projector_degraded_after_seconds: self
+                .conversion_projector_degraded_after_seconds,
             grpc_addr: self
                 .grpc_addr
                 .parse()
@@ -262,11 +305,49 @@ impl AppConfig {
         for (field, value) in [
             ("MATCHPLANE_DATABASE_URL", self.database_url.as_str()),
             ("MATCHPLANE_KAFKA_BROKERS", self.kafka_brokers.as_str()),
-            ("MATCHPLANE_VALKEY_URL", self.valkey_url.as_str()),
             ("MATCHPLANE_OTLP_ENDPOINT", self.otlp_endpoint.as_str()),
         ] {
             if value.trim().is_empty() {
                 errors.push(ConfigError::Empty(field));
+            }
+        }
+        if self.service_role != "conversion-projector" && self.valkey_url.trim().is_empty() {
+            errors.push(ConfigError::Empty("MATCHPLANE_VALKEY_URL"));
+        }
+
+        for (field, actual, minimum, maximum) in [
+            (
+                "MATCHPLANE_CONVERSION_PROJECTOR_BATCH_SIZE",
+                u64::from(self.conversion_projector_batch_size),
+                1,
+                1,
+            ),
+            (
+                "MATCHPLANE_CONVERSION_PROJECTOR_POLL_MS",
+                self.conversion_projector_poll_ms,
+                100,
+                60_000,
+            ),
+            (
+                "MATCHPLANE_CONVERSION_PROJECTOR_POOL_SIZE",
+                u64::from(self.conversion_projector_pool_size),
+                1,
+                20,
+            ),
+            (
+                "MATCHPLANE_CONVERSION_PROJECTOR_DEGRADED_AFTER_SECONDS",
+                self.conversion_projector_degraded_after_seconds,
+                1,
+                86_400,
+            ),
+        ] {
+            if !(minimum..=maximum).contains(&actual) {
+                errors.push(ConfigError::OutOfRange {
+                    field,
+                    minimum,
+                    maximum,
+                    actual,
+                });
             }
         }
 
@@ -277,6 +358,7 @@ impl AppConfig {
                     | "gateway"
                     | "payment-service"
                     | "event-relay"
+                    | "conversion-projector"
                     | "matcher"
                     | "projector"
                     | "vector-worker"
@@ -297,24 +379,26 @@ impl AppConfig {
                     "MATCHPLANE_NODE_ID must be unique and cannot use the development default",
                 ));
             }
-            let valkey_url = match Url::parse(&self.valkey_url) {
-                Ok(url) => Some(url),
-                Err(_) if !self.valkey_url.trim().is_empty() => {
-                    errors.push(ConfigError::InsecureProduction(
-                        "MATCHPLANE_VALKEY_URL must be a valid URL",
-                    ));
-                    None
-                }
-                Err(_) => None,
-            };
-            if let Some(valkey_url) = valkey_url {
-                if valkey_url.scheme() != "rediss" || valkey_url.fragment().is_some() {
-                    errors.push(ConfigError::InsecureProduction(
-                        "Valkey must use rediss:// with certificate verification enabled",
-                    ));
-                }
-                if let Err(error) = reject_placeholder_credentials(&valkey_url, "Valkey") {
-                    errors.push(error);
+            if self.service_role != "conversion-projector" {
+                let valkey_url = match Url::parse(&self.valkey_url) {
+                    Ok(url) => Some(url),
+                    Err(_) if !self.valkey_url.trim().is_empty() => {
+                        errors.push(ConfigError::InsecureProduction(
+                            "MATCHPLANE_VALKEY_URL must be a valid URL",
+                        ));
+                        None
+                    }
+                    Err(_) => None,
+                };
+                if let Some(valkey_url) = valkey_url {
+                    if valkey_url.scheme() != "rediss" || valkey_url.fragment().is_some() {
+                        errors.push(ConfigError::InsecureProduction(
+                            "Valkey must use rediss:// with certificate verification enabled",
+                        ));
+                    }
+                    if let Err(error) = reject_placeholder_credentials(&valkey_url, "Valkey") {
+                        errors.push(error);
+                    }
                 }
             }
 
@@ -486,6 +570,11 @@ mod tests {
             service_role: "gateway".to_owned(),
             node_id: FederationNodeId::new().to_string(),
             http_addr: "127.0.0.1:8080".to_owned(),
+            conversion_projector_enabled: false,
+            conversion_projector_batch_size: 1,
+            conversion_projector_poll_ms: 1_000,
+            conversion_projector_pool_size: 5,
+            conversion_projector_degraded_after_seconds: 300,
             grpc_addr: "127.0.0.1:50051".to_owned(),
             database_url: "postgres://matchplane:secret@db/matchplane?sslmode=verify-full"
                 .to_owned(),
@@ -587,6 +676,49 @@ mod tests {
             .expect_err("Kafka clients must fail closed without mTLS");
 
         assert!(matches!(error, ConfigError::InsecureProduction(_)));
+    }
+
+    #[test]
+    fn validate_should_accept_database_only_conversion_projector_role() {
+        let mut config = production_config();
+        config.service_role = "conversion-projector".to_owned();
+        config.kafka_security_protocol = "PLAINTEXT".to_owned();
+        config.kafka_ssl_ca_location.clear();
+        config.kafka_ssl_certificate_location.clear();
+        config.kafka_ssl_key_location.clear();
+        config.valkey_url.clear();
+        config.valkey_ca_file.clear();
+
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_should_require_valkey_for_cache_using_roles() {
+        let mut config = production_config();
+        config.valkey_url.clear();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::Empty("MATCHPLANE_VALKEY_URL"))
+        ));
+    }
+
+    #[test]
+    fn validate_should_reject_conversion_projector_values_outside_bounds() {
+        for mutate in [
+            |config: &mut AppConfig| config.conversion_projector_batch_size = 0,
+            |config: &mut AppConfig| config.conversion_projector_batch_size = 2,
+            |config: &mut AppConfig| config.conversion_projector_poll_ms = 60_001,
+            |config: &mut AppConfig| config.conversion_projector_pool_size = 21,
+            |config: &mut AppConfig| config.conversion_projector_degraded_after_seconds = 0,
+        ] {
+            let mut config = production_config();
+            mutate(&mut config);
+            assert!(matches!(
+                config.validate(),
+                Err(ConfigError::OutOfRange { .. })
+            ));
+        }
     }
 
     #[test]

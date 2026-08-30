@@ -11,12 +11,15 @@
   },
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0 --port 4173",
-    "build": "next build",
+    "build": "next build && node scripts/validate-standalone-output.mjs",
     "test": "vitest run",
-    "check": "bun run test && bun run build",
+    "test:standalone-output": "node --test scripts/validate-standalone-output.node.mjs",
+    "check": "bun run test && bun run test:standalone-output && bun run build",
     "preview": "node .next/standalone/server.js"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.41",
+    "@ai-sdk/google": "4.0.50",
     "@ai-sdk/openai-compatible": "^3.0.34",
     "@appica/ui-react": "1.1.0",
     "@better-auth/api-key": "1.7.0-rc.6",
@@ -24,16 +27,19 @@
     "@better-auth/passkey": "1.7.0-rc.6",
     "ai": "^7.0.73",
     "better-auth": "1.7.0-rc.6",
+    "ipaddr.js": "2.5.0",
+    "liquid-gooey": "0.2.1",
     "lucide-react": "1.31.0",
+    "metal-fx": "1.0.4",
     "motion": "13.1.0",
     "next": "16.3.1",
     "nodemailer": "^9.0.5",
     "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "react-rnd": "10.5.3",
     "server-only": "0.0.1",
     "sharp": "0.35.3",
+    "undici": "7.29.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -50,5 +56,8 @@
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
+  },
+  "patchedDependencies": {
+    "metal-fx@1.0.4": "patches/metal-fx@1.0.4.patch"
   }
 }

@@ -57,6 +57,31 @@ export type ParseResult<T> =
 const TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9._:-]{1,127}$/;
 const MAX_REQUIREMENTS_BYTES = 32 * 1024;
 const MAX_METADATA_BYTES = 32 * 1024;
+const CONTACT_FIELD_NAMES = new Set([
+  "contact",
+  "contact_details",
+  "contact_info",
+  "contact_method",
+  "contact_phone",
+  "contact_email",
+  "email",
+  "email_address",
+  "phone",
+  "phone_number",
+  "telephone",
+  "wechat",
+  "wechat_id",
+  "weixin",
+  "whatsapp",
+  "telegram",
+  "skype",
+]);
+const CONTACT_VALUE_PATTERNS = [
+  /(?:mailto:|tel:|sms:|(?:wechat|weixin|tg|skype|facetime):|https?:\/\/(?:wa\.me|api\.whatsapp\.com|t\.me|telegram\.me|line\.me)\/|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)/i,
+  /(?:^|[^\d])1[3-9]\d{9}(?:$|[^\d])/,
+  /\+\d[\d\s().-]{6,}\d/,
+  /(?:wechat|weixin|微信号|telegram|skype|whatsapp)(?:\s*(?:id|账号|帳號))?\s*[:=：]\s*[A-Z][A-Z0-9_.-]{4,}/i,
+];
 
 /** Parse and normalize the root-to-subplatform retrieval request envelope. */
 export function parseRetrievalQuery(
@@ -378,6 +403,11 @@ function parseCandidate(
       !isWithinJsonBytes(value.metadata, MAX_METADATA_BYTES))
   )
     return failure(`retrieval candidate ${index} metadata is invalid`);
+  if (containsContactMaterial(value)) {
+    return failure(
+      `retrieval candidate ${index} contains contact material; use the consent-gated introduction flow`,
+    );
+  }
   return {
     ok: true,
     value: {
@@ -400,6 +430,45 @@ function parseCandidate(
         : { metadata: value.metadata as Record<string, unknown> }),
     },
   };
+}
+
+function containsContactMaterial(value: unknown): boolean {
+  const pending: unknown[] = [value];
+  let visited = 0;
+  while (pending.length > 0) {
+    if (++visited > 4_096) return true;
+    const current = pending.pop();
+    if (typeof current === "string") {
+      if (CONTACT_VALUE_PATTERNS.some((pattern) => pattern.test(current))) {
+        return true;
+      }
+      continue;
+    }
+    if (Array.isArray(current)) {
+      pending.push(...current);
+      continue;
+    }
+    if (!isRecord(current)) continue;
+    for (const [rawKey, nested] of Object.entries(current)) {
+      const key = rawKey
+        .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+      if (
+        CONTACT_FIELD_NAMES.has(key) ||
+        key.startsWith("contact_") ||
+        key.endsWith("_contact") ||
+        /^(?:seller|merchant|buyer|owner|provider|supplier|support)_(?:phone|email)$/.test(
+          key,
+        )
+      ) {
+        return true;
+      }
+      pending.push(nested);
+    }
+  }
+  return false;
 }
 
 function validateCurrency(value: unknown): string | null {

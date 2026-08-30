@@ -6,7 +6,7 @@ import { clearPartySessionCache } from "../api";
 import type { WorkspaceRole } from "../types";
 import type { SubplatformConfig } from "../subplatform";
 
-export const AUTH_PENDING_KEY = "matchplane.auth.pending";
+const AUTH_PENDING_KEY = "matchplane.auth.pending";
 
 export interface AuthenticatedUser {
   id: string;
@@ -27,7 +27,7 @@ export function isTransientAuthError(error: unknown): boolean {
   return status === null || status === 408 || status === 429 || status >= 500;
 }
 
-export function authSessionFailureMessage(error: unknown): string {
+function authSessionFailureMessage(error: unknown): string {
   const status =
     error && typeof error === "object"
       ? ((error as { status?: unknown }).status ??
@@ -38,7 +38,7 @@ export function authSessionFailureMessage(error: unknown): string {
     : "暂时无法确认登录状态，请刷新后重试；当前会话不会被清除";
 }
 
-export function hasRecentPendingAuthentication(): boolean {
+function hasRecentPendingAuthentication(): boolean {
   if (typeof window === "undefined") return false;
   const startedAt = Number.parseInt(
     window.sessionStorage.getItem(AUTH_PENDING_KEY) ?? "",
@@ -57,7 +57,7 @@ export function requiresAuthenticatedWorkspace(role: WorkspaceRole): boolean {
   return role === "platform";
 }
 
-export function loginHref(role: WorkspaceRole): string {
+function loginHref(role: WorkspaceRole): string {
   if (typeof window === "undefined")
     return `/login?role=${encodeURIComponent(role)}`;
   const searchParams = new URLSearchParams(window.location.search);

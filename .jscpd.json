@@ -9,7 +9,6 @@
     "**/.next/**",
     "**/target/**",
     "deploy/helm/**",
-    "migrations/**",
-    "subplatforms/auto/**"
+    "migrations/**"
   ]
 }

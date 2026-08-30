@@ -4,6 +4,8 @@ use uuid::Uuid;
 
 use crate::{OutboxMessage, PgStore, StorageError, orders::positive_u64};
 
+const MAX_DELIVERY_ATTEMPTS: i32 = 12;
+
 impl PgStore {
     /// Claims at most one head-of-line record for each Kafka topic and message key.
     ///
@@ -19,9 +21,17 @@ impl PgStore {
     pub async fn claim_outbox(&self, limit: i64) -> Result<Vec<OutboxMessage>, StorageError> {
         let claim_token = Uuid::now_v7();
         let rows = sqlx::query(
-            "WITH candidates AS ( \
+            "WITH exhausted AS ( \
+                 UPDATE outbox_events \
+                    SET status = 'failed', claimed_at = NULL, claim_token = NULL, \
+                        last_error = COALESCE(last_error, 'delivery claim lease expired after attempt limit') \
+                  WHERE status = 'publishing' \
+                    AND attempts >= $2 \
+                    AND claimed_at < clock_timestamp() - INTERVAL '60 seconds' \
+             ), candidates AS ( \
                  SELECT candidate.event_id FROM outbox_events AS candidate \
                  WHERE candidate.available_at <= clock_timestamp() \
+                   AND candidate.attempts < $2 \
                    AND (candidate.status IN ('pending', 'failed') \
                         OR (candidate.status = 'publishing' \
                             AND candidate.claimed_at < clock_timestamp() - INTERVAL '60 seconds')) \
@@ -38,12 +48,13 @@ impl PgStore {
              ) \
              UPDATE outbox_events AS outbox \
              SET status = 'publishing', attempts = attempts + 1, claimed_at = clock_timestamp(), \
-                 claim_token = $2, last_error = NULL \
+                 claim_token = $3, last_error = NULL \
              FROM candidates WHERE outbox.event_id = candidates.event_id \
              RETURNING outbox.event_id, outbox.topic, outbox.message_key, \
                        outbox.shard_sequence, outbox.payload, outbox.attempts, outbox.claim_token",
         )
         .bind(limit.clamp(1, 500))
+        .bind(MAX_DELIVERY_ATTEMPTS)
         .bind(claim_token)
         .fetch_all(self.pool())
         .await?;
@@ -90,6 +101,11 @@ impl PgStore {
     }
 
     /// Returns a failed outbox record to the retry queue with bounded exponential backoff.
+    ///
+    /// Once the durable attempt count reaches the delivery limit, the record remains failed but
+    /// becomes ineligible for automatic claims. Keeping it unpublished deliberately preserves
+    /// per-key ordering: operators can inspect the last error without silently skipping the poison
+    /// record and publishing a later sequence.
     ///
     /// # Errors
     ///

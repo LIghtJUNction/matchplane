@@ -1,6 +1,10 @@
 //! PostgreSQL repositories, migrations, transactional outbox, and consumer inbox primitives.
 
+mod book_projection;
 mod catalog_projection;
+mod consumer_failure;
+mod conversion_projection;
+mod conversion_recovery;
 mod federation;
 mod generic_marketplace;
 mod marketplace;
@@ -19,6 +23,16 @@ pub use catalog_projection::{
     CatalogProjectionCounts, CatalogProjectionProblem, CatalogProjectionReplayOutcome,
     CatalogProjectionStatus,
 };
+pub use consumer_failure::{
+    KafkaFailureClass, KafkaFailureDisposition, QuarantineKafkaRecord, QuarantinedKafkaRecord,
+};
+pub use conversion_projection::{
+    MarketplaceConversionBacklog, MarketplaceConversionClaimBatch,
+    MarketplaceConversionFailureDisposition, MarketplaceConversionFailureOutcome,
+    MarketplaceConversionJob, MarketplaceConversionProjectionOutcome,
+    MarketplaceConversionRecoveryAction, MarketplaceConversionRecoveryOutcome,
+};
+pub use conversion_recovery::VerifiedHostOperator;
 pub use generic_marketplace::{
     AcceptMarketplaceContact, CreateMarketplaceIntent, CreateMarketplaceIntroduction,
     CreateMarketplaceOffer, CreateMarketplaceSalesHandoff, MarketplaceBehaviorEventOutcome,
@@ -49,9 +63,9 @@ pub use platform::{
 };
 pub use subplatform::{SubplatformEmailConfig, UpsertSubplatformEmailConfig};
 pub use types::{
-    BookSnapshot, CandidateMatch, FederationReservation, FederationTransition, MatchCommitOutcome,
-    OutboxMessage, ReserveFederated, StoredAccount, StoredOrder, StoredTrade, SubmitOrder,
-    SubmitOrderOutcome, VectorRecord,
+    BookProjection, BookProjectionLevel, BookSnapshot, CandidateMatch, FederationReservation,
+    FederationTransition, MatchCommitOutcome, OutboxMessage, ReserveFederated, StoredAccount,
+    StoredOrder, StoredTrade, SubmitOrder, SubmitOrderOutcome, VectorRecord,
 };
 
 /// PostgreSQL storage facade shared by service adapters.
@@ -119,6 +133,20 @@ pub enum StorageError {
     /// JSON encoding or decoding failed at a persistence boundary.
     #[error("JSON persistence failed: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+pub(crate) fn bounded_operator_text(
+    value: &str,
+    maximum: usize,
+    label: &str,
+) -> Result<String, StorageError> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
+        return Err(StorageError::InvalidData(format!(
+            "{label} must contain 1..={maximum} printable bytes"
+        )));
+    }
+    Ok(value.to_owned())
 }
 
 impl PgStore {

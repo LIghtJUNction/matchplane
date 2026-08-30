@@ -5,14 +5,14 @@ import { getOwnedStores, type StoreSummary } from "../api";
 import { loadSubplatform, type SubplatformConfig } from "../subplatform";
 import type { AuthenticatedUser } from "./useAuthSession";
 import { isTransientAuthError, waitForAuthRetry } from "./useAuthSession";
-import { relativeBrowserLocation, type AccountSettingsSection } from "./useSubplatformRoute";
+import type { AccountSettingsSection } from "./useSubplatformRoute";
 
 export interface StoreConsoleContext {
   subplatform: SubplatformConfig;
   store: StoreSummary;
 }
 
-export function canManageStore(
+function canManageStore(
   user: AuthenticatedUser | null,
   store: StoreSummary | null,
 ): boolean {
@@ -40,13 +40,12 @@ async function getOwnedStoresWithRetry(): Promise<StoreSummary[]> {
 
 interface UseOwnedStoresOptions {
   authUser: AuthenticatedUser | null;
-  authResolved: boolean;
   subplatform: SubplatformConfig;
   locale: "zh" | "en";
   storeConsoleRequested: boolean;
   setStoreConsoleRequested: (val: boolean) => void;
-  publishProductRequested: boolean;
-  setPublishProductRequested: (val: boolean) => void;
+  storeConsoleRequestedStoreId: string | null;
+  setStoreConsoleRequestedStoreId: (value: string | null) => void;
   setAccountSettingsSection: (section: AccountSettingsSection | null) => void;
   onNotice: (message: string) => void;
   openSignIn: () => void;
@@ -54,18 +53,18 @@ interface UseOwnedStoresOptions {
 
 export function useOwnedStores({
   authUser,
-  authResolved,
   subplatform,
   locale,
   storeConsoleRequested,
   setStoreConsoleRequested,
-  publishProductRequested,
-  setPublishProductRequested,
+  storeConsoleRequestedStoreId,
+  setStoreConsoleRequestedStoreId,
   setAccountSettingsSection,
   onNotice,
   openSignIn,
 }: UseOwnedStoresOptions) {
   const [ownedStores, setOwnedStores] = useState<StoreSummary[]>([]);
+  const [ownedStoresError, setOwnedStoresError] = useState<string | null>(null);
   const [ownedStoresResolved, setOwnedStoresResolved] = useState(false);
   const [storeConsoleOpen, setStoreConsoleOpen] = useState(false);
   const [storeConsoleContext, setStoreConsoleContext] =
@@ -75,11 +74,13 @@ export function useOwnedStores({
     let cancelled = false;
     if (!authUser?.id) {
       setOwnedStores([]);
+      setOwnedStoresError(null);
       setOwnedStoresResolved(false);
       return () => {
         cancelled = true;
       };
     }
+    setOwnedStoresError(null);
     setOwnedStoresResolved(false);
     void getOwnedStoresWithRetry()
       .then((stores) => {
@@ -87,11 +88,12 @@ export function useOwnedStores({
       })
       .catch((error) => {
         if (!cancelled) {
-          onNotice(
+          const message =
             error instanceof Error
               ? error.message
-              : "我的店铺暂时无法读取，请稍后重试",
-          );
+              : "我的店铺暂时无法读取，请稍后重试";
+          setOwnedStoresError(message);
+          onNotice(message);
         }
       })
       .finally(() => {
@@ -134,90 +136,35 @@ export function useOwnedStores({
       openSignIn();
       return;
     }
-    if (!currentManagedStore) {
+    const requestedStore = storeConsoleRequestedStoreId
+      ? (ownedStores.find(
+          (store) => store.id === storeConsoleRequestedStoreId,
+        ) ?? null)
+      : currentManagedStore;
+    setStoreConsoleRequestedStoreId(null);
+    if (!requestedStore) {
       onNotice("只有店主或店铺运营人员可以管理这家店");
       return;
     }
-    setStoreConsoleContext({ subplatform, store: currentManagedStore });
+    if (storeConsoleRequestedStoreId) {
+      void openStoreConsoleFor(requestedStore);
+      return;
+    }
+    setStoreConsoleContext({ subplatform, store: requestedStore });
     setStoreConsoleOpen(true);
   }, [
     authUser,
     currentManagedStore,
     onNotice,
     openSignIn,
+    openStoreConsoleFor,
+    ownedStores,
     ownedStoresResolved,
     setStoreConsoleRequested,
+    setStoreConsoleRequestedStoreId,
     storeConsoleRequested,
+    storeConsoleRequestedStoreId,
     subplatform,
-  ]);
-
-  useEffect(() => {
-    if (!publishProductRequested || !authResolved) return;
-    if (!authUser) {
-      if (typeof window !== "undefined") {
-        window.location.assign(
-          `/login?next=${encodeURIComponent("/?publish=1")}`,
-        );
-      }
-      return;
-    }
-    if (!ownedStoresResolved) return;
-
-    setPublishProductRequested(false);
-    if (typeof window !== "undefined") {
-      const searchParams = new URLSearchParams(window.location.search);
-      searchParams.delete("publish");
-      window.history.replaceState(
-        null,
-        "",
-        relativeBrowserLocation(searchParams),
-      );
-    }
-    if (ownedStores.length === 1) {
-      void openStoreConsoleFor(ownedStores[0]);
-      return;
-    }
-    setAccountSettingsSection("stores");
-  }, [
-    authResolved,
-    authUser,
-    openStoreConsoleFor,
-    ownedStores,
-    ownedStoresResolved,
-    publishProductRequested,
-    setAccountSettingsSection,
-    setPublishProductRequested,
-  ]);
-
-  const publishProduct = useCallback(() => {
-    if (!authResolved || (authUser && !ownedStoresResolved)) {
-      setPublishProductRequested(true);
-      onNotice(locale === "en" ? "Loading your stores…" : "正在读取你的店铺…");
-      return;
-    }
-    if (!authUser) {
-      if (typeof window !== "undefined") {
-        window.location.assign(
-          `/login?next=${encodeURIComponent("/?publish=1")}`,
-        );
-      }
-      return;
-    }
-    if (ownedStores.length === 1) {
-      void openStoreConsoleFor(ownedStores[0]);
-      return;
-    }
-    setAccountSettingsSection("stores");
-  }, [
-    authResolved,
-    authUser,
-    locale,
-    onNotice,
-    openStoreConsoleFor,
-    ownedStores,
-    ownedStoresResolved,
-    setAccountSettingsSection,
-    setPublishProductRequested,
   ]);
 
   const canManageStoreConsole = canManageStore(
@@ -228,6 +175,7 @@ export function useOwnedStores({
   return {
     ownedStores,
     setOwnedStores,
+    ownedStoresError,
     ownedStoresResolved,
     storeConsoleOpen,
     setStoreConsoleOpen,
@@ -236,6 +184,5 @@ export function useOwnedStores({
     currentManagedStore,
     canManageStoreConsole,
     openStoreConsoleFor,
-    publishProduct,
   };
 }

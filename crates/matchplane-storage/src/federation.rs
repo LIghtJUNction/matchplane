@@ -1,6 +1,5 @@
 use matchplane_domain::{FederationNodeId, ReservationId};
 use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::{FederationReservation, FederationTransition, PgStore, ReserveFederated, StorageError};
@@ -191,6 +190,7 @@ impl PgStore {
             return Ok(reservation);
         }
 
+        ensure_future_reservation_expiry(&mut transaction, request.expires_at).await?;
         lock_federation_node(&mut transaction, request).await?;
         lock_order_capacity(&mut transaction, request).await?;
         let reservation_id = ReservationId::new();
@@ -261,7 +261,8 @@ impl PgStore {
             .await?;
         let row = sqlx::query(
             "SELECT id, source_node_id, order_id, quantity::text AS quantity, status, \
-                    idempotency_key, version, fencing_token, expires_at \
+                    idempotency_key, version, fencing_token, expires_at, \
+                    expires_at <= clock_timestamp() AS expired \
              FROM federation_saga_reservations \
              WHERE id = $1 FOR UPDATE",
         )
@@ -298,8 +299,8 @@ impl PgStore {
 
         let order_id: Uuid = row.try_get("order_id")?;
         let quantity: String = row.try_get("quantity")?;
-        let expires_at: OffsetDateTime = row.try_get("expires_at")?;
-        if expires_at <= OffsetDateTime::now_utc() {
+        let expired: bool = row.try_get("expired")?;
+        if expired {
             release_order_capacity(&mut transaction, order_id, &quantity).await?;
             let expired = update_reservation_status(
                 &mut transaction,
@@ -345,7 +346,19 @@ fn validate_reserve(request: &ReserveFederated) -> Result<(), StorageError> {
             "federation fencing token must be positive".to_owned(),
         ));
     }
-    if request.expires_at <= OffsetDateTime::now_utc() {
+    Ok(())
+}
+
+async fn ensure_future_reservation_expiry(
+    transaction: &mut Transaction<'_, Postgres>,
+    expires_at: time::OffsetDateTime,
+) -> Result<(), StorageError> {
+    let expires_in_future =
+        sqlx::query_scalar::<_, bool>("SELECT $1::timestamptz > clock_timestamp()")
+            .bind(expires_at)
+            .fetch_one(&mut **transaction)
+            .await?;
+    if !expires_in_future {
         return Err(StorageError::InvalidData(
             "federation reservation must expire in the future".to_owned(),
         ));
@@ -574,7 +587,7 @@ pub(crate) async fn expire_federated_reservations(
 mod tests {
     use super::*;
     use matchplane_domain::{DomainId, MarketId, OrderId, PayloadHash, Quantity, TenantId};
-    use time::Duration;
+    use time::{Duration, OffsetDateTime};
 
     fn reserve() -> ReserveFederated {
         ReserveFederated {
@@ -583,7 +596,10 @@ mod tests {
             domain_id: DomainId::new(),
             market_id: MarketId::new(),
             order_id: OrderId::new(),
-            quantity: Quantity::new(1).expect("test quantity is positive"),
+            quantity: match Quantity::new(1) {
+                Ok(quantity) => quantity,
+                Err(error) => panic!("positive test quantity was rejected: {error}"),
+            },
             idempotency_key: "federation-test".to_owned(),
             request_hash: PayloadHash::from_bytes(b"request"),
             fencing_token: 1,
@@ -605,5 +621,16 @@ mod tests {
     #[test]
     fn validate_reserve_should_accept_bounded_request() {
         assert!(validate_reserve(&reserve()).is_ok());
+    }
+
+    #[test]
+    fn validate_reserve_should_defer_expiry_to_postgres() {
+        let mut request = reserve();
+        request.expires_at = OffsetDateTime::UNIX_EPOCH;
+
+        assert!(
+            validate_reserve(&request).is_ok(),
+            "PostgreSQL should own the authoritative expiry clock"
+        );
     }
 }

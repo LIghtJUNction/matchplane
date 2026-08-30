@@ -1,6 +1,13 @@
 "use client";
 
-import { type SyntheticEvent, useEffect, useId, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type SyntheticEvent,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint } from "lucide-react";
 import { Button } from "@appica/ui-react/button";
 import { Input } from "@appica/ui-react/input";
@@ -8,7 +15,6 @@ import { Input } from "@appica/ui-react/input";
 import {
   clearPartySessionCache,
   establishMarketplaceSession,
-  getMallLegalDocuments,
   isLiveMarketplaceEnabled,
   redeemPlatformAdminInvite,
   type BetterAuthMarketplaceRole,
@@ -22,6 +28,10 @@ import {
 } from "../subplatform";
 import { Brand } from "./Primitives";
 import { PreferenceControls } from "./PreferenceControls";
+import {
+  RegistrationLegalConsent,
+  type RegistrationLegalVersions,
+} from "./RegistrationLegalConsent";
 
 type AuthMethod = "password" | "email-otp" | "magic-link";
 type SocialProvider = "google" | "wechat" | "qq" | "alipay";
@@ -82,10 +92,8 @@ export function LoginScreen({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [legalVersions, setLegalVersions] = useState<{
-    terms: number;
-    privacy: number;
-  } | null>(null);
+  const [legalVersions, setLegalVersions] =
+    useState<RegistrationLegalVersions | null>(null);
   const [legalAccepted, setLegalAccepted] = useState(false);
   const redeemingInviteRef = useRef(false);
   const authMethodsId = useId();
@@ -178,17 +186,6 @@ export function LoginScreen({
           magicLink: false,
           passkey: true,
         });
-      });
-    void getMallLegalDocuments()
-      .then((legal) => {
-        if (!cancelled)
-          setLegalVersions({
-            terms: legal.documents.terms.version,
-            privacy: legal.documents.privacy.version,
-          });
-      })
-      .catch(() => {
-        if (!cancelled) setLegalVersions(null);
       });
     return () => {
       cancelled = true;
@@ -735,6 +732,26 @@ export function LoginScreen({
   // deployment can actually deliver an SMS code for them.
   const phoneIdentifierEnabled = capabilities.phoneOtp && !emailOnlyIdentifier;
   const activeMethodTabId = `${authMethodsId}-${method}-tab`;
+  const moveMethodTab = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    currentMethod: AuthMethod,
+  ) => {
+    const currentIndex = availableMethods.indexOf(currentMethod);
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight")
+      nextIndex = (currentIndex + 1) % availableMethods.length;
+    else if (event.key === "ArrowLeft")
+      nextIndex =
+        (currentIndex - 1 + availableMethods.length) % availableMethods.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = availableMethods.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextMethod = availableMethods[nextIndex];
+    if (!nextMethod) return;
+    switchMethod(nextMethod);
+    document.getElementById(`${authMethodsId}-${nextMethod}-tab`)?.focus();
+  };
   const registrationHref = `/register?next=${encodeURIComponent(next)}`;
   const loginHref = `/login?next=${encodeURIComponent(next)}`;
 
@@ -806,7 +823,9 @@ export function LoginScreen({
                 role="tab"
                 aria-controls={`${authMethodsId}-panel`}
                 aria-selected={method === "password"}
+                tabIndex={method === "password" ? 0 : -1}
                 onClick={() => switchMethod("password")}
+                onKeyDown={(event) => moveMethodTab(event, "password")}
               >
                 {copy.password}
               </button>
@@ -818,7 +837,9 @@ export function LoginScreen({
                   role="tab"
                   aria-controls={`${authMethodsId}-panel`}
                   aria-selected={method === "email-otp"}
+                  tabIndex={method === "email-otp" ? 0 : -1}
                   onClick={() => switchMethod("email-otp")}
+                  onKeyDown={(event) => moveMethodTab(event, "email-otp")}
                 >
                   {copy.emailOtp}
                 </button>
@@ -831,7 +852,9 @@ export function LoginScreen({
                   role="tab"
                   aria-controls={`${authMethodsId}-panel`}
                   aria-selected={method === "magic-link"}
+                  tabIndex={method === "magic-link" ? 0 : -1}
                   onClick={() => switchMethod("magic-link")}
+                  onKeyDown={(event) => moveMethodTab(event, "magic-link")}
                 >
                   {copy.magicLink}
                 </button>
@@ -853,7 +876,9 @@ export function LoginScreen({
             onSubmit={submit}
           >
             <label htmlFor="login-identifier">
-              <span>{phoneIdentifierEnabled ? copy.identifier : copy.email}</span>
+              <span>
+                {phoneIdentifierEnabled ? copy.identifier : copy.email}
+              </span>
               <Input
                 id="login-identifier"
                 type="text"
@@ -939,25 +964,13 @@ export function LoginScreen({
               </div>
             ) : null}
             {isRegistration && !registrationPending && !passwordResetMode ? (
-              <div className="login-legal-consent">
-                <input
-                  id="login-legal-consent"
-                  type="checkbox"
-                  checked={legalAccepted}
-                  onChange={(event) => setLegalAccepted(event.target.checked)}
-                  disabled={submitting || !legalVersions}
-                />
-                <label htmlFor="login-legal-consent">
-                  {copy.legalConsentPrefix}{" "}
-                  <a href="/terms" target="_blank" rel="noreferrer">
-                    {copy.terms}
-                  </a>{" "}
-                  {copy.legalConsentJoin}{" "}
-                  <a href="/privacy" target="_blank" rel="noreferrer">
-                    {copy.privacy}
-                  </a>
-                </label>
-              </div>
+              <RegistrationLegalConsent
+                locale={locale}
+                accepted={legalAccepted}
+                disabled={submitting}
+                onAcceptedChange={setLegalAccepted}
+                onVersionsChange={setLegalVersions}
+              />
             ) : null}
             {(method === "email-otp" && otpSent) ||
             registrationPending ||
@@ -1269,10 +1282,6 @@ function loginCopy(locale: "zh" | "en") {
       socialMethods: "Social sign-in",
       password: "Password",
       confirmPassword: "Confirm password",
-      terms: "Terms of Service",
-      privacy: "Privacy Policy",
-      legalConsentPrefix: "I have read and agree to the",
-      legalConsentJoin: "and",
       legalAcceptanceRequired:
         "Read and agree to the Terms of Service and Privacy Policy to register.",
       emailOtp: "Code",
@@ -1362,10 +1371,6 @@ function loginCopy(locale: "zh" | "en") {
     socialMethods: "第三方登录",
     password: "密码",
     confirmPassword: "确认密码",
-    terms: "用户协议",
-    privacy: "隐私政策",
-    legalConsentPrefix: "我已阅读并同意",
-    legalConsentJoin: "和",
     legalAcceptanceRequired: "请先阅读并同意用户协议和隐私政策。",
     emailOtp: "验证码",
     magicLink: "免密链接",

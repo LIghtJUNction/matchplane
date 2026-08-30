@@ -1,9 +1,14 @@
+import { Button, buttonVariants } from "@appica/ui-react/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appica/ui-react/collapsible";
 import {
   ArrowRight,
-  Check,
   CheckCircle2,
-  Copy,
-  Link2,
+  ChevronDown,
+  CircleAlert,
   Plus,
   UserPlus,
 } from "lucide-react";
@@ -13,10 +18,12 @@ import {
   createHostedStore,
   createStoreCollaboratorInvite,
   getOwnedStores,
+  MarketplaceApiError,
   type StoreCollaboratorInvite,
   type StoreSummary,
 } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
+import { InviteLinkPanel, OwnedStoreCard } from "./OwnedStoreCard";
 
 export function HostedStoreOnboarding({
   locale,
@@ -33,7 +40,7 @@ export function HostedStoreOnboarding({
 }) {
   const [stores, setStores] = useState<StoreSummary[]>(initialStores);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [opening, setOpening] = useState(false);
   const [name, setName] = useState("");
@@ -43,20 +50,32 @@ export function HostedStoreOnboarding({
   const [invite, setInvite] = useState<StoreCollaboratorInvite | null>(null);
   const [invitingStoreId, setInvitingStoreId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const activeStores = stores.filter((store) => store.status === "active");
+  const inactiveStores = stores.filter((store) => store.status !== "active");
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    setLoadError(false);
+    setLoadError(null);
     getOwnedStores()
       .then((items) => {
         if (!active) return;
         setStores(items);
         onStoresChange?.(items);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!active) return;
-        setLoadError(true);
+        const sessionUnavailable =
+          error instanceof MarketplaceApiError &&
+          (error.status === 401 || error.status === 403);
+        const message = sessionUnavailable
+          ? locale === "en"
+            ? "Refresh your sign-in, then try again."
+            : "请刷新登录状态后重试。"
+          : locale === "en"
+            ? "Your store data is unchanged. Check the connection and try again."
+            : "店铺数据没有变化，请检查网络后重试。";
+        setLoadError(message);
         onNotice(
           locale === "en" ? "Could not load your stores." : "店铺列表读取失败",
         );
@@ -160,17 +179,24 @@ export function HostedStoreOnboarding({
 
       {loadError ? (
         <div className="hosted-store-load-error" role="alert">
-          <p>
-            {locale === "en"
-              ? "Your stores could not be loaded."
-              : "暂时无法读取店铺列表。"}
-          </p>
-          <button
+          <CircleAlert size={19} aria-hidden="true" />
+          <div>
+            <strong>
+              {locale === "en"
+                ? "Store list did not load"
+                : "店铺列表没有加载成功"}
+            </strong>
+            <p>{loadError}</p>
+          </div>
+          <Button
+            variant="outline"
+            size="md"
+            className="min-h-11"
             type="button"
             onClick={() => setReloadKey((value) => value + 1)}
           >
-            {locale === "en" ? "Try again" : "重试"}
-          </button>
+            {locale === "en" ? "Try again" : "重新加载"}
+          </Button>
         </div>
       ) : null}
 
@@ -189,7 +215,10 @@ export function HostedStoreOnboarding({
           </div>
           <div className="hosted-store-success-actions">
             {invite?.storeId === createdStore.id ? null : (
-              <button
+              <Button
+                variant="outline"
+                size="md"
+                className="min-h-11"
                 type="button"
                 onClick={() => void generateInvite(createdStore.id)}
                 disabled={invitingStoreId !== null}
@@ -202,21 +231,28 @@ export function HostedStoreOnboarding({
                   : locale === "en"
                     ? "Invite a partner"
                     : "邀请伙伴协作"}
-              </button>
+              </Button>
             )}
             {onManageStore ? (
-              <button
-                className="button button-dark"
+              <Button
+                variant="primary"
+                size="md"
+                className="min-h-11"
                 type="button"
                 onClick={() => onManageStore(createdStore)}
               >
                 {locale === "en" ? "Add products" : "开始添加商品"}
                 <ArrowRight size={17} aria-hidden="true" />
-              </button>
+              </Button>
             ) : (
               <a
-                className="button button-dark"
                 href={`${createdStore.path}?console=products`}
+                data-slot="button"
+                className={buttonVariants({
+                  variant: "primary",
+                  size: "md",
+                  className: "min-h-11",
+                })}
               >
                 {locale === "en" ? "Add products" : "开始添加商品"}
                 <ArrowRight size={17} aria-hidden="true" />
@@ -238,113 +274,70 @@ export function HostedStoreOnboarding({
       ) : null}
 
       {!loading && !loadError && stores.length > 0 ? (
-        <ul className="owned-store-grid">
-          {stores.map((store) => {
-            const canInvite =
-              store.membershipRole === "owner" ||
-              store.membershipRole === "mall_operator";
-            const showsInvite =
-              invite?.storeId === store.id && createdStore?.id !== store.id;
-            const inviteLabel =
-              invitingStoreId === store.id
-                ? locale === "en"
-                  ? "Creating…"
-                  : "生成中…"
-                : invite?.storeId === store.id
-                  ? locale === "en"
-                    ? "Link ready"
-                    : "链接已生成"
-                  : locale === "en"
-                    ? "Invite"
-                    : "邀请协作";
-            return (
-              <li key={store.id} className="owned-store-card">
-                <div className="owned-store-card-main">
-                  <div className="owned-store-card-copy">
-                    <div className="owned-store-card-title-row">
-                      <strong>{store.displayName}</strong>
-                      {store.status === "active" && (
-                        <span className="store-status-badge is-active">
-                          {locale === "en" ? "Open" : "营业中"}
-                        </span>
-                      )}
-                      {store.status === "closed" && (
-                        <span className="store-status-badge is-closed">
-                          {locale === "en" ? "Closed" : "已打烊"}
-                        </span>
-                      )}
-                      {store.status === "pending" && (
-                        <span className="store-status-badge is-pending">
-                          {locale === "en" ? "Review" : "审核中"}
-                        </span>
-                      )}
-                      {store.status === "suspended" && (
-                        <span className="store-status-badge is-suspended">
-                          {locale === "en" ? "Suspended" : "已暂停"}
-                        </span>
-                      )}
-                    </div>
-                    <p>
-                      {store.description ||
-                        (locale === "en" ? "Hosted store" : "托管店铺")}
-                    </p>
-                  </div>
-                  <a className="owned-store-enter" href={store.path}>
-                    {locale === "en" ? "Open store" : "进入店铺"}
-                    <ArrowRight size={16} aria-hidden="true" />
-                  </a>
-                </div>
-                <div className="owned-store-card-toolbar">
-                  {canInvite ? (
-                    <button
-                      type="button"
-                      className="owned-store-secondary-action"
-                      onClick={() => {
-                        if (invite?.storeId !== store.id)
-                          void generateInvite(store.id);
-                      }}
-                      disabled={
-                        invitingStoreId !== null || invite?.storeId === store.id
+        <div className="owned-store-groups">
+          {activeStores.length > 0 ? (
+            <ul
+              className="owned-store-grid"
+              aria-label={locale === "en" ? "Active stores" : "营业中的店铺"}
+            >
+              {activeStores.map((store) => (
+                <OwnedStoreCard
+                  key={store.id}
+                  store={store}
+                  secondary={false}
+                  locale={locale}
+                  invite={invite}
+                  createdStoreId={createdStore?.id}
+                  invitingStoreId={invitingStoreId}
+                  copied={copied}
+                  onGenerateInvite={(storeId) => void generateInvite(storeId)}
+                  onCopyInvite={() => void copyInviteLink()}
+                  onManageStore={onManageStore}
+                />
+              ))}
+            </ul>
+          ) : null}
+          {inactiveStores.length > 0 ? (
+            <Collapsible
+              className="owned-store-inactive-group"
+              defaultOpen={activeStores.length === 0}
+            >
+              <CollapsibleTrigger className="owned-store-inactive-trigger">
+                <span>
+                  {locale === "en" ? "Other stores" : "其他状态的店铺"}
+                  <small>{inactiveStores.length}</small>
+                </span>
+                <ChevronDown aria-hidden="true" />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="owned-store-inactive-content">
+                <ul
+                  className="owned-store-grid"
+                  aria-label={
+                    locale === "en" ? "Inactive stores" : "非营业店铺"
+                  }
+                >
+                  {inactiveStores.map((store) => (
+                    <OwnedStoreCard
+                      key={store.id}
+                      store={store}
+                      secondary
+                      locale={locale}
+                      invite={invite}
+                      createdStoreId={createdStore?.id}
+                      invitingStoreId={invitingStoreId}
+                      copied={copied}
+                      onGenerateInvite={(storeId) =>
+                        void generateInvite(storeId)
                       }
-                      aria-disabled={
-                        invite?.storeId === store.id ? true : undefined
-                      }
-                    >
-                      <UserPlus size={15} aria-hidden="true" />
-                      {inviteLabel}
-                    </button>
-                  ) : null}
-                  {onManageStore ? (
-                    <button
-                      className="owned-store-secondary-action"
-                      type="button"
-                      onClick={() => onManageStore(store)}
-                    >
-                      {locale === "en" ? "Products" : "管理商品"}
-                    </button>
-                  ) : (
-                    <a
-                      className="owned-store-secondary-action"
-                      href={`${store.path}?console=products`}
-                    >
-                      {locale === "en" ? "Products" : "管理商品"}
-                    </a>
-                  )}
-                </div>
-                {showsInvite ? (
-                  <InviteLinkPanel
-                    invite={invite}
-                    locale={locale}
-                    copied={copied}
-                    regenerating={invitingStoreId === store.id}
-                    onCopy={() => void copyInviteLink()}
-                    onRegenerate={() => void generateInvite(store.id)}
-                  />
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
+                      onCopyInvite={() => void copyInviteLink()}
+                      onManageStore={onManageStore}
+                    />
+                  ))}
+                </ul>
+              </CollapsibleContent>
+            </Collapsible>
+          ) : null}
+        </div>
       ) : null}
 
       {!loading && !loadError && !opening ? (
@@ -355,25 +348,29 @@ export function HostedStoreOnboarding({
                 ? "A name and short introduction are enough to begin."
                 : "填写名称和简介即可开店。"}
             </p>
-            <button
-              className="button button-dark hosted-store-empty-action"
+            <Button
+              variant="primary"
+              size="md"
+              className="min-h-11"
               type="button"
               onClick={openForm}
             >
               <Plus size={16} aria-hidden="true" />
               {locale === "en" ? "Open a store" : "开一家店"}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="hosted-store-add-row">
-            <button
-              className="hosted-store-add"
+            <Button
+              variant="outline"
+              size="md"
+              className="min-h-11"
               type="button"
               onClick={openForm}
             >
               <Plus size={16} aria-hidden="true" />
               {locale === "en" ? "Open another store" : "再开一家店"}
-            </button>
+            </Button>
           </div>
         )
       ) : null}
@@ -384,9 +381,15 @@ export function HostedStoreOnboarding({
             <strong>
               {locale === "en" ? "Store details" : "填写店铺资料"}
             </strong>
-            <button type="button" onClick={() => setOpening(false)}>
+            <Button
+              variant="ghost"
+              size="md"
+              className="min-h-11"
+              type="button"
+              onClick={() => setOpening(false)}
+            >
               {locale === "en" ? "Cancel" : "取消"}
-            </button>
+            </Button>
           </div>
           <label htmlFor="hosted-store-name">
             <span>{locale === "en" ? "Store name" : "店铺名称"}</span>
@@ -421,8 +424,10 @@ export function HostedStoreOnboarding({
               ? "The public address is assigned automatically. You can update store details later."
               : "访问地址会自动生成；店铺资料之后仍可修改。"}
           </p>
-          <button
-            className="button button-dark"
+          <Button
+            variant="primary"
+            size="md"
+            className="min-h-11"
             type="submit"
             disabled={submitting}
           >
@@ -434,88 +439,9 @@ export function HostedStoreOnboarding({
                 ? "Create store"
                 : "创建店铺"}
             <ArrowRight size={18} aria-hidden="true" />
-          </button>
+          </Button>
         </form>
       ) : null}
     </section>
-  );
-}
-
-function InviteLinkPanel({
-  invite,
-  locale,
-  copied,
-  regenerating,
-  onCopy,
-  onRegenerate,
-}: {
-  invite: StoreCollaboratorInvite;
-  locale: InterfaceLocale;
-  copied: boolean;
-  regenerating: boolean;
-  onCopy: () => void;
-  onRegenerate: () => void;
-}) {
-  const expiresAt = new Intl.DateTimeFormat(locale === "en" ? "en" : "zh-CN", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(invite.expiresAt));
-
-  return (
-    <div className="hosted-store-invite" role="status">
-      <div className="hosted-store-invite-heading">
-        <Link2 size={18} aria-hidden="true" />
-        <div>
-          <strong>
-            {locale === "en" ? "Collaborator invite" : "店铺协作邀请"}
-          </strong>
-          <p>
-            {locale === "en"
-              ? "One person can use each link within seven days. They can manage products, but not store ownership or members."
-              : "每条链接限一人于 7 天内使用；对方可管理商品，不能转移店铺或管理成员。"}
-          </p>
-        </div>
-      </div>
-      <div className="hosted-store-invite-url">
-        <input
-          aria-label={
-            locale === "en" ? "Collaborator invite link" : "协作邀请链接"
-          }
-          value={invite.registrationUrl}
-          readOnly
-          onFocus={(event) => event.currentTarget.select()}
-        />
-        <button type="button" onClick={onCopy}>
-          {copied ? (
-            <Check size={16} aria-hidden="true" />
-          ) : (
-            <Copy size={16} aria-hidden="true" />
-          )}
-          {copied
-            ? locale === "en"
-              ? "Copied"
-              : "已复制"
-            : locale === "en"
-              ? "Copy"
-              : "复制"}
-        </button>
-      </div>
-      <div className="hosted-store-invite-meta">
-        <span>
-          {locale === "en" ? `Expires ${expiresAt}` : `${expiresAt} 到期`}
-        </span>
-        <button type="button" onClick={onRegenerate} disabled={regenerating}>
-          {regenerating
-            ? locale === "en"
-              ? "Creating…"
-              : "正在生成…"
-            : locale === "en"
-              ? "Create another link"
-              : "再生成一条"}
-        </button>
-      </div>
-    </div>
   );
 }

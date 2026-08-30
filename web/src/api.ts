@@ -111,6 +111,7 @@ export interface PaymentAdminRecord {
   gateway_kind: string;
   gateway_mode: string;
   payment_method: string;
+  /** Exact integer minor units; apply currency_scale only for display. */
   amount: string;
   captured_amount: string;
   refunded_amount: string;
@@ -130,6 +131,7 @@ export interface RefundAdminRecord {
   refund_id: string;
   tenant_id: string;
   payment_id: string;
+  /** Exact integer minor units; apply currency_scale only for display. */
   amount: string;
   commission_reversal_amount: string;
   currency: string;
@@ -150,6 +152,7 @@ export interface InvoiceAdminRecord {
   offline_deal_id?: string | null;
   correction_of_invoice_id?: string | null;
   kind: string;
+  /** Exact integer minor units; apply currency_scale only for display. */
   amount: string;
   currency: string;
   currency_scale: number;
@@ -200,12 +203,25 @@ export interface PlatformSetupStatus {
 export interface PlatformAiStatus {
   router: {
     configured: boolean;
+    aiReady: boolean;
     protocol:
       | "openai-compatible"
       | "anthropic-messages"
-      | "gemini-generate-content";
+      | "gemini-generate-content"
+      | null;
     model: string | null;
     endpointOrigin: string | null;
+    source: "managed" | "environment" | "unconfigured";
+    managedOverridesEnvironment: boolean;
+    conflicts: {
+      endpoint: boolean | null;
+      model: boolean | null;
+      protocol: boolean | null;
+    };
+    credentialConfigured: boolean;
+    policyCode: "ready" | "upstream_configuration";
+    policyIssues: string[];
+    originAllowlistApplied: boolean;
     toolMode: "auto" | "required" | "disabled";
     maxInputCharacters: number;
     maxOutputTokens: number;
@@ -227,11 +243,54 @@ export interface PlatformAiStatus {
 }
 
 export interface PlatformAiProbeResult {
-  status: "ready" | "unconfigured" | "failed";
+  status: "ready" | "slow" | "unconfigured" | "failed";
+  outcome:
+    | "ready"
+    | "slow"
+    | "unconfigured"
+    | "connect_timeout"
+    | "first_byte_timeout"
+    | "total_timeout"
+    | "upstream_http"
+    | "quota"
+    | "malformed_response"
+    | "no_final_text"
+    | "aborted"
+    | "unreachable";
+  phase:
+    | "configuration"
+    | "admission"
+    | "connect"
+    | "first_byte"
+    | "response"
+    | "tool"
+    | "total";
   model: string | null;
   responseStatus: number | null;
   latencyMs: number;
+  firstByteLatencyMs: number | null;
+  performanceBudgetMs: number;
+  hardTimeoutMs: number;
   message: string;
+  code?: "upstream_configuration";
+  preferredHttpStatus?: 451;
+  issues?: string[];
+  requestId?: string;
+  committed?: true;
+  auditPending?: boolean;
+  maintenancePending?: boolean;
+  generationId?: string;
+  config?: ManagedPlatformRouterConfig | null;
+  draft?: ManagedPlatformRouterDraftConfig | null;
+  effective?: PlatformRouterEffectiveStatus;
+}
+
+export interface PlatformAiCandidateProbeResult extends PlatformAiProbeResult {
+  committed: true;
+  generationId: string;
+  config: ManagedPlatformRouterConfig | null;
+  draft: ManagedPlatformRouterDraftConfig;
+  effective: PlatformRouterEffectiveStatus;
 }
 
 export interface PlatformSiteSettings {
@@ -832,7 +891,7 @@ export async function probeFederationBinding(bindingId: string): Promise<{
   };
 }
 
-export interface PlatformChildSummary {
+interface PlatformChildSummary {
   slug: string;
   path: string;
   displayName: string;
@@ -880,6 +939,15 @@ export interface MallSettings {
   placeholderPhrases?: string[];
 }
 
+export interface MallExchangeRateSettings {
+  baseCurrency: "USD";
+  localCurrency: string;
+  usdToLocalRate: number | null;
+  rateSource: string | null;
+  rateUpdatedAt: string | null;
+  version: number;
+}
+
 export async function getMallSettings(): Promise<MallSettings> {
   const body = await apiJson<{ mall: MallSettings }>(`/api/mall/settings`, {
     cache: "no-store",
@@ -908,6 +976,65 @@ export async function saveMallSettings(input: {
       ),
   });
   return body.mall;
+}
+
+export async function getMallExchangeRateSettings(): Promise<MallExchangeRateSettings> {
+  const body = await apiJson<{
+    exchangeRate: MallExchangeRateSettings;
+  }>(`/api/mall/exchange-rate`, {
+    cache: "no-store",
+    fallbackError: "货币设置读取失败",
+    ok: (value) =>
+      Boolean(
+        value &&
+          typeof value === "object" &&
+          "exchangeRate" in value &&
+          value.exchangeRate,
+      ),
+  });
+  return body.exchangeRate;
+}
+
+export async function saveMallExchangeRateSettings(input: {
+  localCurrency: string;
+  expectedVersion: number;
+}): Promise<MallExchangeRateSettings> {
+  const body = await apiJson<{
+    exchangeRate: MallExchangeRateSettings;
+  }>(`/api/mall/exchange-rate`, {
+    method: "PATCH",
+    body: input,
+    fallbackError: "本地货币保存失败",
+    ok: (value) =>
+      Boolean(
+        value &&
+          typeof value === "object" &&
+          "exchangeRate" in value &&
+          value.exchangeRate,
+      ),
+  });
+  return body.exchangeRate;
+}
+
+export async function syncLatestUsdExchangeRate(input: {
+  localCurrency: string;
+  expectedVersion: number;
+}): Promise<MallExchangeRateSettings> {
+  const body = await apiJson<{
+    exchangeRate: MallExchangeRateSettings;
+  }>(`/api/mall/exchange-rate`, {
+    method: "POST",
+    body: input,
+    fallbackError: "最新美元汇率同步失败",
+    ok: (value) =>
+      Boolean(
+        value &&
+          typeof value === "object" &&
+          "exchangeRate" in value &&
+          value.exchangeRate,
+      ),
+  });
+  return body.exchangeRate;
 }
 
 export async function uploadMallBrandLogo(input: {
@@ -941,7 +1068,7 @@ export async function uploadMallBrandLogo(input: {
   return body.mall;
 }
 
-export interface MallLegalDocument {
+interface MallLegalDocument {
   content: string;
   version: number;
   updatedAt: string;
@@ -1386,7 +1513,7 @@ export interface SubplatformSourceIntake {
   error?: string | null;
 }
 
-export interface SubplatformEmailConfig {
+interface SubplatformEmailConfig {
   tenant_id: string;
   domain_id: string;
   provider_key: string;
@@ -1447,13 +1574,51 @@ export interface ManagedPlatformRouterConfig {
   modelReasoningEfforts: string[];
 }
 
-export interface ManagedPlatformRouterModel {
-  id: string;
-  reasoningEfforts: string[];
+export interface ManagedPlatformRouterDraftConfig
+  extends ManagedPlatformRouterConfig {
+  testedReady: boolean;
+  testedAt: string | null;
+  keyChanged: boolean;
+}
+
+export interface PlatformRouterEffectiveStatus {
+  ready: boolean;
+  code: "ready" | "upstream_configuration";
+  preferredHttpStatus: 451 | null;
+  source: "managed" | "environment" | "unconfigured";
+  managedOverridesEnvironment: boolean;
+  conflicts: {
+    endpoint: boolean | null;
+    model: boolean | null;
+    protocol: boolean | null;
+  };
+  endpointOrigin: string | null;
+  model: string | null;
+  protocol: ManagedPlatformRouterConfig["protocol"] | null;
+  enabled: boolean;
+  credentialConfigured: boolean;
+  originAllowlistApplied: boolean;
+  issues: string[];
+}
+
+export interface ManagedPlatformRouterState {
+  config: ManagedPlatformRouterConfig | null;
+  draft: ManagedPlatformRouterDraftConfig | null;
+  effective: PlatformRouterEffectiveStatus;
+  requestId?: string;
+}
+
+export interface ManagedPlatformRouterMutationState
+  extends ManagedPlatformRouterState {
+  requestId: string;
+  committed: true;
+  auditPending: boolean;
+  maintenancePending: boolean;
+  generationId: string;
 }
 
 /** Contact channels are supplied by the active platform; the kernel does not prescribe names. */
-export type ContactExchange = Record<string, string>;
+type ContactExchange = Record<string, string>;
 
 export interface OfflineDeal {
   offline_deal_id: string;
@@ -1521,7 +1686,7 @@ export interface MarketplaceOfferCandidate extends MarketplaceOffer {
   risks?: string[];
 }
 
-export interface MarketplaceOfferPreference {
+interface MarketplaceOfferPreference {
   tenant_id: string;
   domain_id: string;
   participant_id: string;
@@ -1625,10 +1790,12 @@ export interface RecommendedBackendListing {
   match_score?: number;
   match_reasons?: string[];
   match_risks?: string[];
+  /** Advisory store retrieval hints; never canonical match reasons or score evidence. */
+  provider_hints?: string[];
   [key: string]: unknown;
 }
 
-export interface MallSearchResponse {
+interface MallSearchResponse {
   requestId: string;
   stores: Array<{ slug: string; path: string; displayName: string }>;
   recommendations: RecommendedBackendListing[];
@@ -1738,6 +1905,18 @@ export interface MallAssistantMessage {
   content: string;
 }
 
+interface MallAssistantSearchTraceStore {
+  path: string;
+  displayName: string;
+  offerCount: number;
+}
+
+export interface MallAssistantSearchTrace {
+  source: "visible_recommendations";
+  resultCount: number;
+  stores: MallAssistantSearchTraceStore[];
+}
+
 export interface MallAssistantChoiceAction {
   type: "choice";
   id: string;
@@ -1745,7 +1924,7 @@ export interface MallAssistantChoiceAction {
   options: Array<{ id: string; label: string; value: string }>;
 }
 
-export interface MallAssistantProductsAction {
+interface MallAssistantProductsAction {
   type: "products";
   productIds: string[];
 }
@@ -1889,11 +2068,11 @@ export async function updateStoreCustomer(input: {
       body: JSON.stringify({
         id: input.customerId,
         expectedVersion: input.expectedVersion,
-        ...(input.favorite !== undefined ? { favorite: input.favorite } : {}),
-        ...(input.stage !== undefined ? { stage: input.stage } : {}),
-        ...(input.staffNotes !== undefined
-          ? { staffNotes: input.staffNotes }
-          : {}),
+        ...(input.favorite === undefined ? {} : { favorite: input.favorite }),
+        ...(input.stage === undefined ? {} : { stage: input.stage }),
+        ...(input.staffNotes === undefined
+          ? {}
+          : { staffNotes: input.staffNotes }),
       }),
     },
   );
@@ -1917,6 +2096,8 @@ export async function askMallShoppingAssistant(
   answer: string;
   recommendations: RecommendedBackendListing[];
   uiActions: MallAssistantUiAction[];
+  searchTrace?: MallAssistantSearchTrace;
+  outcome?: "empty_catalog" | "no_matching_products";
 }> {
   const response = await fetch("/api/mall/assistant", {
     method: "POST",
@@ -1932,23 +2113,154 @@ export async function askMallShoppingAssistant(
     answer?: string;
     recommendations?: unknown;
     uiActions?: unknown;
-    error?: string;
+    searchTrace?: unknown;
+    outcome?: unknown;
+    error?:
+      | string
+      | {
+          message?: string;
+          code?: string;
+          retryable?: boolean;
+          retryAfterMs?: number;
+          retry_after_ms?: number;
+        };
+    code?: string;
+    retryable?: boolean;
+    retryAfterMs?: number;
+    retry_after_ms?: number;
+    retryAfterSeconds?: number;
   } | null;
   if (!response.ok || !body?.requestId || !body.answer) {
+    const typedError =
+      body?.error && typeof body.error === "object" ? body.error : null;
+    const errorMessage =
+      typeof body?.error === "string" ? body.error : typedError?.message;
     throw new MarketplaceApiError(
       response.status,
-      body?.error || "商品搜索暂时不可用",
+      errorMessage || "商品搜索暂时不可用",
+      {
+        code: typedError?.code || body?.code,
+        retryable:
+          typedError?.retryable ??
+          body?.retryable ??
+          [429, 503, 504].includes(response.status),
+        retryAfterMs: readRetryAfterMs(response, {
+          retryAfterMs: typedError?.retryAfterMs ?? body?.retryAfterMs,
+          retryAfterSnakeMs: typedError?.retry_after_ms ?? body?.retry_after_ms,
+          retryAfterSeconds: body?.retryAfterSeconds,
+        }),
+      },
     );
   }
+  const outcome =
+    body.outcome === "empty_catalog" || body.outcome === "no_matching_products"
+      ? body.outcome
+      : undefined;
+  const recommendations = Array.isArray(body.recommendations)
+    ? (body.recommendations as RecommendedBackendListing[])
+    : [];
+  const searchTrace = normalizeMallAssistantSearchTrace(
+    body.searchTrace,
+    recommendations,
+  );
   return {
     requestId: body.requestId,
     answer: body.answer,
-    recommendations: Array.isArray(body.recommendations)
-      ? (body.recommendations as RecommendedBackendListing[])
-      : [],
+    recommendations,
     uiActions: Array.isArray(body.uiActions)
       ? (body.uiActions as MallAssistantUiAction[])
       : [],
+    ...(searchTrace ? { searchTrace } : {}),
+    ...(outcome ? { outcome } : {}),
+  };
+}
+
+const CANONICAL_SEARCH_TRACE_STORE_PATH = /^\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function normalizeMallAssistantSearchTraceStore(
+  value: unknown,
+): MallAssistantSearchTraceStore | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const store = value as {
+    path?: unknown;
+    displayName?: unknown;
+    offerCount?: unknown;
+  };
+  if (
+    typeof store.path !== "string" ||
+    !CANONICAL_SEARCH_TRACE_STORE_PATH.test(store.path) ||
+    typeof store.displayName !== "string" ||
+    !store.displayName.trim() ||
+    store.displayName.length > 120 ||
+    !Number.isInteger(store.offerCount)
+  )
+    return undefined;
+  const offerCount = Number(store.offerCount);
+  if (offerCount < 1 || offerCount > 12) return undefined;
+  return {
+    path: store.path,
+    displayName: store.displayName.trim(),
+    offerCount,
+  };
+}
+
+function visibleRecommendationCountByPath(
+  recommendations: RecommendedBackendListing[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const recommendation of recommendations) {
+    const path = recommendation.platform_path?.trim();
+    if (path) counts.set(path, (counts.get(path) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function normalizeMallAssistantSearchTrace(
+  value: unknown,
+  recommendations: RecommendedBackendListing[],
+): MallAssistantSearchTrace | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as {
+    source?: unknown;
+    resultCount?: unknown;
+    stores?: unknown;
+  };
+  if (
+    candidate.source !== "visible_recommendations" ||
+    !Number.isInteger(candidate.resultCount) ||
+    !Array.isArray(candidate.stores)
+  )
+    return undefined;
+  const resultCount = Number(candidate.resultCount);
+  if (
+    resultCount < 1 ||
+    resultCount > 12 ||
+    candidate.stores.length < 1 ||
+    candidate.stores.length > 8
+  )
+    return undefined;
+  const normalizedStores: MallAssistantSearchTraceStore[] = [];
+  for (const value of candidate.stores) {
+    const store = normalizeMallAssistantSearchTraceStore(value);
+    if (!store) return undefined;
+    normalizedStores.push(store);
+  }
+  if (
+    normalizedStores.reduce((total, store) => total + store.offerCount, 0) !==
+    resultCount
+  )
+    return undefined;
+  const visibleCounts = visibleRecommendationCountByPath(recommendations);
+  if (
+    normalizedStores.some(
+      (store) => visibleCounts.get(store.path) !== store.offerCount,
+    )
+  )
+    return undefined;
+  return {
+    source: "visible_recommendations",
+    resultCount,
+    stores: normalizedStores,
   };
 }
 
@@ -1970,7 +2282,7 @@ export async function reviseShoppingMemory(input: {
   if (!response.ok || !body?.memory || !body.message)
     throw new MarketplaceApiError(
       response.status,
-      body?.error || "暂时无法修改购物记忆",
+      body?.error || "AI 暂时无法修改购物记忆",
     );
   return { memory: body.memory, message: body.message };
 }
@@ -2161,7 +2473,7 @@ export async function saveWeChatOAuthConfig(input: {
   };
 }
 
-export interface ContactResponse {
+interface ContactResponse {
   counterpart: {
     party_id: string;
     display_name: string;
@@ -2187,7 +2499,7 @@ export interface PlatformRouteHop {
   depth: number;
 }
 
-export interface PlatformRouteDecision {
+interface PlatformRouteDecision {
   selectedSlugs: string[];
   source: "ai" | "policy_fallback";
   routeMechanism?: "mcp_tool" | "structured_json" | "policy_fallback";
@@ -2219,14 +2531,60 @@ export interface PlatformIntentRoute {
   }>;
 }
 
+interface MarketplaceApiErrorOptions {
+  code?: string;
+  retryable?: boolean;
+  retryAfterMs?: number;
+}
+
 export class MarketplaceApiError extends Error {
   readonly status: number;
+  readonly code?: string;
+  readonly retryable: boolean;
+  readonly retryAfterMs?: number;
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    options: MarketplaceApiErrorOptions = {},
+  ) {
     super(message);
     this.name = "MarketplaceApiError";
     this.status = status;
+    this.code = options.code;
+    this.retryable = options.retryable ?? [429, 503, 504].includes(status);
+    this.retryAfterMs = options.retryAfterMs;
   }
+}
+
+function readRetryAfterMs(
+  response: Response,
+  body: {
+    retryAfterMs?: number;
+    retryAfterSnakeMs?: number;
+    retryAfterSeconds?: number;
+  },
+): number | undefined {
+  const bodyMilliseconds = body.retryAfterMs ?? body.retryAfterSnakeMs;
+  if (Number.isFinite(bodyMilliseconds) && Number(bodyMilliseconds) > 0) {
+    return Math.round(Number(bodyMilliseconds));
+  }
+  if (
+    Number.isFinite(body.retryAfterSeconds) &&
+    Number(body.retryAfterSeconds) > 0
+  ) {
+    return Math.round(Number(body.retryAfterSeconds) * 1_000);
+  }
+
+  const retryAfter = response.headers.get("retry-after")?.trim();
+  if (!retryAfter) return undefined;
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.round(seconds * 1_000);
+  }
+  const retryDate = Date.parse(retryAfter);
+  if (!Number.isFinite(retryDate)) return undefined;
+  return Math.max(0, retryDate - Date.now()) || undefined;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -2285,12 +2643,12 @@ async function apiJson<T>(path: string, options: ApiJsonOptions): Promise<T> {
     cache: options.cache,
     headers: {
       accept: "application/json",
-      ...(options.body !== undefined
-        ? { "content-type": "application/json" }
-        : {}),
+      ...(options.body === undefined
+        ? {}
+        : { "content-type": "application/json" }),
       ...options.headers,
     },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   const body = await readJson<T & { error?: string }>(response);
   const valid = options.ok ? options.ok(body) : Boolean(body);
@@ -2476,11 +2834,23 @@ export async function getPlatformAiStatus(): Promise<PlatformAiStatus> {
 }
 
 /** Test the server-side hosted Agent without sending browser or user content. */
-export async function testPlatformAi(): Promise<PlatformAiProbeResult> {
+export function testPlatformAi(input: {
+  candidate: true;
+}): Promise<PlatformAiCandidateProbeResult>;
+export function testPlatformAi(input?: {
+  candidate?: false;
+}): Promise<PlatformAiProbeResult>;
+export function testPlatformAi(input: {
+  candidate: boolean;
+}): Promise<PlatformAiProbeResult | PlatformAiCandidateProbeResult>;
+export async function testPlatformAi(
+  input: { candidate?: boolean } = {},
+): Promise<PlatformAiProbeResult> {
   const response = await fetch("/api/platform/ai/test", {
     method: "POST",
     credentials: "include",
-    headers: { accept: "application/json" },
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input),
   });
   const body = (await response.json().catch(() => null)) as
     | (PlatformAiProbeResult & { error?: string })
@@ -2491,71 +2861,91 @@ export async function testPlatformAi(): Promise<PlatformAiProbeResult> {
       body?.message || body?.error || "AI 连接测试失败",
     );
   }
+  if (
+    input.candidate === true &&
+    (body.committed !== true ||
+      typeof body.generationId !== "string" ||
+      !body.generationId.trim() ||
+      !Object.prototype.hasOwnProperty.call(body, "config") ||
+      (body.config !== null &&
+        (typeof body.config !== "object" || Array.isArray(body.config))) ||
+      !Object.prototype.hasOwnProperty.call(body, "draft") ||
+      !body.draft ||
+      typeof body.draft !== "object" ||
+      Array.isArray(body.draft) ||
+      body.draft.testedReady !== true ||
+      !Object.prototype.hasOwnProperty.call(body, "effective") ||
+      !body.effective ||
+      typeof body.effective !== "object" ||
+      Array.isArray(body.effective))
+  ) {
+    throw new MarketplaceApiError(
+      response.status,
+      body.message || "AI 待测配置测试结果未提交",
+    );
+  }
   return body;
 }
 
-export async function getManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterConfig | null> {
+export async function getManagedPlatformRouterState(): Promise<ManagedPlatformRouterState> {
   const response = await fetch("/api/platform/ai/config", {
     credentials: "include",
     headers: { accept: "application/json" },
     cache: "no-store",
   });
-  const body = (await response.json().catch(() => null)) as {
-    config?: ManagedPlatformRouterConfig | null;
-    error?: string;
-  } | null;
-  if (!response.ok)
+  const body = (await response.json().catch(() => null)) as
+    | (ManagedPlatformRouterState & { error?: string })
+    | null;
+  if (!response.ok || !body)
     throw new MarketplaceApiError(
       response.status,
       body?.error || "AI 配置读取失败",
     );
-  return body?.config ?? null;
+  return body;
+}
+
+export async function getManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterConfig | null> {
+  return (await getManagedPlatformRouterState()).config;
 }
 
 export async function saveManagedPlatformRouterConfig(
   input: Omit<ManagedPlatformRouterConfig, "credentialConfigured"> & {
     apiKey?: string;
   },
-): Promise<ManagedPlatformRouterConfig> {
+): Promise<ManagedPlatformRouterMutationState> {
   const response = await fetch("/api/platform/ai/config", {
     method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, action: "stage" }),
   });
-  const body = (await response.json().catch(() => null)) as {
-    config?: ManagedPlatformRouterConfig;
-    error?: string;
-  } | null;
-  if (!response.ok || !body?.config)
+  const body = (await response.json().catch(() => null)) as
+    | (ManagedPlatformRouterMutationState & { error?: string })
+    | null;
+  if (!response.ok || !body?.draft || !body.committed)
     throw new MarketplaceApiError(
       response.status,
-      body?.error || "AI 配置保存失败",
+      body?.error || "AI 待测配置保存失败",
     );
-  return body.config;
+  return body;
 }
 
-export async function listManagedPlatformRouterModels(input: {
-  endpoint: string;
-  protocol: ManagedPlatformRouterConfig["protocol"];
-  apiKey?: string;
-}): Promise<ManagedPlatformRouterModel[]> {
-  const response = await fetch("/api/platform/ai/models", {
-    method: "POST",
+export async function activateManagedPlatformRouterConfig(): Promise<ManagedPlatformRouterMutationState> {
+  const response = await fetch("/api/platform/ai/config", {
+    method: "PATCH",
     credentials: "include",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ action: "activate" }),
   });
-  const body = (await response.json().catch(() => null)) as {
-    models?: ManagedPlatformRouterModel[];
-    error?: string;
-  } | null;
-  if (!response.ok || !body?.models)
+  const body = (await response.json().catch(() => null)) as
+    | (ManagedPlatformRouterMutationState & { error?: string })
+    | null;
+  if (!response.ok || !body?.config || !body.committed)
     throw new MarketplaceApiError(
       response.status,
-      body?.error || "模型列表读取失败",
+      body?.error || "AI 待测配置激活失败",
     );
-  return body.models;
+  return body;
 }
 
 export async function getRootEmailConfig(): Promise<RootEmailConfig | null> {
@@ -3237,18 +3627,20 @@ export function getInvoiceSetting(tenantId?: string): Promise<InvoiceSetting> {
 export function getPaymentAdminRecords(
   tenantId?: string,
   limit = 25,
+  offset = 0,
 ): Promise<PaymentAdminRecord[]> {
   return paymentAdminRequest<PaymentAdminRecord[]>(
-    `payments?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+    `payments?limit=${limit}&offset=${offset}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
 }
 
 export function getRefundAdminRecords(
   tenantId?: string,
   limit = 25,
+  offset = 0,
 ): Promise<RefundAdminRecord[]> {
   return paymentAdminRequest<RefundAdminRecord[]>(
-    `refunds?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+    `refunds?limit=${limit}&offset=${offset}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
 }
 
@@ -3275,9 +3667,10 @@ export function createAdminRefund(input: {
 export function getInvoiceAdminRecords(
   tenantId?: string,
   limit = 25,
+  offset = 0,
 ): Promise<InvoiceAdminRecord[]> {
   return paymentAdminRequest<InvoiceAdminRecord[]>(
-    `invoices?limit=${limit}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
+    `invoices?limit=${limit}&offset=${offset}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`,
   );
 }
 

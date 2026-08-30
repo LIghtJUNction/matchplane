@@ -14,6 +14,7 @@ RUN --mount=type=cache,id=matchplane-cargo-registry,target=/usr/local/cargo/regi
     cargo build --release --locked --workspace --bins \
     && mkdir -p /out \
     && cp \
+        target/release/matchplane-conversion-projector \
         target/release/matchplane-event-relay \
         target/release/matchplane-federation-hub \
         target/release/matchplane-gateway \

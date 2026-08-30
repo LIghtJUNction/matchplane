@@ -202,11 +202,12 @@ Discovery 进入 `queued → discovering → ready/rejected` 状态；只有 `re
   - host 发送 `{ protocol: "matchplane.plugin/v1", type: "match.results", version: 1, contextToken, payload: { listings: [...] } }`，最多包含 100 条由 host 拥有且公开的结果卡片。
   - 供给方会话的 `platform.context` 可附带 `agentDraft`（`narrative`、可选 `intentId`、不透明 `attributes` 与 `terms`）。它只是聊天材料的可编辑草稿，不是已发布供给，也不携带 token、联系人或支付权限；插件必须让供给方检查并通过 `listing.submit` 明确提交，宿主仍会做 schema、租户和权限校验。草稿在路由到子平台后会通过新的 context 消息补发，避免聊天与表单脱节。
   - 插件发送 `{ type: "listing.open", contextToken, payload: { listingId } }`；host 会忽略当前快照之外的 id。
-  这种约束在保留垂直化渲染能力的同时，将作用域、联系人同意与支付行为留在根服务侧。
+  - 买方 `platform.context` 只附带 `auth.status = pending|authenticated|anonymous`，不附带用户资料、cookie 或 token。插件可发送带 `requestId` 的 `auth.open`、`demand.open` 与 `listing.like`；host 分别负责 Better Auth 跳转、打开当前子平台内的根托管会话，以及调用已认证点赞 API，并返回对应的 `*.result`。匿名点赞意图只在根的 `sessionStorage` 中保存供给 id、平台路径和期望计数，登录返回同一路径后由根恢复；凭据始终不会进入 iframe。
+  这种约束在保留垂直化渲染能力的同时，将认证、作用域、联系人同意与支付行为留在根服务侧。
 - 路径仅在清单校验、API 兼容、CSP/资源检查、包扫描和运营审计通过后才激活。禁用或吊销会移除路径，但根账号与历史会保留。
   生产环境下，web 页面和清单接口会独立校验完整的递归路径是否解析到活跃不可变注册；`public/` 下静态文件不构成激活授权。
 - 清单与插件资产读取与 Agent 路由共享 `membership_policy` 可见性检查。公开注册可在未认领成员关系时获取；邀请制发布在调用方 Better Auth 用户或带作用域的 Agent key 未被授权该组织子树时，返回相同的未找到（not-found）响应。
 
-## 本仓库内布局
+## 仓库边界
 
-汽车适配器是 Git 子模块，位于 `subplatforms/auto`。其他垂直应在各自仓库遵循同一合约；根仓库仅保存 gitlink 与注册元数据，不会拷贝第二套实现。
+商店包在各自独立仓库中遵循本合约。核心仓库不保存商店 gitlink、不递归签出实例，也不复制任何商店实现；canonical path 始终来自活动 registry/manifest 记录。运营方可对外部签出运行 `just subplatform-package-check <path>` 或 `just subplatform-package-build-check <path>`。

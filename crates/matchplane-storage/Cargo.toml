@@ -8,12 +8,15 @@ publish.workspace = true
 
 [dependencies]
 bigdecimal.workspace = true
+hex.workspace = true
 matchplane-domain.workspace = true
 matchplane-engine.workspace = true
 matchplane-events.workspace = true
+matchplane-matching.workspace = true
 matchplane-payments.workspace = true
 matchplane-protocol.workspace = true
 prost.workspace = true
+rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -24,6 +27,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

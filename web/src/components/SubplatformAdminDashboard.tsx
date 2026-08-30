@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Tabs, TabsList, TabsTrigger } from "@appica/ui-react/tabs";
 import {
   Moon,
   Package,
@@ -14,11 +15,19 @@ import {
 import type { StoreSummary, SubplatformOrganizationRecord } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
 import type { SubplatformConfig } from "../subplatform";
+import { HorizontalTabScroller } from "./HorizontalTabScroller";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { SellerDashboard } from "./SellerDashboard";
 import { StoreCustomersPanel } from "./StoreCustomersPanel";
 import { StoreFinancePanel } from "./StoreFinancePanel";
 import { StoreManagementPanel } from "./StoreManagementPanel";
+
+type StoreConsoleSection =
+  | "products"
+  | "customers"
+  | "finance"
+  | "store"
+  | "team";
 
 /** Store operators manage commerce only; mall infrastructure stays in the root console. */
 export function SubplatformAdminDashboard({
@@ -38,10 +47,24 @@ export function SubplatformAdminDashboard({
   onStoreUpdated: (store: StoreSummary) => void;
   initialSection?: "products" | "customers";
 }) {
-  const [section, setSection] = useState<
-    "products" | "customers" | "finance" | "store" | "team"
-  >(initialSection);
+  const [section, setSection] = useState<StoreConsoleSection>(initialSection);
+  const [visitedSections, setVisitedSections] = useState<
+    ReadonlySet<StoreConsoleSection>
+  >(() => new Set([initialSection]));
   const english = locale === "en";
+
+  const activateSection = (nextSection: StoreConsoleSection) => {
+    const requiresManagement =
+      nextSection === "finance" ||
+      nextSection === "store" ||
+      nextSection === "team";
+    if (requiresManagement && !canManageStore) return;
+
+    setVisitedSections((visited) =>
+      visited.has(nextSection) ? visited : new Set(visited).add(nextSection),
+    );
+    setSection(nextSection);
+  };
 
   return (
     <div className="dashboard subplatform-admin-dashboard">
@@ -59,77 +82,66 @@ export function SubplatformAdminDashboard({
             <button
               type="button"
               className="store-closed-banner-action"
-              onClick={() => setSection("store")}
+              onClick={() => activateSection("store")}
             >
-              {english ? "Go to store details to reopen" : "前往店铺资料恢复营业"}
+              {english
+                ? "Go to store details to reopen"
+                : "前往店铺资料恢复营业"}
             </button>
           )}
         </div>
       )}
 
       <div className="store-console-toolbar">
-        <nav
-          className="store-management-tabs"
-          role="tablist"
-          aria-label={english ? "Store management sections" : "店铺管理分区"}
+        <HorizontalTabScroller
+          activeKey={section}
+          className="w-full min-w-0 flex-1"
+          locale={locale}
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={section === "products"}
-            className={section === "products" ? "is-active" : ""}
-            onClick={() => setSection("products")}
+          <Tabs
+            value={section}
+            onValueChange={(value) =>
+              activateSection(value as StoreConsoleSection)
+            }
+            variant="pill"
+            size="md"
+            className="store-management-tabs min-w-max"
           >
-            <Package size={16} aria-hidden="true" />
-            {english ? "Products" : "商品"}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={section === "customers"}
-            className={section === "customers" ? "is-active" : ""}
-            onClick={() => setSection("customers")}
-          >
-            <UserSearch size={16} aria-hidden="true" />
-            {english ? "Customers" : "客户"}
-          </button>
-          {canManageStore ? (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={section === "finance"}
-              className={section === "finance" ? "is-active" : ""}
-              onClick={() => setSection("finance")}
+            <TabsList
+              aria-label={
+                english ? "Store management sections" : "店铺管理分区"
+              }
+              className="w-max min-w-max"
             >
-              <ReceiptText size={16} aria-hidden="true" />
-              {english ? "Finance" : "财务"}
-            </button>
-          ) : null}
-          {canManageStore ? (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={section === "store"}
-              className={section === "store" ? "is-active" : ""}
-              onClick={() => setSection("store")}
-            >
-              <Store size={16} aria-hidden="true" />
-              {english ? "Store details" : "店铺资料"}
-            </button>
-          ) : null}
-          {canManageStore ? (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={section === "team"}
-              className={section === "team" ? "is-active" : ""}
-              onClick={() => setSection("team")}
-            >
-              <UsersRound size={16} aria-hidden="true" />
-              {english ? "Team" : "店员"}
-            </button>
-          ) : null}
-        </nav>
+              <TabsTrigger value="products" className="min-h-11">
+                <Package size={16} aria-hidden="true" />
+                {english ? "Products" : "商品"}
+              </TabsTrigger>
+              <TabsTrigger value="customers" className="min-h-11">
+                <UserSearch size={16} aria-hidden="true" />
+                {english ? "Customer management" : "客户管理"}
+              </TabsTrigger>
+              {canManageStore ? (
+                <TabsTrigger value="finance" className="min-h-11">
+                  <ReceiptText size={16} aria-hidden="true" />
+                  {english ? "Finance" : "财务"}
+                </TabsTrigger>
+              ) : null}
+              {canManageStore ? (
+                <TabsTrigger value="store" className="min-h-11">
+                  <Store size={16} aria-hidden="true" />
+                  {english ? "Store details" : "店铺资料"}
+                </TabsTrigger>
+              ) : null}
+              {canManageStore ? (
+                <TabsTrigger value="team" className="min-h-11">
+                  <UsersRound size={16} aria-hidden="true" />
+                  {english ? "Team" : "店员"}
+                </TabsTrigger>
+              ) : null}
+            </TabsList>
+          </Tabs>
+        </HorizontalTabScroller>
         <span className="store-console-scope">
           <ShieldCheck size={16} aria-hidden="true" />
           {canManageStore
@@ -143,24 +155,30 @@ export function SubplatformAdminDashboard({
       </div>
 
       <div className="store-console-content">
-        <div hidden={section !== "products"}>
-          <SellerDashboard
-            locale={locale}
-            onNotice={onNotice}
-            subplatform={subplatform}
-          />
-        </div>
-        <div hidden={section !== "customers"}>
-          <StoreCustomersPanel storeId={store.id} locale={locale} />
-        </div>
-        {canManageStore && section === "finance" ? (
-          <StoreFinancePanel
-            locale={locale}
-            onNotice={onNotice}
-            store={store}
-          />
+        {visitedSections.has("products") ? (
+          <div hidden={section !== "products"}>
+            <SellerDashboard
+              locale={locale}
+              onNotice={onNotice}
+              subplatform={subplatform}
+            />
+          </div>
         ) : null}
-        {canManageStore ? (
+        {visitedSections.has("customers") ? (
+          <div hidden={section !== "customers"}>
+            <StoreCustomersPanel storeId={store.id} locale={locale} />
+          </div>
+        ) : null}
+        {canManageStore && visitedSections.has("finance") ? (
+          <div hidden={section !== "finance"}>
+            <StoreFinancePanel
+              locale={locale}
+              onNotice={onNotice}
+              store={store}
+            />
+          </div>
+        ) : null}
+        {canManageStore && visitedSections.has("store") ? (
           <div hidden={section !== "store"}>
             <StoreManagementPanel
               store={store}
@@ -171,7 +189,7 @@ export function SubplatformAdminDashboard({
             />
           </div>
         ) : null}
-        {canManageStore ? (
+        {canManageStore && visitedSections.has("team") ? (
           <div hidden={section !== "team"}>
             <PlatformAccessPanel
               organizations={

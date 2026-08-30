@@ -12,7 +12,7 @@ describe("HTTP MCP argument contract", () => {
     expect(
       validateMcpToolArguments("platform.match", {
         narrative: "找一个合适的供给",
-        platformPath: "/used-car/../private",
+        platformPath: "/store-a/../private",
       }),
     ).toContain("platformPath");
   });
@@ -21,7 +21,7 @@ describe("HTTP MCP argument contract", () => {
     expect(
       validateMcpToolArguments("platform.match", {
         narrative: "找一个合适的供给",
-        platformPath: "/used-car",
+        platformPath: "/store-a",
         idempotency_key: "chat-123",
       }),
     ).toBeNull();
@@ -38,7 +38,7 @@ describe("HTTP MCP argument contract", () => {
       validateMcpToolArguments("marketplace.intent.create", {
         tenant_id: tenantId,
         domain_id: domainId,
-        platform_path: "/used-car",
+        platform_path: "/store-a",
         participant_id: partyId,
         side: "demand",
         narrative: "寻找适合我的供给",
@@ -50,7 +50,7 @@ describe("HTTP MCP argument contract", () => {
       validateMcpToolArguments("marketplace.intent.create", {
         tenant_id: tenantId,
         domain_id: domainId,
-        platform_path: "/used-car",
+        platform_path: "/store-a",
         participant_id: partyId,
         side: "demand",
         narrative: "寻找适合我的供给",
@@ -66,7 +66,7 @@ describe("HTTP MCP argument contract", () => {
       validateMcpToolArguments("marketplace.demand.match", {
         tenant_id: tenantId,
         domain_id: domainId,
-        platform_path: "/used-car",
+        platform_path: "/store-a",
         participant_id: partyId,
         offer_id: intentId,
         limit: 10,
@@ -77,7 +77,7 @@ describe("HTTP MCP argument contract", () => {
       validateMcpToolArguments("marketplace.intent.discovery.update", {
         tenant_id: tenantId,
         domain_id: domainId,
-        platform_path: "/used-car",
+        platform_path: "/store-a",
         participant_id: partyId,
         intent_id: intentId,
         enabled: false,
@@ -99,7 +99,7 @@ describe("HTTP MCP argument contract", () => {
       validateMcpToolArguments("marketplace.intent.create", {
         tenant_id: tenantId,
         domain_id: domainId,
-        platform_path: "/used-car",
+        platform_path: "/store-a",
         participant_id: partyId,
         side: "demand",
         narrative: "寻找适合我的供给",
@@ -150,21 +150,21 @@ describe("HTTP MCP argument contract", () => {
   it("validates child MCP tool calls without accepting arbitrary endpoints", () => {
     expect(
       validateMcpToolArguments("platform.child.tool", {
-        platform_path: "/used-car",
+        platform_path: "/store-a",
         tool_name: "inventory.search",
         arguments: { narrative: "适合城市通勤" },
       }),
     ).toBeNull();
     expect(
       validateMcpToolArguments("platform.child.tool", {
-        platform_path: "/used-car",
+        platform_path: "/store-a",
         tool_name: "inventory/search",
         arguments: {},
       }),
     ).toContain("tool_name");
     expect(
       validateMcpToolArguments("platform.child.tool", {
-        platform_path: "/used-car",
+        platform_path: "/store-a",
         tool_name: "inventory.search",
         endpoint: "https://attacker.example/mcp",
         arguments: {},
@@ -179,7 +179,7 @@ describe("HTTP MCP argument contract", () => {
       scope: {
         tenant_id: tenantId,
         domain_id: domainId,
-        platform_path: "/used-car",
+        platform_path: "/store-a",
       },
       input: {
         narrative: "预算内、适合通勤的方案",
@@ -215,7 +215,7 @@ describe("HTTP MCP argument contract", () => {
       validateMcpToolArguments("marketplace.introduction.create", {
         tenant_id: tenantId,
         domain_id: domainId,
-        platform_path: "/used-car",
+        platform_path: "/store-a",
         intent_id: intentId,
         offer_id: "not-a-uuid",
         participant_id: partyId,
@@ -230,7 +230,7 @@ describe("HTTP MCP argument contract", () => {
     const common = {
       tenant_id: tenantId,
       domain_id: domainId,
-      platform_path: "/used-car",
+      platform_path: "/store-a",
       supply_party_id: partyId,
       offer_id: intentId,
       expected_version: 3,
@@ -266,7 +266,7 @@ describe("HTTP MCP argument contract", () => {
     const common = {
       tenant_id: tenantId,
       domain_id: domainId,
-      platform_path: "/used-car",
+      platform_path: "/store-a",
       participant_id: partyId,
     };
     expect(

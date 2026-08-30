@@ -66,8 +66,8 @@ describe("cross-origin marketplace capability exchange", () => {
     const response = await POST(
       request({
         ...ids,
-        subplatform: "used-car",
-        platformPath: "/used-car",
+        subplatform: "store-a",
+        platformPath: "/store-a",
         role: "buyer",
         federated: {
           accessToken: "mp_at_test",
@@ -105,7 +105,7 @@ describe("cross-origin marketplace capability exchange", () => {
       request({
         tenantId: ids.tenantId,
         domainId: ids.domainId,
-        subplatform: "used-car",
+        subplatform: "store-a",
         role: "buyer",
         federated: {
           accessToken: "mp_at_test",
@@ -127,8 +127,8 @@ describe("cross-origin marketplace capability exchange", () => {
       request({
         tenantId: ids.tenantId,
         domainId: ids.domainId,
-        subplatform: "used-car",
-        platformPath: "/used-car",
+        subplatform: "store-a",
+        platformPath: "/store-a",
         role: "buyer",
         contact: { wechat: "manually-entered-id" },
       }),

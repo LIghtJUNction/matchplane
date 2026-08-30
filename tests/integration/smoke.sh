@@ -2,6 +2,12 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+source "$repository_root/tests/integration/http-json.sh"
+http_json_root=${MATCHPLANE_SMOKE_TMPDIR:-$repository_root/.scratch/ci-smoke}
+mkdir -p "$http_json_root"
+HTTP_JSON_WORK_DIRECTORY=$(mktemp -d "$http_json_root/http-json.XXXXXX")
+export HTTP_JSON_WORK_DIRECTORY
+export -f http_json http_json_pipe
 env_file="$repository_root/.env.example"
 if [[ -f "$repository_root/.env" ]]; then env_file="$repository_root/.env"; fi
 compose=(docker compose --env-file "$env_file" -f "$repository_root/deploy/compose/compose.yaml")
@@ -16,23 +22,28 @@ buyer_quote=00000000-0000-7000-8000-000000000501
 buyer_base=00000000-0000-7000-8000-000000000502
 seller_base=00000000-0000-7000-8000-000000000503
 seller_quote=00000000-0000-7000-8000-000000000504
-work_directory=$(mktemp -d)
-trap 'rm -rf "$work_directory"' EXIT
+work_directory=$(mktemp -d "$http_json_root/orders.XXXXXX")
+trap 'rm -rf "$HTTP_JSON_WORK_DIRECTORY" "$work_directory"' EXIT
 
 wait_for() {
   local description=$1
-  local command=$2
+  local request_target=$2
+  local jq_filter=$3
+  shift 3
+  local response_file="$HTTP_JSON_WORK_DIRECTORY/wait.json"
+
   for _ in $(seq 1 90); do
-    if bash -o pipefail -c "$command" >/dev/null 2>&1; then
+    if http_json "$response_file" "$request_target" "$@" 2>/dev/null \
+      && jq -e "$jq_filter" "$response_file" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
   done
-  echo "timed out waiting for $description" >&2
+  echo "timed out waiting for $description: $request_target (HTTP ${HTTP_JSON_LAST_STATUS:-unknown}; content-type ${HTTP_JSON_LAST_CONTENT_TYPE:-unknown})" >&2
   return 1
 }
 
-wait_for 'gateway readiness' "curl --fail --silent '$base_url/health/ready' | jq -e '.status == \"ready\"'"
+wait_for 'gateway readiness' "$base_url/health/ready" '.status == "ready"'
 
 unauthenticated_core=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --request POST --header 'content-type: application/json' \
@@ -43,8 +54,8 @@ test "$unauthenticated_core" = 401
 curl --fail-with-body --silent --request POST "$base_url/v1/embeddings" \
   --header "$core_authorization" --header 'content-type: application/json' \
   --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"asset_id\":\"$asset_id\",\"embedding_model_id\":\"$model_id\",\"values\":[0.1,0.2,0.3]}"
-curl --fail-with-body --silent --request POST "$base_url/v1/candidates/search" \
-  --header "$core_authorization" --header 'content-type: application/json' \
+http_json_pipe "$base_url/v1/candidates/search" \
+  --request POST --header "$core_authorization" --header 'content-type: application/json' \
   --data "{\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"embedding_model_id\":\"$model_id\",\"values\":[0.1,0.2,0.3],\"limit\":5}" \
   | jq -e --arg asset "$asset_id" 'length == 1 and .[0].asset_id == $asset' >/dev/null
 
@@ -55,16 +66,19 @@ printf '%s\n' "{\"order_id\":\"00000000-0000-7000-8000-000000008001\",\"tenant_i
 printf '%s\n' "{\"order_id\":\"00000000-0000-7000-8000-000000008002\",\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"market_id\":\"$market_id\",\"side\":\"buy\",\"price\":\"110\",\"quantity\":\"3\",\"idempotency_key\":\"smoke-buyer-one-v1\",\"reservation_account_id\":\"$buyer_quote\",\"settlement_account_id\":\"$buyer_base\",\"submitted_at\":\"2026-08-14T01:00:01Z\"}" >"$buyer_one_request"
 printf '%s\n' "{\"order_id\":\"00000000-0000-7000-8000-000000008003\",\"tenant_id\":\"$tenant_id\",\"domain_id\":\"$domain_id\",\"market_id\":\"$market_id\",\"side\":\"buy\",\"price\":\"110\",\"quantity\":\"2\",\"idempotency_key\":\"smoke-buyer-two-v1\",\"reservation_account_id\":\"$buyer_quote\",\"settlement_account_id\":\"$buyer_base\",\"submitted_at\":\"2026-08-14T01:00:02Z\"}" >"$buyer_two_request"
 
-curl --fail-with-body --silent --request POST "$base_url/v1/orders" \
-  --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$seller_request" | jq -e '.duplicate == false' >/dev/null
-wait_for 'seller order admission' "curl --fail --silent --header '$core_authorization' '$base_url/v1/orders/00000000-0000-7000-8000-000000008001' | jq -e '.status == \"open\"'"
+http_json_pipe "$base_url/v1/orders" \
+  --request POST --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$seller_request" \
+  | jq -e '.duplicate == false' >/dev/null
+wait_for 'seller order admission' "$base_url/v1/orders/00000000-0000-7000-8000-000000008001" '.status == "open"' --header "$core_authorization"
 
-curl --fail-with-body --silent --request POST "$base_url/v1/orders" \
-  --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$buyer_one_request" | jq -e '.duplicate == false' >/dev/null
-curl --fail-with-body --silent --request POST "$base_url/v1/orders" \
-  --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$buyer_one_request" | jq -e '.duplicate == true' >/dev/null
-wait_for 'first deterministic trade' "curl --fail --silent --header '$core_authorization' '$base_url/v1/markets/$market_id/trades' | jq -e 'length == 1 and .[0].price == \"100\" and .[0].quantity == \"3\"'"
-wait_for 'first projected book' "curl --fail --silent --header '$core_authorization' '$base_url/v1/markets/$market_id/book' | jq -e '.sequence == 2 and (.asks | length) == 1 and .asks[0].price == \"100\" and .asks[0].quantity == \"2\"'"
+http_json_pipe "$base_url/v1/orders" \
+  --request POST --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$buyer_one_request" \
+  | jq -e '.duplicate == false' >/dev/null
+http_json_pipe "$base_url/v1/orders" \
+  --request POST --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$buyer_one_request" \
+  | jq -e '.duplicate == true' >/dev/null
+wait_for 'first deterministic trade' "$base_url/v1/markets/$market_id/trades" 'length == 1 and .[0].price == "100" and .[0].quantity == "3"' --header "$core_authorization"
+wait_for 'first projected book' "$base_url/v1/markets/$market_id/book" '.sequence == 2 and (.asks | length) == 1 and .asks[0].price == "100" and .asks[0].quantity == "2"' --header "$core_authorization"
 
 conflict_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --request POST "$base_url/v1/orders" \
   --header "$core_authorization" --header 'content-type: application/json' \
@@ -72,10 +86,11 @@ conflict_status=$(curl --silent --output /dev/null --write-out '%{http_code}' --
 test "$conflict_status" = 409
 
 "${compose[@]}" restart matcher >/dev/null
-curl --fail-with-body --silent --request POST "$base_url/v1/orders" \
-  --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$buyer_two_request" | jq -e '.duplicate == false' >/dev/null
-wait_for 'post-restart snapshot recovery and trade' "curl --fail --silent --header '$core_authorization' '$base_url/v1/markets/$market_id/trades' | jq -e 'length == 2'"
-wait_for 'empty projected book after second fill' "curl --fail --silent --header '$core_authorization' '$base_url/v1/markets/$market_id/book' | jq -e '.sequence == 3 and (.bids | length) == 0 and (.asks | length) == 0'"
+http_json_pipe "$base_url/v1/orders" \
+  --request POST --header "$core_authorization" --header 'content-type: application/json' --data-binary "@$buyer_two_request" \
+  | jq -e '.duplicate == false' >/dev/null
+wait_for 'post-restart snapshot recovery and trade' "$base_url/v1/markets/$market_id/trades" 'length == 2' --header "$core_authorization"
+wait_for 'empty projected book after second fill' "$base_url/v1/markets/$market_id/book" '.sequence == 3 and (.bids | length) == 0 and (.asks | length) == 0' --header "$core_authorization"
 
 database_assertion=$("${compose[@]}" exec -T postgres psql --username matchplane --dbname matchplane --tuples-only --no-align --command \
   "SELECT (SELECT count(*) FROM orders), (SELECT count(*) FROM trades), (SELECT count(*) FROM ledger_entries), (SELECT count(*) FROM consumer_inbox WHERE status='applied'), (SELECT count(*) FROM asset_embeddings), (SELECT available_amount::text FROM accounts WHERE id='00000000-0000-7000-8000-000000000505');")

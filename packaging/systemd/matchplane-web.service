@@ -10,8 +10,9 @@ Group=matchplane-web
 SupplementaryGroups=matchplane
 EnvironmentFile=/etc/matchplane/matchplane.env
 EnvironmentFile=/etc/matchplane/services/web.env
-# Keep Better Auth's signing secret readable only by the web service account.
+# Keep web-only provider and signing secrets readable only by the web service account.
 EnvironmentFile=-/etc/matchplane/secrets/web/better-auth.env
+EnvironmentFile=-/etc/matchplane/secrets/web/router-ai.env
 # MATCHPLANE_ENVIRONMENT is intentionally supplied by the shared environment file.
 # This unit is used for development/test and production profiles; hard-coding the
 # value here would silently turn a test installation into a production safety profile.
@@ -37,7 +38,8 @@ RestartSec=3s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-# Root-admin archive uploads are opaque staging bytes. Keep the rest of the host read-only.
+# Keep uploads, hosted media, and the durable Web-managed router-state root writable. Router
+# generations and credential slots remain below the protected root-email directory only.
 ReadWritePaths=/var/lib/matchplane/subplatform-uploads /var/lib/matchplane/media /etc/matchplane/secrets/root-email
 ProtectHome=true
 ProtectKernelTunables=true

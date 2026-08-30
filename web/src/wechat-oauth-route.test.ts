@@ -23,9 +23,10 @@ import { GET, PATCH } from "../app/api/platform/wechat-oauth/config/route";
 
 const managedConfig = {
   enabled: true,
-  appId: "wx1234567890abcdef",
+  appId: "<appid>",
   scopes: ["snsapi_login"],
-  authorizationUrl: "https://open.weixin.qq.com/connect/qrconnect#wechat_redirect",
+  authorizationUrl:
+    "https://open.weixin.qq.com/connect/qrconnect#wechat_redirect",
   tokenUrl: "https://api.weixin.qq.com/sns/oauth2/access_token",
   userInfoUrl: "https://api.weixin.qq.com/sns/userinfo",
   credentialConfigured: true,
@@ -82,18 +83,20 @@ describe("wechat oauth config route", () => {
     const response = await PATCH(
       patchRequest({
         enabled: true,
-        appId: "wx1234567890abcdef",
-        appSecret: "top-secret",
+        appId: "<appid>",
+        appSecret: "<appsecret>",
         scopes: ["snsapi_login", 42],
-        authorizationUrl: "https://open.weixin.qq.com/connect/qrconnect#wechat_redirect",
+        authorizationUrl:
+          "https://open.weixin.qq.com/connect/qrconnect#wechat_redirect",
       }),
     );
     expect(response.status).toBe(200);
     expect(saveManagedWeChatOAuthConfig).toHaveBeenCalledWith({
       enabled: true,
-      appId: "wx1234567890abcdef",
-      appSecret: "top-secret",
-      authorizationUrl: "https://open.weixin.qq.com/connect/qrconnect#wechat_redirect",
+      appId: "<appid>",
+      appSecret: "<appsecret>",
+      authorizationUrl:
+        "https://open.weixin.qq.com/connect/qrconnect#wechat_redirect",
       tokenUrl: undefined,
       userInfoUrl: undefined,
       scopes: ["snsapi_login"],
@@ -106,7 +109,9 @@ describe("wechat oauth config route", () => {
 
   it("rejects writes from mall staff who are not the owner", async () => {
     getSession.mockResolvedValue({ user: { role: "rootAdmin" } });
-    const response = await PATCH(patchRequest({ enabled: false, appId: "wx1" }));
+    const response = await PATCH(
+      patchRequest({ enabled: false, appId: "<appid>" }),
+    );
     expect(response.status).toBe(403);
     expect(saveManagedWeChatOAuthConfig).not.toHaveBeenCalled();
   });
@@ -121,7 +126,9 @@ describe("wechat oauth config route", () => {
     saveManagedWeChatOAuthConfig.mockImplementation(() => {
       throw new Error("启用前请填写 AppSecret");
     });
-    const response = await PATCH(patchRequest({ enabled: true, appId: "wx1" }));
+    const response = await PATCH(
+      patchRequest({ enabled: true, appId: "<appid>" }),
+    );
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "启用前请填写 AppSecret",

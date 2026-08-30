@@ -1,6 +1,11 @@
 import { randomInt } from "node:crypto";
 
+import { fetchPinnedPublicText } from "./pinned-public-endpoint";
+import { isProductionEnvironment } from "./runtime";
 import { readManagedSmsGatewayConfig } from "./sms-gateway-config";
+
+const SMS_GATEWAY_TIMEOUT_MS = 3_000;
+const SMS_GATEWAY_RESPONSE_LIMIT_BYTES = 64 * 1024;
 
 type SmsPayload = {
   phoneNumber: string;
@@ -63,36 +68,50 @@ function envSmsGatewayRoute(environment: Record<string, string | undefined>): Sm
 }
 
 async function postToGateway(route: SmsGatewayRoute, body: SmsPayload & { purpose: string }): Promise<void> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3_000);
+  let url: URL;
   try {
-    const response = await fetch(route.url, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-        ...(route.token ? { authorization: `Bearer ${route.token}` } : {}),
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error(`SMS provider returned HTTP ${response.status}`);
-    }
-  } finally {
-    clearTimeout(timeout);
+    url = new URL(route.url);
+  } catch {
+    throw new Error("短信网关地址无效");
+  }
+  const headers = new Headers({
+    accept: "application/json",
+    "content-type": "application/json",
+  });
+  if (route.token) headers.set("authorization", `Bearer ${route.token}`);
+
+  const { response } = await fetchPinnedPublicText(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(SMS_GATEWAY_TIMEOUT_MS),
+    requestTimeoutMs: SMS_GATEWAY_TIMEOUT_MS,
+    responseBodyTimeoutMs: SMS_GATEWAY_TIMEOUT_MS,
+    responseLimitBytes: SMS_GATEWAY_RESPONSE_LIMIT_BYTES,
+    allowLoopback: isAllowedDevelopmentLoopback(url),
+  });
+  if (!response.ok) {
+    throw new Error(`SMS provider returned HTTP ${response.status}`);
   }
 }
 
 function safeProviderUrl(value: string): string | null {
   try {
-    const url = new URL(value);
+    const normalized = value.trim();
+    if (!normalized || normalized.length > 2_048) return null;
+    const url = new URL(normalized);
+    if (url.username || url.password || url.hash) return null;
     if (url.protocol === "https:") return url.toString();
-    if (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
-      return url.toString();
-    }
-    return null;
+    return isAllowedDevelopmentLoopback(url) ? url.toString() : null;
   } catch {
     return null;
   }
+}
+
+function isAllowedDevelopmentLoopback(url: URL): boolean {
+  return (
+    !isProductionEnvironment() &&
+    url.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+  );
 }

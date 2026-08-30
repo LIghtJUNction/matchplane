@@ -43,7 +43,7 @@ for compatibility, but new product behavior must not expose or create a recursiv
 
 ## Operating Context
 
-The marketplace is served at `/`. Active stores use one-segment paths such as `/matx-auto` and are
+The marketplace is served at `/`. Active stores use one-segment paths such as `/store-a` and are
 also discoverable from the marketplace assistant. A hosted store uses the shared product editor;
 an integrated store may supply its own storefront, catalog retrieval, media, and fulfilment tools.
 Both types remain ordinary stores in the public experience. Catalogs are empty by default: MatchPlane does not seed merchant products or copy third-party listings. A signed-in merchant enters product details and images through the store editor; the product becomes public only after platform review.
@@ -88,7 +88,7 @@ and store content must come from real approved records; the root never fabricate
 
 - Marketplace web application: `web/`.
 - Rust services and shared commerce/storage crates: `services/` and `crates/`.
-- Store integration compatibility layer: `docs/subplatform-contract.md` and `subplatforms/auto/`.
+- Store integration contract: `docs/subplatform-contract.md`; store packages are maintained independently.
 - HTTP MCP facade and Agent handoff: `web/app/api/mcp/` and
   `web/app/api/platform/agent/handoff/`.
 

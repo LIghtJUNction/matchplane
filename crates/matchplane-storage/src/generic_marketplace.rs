@@ -9,6 +9,9 @@ use matchplane_domain::{
     AssetId, DomainId, MarketplaceBehaviorEventId, MarketplaceIntentId, MarketplaceOfferId,
     MarketplacePartyId, MarketplaceSalesHandoffId, MatchIntroductionId, TenantId,
 };
+use matchplane_matching::{
+    StructuredDataBudget, StructuredScorePolicy, TokenPolicy, score_structured,
+};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
@@ -21,6 +24,19 @@ const MAX_NARRATIVE_BYTES: usize = 10_000;
 const MAX_IDEMPOTENCY_KEY_BYTES: usize = 240;
 const MAX_EXTERNAL_KEY_BYTES: usize = 256;
 const MAX_DISPLAY_NAME_BYTES: usize = 500;
+// The storage adapter refuses unbounded rank work: SQL admits at most 500 rows per side and the
+// public API returns at most 100 after deterministic scoring.
+const MARKETPLACE_MATCH_MAX_INPUT_CANDIDATES: i64 = 500;
+const MARKETPLACE_MATCH_MAX_RESULTS: usize = 100;
+// Preserve the legacy 256 raw-token/sorted-token behavior while bounding direct storage callers
+// to production request-sized structured data and introduction-compatible explanations.
+const MARKETPLACE_MATCH_POLICY: StructuredScorePolicy = StructuredScorePolicy::new(
+    TokenPolicy::storage_compatible(256),
+    StructuredDataBudget::new(256, 500, 128 * 1_024, 16 * 1_024, 32),
+    8,
+    8,
+    500,
+);
 
 /// A domain-neutral demand or supply intent submitted by one participant.
 #[derive(Debug)]
@@ -1036,19 +1052,37 @@ impl PgStore {
         }
 
         let rows = sqlx::query(
-            "SELECT id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
-                    display_name, attributes, terms, status, published_at, expires_at,
-                    version, created_at, updated_at
-             FROM marketplace_offers
-             WHERE tenant_id = $1 AND domain_id = $2 AND status = 'active'
-               AND supply_party_id <> $3
-               AND (expires_at IS NULL OR expires_at > clock_timestamp())
-             ORDER BY published_at DESC NULLS LAST, id
-             LIMIT 500",
+            "SELECT offer.id, offer.tenant_id, offer.domain_id, offer.supply_party_id,
+                    offer.asset_id, offer.external_key, offer.display_name, offer.attributes,
+                    offer.terms, offer.status, offer.published_at, offer.expires_at,
+                    offer.version, offer.created_at, offer.updated_at
+             FROM marketplace_offers offer
+             WHERE offer.tenant_id = $1 AND offer.domain_id = $2 AND offer.status = 'active'
+               AND offer.supply_party_id <> $3
+               AND (offer.expires_at IS NULL OR offer.expires_at > clock_timestamp())
+               AND (
+                 offer.store_id IS NULL
+                 OR EXISTS (
+                   SELECT 1
+                     FROM stores store
+                     JOIN domains domain
+                       ON domain.tenant_id = store.tenant_id
+                      AND domain.id = store.domain_id
+                      AND domain.status = 'active'
+                    WHERE store.tenant_id = offer.tenant_id
+                      AND store.id = offer.store_id
+                      AND store.domain_id = offer.domain_id
+                      AND store.status = 'active'
+                      AND store.visibility = 'public'
+                 )
+               )
+             ORDER BY offer.published_at DESC NULLS LAST, offer.id
+             LIMIT $4",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(intent.domain_id.into_uuid())
         .bind(command.participant_id.into_uuid())
+        .bind(MARKETPLACE_MATCH_MAX_INPUT_CANDIDATES)
         .fetch_all(self.pool())
         .await?;
 
@@ -1056,22 +1090,23 @@ impl PgStore {
             .iter()
             .map(|row| {
                 let offer = offer_from_row(row)?;
-                let (score, reasons) = generic_match_score(
+                let recommendation = score_structured(
                     &intent.narrative,
                     &intent.attributes,
                     &offer.display_name,
                     &offer.attributes,
+                    MARKETPLACE_MATCH_POLICY,
                 );
                 // An empty/unsupported request must not be presented as a real match. The
                 // caller can still hand the narrative to its own retrieval provider, but the
                 // kernel should not manufacture a neutral 50% recommendation.
-                if score <= 0.0 {
+                if recommendation.score <= 0.0 {
                     return Ok(None);
                 }
                 Ok(Some(MarketplaceOfferCandidate {
                     offer,
-                    score,
-                    reasons,
+                    score: recommendation.score,
+                    reasons: recommendation.reasons,
                     risks: Vec::new(),
                 }))
             })
@@ -1091,7 +1126,7 @@ impl PgStore {
                         .cmp(right.offer.offer_id.as_uuid())
                 })
         });
-        candidates.truncate(command.limit.clamp(1, 100));
+        candidates.truncate(command.limit.clamp(1, MARKETPLACE_MATCH_MAX_RESULTS));
         Ok(candidates)
     }
 
@@ -1103,20 +1138,22 @@ impl PgStore {
         &self,
         command: &MatchMarketplaceDemands,
     ) -> Result<Vec<MarketplaceDemandCandidate>, StorageError> {
-        let offer = sqlx::query(OFFER_SELECT_BY_ID)
+        let row = sqlx::query(OFFER_SELECT_BY_ID)
             .bind(command.tenant_id.into_uuid())
             .bind(command.domain_id.into_uuid())
             .bind(command.offer_id.into_uuid())
             .fetch_optional(self.pool())
             .await?
-            .ok_or(StorageError::NotFound("marketplace offer"))
-            .and_then(|row| offer_from_row(&row))?;
+            .ok_or(StorageError::NotFound("marketplace offer"))?;
+        let storefront_is_discoverable: bool = row.try_get("storefront_is_discoverable")?;
+        let offer = offer_from_row(&row)?;
         if offer.supply_party_id != command.participant_id {
             return Err(StorageError::Forbidden(
                 "marketplace offer does not belong to the authenticated participant".to_owned(),
             ));
         }
         if offer.status != "active"
+            || !storefront_is_discoverable
             || offer
                 .expires_at
                 .is_some_and(|expiry| expiry <= OffsetDateTime::now_utc())
@@ -1130,19 +1167,21 @@ impl PgStore {
             .bind(command.tenant_id.into_uuid())
             .bind(command.domain_id.into_uuid())
             .bind(command.participant_id.into_uuid())
+            .bind(MARKETPLACE_MATCH_MAX_INPUT_CANDIDATES)
             .fetch_all(self.pool())
             .await?;
         let mut candidates: Vec<MarketplaceDemandCandidate> = rows
             .iter()
             .map(|row| {
                 let intent = intent_from_row(row)?;
-                let (score, reasons) = generic_match_score(
+                let recommendation = score_structured(
                     &intent.narrative,
                     &intent.attributes,
                     &offer.display_name,
                     &offer.attributes,
+                    MARKETPLACE_MATCH_POLICY,
                 );
-                if score <= 0.0 {
+                if recommendation.score <= 0.0 {
                     return Ok(None);
                 }
                 Ok(Some(MarketplaceDemandCandidate {
@@ -1152,8 +1191,8 @@ impl PgStore {
                     narrative: intent.narrative,
                     attributes: intent.attributes,
                     terms: intent.terms,
-                    score,
-                    reasons,
+                    score: recommendation.score,
+                    reasons: recommendation.reasons,
                     expires_at: intent.expires_at,
                     created_at: intent.created_at,
                     updated_at: intent.updated_at,
@@ -1170,7 +1209,7 @@ impl PgStore {
                 .then_with(|| right.created_at.cmp(&left.created_at))
                 .then_with(|| left.intent_id.as_uuid().cmp(right.intent_id.as_uuid()))
         });
-        candidates.truncate(command.limit.clamp(1, 100));
+        candidates.truncate(command.limit.clamp(1, MARKETPLACE_MATCH_MAX_RESULTS));
         Ok(candidates)
     }
 
@@ -1247,7 +1286,8 @@ impl PgStore {
         let row = sqlx::query(
             "SELECT i.domain_id, i.participant_id, i.side, i.status AS intent_status,
                     i.expires_at AS intent_expires_at,
-                    o.supply_party_id, o.status AS offer_status, o.expires_at AS offer_expires_at
+                    o.supply_party_id, o.store_id AS offer_store_id,
+                    o.status AS offer_status, o.expires_at AS offer_expires_at
              FROM marketplace_intents i
              JOIN marketplace_offers o
                ON o.tenant_id = i.tenant_id AND o.domain_id = i.domain_id
@@ -1266,6 +1306,7 @@ impl PgStore {
         let intent_status: String = row.try_get("intent_status")?;
         let supply_party_id: MarketplacePartyId =
             MarketplacePartyId::from_uuid(row.try_get("supply_party_id")?);
+        let offer_store_id: Option<Uuid> = row.try_get("offer_store_id")?;
         let offer_status: String = row.try_get("offer_status")?;
         let intent_expiry: Option<OffsetDateTime> = row.try_get("intent_expires_at")?;
         let offer_expiry: Option<OffsetDateTime> = row.try_get("offer_expires_at")?;
@@ -1284,9 +1325,35 @@ impl PgStore {
                 "demand and supply participants must differ".to_owned(),
             ));
         }
+        // A store can be closed, suspended, made private, or disabled after an offer was
+        // published. Lock the current lifecycle rows so a concurrent transition linearizes
+        // either before this introduction (and blocks it) or after the transaction commits.
+        let storefront_is_discoverable = match offer_store_id {
+            None => true,
+            Some(store_id) => sqlx::query_scalar::<_, bool>(
+                "SELECT store.status = 'active'
+                        AND store.visibility = 'public'
+                        AND domain.status = 'active'
+                   FROM stores store
+                   JOIN domains domain
+                     ON domain.tenant_id = store.tenant_id
+                    AND domain.id = store.domain_id
+                  WHERE store.tenant_id = $1
+                    AND store.id = $2
+                    AND store.domain_id = $3
+                  FOR SHARE OF store, domain",
+            )
+            .bind(command.tenant_id.into_uuid())
+            .bind(store_id)
+            .bind(row.try_get::<Uuid, _>("domain_id")?)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .unwrap_or(false),
+        };
         let now = OffsetDateTime::now_utc();
         if intent_status != "active" && intent_status != "matched"
             || offer_status != "active"
+            || !storefront_is_discoverable
             || intent_expiry.is_some_and(|expiry| expiry <= now)
             || offer_expiry.is_some_and(|expiry| expiry <= now)
         {
@@ -2351,93 +2418,6 @@ fn ensure_same_offer(
     Ok(())
 }
 
-fn generic_match_score(
-    narrative: &str,
-    demand: &Value,
-    supply_name: &str,
-    supply: &Value,
-) -> (f64, Vec<String>) {
-    let Some(demand) = demand.as_object() else {
-        return (0.0, Vec::new());
-    };
-    let Some(supply) = supply.as_object() else {
-        return (0.0, Vec::new());
-    };
-    let mut matched = 0usize;
-    let mut reasons = Vec::new();
-    for (key, value) in demand {
-        if supply.get(key) == Some(value) {
-            matched += 1;
-            if reasons.len() < 8 {
-                reasons.push(format!("shared attribute: {key}"));
-            }
-        }
-    }
-    let considered = demand.values().filter(|value| !value.is_null()).count();
-    let attribute_score = if considered == 0 {
-        0.0
-    } else {
-        matched as f64 / considered as f64
-    };
-    let narrative_tokens = generic_match_tokens(narrative);
-    let supply_json = serde_json::to_string(supply).unwrap_or_default();
-    let supply_tokens = generic_match_tokens(&format!("{supply_name} {supply_json}"));
-    let narrative_matches = narrative_tokens
-        .iter()
-        .filter(|token| supply_tokens.contains(*token))
-        .count();
-    let narrative_score = if narrative_tokens.is_empty() {
-        0.0
-    } else {
-        narrative_matches as f64 / narrative_tokens.len() as f64
-    };
-    if narrative_matches > 0 {
-        for token in narrative_tokens
-            .iter()
-            .filter(|token| supply_tokens.contains(*token))
-            .take(8)
-        {
-            reasons.push(format!("narrative_match:{token}"));
-        }
-    }
-    let score = match (considered, narrative_tokens.is_empty()) {
-        (0, true) => 0.0,
-        (0, false) => narrative_score,
-        (_, true) => attribute_score,
-        (_, false) => attribute_score.mul_add(0.7, narrative_score * 0.3),
-    };
-    (score.clamp(0.0, 1.0), reasons)
-}
-
-fn generic_match_tokens(value: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut ascii = String::new();
-    let flush_ascii = |tokens: &mut Vec<String>, ascii: &mut String| {
-        if ascii.len() >= 2 {
-            tokens.push(std::mem::take(ascii));
-        } else {
-            ascii.clear();
-        }
-    };
-    for character in value.chars().flat_map(char::to_lowercase) {
-        if character.is_ascii_alphanumeric() {
-            ascii.push(character);
-        } else {
-            flush_ascii(&mut tokens, &mut ascii);
-            if ('\u{3400}'..='\u{9fff}').contains(&character) {
-                tokens.push(character.to_string());
-            }
-        }
-        if tokens.len() >= 256 {
-            break;
-        }
-    }
-    flush_ascii(&mut tokens, &mut ascii);
-    tokens.sort_unstable();
-    tokens.dedup();
-    tokens
-}
-
 const INTENT_SELECT: &str = "SELECT id, tenant_id, domain_id, participant_id, side, narrative,
     attributes, terms, supply_discovery_enabled, supply_discovery_expires_at,
     idempotency_key, status, expires_at, version, created_at, updated_at
@@ -2461,7 +2441,7 @@ const INTENT_SELECT_DISCOVERABLE_DEMANDS: &str =
       AND (expires_at IS NULL OR expires_at > clock_timestamp())
       AND participant_id <> $3
     ORDER BY created_at DESC
-    LIMIT 500";
+    LIMIT $4";
 
 const OFFER_SELECT: &str = "SELECT id, tenant_id, domain_id, supply_party_id, asset_id,
     external_key, display_name, attributes, terms, status, published_at, expires_at, version,
@@ -2472,10 +2452,25 @@ const OFFER_SELECT: &str = "SELECT id, tenant_id, domain_id, supply_party_id, as
           WHERE tenant_id = $1 AND id = $3
       )";
 
-const OFFER_SELECT_BY_ID: &str = "SELECT id, tenant_id, domain_id, supply_party_id, asset_id,
-    external_key, display_name, attributes, terms, status, published_at, expires_at, version,
-    created_at, updated_at FROM marketplace_offers
-    WHERE tenant_id = $1 AND domain_id = $2 AND id = $3";
+const OFFER_SELECT_BY_ID: &str = "SELECT offer.id, offer.tenant_id, offer.domain_id,
+    offer.supply_party_id, offer.asset_id, offer.external_key, offer.display_name,
+    offer.attributes, offer.terms, offer.status, offer.published_at, offer.expires_at,
+    offer.version, offer.created_at, offer.updated_at,
+    (offer.store_id IS NULL OR EXISTS (
+        SELECT 1
+          FROM stores store
+          JOIN domains domain
+            ON domain.tenant_id = store.tenant_id
+           AND domain.id = store.domain_id
+           AND domain.status = 'active'
+         WHERE store.tenant_id = offer.tenant_id
+           AND store.id = offer.store_id
+           AND store.domain_id = offer.domain_id
+           AND store.status = 'active'
+           AND store.visibility = 'public'
+    )) AS storefront_is_discoverable
+    FROM marketplace_offers offer
+    WHERE offer.tenant_id = $1 AND offer.domain_id = $2 AND offer.id = $3";
 
 const INTRODUCTION_SELECT_BY_KEY: &str = "SELECT id, tenant_id, demand_intent_id, supply_offer_id,
     demand_party_id, supply_party_id, score, reasons, status, supply_contact_consent_at,
@@ -2641,6 +2636,8 @@ async fn insert_marketplace_contact_event(
             SET request_fingerprint = marketplace_introduction_contact_events.request_fingerprint
           WHERE marketplace_introduction_contact_events.request_fingerprint
                 IS NOT DISTINCT FROM EXCLUDED.request_fingerprint
+            AND marketplace_introduction_contact_events.target_party_id = EXCLUDED.target_party_id
+            AND marketplace_introduction_contact_events.decision = EXCLUDED.decision
          RETURNING id",
     )
     .bind(Uuid::now_v7())
@@ -2672,26 +2669,29 @@ async fn serializable(transaction: &mut Transaction<'_, Postgres>) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::{
-        LockedMarketplaceOffer, authorize_offer_management, ensure_offer_version,
-        generic_match_score,
+        LockedMarketplaceOffer, MARKETPLACE_MATCH_POLICY, authorize_offer_management,
+        ensure_offer_version,
     };
     use crate::StorageError;
     use matchplane_domain::MarketplacePartyId;
+    use matchplane_matching::score_structured;
     use serde_json::json;
     use uuid::Uuid;
 
     #[test]
     fn generic_match_score_keeps_exact_attributes_explainable() {
-        let (score, reasons) = generic_match_score(
+        let recommendation = score_structured(
             "service",
             &json!({"kind": "service", "region": "cn", "capacity": 4}),
             "service offer",
             &json!({"kind": "service", "region": "cn", "capacity": 2}),
+            MARKETPLACE_MATCH_POLICY,
         );
 
-        assert!(score > 0.6);
+        assert!(recommendation.score > 0.6);
         assert_eq!(
-            reasons
+            recommendation
+                .reasons
                 .iter()
                 .take(2)
                 .map(String::as_str)
@@ -2702,24 +2702,35 @@ mod tests {
 
     #[test]
     fn empty_constraints_without_narrative_do_not_match_everything() {
-        let (score, reasons) =
-            generic_match_score("", &json!({}), "anything", &json!({"kind": "anything"}));
+        let recommendation = score_structured(
+            "",
+            &json!({}),
+            "anything",
+            &json!({"kind": "anything"}),
+            MARKETPLACE_MATCH_POLICY,
+        );
 
-        assert_eq!(score, 0.0);
-        assert!(reasons.is_empty());
+        assert_eq!(recommendation.score, 0.0);
+        assert!(recommendation.reasons.is_empty());
     }
 
     #[test]
     fn narrative_overlap_produces_a_bounded_explanation_without_schema_fields() {
-        let (score, reasons) = generic_match_score(
+        let recommendation = score_structured(
             "新能源服务",
             &json!({}),
             "城市新能源服务",
             &json!({"kind": "service"}),
+            MARKETPLACE_MATCH_POLICY,
         );
 
-        assert!(score > 0.0);
-        assert!(reasons.iter().any(|reason| reason == "narrative_match:新"));
+        assert!(recommendation.score > 0.0);
+        assert!(
+            recommendation
+                .reasons
+                .iter()
+                .any(|reason| reason == "narrative_match:新")
+        );
     }
 
     #[test]

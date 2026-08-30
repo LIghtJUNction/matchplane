@@ -3,19 +3,20 @@ image:
   # Retained for release metadata; deployments use the immutable digest below.
   tag: 0.1.10
   # Intentionally empty: production renders must provide the published image digest.
-  digest: ''
+  digest: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
-nameOverride: ''
-fullnameOverride: ''
+nameOverride: ""
+fullnameOverride: ""
 
 web:
-  replicas: 2
+  # Exactly one writer is required until the router lock is safe across Pod/PID namespaces.
+  replicas: 1
   image:
     repository: ghcr.io/lightjunction/matchplane-web
     # Production renders must provide the immutable digest published by CI.
-    digest: ''
+    digest: ""
   service:
     type: ClusterIP
     port: 4173
@@ -24,29 +25,39 @@ web:
   # separately from the payment/gateway secrets into the web BFF.
   existingSecret: matchplane-web-secrets
   # Required per deployment; keep domains out of the reusable chart defaults.
-  betterAuthUrl: ''
-  trustedOrigins: ''
-  rootTenantId: ''
-  rootOrganizationId: ''
+  betterAuthUrl: ""
+  trustedOrigins: ""
+  rootTenantId: ""
+  rootOrganizationId: ""
   artifactRoot: /var/lib/matchplane/subplatform-artifacts
   # Optional read-only PVC containing artifacts produced by the isolated plugin builder.
   # Leave empty when artifacts are supplied by the host-mounted systemd/Compose path.
-  artifactPvc: ''
+  artifactPvc: ""
   uploadRoot: /var/lib/matchplane/subplatform-uploads
   mediaMaxBytes: 26214400
   hostedMediaRoot: /var/lib/matchplane/media
   # ReadWriteMany is required when web.replicas is greater than one.
-  hostedMediaPvc: ''
+  hostedMediaPvc: ""
   # Optional ReadWriteMany PVC for opaque archive uploads. The isolated builder should mount
   # the same PVC read-only or consume the upload object through an external worker.
-  uploadPvc: ''
+  uploadPvc: ""
   secretRoot: /run/matchplane/subplatform-email-secrets
   # Optional read-only PVC populated by the deployment secret manager. Its layout is
   # <tenant-uuid>/<domain-uuid>/<slot-name> and is never writable by the web pod.
-  secretPvc: ''
+  secretPvc: ""
+  # Durable state for Web-managed router generations, audit delivery, and credential slots.
+  # This storage is mandatory because an ephemeral Web filesystem can silently lose an activated
+  # router during a restart. Production must name an existing claim or an explicit storage class.
+  platformRouterStorage:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    size: 1Gi
+    accessModes:
+      - ReadWriteOnce
   # The router provider is optional. Keep its API key in existingWebSecret under router-ai-key.
-  routerAiUrl: ''
-  routerAiModel: ''
+  routerAiUrl: ""
+  routerAiModel: ""
   routerAiProtocol: openai-compatible
   routerAiMaxTokens: 512
   routerAiToolMode: auto
@@ -55,22 +66,22 @@ web:
   # Optional approved national network identity adapter. The client secret is
   # read from existingWebSecret under national-identity-client-secret.
   nationalIdentity:
-    clientId: ''
-    discoveryUrl: ''
-    authorizationUrl: ''
-    tokenUrl: ''
-    userInfoUrl: ''
+    clientId: ""
+    discoveryUrl: ""
+    authorizationUrl: ""
+    tokenUrl: ""
+    userInfoUrl: ""
     scopes: openid
   # Root SMTP is needed only for first-run/admin auth. The credential itself stays in the
   # existing web secret under root-smtp-credential-ref (file:// or env:// reference).
   rootSmtp:
     providerKey: root-smtp
-    host: ''
+    host: ""
     port: 587
     tlsMode: starttls
-    username: ''
-    fromAddress: ''
-    replyTo: ''
+    username: ""
+    fromAddress: ""
+    replyTo: ""
     mode: production
     enabled: true
   resources:
@@ -78,7 +89,7 @@ web:
       cpu: 100m
       memory: 256Mi
     limits:
-      cpu: '1'
+      cpu: "1"
       memory: 512Mi
 
 subplatformBuilder:
@@ -87,14 +98,14 @@ subplatformBuilder:
   image:
     repository: ghcr.io/lightjunction/matchplane-subplatform-builder
     # Production renders must provide the immutable builder image digest.
-    digest: ''
+    digest: ""
   # Empty derives the release-local web service name in the Deployment template.
-  webUrl: ''
+  webUrl: ""
   uploadRoot: /var/lib/matchplane/subplatform-uploads
   artifactRoot: /var/lib/matchplane/subplatform-artifacts
   workRoot: /var/lib/matchplane/subplatform-builder-work
-  uploadPvc: ''
-  artifactPvc: ''
+  uploadPvc: ""
+  artifactPvc: ""
   pollSeconds: 5
   buildSeconds: 900
   gitAllowedHosts: github.com,gitlab.com
@@ -104,7 +115,7 @@ subplatformBuilder:
       cpu: 100m
       memory: 256Mi
     limits:
-      cpu: '2'
+      cpu: "2"
       memory: 1Gi
 
 networkPolicy:
@@ -119,18 +130,20 @@ runtime:
   # Legacy shared secret retained only for development/test renders. Production
   # requires a distinct secret for every workload below.
   existingSecret: matchplane-runtime
-  # Each secret must provide database-url and valkey-url. Use distinct
-  # PostgreSQL roles and Valkey ACL users; do not reuse the migration identity.
+  # Each secret must provide database-url. Cache-using workloads must also provide valkey-url;
+  # the database-only conversion projector must not receive it. Use distinct PostgreSQL roles
+  # and Valkey ACL users; do not reuse the migration identity.
   serviceSecrets:
-    web: ''
-    gateway: ''
-    payment-service: ''
-    event-relay: ''
-    matcher: ''
-    projector: ''
-    vector-worker: ''
-    federation-hub: ''
-    migration: ''
+    web: ""
+    gateway: ""
+    payment-service: ""
+    event-relay: ""
+    conversion-projector: ""
+    matcher: ""
+    projector: ""
+    vector-worker: ""
+    federation-hub: ""
+    migration: ""
   # These secrets are split so the public gateway cannot read payment credentials or invoice keys.
   existingGatewaySecret: matchplane-gateway-secrets
   existingPaymentSecret: matchplane-payment-secrets
@@ -141,12 +154,12 @@ runtime:
   existingKafkaTlsSecret: matchplane-kafka-tls
   # Production requires a distinct Kafka mTLS identity per client workload.
   kafkaTlsSecrets:
-    event-relay: ''
-    matcher: ''
-    projector: ''
+    event-relay: ""
+    matcher: ""
+    projector: ""
   environment: production
   # Override with a unique UUID per federation node before a production install.
-  nodeId: ''
+  nodeId: ""
   kafkaBrokers: matchplane-kafka-bootstrap:9093
   kafkaSecurityProtocol: SSL
   kafkaSslCaLocation: /run/matchplane/kafka/ca.crt
@@ -165,7 +178,7 @@ runtime:
   paymentAdminTokenPath: /run/secrets/payment-admin.token
   gatewayAdminTokenPath: /run/secrets/gateway-admin.token
   # Required operator input; an empty value intentionally fails production config validation.
-  paymentCallbackOrigin: ''
+  paymentCallbackOrigin: ""
 
 gateway:
   replicas: 2
@@ -188,6 +201,19 @@ federationHub:
     type: ClusterIP
     port: 50051
 
+conversionProjector:
+  # The chart ships the workload declaration disabled. Production must opt in explicitly only
+  # after the database migration, service-scoped secret, and operator runbook are ready.
+  enabled: false
+  replicas: 2
+  batchSize: 1
+  pollMs: 1000
+  poolSize: 5
+  degradedAfterSeconds: 300
+  service:
+    type: ClusterIP
+    port: 8080
+
 workers:
   eventRelayReplicas: 2
   projectorReplicas: 2
@@ -198,7 +224,7 @@ resources:
     cpu: 100m
     memory: 128Mi
   limits:
-    cpu: '2'
+    cpu: "2"
     memory: 1Gi
 
 podSecurityContext:
@@ -206,6 +232,7 @@ podSecurityContext:
   runAsUser: 12001
   runAsGroup: 12001
   fsGroup: 12001
+  fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
     type: RuntimeDefault
 

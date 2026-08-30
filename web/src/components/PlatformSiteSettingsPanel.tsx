@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@appica/ui-react/button";
 import { type SyntheticEvent, useEffect, useState } from "react";
 import { Search, Save, ShieldCheck } from "lucide-react";
 
@@ -125,15 +126,17 @@ export function PlatformSiteSettingsPanel({
     >
       <div className="site-settings-heading">
         <SectionHeading eyebrow="网站与合规" title="备案信息" />
-        <button
-          className="button button-light site-settings-lookup"
+        <Button
+          className="site-settings-lookup min-h-11"
+          variant="outline"
+          size="md"
           type="button"
           onClick={() => void lookup()}
           disabled={lookingUp || loading}
         >
           <Search size={16} aria-hidden="true" />
           {lookingUp ? "查询中…" : "自动查询当前域名"}
-        </button>
+        </Button>
       </div>
       <p className="site-settings-intro">
         {platformName}{" "}
@@ -143,6 +146,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-icp-number">
           <span>ICP备案号</span>
           <input
+            className="min-h-11"
             id="site-icp-number"
             value={icpNumber}
             onChange={(event) => setIcpNumber(event.target.value)}
@@ -153,6 +157,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-icp-subject">
           <span>备案主体</span>
           <input
+            className="min-h-11"
             id="site-icp-subject"
             value={icpSubject}
             onChange={(event) => setIcpSubject(event.target.value)}
@@ -163,6 +168,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-icp-url">
           <span>备案查询链接（可选）</span>
           <input
+            className="min-h-11"
             id="site-icp-url"
             type="url"
             value={icpRecordUrl}
@@ -174,6 +180,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-psb-number">
           <span>公安备案号（可选）</span>
           <input
+            className="min-h-11"
             id="site-psb-number"
             value={publicSecurityNumber}
             onChange={(event) => setPublicSecurityNumber(event.target.value)}
@@ -184,6 +191,7 @@ export function PlatformSiteSettingsPanel({
         <label htmlFor="site-psb-url">
           <span>公安备案链接（可选）</span>
           <input
+            className="min-h-11"
             id="site-psb-url"
             type="url"
             value={publicSecurityUrl}
@@ -200,14 +208,16 @@ export function PlatformSiteSettingsPanel({
               ? ` · 最近查询 ${formatDate(settings.lookup_checked_at)}`
               : ""}
           </p>
-          <button
-            className="button button-dark"
+          <Button
+            className="min-h-11"
+            variant="primary"
+            size="md"
             type="submit"
             disabled={saving || loading}
           >
             <Save size={16} aria-hidden="true" />
             {saving ? "保存中…" : "保存备案信息"}
-          </button>
+          </Button>
         </div>
       </form>
     </section>

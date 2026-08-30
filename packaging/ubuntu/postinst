@@ -9,11 +9,15 @@ fi
 if command -v systemd-tmpfiles >/dev/null 2>&1; then
   systemd-tmpfiles --create matchplane.conf
 fi
+if [ -x /usr/sbin/matchplane-postgres-backup-prepare ]; then
+  /usr/sbin/matchplane-postgres-backup-prepare --if-postgres-present
+fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
   if [ "${1:-}" = configure ] && [ -n "$previous_version" ]; then
     set -- matchplane-gateway.service matchplane-payment-service.service \
-      matchplane-event-relay.service matchplane-matcher.service \
+      matchplane-event-relay.service matchplane-conversion-projector.service \
+      matchplane-matcher.service \
       matchplane-projector.service matchplane-vector-worker.service \
       matchplane-subplatform-builder.service matchplane-federation-hub.service matchplane-web.service
     if [ "$previous_version" = 0.1.0 ]; then
@@ -32,3 +36,4 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
 fi
 printf '%s\n' 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.env before enabling services.'
+printf '%s\n' 'The PostgreSQL backup timer is installed disabled; production operators must enable it explicitly.'

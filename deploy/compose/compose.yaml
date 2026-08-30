@@ -216,8 +216,7 @@ services:
       MATCHPLANE_ROOT_TENANT_ID: ${MATCHPLANE_ROOT_TENANT_ID:-}
       MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT: ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-/var/lib/matchplane/subplatform-artifacts}
       MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT: ${MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT:-/var/lib/matchplane/subplatform-uploads}
-      MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON: '${MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON:-{"used-car":{"url":"http://auto-agent:8787/mcp","tokenEnv":"MATCHPLANE_AUTO_MCP_TOKEN"}}}'
-      MATCHPLANE_AUTO_MCP_TOKEN: ${MATCHPLANE_AUTO_MCP_TOKEN:-matchplane_auto_dev_only}
+      MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON: '${MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON:-{}}'
       MATCHPLANE_MEDIA_MAX_BYTES: ${MATCHPLANE_MEDIA_MAX_BYTES:-26214400}
       MATCHPLANE_HOSTED_MEDIA_ROOT: ${MATCHPLANE_HOSTED_MEDIA_ROOT:-/var/lib/matchplane/media}
       MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN: ${MATCHPLANE_SUBPLATFORM_BUILDER_TOKEN:-}
@@ -249,14 +248,15 @@ services:
         condition: service_started
       payment-service:
         condition: service_started
-      auto-agent:
-        condition: service_healthy
     ports:
       - "127.0.0.1:${MATCHPLANE_WEB_HOST_PORT:-4173}:4173"
     volumes:
       - ${MATCHPLANE_SUBPLATFORM_ARTIFACT_ROOT:-./var/subplatform-artifacts}:/var/lib/matchplane/subplatform-artifacts:ro
       - ${MATCHPLANE_SUBPLATFORM_UPLOAD_ROOT:-./var/subplatform-uploads}:/var/lib/matchplane/subplatform-uploads:rw
       - ${MATCHPLANE_HOSTED_MEDIA_HOST_ROOT:-./var/hosted-media}:/var/lib/matchplane/media:rw
+      # Durable managed router generations and credential slots. This bind mount is intentionally
+      # Web-only; prepare it with deploy/scripts/prepare-compose-router-state.sh before startup.
+      - ${MATCHPLANE_PLATFORM_ROUTER_STATE_HOST_ROOT:-../../var/platform-router-state}:/etc/matchplane/secrets/root-email:rw
       - ${MATCHPLANE_SUBPLATFORM_SECRET_HOST_ROOT:-./var/subplatform-email-secrets}:/run/secrets/subplatform-email:ro
     healthcheck:
       test:
@@ -274,53 +274,6 @@ services:
       - matchplane
     security_opt:
       - no-new-privileges:true
-
-  auto-agent:
-    image: matchplane/auto-agent:dev
-    build:
-      context: ../..
-      dockerfile: deploy/compose/auto-agent.Dockerfile
-    restart: unless-stopped
-    environment:
-      MATCHPLANE_ENVIRONMENT: ${MATCHPLANE_ENVIRONMENT:-development}
-      MATCHPLANE_AUTO_MCP_TOKEN: ${MATCHPLANE_AUTO_MCP_TOKEN:-matchplane_auto_dev_only}
-      # Production child Agents must be pinned to the active root scope. Development may leave
-      # these empty while the package is used as a local reference adapter.
-      MATCHPLANE_AUTO_TENANT_ID: ${MATCHPLANE_AUTO_TENANT_ID:-}
-      MATCHPLANE_AUTO_DOMAIN_ID: ${MATCHPLANE_AUTO_DOMAIN_ID:-}
-      MATCHPLANE_AUTO_PLATFORM_PATH: /used-car
-      MATCHPLANE_AUTO_MCP_HOST: 0.0.0.0
-      MATCHPLANE_AUTO_MCP_PORT: 8787
-      MATCHPLANE_AUTO_MAX_MEDIA_BYTES: ${MATCHPLANE_MEDIA_MAX_BYTES:-26214400}
-      MATCHPLANE_AUTO_DATA_DIR: /var/lib/matchplane-auto
-    volumes:
-      - auto-agent-data:/var/lib/matchplane-auto
-    expose:
-      - "8787"
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "bun",
-          "-e",
-          "fetch('http://127.0.0.1:8787/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 5s
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=256m
-    pids_limit: 256
-    mem_limit: 1g
-    cpus: "2.0"
-    networks:
-      - matchplane
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
 
   subplatform-builder:
     image: matchplane/subplatform-builder:dev
@@ -372,6 +325,21 @@ services:
     <<: *matchplane-service
     entrypoint: ["/usr/local/bin/matchplane", "serve", "event-relay"]
 
+  # Deliberately excluded from the default Compose graph. Operators must select this profile,
+  # which also supplies the exact workload role and explicit enable gate.
+  conversion-projector:
+    <<: *matchplane-service
+    profiles: ["conversion-projector"]
+    entrypoint:
+      - /usr/bin/env
+      - MATCHPLANE_SERVICE_ROLE=conversion-projector
+      - MATCHPLANE_CONVERSION_PROJECTOR_ENABLED=true
+      - /usr/local/bin/matchplane
+      - serve
+      - conversion-projector
+    ports:
+      - "127.0.0.1:${MATCHPLANE_CONVERSION_PROJECTOR_HOST_PORT:-8082}:8080"
+
   matcher:
     <<: *matchplane-service
     entrypoint: ["/usr/local/bin/matchplane", "serve", "matcher"]
@@ -395,7 +363,6 @@ volumes:
   valkey-data:
   kafka-data:
   subplatform-builder-work:
-  auto-agent-data:
 
 networks:
   matchplane:

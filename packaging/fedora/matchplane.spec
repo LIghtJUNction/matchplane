@@ -20,11 +20,15 @@ BuildRequires:  protobuf-compiler
 BuildRequires:  protobuf-devel
 BuildRequires:  rust
 BuildRequires:  systemd-rpm-macros
+Requires:       bash
 Requires:       ca-certificates
 Requires:       bubblewrap
+Requires:       coreutils
 Requires:       git
 Requires:       nodejs >= 22.12.0
+Requires:       postgresql
 Requires:       systemd
+Requires:       util-linux
 
 %description
 MatchPlane combines deterministic matching, PostgreSQL authority, Kafka facts,
@@ -56,17 +60,22 @@ packaging/scripts/stage.sh %{buildroot} target/release
 
 %post
 %systemd_post matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
+/usr/bin/systemd-tmpfiles --create %{_tmpfilesdir}/matchplane.conf
+%{_sbindir}/matchplane-postgres-backup-prepare --if-postgres-present
 echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.env before enabling services.'
+echo 'The PostgreSQL backup timer is installed disabled; production operators must enable it explicitly.'
 
 %preun
-%systemd_preun matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
+%systemd_preun matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-conversion-projector.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service matchplane-postgres-backup.timer
 
 %postun
-%systemd_postun_with_restart matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
+%systemd_postun_with_restart matchplane-gateway.service matchplane-payment-service.service matchplane-event-relay.service matchplane-conversion-projector.service matchplane-matcher.service matchplane-projector.service matchplane-subplatform-builder.service matchplane-vector-worker.service matchplane-federation-hub.service matchplane-web.service
 
 %files
 %config(noreplace) %attr(0640,root,matchplane) /etc/matchplane/matchplane.env
+%config(noreplace) %attr(0644,root,root) /etc/matchplane/postgres-backup.conf
 %dir %attr(0750,root,matchplane) /etc/matchplane/services
+%{_bindir}/matchplane-conversion-projector
 %{_bindir}/matchplane-event-relay
 %{_bindir}/matchplane-federation-hub
 %{_bindir}/matchplane-gateway
@@ -75,8 +84,12 @@ echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.en
 %{_bindir}/matchplane-projector
 %{_bindir}/matchplane-subplatform-builder
 %{_bindir}/matchplane-vector-worker
+%{_bindir}/matchplane-postgres-backup-verify
 %{_bindir}/matchplane
+%{_sbindir}/matchplane-postgres-backup-prepare
+%{_libexecdir}/matchplane-postgres-backup
 %{_unitdir}/matchplane-*.service
+%{_unitdir}/matchplane-*.timer
 %{_sysusersdir}/matchplane.conf
 %{_tmpfilesdir}/matchplane.conf
 %{_datadir}/matchplane/web
@@ -84,8 +97,13 @@ echo 'Configure /etc/matchplane/matchplane.env and /etc/matchplane/services/*.en
 %{_docdir}/matchplane/ARCHITECTURE.md
 %{_docdir}/matchplane/marketplace-payments.md
 %{_docdir}/matchplane/cli-and-mcp.md
+%{_docdir}/matchplane/postgresql-backup-gate.md
+%{_docdir}/matchplane/web-THIRD_PARTY_NOTICES.md
+%{_docdir}/matchplane/*.json
 %{_datadir}/matchplane/skills
 %license %{_datadir}/licenses/matchplane/LICENSE
+%license %{_datadir}/licenses/matchplane/liquid-gooey.LICENSE
+%license %{_datadir}/licenses/matchplane/metal-fx.LICENSE
 
 %changelog
 * Fri Aug 14 2026 LIghtJUNction <lightjunction.me@gmail.com> - %{version}-1

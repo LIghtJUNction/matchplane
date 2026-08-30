@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -56,6 +56,55 @@ describe("ListingSheet", () => {
     expect(screen.getByAltText("Dogfood 测试商品 2/2")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "管理商品" }));
     expect(onManage).toHaveBeenCalledWith(ownedListing);
+  });
+
+  it("never presents provider hints as canonical match reasons", () => {
+    const matchedListing: AssetListing = {
+      ...listing,
+      reasons: ["Verified canonical reason"],
+      providerHints: ["Advisory provider hint"],
+    };
+    const view = render(
+      <ListingSheet
+        listing={matchedListing}
+        subplatform={subplatform}
+        locale="zh"
+        onClose={vi.fn()}
+        onContact={vi.fn()}
+      />,
+    );
+
+    const canonicalSection = screen
+      .getByRole("heading", { name: "匹配理由" })
+      .closest("section");
+    const providerSection = screen
+      .getByRole("heading", { name: "店铺检索线索" })
+      .closest("section");
+    if (!canonicalSection || !providerSection) {
+      throw new Error("Expected separate canonical and provider hint sections");
+    }
+    expect(
+      within(canonicalSection).getByText("Verified canonical reason"),
+    ).toBeInTheDocument();
+    expect(
+      within(canonicalSection).queryByText("Advisory provider hint"),
+    ).toBeNull();
+    expect(
+      within(providerSection).getByText("Advisory provider hint"),
+    ).toBeInTheDocument();
+
+    view.rerender(
+      <ListingSheet
+        listing={matchedListing}
+        subplatform={subplatform}
+        locale="en"
+        onClose={vi.fn()}
+        onContact={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Store retrieval hints" }),
+    ).toBeInTheDocument();
   });
 
   it("delegates Escape dismissal to the accessible drawer primitive", async () => {

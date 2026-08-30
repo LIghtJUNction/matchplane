@@ -10,6 +10,7 @@ root=$1
 binary_directory=$2
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 binaries=(
+  matchplane-conversion-projector
   matchplane-event-relay
   matchplane-federation-hub
   matchplane-gateway
@@ -21,7 +22,8 @@ binaries=(
   matchplane
 )
 
-install -d "$root/usr/bin" "$root/etc/matchplane" "$root/etc/matchplane/services" "$root/usr/lib/systemd/system"
+install -d "$root/usr/bin" "$root/usr/sbin" "$root/usr/libexec"
+install -d "$root/etc/matchplane" "$root/etc/matchplane/services" "$root/usr/lib/systemd/system"
 install -d "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" "$root/usr/share/doc/matchplane"
 install -d "$root/usr/share/licenses/matchplane"
 install -d "$root/usr/share/matchplane/web"
@@ -42,16 +44,39 @@ for binary in "${binaries[@]}"; do
   install -Dm0755 "$binary_directory/$binary" "$root/usr/bin/$binary"
 done
 install -Dm0640 "$repository_root/packaging/config/matchplane.env" "$root/etc/matchplane/matchplane.env"
+install -Dm0644 "$repository_root/packaging/config/postgres-backup.conf" \
+  "$root/etc/matchplane/postgres-backup.conf"
+install -Dm0755 "$repository_root/packaging/scripts/postgres-backup.sh" \
+  "$root/usr/libexec/matchplane-postgres-backup"
+install -Dm0755 "$repository_root/packaging/scripts/postgres-backup-prepare.sh" \
+  "$root/usr/sbin/matchplane-postgres-backup-prepare"
+install -Dm0755 "$repository_root/packaging/scripts/postgres-backup-verify.sh" \
+  "$root/usr/bin/matchplane-postgres-backup-verify"
 install -Dm0644 "$repository_root"/packaging/systemd/*.service "$root/usr/lib/systemd/system/"
+install -Dm0644 "$repository_root"/packaging/systemd/*.timer "$root/usr/lib/systemd/system/"
 install -Dm0644 "$repository_root/packaging/sysusers/matchplane.conf" "$root/usr/lib/sysusers.d/matchplane.conf"
 install -Dm0644 "$repository_root/packaging/tmpfiles/matchplane.conf" "$root/usr/lib/tmpfiles.d/matchplane.conf"
 install -Dm0644 "$repository_root/README.md" "$root/usr/share/doc/matchplane/README.md"
 install -Dm0644 "$repository_root/LICENSE" "$root/usr/share/licenses/matchplane/LICENSE"
+install -Dm0644 "$repository_root/web/licenses/liquid-gooey.LICENSE" \
+  "$root/usr/share/licenses/matchplane/liquid-gooey.LICENSE"
+install -Dm0644 "$repository_root/web/licenses/metal-fx.LICENSE" \
+  "$root/usr/share/licenses/matchplane/metal-fx.LICENSE"
+install -Dm0644 "$repository_root/web/THIRD_PARTY_NOTICES.md" \
+  "$root/usr/share/doc/matchplane/web-THIRD_PARTY_NOTICES.md"
 install -Dm0644 "$repository_root/ARCHITECTURE.md" "$root/usr/share/doc/matchplane/ARCHITECTURE.md"
 install -Dm0644 "$repository_root/docs/marketplace-payments.md" \
   "$root/usr/share/doc/matchplane/marketplace-payments.md"
 install -Dm0644 "$repository_root/docs/cli-and-mcp.md" \
   "$root/usr/share/doc/matchplane/cli-and-mcp.md"
+install -Dm0644 "$repository_root/docs/postgresql-backup-gate.md" \
+  "$root/usr/share/doc/matchplane/postgresql-backup-gate.md"
+# Ship every public machine-readable contract used by Agent and subplatform integrators. Keeping
+# this as a source glob makes a newly added protocol fail visible in the release artifact by default.
+for contract in "$repository_root"/docs/*.json; do
+  install -Dm0644 "$contract" \
+    "$root/usr/share/doc/matchplane/$(basename "$contract")"
+done
 cp -a "$repository_root/.agents/skills/." "$root/usr/share/matchplane/skills/"
 cp -a "$standalone_web_root/." "$root/usr/share/matchplane/web/"
 # Next can place the standalone server below the traced runtime while keeping
@@ -67,8 +92,8 @@ fi
 # `pg-074a390aaed10fa4`) in the standalone server chunks. Create those aliases
 # from the locked Bun links instead of assuming that the tracer will emit them.
 external_aliases=$(grep -RhoE '"[A-Za-z0-9@._/-]+-[0-9a-f]{14,}"' \
-  "$repository_root/web/.next/server" 2>/dev/null \
-  | sed -E 's/^"|"$//g' | sort -u || true)
+  "$repository_root/web/.next/server" 2>/dev/null |
+  sed -E 's/^"|"$//g' | sort -u || true)
 for external_alias in $external_aliases; do
   package_name=$(printf '%s\n' "$external_alias" | sed -E 's/-[0-9a-f]{14,}$//')
   source_link="$repository_root/web/node_modules/$package_name"
@@ -78,7 +103,7 @@ for external_alias in $external_aliases; do
   package_fragment=${package_link#../../node_modules/.bun/}
   alias_path="$root/usr/share/matchplane/web/node_modules/$external_alias"
   install -d "$(dirname "$alias_path")"
-  [[ -e $alias_path || -L $alias_path ]] || \
+  [[ -e $alias_path || -L $alias_path ]] ||
     ln -s ".bun/$package_fragment" "$alias_path"
 done
 # Bun's isolated linker can make Next's file tracer retain only the CJS half of

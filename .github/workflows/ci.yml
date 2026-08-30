@@ -20,7 +20,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
       - name: Install pinned Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -39,24 +38,25 @@ jobs:
       - name: Type-check external Agent client
         run: web/node_modules/.bin/tsc -p integrations/matchplane-agent-client/tsconfig.json --noEmit
 
-  subplatform:
-    runs-on: ubuntu-latest
+  packaging:
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
-      - name: Install current Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.14
-      - name: Build subplatform UI and run child Agent tests
+      - name: Test and validate project skills
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          bun install --no-save --cwd subplatforms/auto
-          bun run --cwd subplatforms/auto build
-          test -s subplatforms/auto/dist/index.html
-          bun run --cwd subplatforms/auto agent:test
+          python3 -m unittest tools/test_check_skills.py
+          python3 tools/check-skills.py
+      - name: Install shell validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep shellcheck shfmt
+      - name: Validate packaging and PostgreSQL backup gate
+        run: ./packaging/scripts/check.sh
 
   rust:
     runs-on: ubuntu-latest
@@ -75,12 +75,20 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      valkey:
+        image: valkey/valkey:9.1.1-alpine@sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
       - name: Install native build dependencies
         run: |
           set -euo pipefail
@@ -115,10 +123,64 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Run tests
         run: cargo test --workspace --locked
+      - name: Install pinned Bun for the PostgreSQL storefront harness
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - name: Install locked web workspace for the PostgreSQL storefront harness
+        run: bun install --frozen-lockfile --cwd web
+      - name: Apply every migration to a fresh PostgreSQL database
+        env:
+          COMPOSE_PROJECT_NAME: matchplane-migration-gate
+          DATABASE_URL: postgres://matchplane:matchplane_dev_only@127.0.0.1:15432/matchplane
+          MATCHPLANE_POSTGRES_HOST_PORT: "15432"
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file .env.example -f deploy/compose/compose.yaml)
+          cleanup() {
+            "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          "${compose[@]}" up --build --detach --wait postgres
+          cargo test --locked -p matchplane-storage --test migration_fresh_install -- --ignored
+          # Lifecycle isolation gate: private or inactive stores and disabled domains must neither
+          # expose offers to matching nor permit new introductions.
+          CARGO_BUILD_JOBS=2 cargo test --locked -p matchplane-storage --test marketplace_capability_lifecycle -- --ignored --test-threads=1
+          # The SQLx test owns an isolated migrated database and passes only that loopback URL to
+          # the Bun harness, which executes the production TypeScript database-reader seams.
+          CARGO_BUILD_JOBS=2 cargo test --locked -p matchplane-storage --test storefront_web_lifecycle -- --ignored --test-threads=1
+      - name: Test marketplace contact idempotency against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test marketplace_contact_idempotency -- --ignored
       - name: Test ordered outbox claims against PostgreSQL
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: cargo test --locked -p matchplane-storage --test outbox_claims -- --ignored
+      - name: Test federation expiry authority against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test federation_expiry -- --ignored
+      - name: Test durable book recovery source against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test book_projection_recovery -- --ignored
+      - name: Test Kafka poison-record quarantine against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test kafka_consumer_quarantine -- --ignored
+      - name: Test marketplace conversion outbox against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test marketplace_conversion_outbox -- --ignored
+      - name: Test marketplace conversion projection against PostgreSQL
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: cargo test --locked -p matchplane-storage --test marketplace_conversion_projection -- --ignored
+      - name: Test atomic Valkey book repair
+        env:
+          MATCHPLANE_TEST_VALKEY_URL: redis://127.0.0.1:6379/
+        run: cargo test --locked -p matchplane-cache durable_repair_should_seed_gap_and_fence_stale_writers -- --ignored
       - name: Validate Compose model
         run: docker compose --env-file .env.example -f deploy/compose/compose.yaml config --quiet
 
@@ -130,12 +192,20 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          submodules: recursive
+      - name: Test HTTP JSON probe handling
+        run: ./tests/integration/http-json-test.sh
       - name: Run complete Compose smoke test
         run: ./tests/integration/compose-smoke.sh
       - name: Collect service logs
         if: always()
-        run: docker compose --env-file .env.example -f deploy/compose/compose.yaml logs --no-color > compose.log
+        run: |
+          set -euo pipefail
+          compose=(docker compose --env-file .env.example -f deploy/compose/compose.yaml)
+          if [[ -n "$("${compose[@]}" ps --all --quiet)" ]]; then
+            "${compose[@]}" logs --no-color > compose.log
+          elif [[ ! -f compose.log ]]; then
+            : > compose.log
+          fi
       - name: Upload integration log
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

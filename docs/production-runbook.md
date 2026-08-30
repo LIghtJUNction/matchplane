@@ -31,7 +31,7 @@ web 管理员 BFF 还需要网关和支付管理员 token 的窄权限投影副�
 
 Web 的 catalog projection relay 默认启用；它从 `marketplace_offer_projection_jobs` 领取带 PostgreSQL lease 的小批次，按 `matchplane.catalog/v2` 投递并验证结构化 ACK。可用 `MATCHPLANE_CATALOG_RELAY_ENABLED=false` 显式停止领取，或用 `_INTERVAL_MS`（1–60 秒）、`_BATCH_SIZE`（1–32）、`_LEASE_SECONDS`（15–300）与 `_MAX_ATTEMPTS`（1–8）调整有界运行参数。滚动发布必须先添加 destination 列和新唯一约束，再部署理解 immutable registration 的网关/Web writer，最后移除旧的 version-only 唯一约束；仓库中的 `202608220002`/`202608220003` 已按这个顺序拆分。监控使用 `sudo matchplane catalog-projections status --limit 20`，或让只读运营 Agent 调用 `platform.catalog_projections.status`；它按 `status` 聚合 job，报告最老 actionable/dead age，并只返回不含 payload/endpoint/token 的有界问题行。禁止直接改 canonical offer、job 或 ACK。确需重放时只能执行 `sudo matchplane catalog-projections replay <dead-job-uuid> --reason "<已验证的修复原因>"`：命令会在事务内锁住 dead row、重新读取规范 offer 与当前 active immutable destination，并写入平台审计；destination 变化时旧 job 会被 supersede，而不是复制旧 payload。只读 MCP 故意不提供 replay。
 
-参考 `subplatforms/auto/agent` 可作为单独的 child Agent 进程运行。Compose 的开发配置包含一个无 root 数据库/支付凭据的 `auto-agent` 服务；生产部署应为它使用独立用户、持久化的 `MATCHPLANE_AUTO_DATA_DIR`、专用 `MATCHPLANE_AUTO_MCP_TOKEN`，并通过 HTTPS/mTLS 或受控内网网关暴露 `/mcp`。生产还必须设置 `MATCHPLANE_AUTO_TENANT_ID` 和 `MATCHPLANE_AUTO_DOMAIN_ID`，使服务拒绝被复用到其他租户。子服务的 `catalog.upsert`、`retrieval.query` 和 `media.upload` 只处理通用 ABI；向量库、媒体扫描器和领域字段仍由子平台运营方负责。激活包含 MCP 工具的注册前，运行一次 `initialize` 健康探测；没有健康 endpoint 时保持 registration 不可路由。
+商店 Agent 必须由商店运营方独立构建和部署，并通过运营方持有的 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 绑定到活动清单记录；核心 Compose 刻意不捆绑任何商店 Agent、token、数据卷或代理路由。生产部署应为每个 Agent 使用独立用户、持久化数据目录、专用 secret，并通过 HTTPS/mTLS 或受控内网网关暴露 `/mcp`。Agent 必须绑定活动注册给出的 tenant、domain 和 canonical path，不能从固定路径或示例名称推断作用域。子服务的 `catalog.upsert`、`retrieval.query` 和 `media.upload` 只处理通用 ABI；向量库、媒体扫描器和领域字段仍由商店运营方负责。激活包含 MCP 工具的注册前，运行一次 `initialize` 健康探测；没有健康 endpoint 时保持 registration 不可路由。
 
 路由默认会发送受限函数工具 `matchplane.platform.select_children`（`MATCHPLANE_ROUTER_AI_TOOL_MODE=auto`）。该工具的可选项枚举由服务端 allowlist（白名单）中子节点生成，因此供应商无法路由到未注册 slug。仅支持结构化 JSON 的供应商可设置 `MATCHPLANE_ROUTER_AI_TOOL_MODE=disabled`；供应商支持强制工具调用时可用 `required`。持久化的路由决策会记录结果来源于 MCP-compatible tool boundary、结构化 JSON，还是策略回退。
 
@@ -136,6 +136,14 @@ journalctl -u matchplane-matcher -u matchplane-projector --since '-10 min' --no-
 然后在测试或预发租户各执行一次已认证 marketplace introduction 与一次支付供应商的 sandbox 交易。再确认联系审计、outbox/event relay、matcher 成交、Valkey 投影、支付 webhook/对账、发票与退款记录，最后再放开生产供应商路由。
 
 ## 6. 安全更新与回滚
+
+生产迁移前先按 [PostgreSQL backup gate](./postgresql-backup-gate.md) 显式启用本机 timer、执行一次 service，再把只读校验作为迁移门禁：
+
+```sh
+sudo matchplane-postgres-backup-verify && sudo matchplane migrate
+```
+
+校验失败时不得绕过；该门禁不实现自动 restore，也不能替代加密异机副本。
 
 每次更新前先记录当前运行版本，并同时备份加密后的 PostgreSQL 与当前二进制、web 发布件、Nginx 配置、密钥引用。使用 `pg_restore --list`（或同等 PostgreSQL 工具）验证 dump，再把第二份备份放到独立主机。解包前下载 `SHA256SUMS` 并校验；CI 发布版本建议再校验 GitHub Artifact Attestation 与仓库、ref 对应关系（示例：
 `gh attestation verify matchplane-*.tar.zst --repo LIghtJUNction/matchplane`）。在健康与业务探针运行阶段保持一份针对发布版本的单次回滚定时器，至少十分钟。仅当运营方确认本次发布有效时再关闭该定时器，否则应按定时器自动回退到上一个应用版本与配置。

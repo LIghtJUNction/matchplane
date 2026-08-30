@@ -35,6 +35,14 @@ interface PluginHostProps {
   listings?: AssetListing[];
   /** Open a result in the host-owned detail sheet and contact flow. */
   onOpenListing?: (listing: AssetListing) => void;
+  /** Apply a host-owned authenticated like without exposing a session to the iframe. */
+  onLikeListing?: (listing: AssetListing) => Promise<void>;
+  /** Open the host-owned demand conversation on the current child platform. */
+  onOpenDemand?: () => void;
+  /** Start the root Better Auth flow while preserving the current child path. */
+  onAuthRequired?: () => void;
+  /** Coarse auth state only; user identity and session material never cross the bridge. */
+  authStatus?: "pending" | "authenticated" | "anonymous";
   /** Opaque conversational seller draft; the plugin may import it into its editable form. */
   sellerDraft?: {
     narrative: string;
@@ -64,6 +72,10 @@ export function PluginHost({
   fallback,
   listings = [],
   onOpenListing,
+  onLikeListing,
+  onOpenDemand,
+  onAuthRequired,
+  authStatus = "anonymous",
   sellerDraft = null,
   fullscreen = false,
   onFailure,
@@ -112,19 +124,13 @@ export function PluginHost({
           theme,
           locale,
           contextToken: contextTokenRef.current,
+          auth: { status: authStatus },
           currency: subplatform.currency,
           currencyScale: subplatform.currencyScale,
           pricing: pricingFor(subplatform),
           assetSchema: subplatform.assetSchema,
           ui: subplatform.ui,
-          capabilities: fullscreen
-            ? ["match.results", "listing.open", "listing.submit"]
-            : [
-                "chat.open",
-                "match.results",
-                "listing.open",
-                "listing.submit",
-              ],
+          capabilities: pluginCapabilitiesForRole(role, fullscreen),
           ...(role === "seller" && sellerDraft
             ? { agentDraft: sellerDraft }
             : {}),
@@ -161,7 +167,22 @@ export function PluginHost({
         return;
       }
       if (event.data.contextToken !== contextTokenRef.current) return;
-      if (event.data.type === "chat.open") {
+      if (
+        event.data.type === "chat.open" ||
+        event.data.type === "demand.open"
+      ) {
+        if (onOpenDemand) {
+          onOpenDemand();
+          onNotice(copy("pluginChatOpenedNotice", "已打开店内 AI 选货员"));
+          pluginResponder(
+            event.data,
+            pluginActionInput(),
+            event.data.type === "chat.open"
+              ? "chat.open.result"
+              : "demand.open.result",
+          )(true);
+          return;
+        }
         if (fullscreen) {
           onNotice(
             copy("pluginChatUnavailableNotice", "请返回上一级继续描述需求"),
@@ -170,28 +191,91 @@ export function PluginHost({
         }
         document.getElementById("match-chat-input")?.focus();
         onNotice(copy("pluginChatOpenedNotice", "已打开找商品输入框"));
-      } else if (event.data.type === "listing.open") {
-        const payload = isRecord(event.data.payload)
-          ? event.data.payload
-          : null;
-        const listingId =
-          payload && typeof payload.listingId === "string"
-            ? payload.listingId
-            : null;
-        const selected = listingId
-          ? listingsRef.current.find((item) => item.id === listingId)
-          : null;
+      } else if (event.data.type === "auth.open") {
+        if (onAuthRequired) onAuthRequired();
+        pluginResponder(
+          event.data,
+          pluginActionInput(),
+          "auth.open.result",
+        )(Boolean(onAuthRequired), onAuthRequired ? undefined : "unavailable");
+      } else if (
+        event.data.type === "listing.open" ||
+        event.data.type === "listing.like"
+      ) {
+        const selected = listingForPluginAction(
+          event.data,
+          listingsRef.current,
+        );
         if (!selected) {
-          onNotice(
-            copy(
-              "pluginListingUnavailableNotice",
-              "这条供给已不在当前匹配结果中，请重新描述需求",
-            ),
+          const messageText = copy(
+            "pluginListingUnavailableNotice",
+            "这条供给已不在当前匹配结果中，请重新描述需求",
           );
-        } else if (onOpenListing) {
-          onOpenListing(selected);
+          onNotice(messageText);
+          pluginResponder(
+            event.data,
+            pluginActionInput(),
+            event.data.type === "listing.like"
+              ? "listing.like.result"
+              : "listing.open.result",
+          )(false, messageText);
+        } else if (event.data.type === "listing.open") {
+          onOpenListing?.(selected);
+          pluginResponder(
+            event.data,
+            pluginActionInput(),
+            "listing.open.result",
+          )(Boolean(onOpenListing), onOpenListing ? undefined : "unavailable");
+        } else if (onLikeListing) {
+          const message = event.data;
+          void onLikeListing(selected)
+            .then(() =>
+              pluginResponder(
+                message,
+                pluginActionInput(),
+                "listing.like.result",
+              )(true),
+            )
+            .catch(() => {
+              const messageText = copy(
+                "pluginLikeFailedNotice",
+                "点赞暂时失败，请稍后重试",
+              );
+              onNotice(messageText);
+              pluginResponder(
+                message,
+                pluginActionInput(),
+                "listing.like.result",
+              )(false, messageText);
+            });
+        } else {
+          pluginResponder(
+            event.data,
+            pluginActionInput(),
+            "listing.like.result",
+          )(false, "unavailable");
         }
       } else if (event.data.type === "listing.submit") {
+        if (role !== "seller") {
+          const messageText = copy(
+            "pluginSellerCapabilityRequired",
+            "只有已授权卖家工作区可以提交商品",
+          );
+          onNotice(messageText);
+          pluginResponder(
+            event.data,
+            {
+              frame: frameRef.current?.contentWindow,
+              targetOrigin: OPAQUE_SANDBOX_TARGET_ORIGIN,
+              contextToken: contextTokenRef.current,
+              role,
+              subplatform,
+              onNotice,
+            },
+            "listing.submit.result",
+          )(false, messageText);
+          return;
+        }
         void submitPluginListing(event.data, {
           frame: frameRef.current?.contentWindow,
           targetOrigin: OPAQUE_SANDBOX_TARGET_ORIGIN,
@@ -211,12 +295,35 @@ export function PluginHost({
         });
       }
     };
+    function pluginActionInput(): PluginActionInput {
+      return {
+        frame: frameRef.current?.contentWindow,
+        targetOrigin: OPAQUE_SANDBOX_TARGET_ORIGIN,
+        contextToken: contextTokenRef.current,
+        role,
+        subplatform,
+        onNotice,
+      };
+    }
+
     window.addEventListener("message", onMessage);
     return () => {
       pluginReadyRef.current = false;
       window.removeEventListener("message", onMessage);
     };
-  }, [fullscreen, locale, onNotice, onOpenListing, role, subplatform, theme]);
+  }, [
+    authStatus,
+    fullscreen,
+    locale,
+    onAuthRequired,
+    onLikeListing,
+    onNotice,
+    onOpenDemand,
+    onOpenListing,
+    role,
+    subplatform,
+    theme,
+  ]);
 
   useEffect(() => {
     postResults();
@@ -276,6 +383,19 @@ export function PluginHost({
   );
 }
 
+export function pluginCapabilitiesForRole(
+  role: WorkspaceRole,
+  fullscreen: boolean,
+): string[] {
+  const capabilities = ["match.results", "listing.open"];
+  if (!fullscreen) capabilities.unshift("chat.open");
+  if (role === "buyer") {
+    capabilities.push("auth.open", "demand.open", "listing.like");
+  }
+  if (role === "seller") capabilities.push("listing.submit");
+  return capabilities;
+}
+
 interface PluginActionInput {
   frame: Window | null | undefined;
   targetOrigin: string;
@@ -298,6 +418,21 @@ function updatePluginContact(
   pluginResponder(message, input, "contact.update.result")(false, messageText);
 }
 
+function listingForPluginAction(
+  message: Record<string, unknown>,
+  listings: AssetListing[],
+): AssetListing | null {
+  const payload = isRecord(message.payload) ? message.payload : null;
+  const listingId =
+    payload && typeof payload.listingId === "string" ? payload.listingId : null;
+  if (!listingId) return null;
+  return (
+    listings.find(
+      (item) => item.id === listingId || item.offerId === listingId,
+    ) ?? null
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -309,6 +444,8 @@ async function submitPluginListing(
   const respond = pluginResponder(message, input, "listing.submit.result");
 
   try {
+    if (input.role !== "seller")
+      throw new Error("只有已授权卖家工作区可以提交商品");
     if (!isLiveMarketplaceEnabled())
       throw new Error("插件供给提交需要连接真实平台 API");
     if (!input.subplatform.tenantId || !input.subplatform.domainId) {
@@ -416,7 +553,14 @@ async function submitPluginListing(
 function pluginResponder(
   message: Record<string, unknown>,
   input: PluginActionInput,
-  type: "contact.update.result" | "listing.submit.result",
+  type:
+    | "auth.open.result"
+    | "chat.open.result"
+    | "contact.update.result"
+    | "demand.open.result"
+    | "listing.like.result"
+    | "listing.open.result"
+    | "listing.submit.result",
 ): (ok: boolean, error?: string) => void {
   const requestId =
     typeof message.requestId === "string" ? message.requestId : null;

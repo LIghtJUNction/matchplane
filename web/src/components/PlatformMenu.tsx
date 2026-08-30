@@ -35,7 +35,11 @@ export function PlatformMenu({ locale }: PlatformMenuProps) {
   useEffect(() => {
     if (!open) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
+      if (
+        event.target instanceof Node &&
+        !rootRef.current?.contains(event.target)
+      )
+        setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -59,6 +63,7 @@ export function PlatformMenu({ locale }: PlatformMenuProps) {
         type="button"
         aria-expanded={open}
         aria-controls={menuId}
+        style={{ minHeight: 44, minWidth: 44 }}
         onClick={() => setOpen((value) => !value)}
       >
         {label}

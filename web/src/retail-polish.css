@@ -1,0 +1,254 @@
+/* Surface polish: denser first viewport, truthful recovery, and calmer workspaces. */
+
+.platform-dashboard {
+  width: min(100%, 84rem);
+  margin-inline: auto;
+  padding: clamp(1rem, 3vw, 2rem) clamp(1rem, 3vw, 2.5rem) 3rem;
+}
+
+.platform-dashboard .workspace-heading {
+  min-height: auto;
+  padding: 1.1rem 0 1.35rem;
+  box-shadow: none;
+}
+
+.platform-dashboard .platform-admin-shell {
+  width: 100%;
+  min-height: auto;
+  align-items: start;
+  gap: 1rem;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.platform-dashboard .platform-admin-nav {
+  position: sticky;
+  top: 4.75rem;
+  padding: 0.45rem;
+  border: 1px solid var(--retail-line);
+  border-radius: 0.85rem;
+  background: var(--retail-surface);
+}
+
+.platform-dashboard .platform-admin-nav button[aria-selected="true"],
+.platform-dashboard .platform-admin-nav button.is-active {
+  background: var(--retail-accent-soft);
+  color: var(--retail-ink);
+}
+
+.platform-dashboard .platform-admin-content {
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--retail-line);
+  border-radius: 0.9rem;
+  background: var(--retail-surface);
+}
+
+.platform-dashboard .platform-layout,
+.platform-dashboard .platform-component-panel {
+  min-width: 0;
+  width: 100%;
+}
+
+.platform-dashboard .mall-initialization {
+  max-width: none;
+  min-height: auto;
+  padding: clamp(1.1rem, 2.5vw, 1.8rem);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.platform-dashboard .mall-initialization-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, auto);
+  align-items: end;
+  gap: 1rem 2rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--retail-line);
+}
+
+.platform-dashboard .mall-initialization-heading > div:first-child > span,
+.platform-dashboard .mall-initialization-next > span {
+  color: var(--retail-muted);
+  font-family: var(--font-mono, ui-monospace, "SFMono-Regular", monospace);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.platform-dashboard .mall-initialization-heading h2 {
+  margin-top: 0.35rem;
+}
+
+.platform-dashboard .mall-initialization-heading p {
+  max-width: 38rem;
+  margin-top: 0.4rem;
+  color: var(--retail-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.platform-dashboard .mall-initialization-next {
+  min-width: 10rem;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.3rem;
+  border-left: 1px solid var(--retail-line);
+}
+
+.platform-dashboard .mall-initialization-next strong {
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.platform-dashboard .mall-initialization-list {
+  width: 100%;
+  margin-top: 0.3rem;
+}
+
+.workspace-settings-dialog-stores {
+  width: min(calc(100vw - 2rem), 58rem);
+  height: auto;
+  min-height: min(28rem, calc(100dvh - 2rem));
+  max-height: calc(100dvh - 2rem);
+}
+
+.workspace-settings-dialog-stores .workspace-settings-layout {
+  grid-template-columns: 13rem minmax(0, 1fr);
+}
+
+.workspace-settings-dialog-stores .workspace-settings-content {
+  padding-inline: clamp(1rem, 2.5vw, 1.7rem);
+}
+
+.workspace-settings-dialog-stores .hosted-store-onboarding {
+  max-width: none;
+  padding-block: 0.15rem 1.25rem;
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error {
+  min-height: 4.4rem;
+  padding: 0.75rem 0.9rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  border-left-width: 3px;
+  border-radius: 0.75rem;
+  background: color-mix(
+    in srgb,
+    var(--retail-clay-soft) 58%,
+    var(--retail-surface)
+  );
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error > svg {
+  color: var(--retail-clay);
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error strong {
+  color: var(--retail-ink);
+  font-size: 0.78rem;
+}
+
+.workspace-settings-dialog-stores .hosted-store-load-error p {
+  max-width: 32rem;
+}
+
+.workspace-settings-dialog-stores .owned-store-card {
+  border-radius: 0.85rem;
+}
+
+.account-menu-count.is-error {
+  display: inline-grid;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--retail-clay) 45%, transparent);
+  border-radius: 999px;
+  background: var(--retail-clay-soft);
+  color: var(--retail-clay);
+  font-size: 0.7rem;
+}
+
+@media (max-width: 48rem) {
+  .platform-dashboard {
+    padding-inline: 0.75rem;
+  }
+
+  .platform-dashboard .platform-admin-shell {
+    gap: 0.75rem;
+  }
+
+  .platform-dashboard .platform-admin-nav {
+    position: static;
+  }
+
+  .platform-dashboard .mall-initialization-heading {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .platform-dashboard .mall-initialization-next {
+    min-width: 0;
+    padding: 0.75rem 0 0;
+    border-top: 1px solid var(--retail-line);
+    border-left: 0;
+  }
+
+  .workspace-settings-dialog-stores {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .workspace-settings-dialog-stores .workspace-settings-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.match-chat-form:focus-within,
+.match-chat-more-trigger:focus-visible,
+.login-password-visibility:focus-visible,
+.login-methods button:focus-visible,
+.login-passkey-action > button:focus-visible,
+.login-back:focus-visible,
+.login-registration-link a:focus-visible,
+.login-link-button:focus-visible {
+  outline: 3px solid var(--retail-focus) !important;
+  outline-offset: 3px !important;
+}
+
+@media (pointer: coarse) {
+  .match-chat-more-trigger,
+  .login-password-visibility {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .login-methods button,
+  .login-passkey-action > button {
+    min-height: 44px !important;
+  }
+
+  .login-back,
+  .login-registration-link a,
+  .login-link-button {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}

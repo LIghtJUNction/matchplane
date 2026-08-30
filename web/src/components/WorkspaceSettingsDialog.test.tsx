@@ -1,11 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WorkspaceSettingsDialog } from "./WorkspaceSettingsDialog";
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe("WorkspaceSettingsDialog", () => {
-  it("closes from Escape and the backdrop, and restores focus", async () => {
+  it("restores the opener after Escape and the Close button", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     const view = render(
@@ -60,11 +62,103 @@ describe("WorkspaceSettingsDialog", () => {
         </WorkspaceSettingsDialog>
       </div>,
     );
-    expect(document.activeElement).toBe(opener);
-
+    await waitFor(() => expect(opener).toHaveFocus());
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
+
+    view.rerender(
+      <div>
+        <button type="button">Open settings</button>
+        <WorkspaceSettingsDialog
+          open
+          onClose={onClose}
+          title="Workspace settings"
+        >
+          <input aria-label="Workspace name" />
+        </WorkspaceSettingsDialog>
+      </div>,
+    );
+    await screen.findByRole("dialog", { name: "Workspace settings" });
+    await user.click(
+      screen.getByRole("button", { name: "Close workspace settings" }),
+    );
+    expect(onClose).toHaveBeenCalledTimes(2);
+    view.rerender(
+      <div>
+        <button type="button">Open settings</button>
+        <WorkspaceSettingsDialog
+          open={false}
+          onClose={onClose}
+          title="Workspace settings"
+        >
+          <span />
+        </WorkspaceSettingsDialog>
+      </div>,
+    );
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  it("keeps complete forward and reverse natural Tab cycles inside the modal", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    const flushAnimationFrames = () => {
+      for (const callback of animationFrames.splice(0)) callback(0);
+    };
+    const user = userEvent.setup();
+    render(
+      <div>
+        <button type="button">Background action</button>
+        <WorkspaceSettingsDialog
+          open
+          onClose={vi.fn()}
+          title="Store console"
+          navigation={[
+            { id: "general", label: "General" },
+            { id: "customers", label: "Customers" },
+          ]}
+          activeNavigationId="general"
+        >
+          <label>
+            Store name
+            <input />
+          </label>
+        </WorkspaceSettingsDialog>
+      </div>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Store console" });
+    await waitFor(() => expect(animationFrames.length).toBeGreaterThan(0));
+    flushAnimationFrames();
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+
+    const tabbableElements = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      ),
+    );
+    const backgroundAction = screen.getByRole("button", {
+      name: "Background action",
+      hidden: true,
+    });
+    expect(backgroundAction.closest("[aria-hidden='true']")).not.toBeNull();
+    expect(
+      document.querySelector<HTMLElement>(
+        "[role='presentation'][data-base-ui-inert]",
+      ),
+    ).toHaveStyle({ position: "fixed", inset: "0" });
+
+    for (let index = 0; index < tabbableElements.length; index += 1) {
+      await user.tab();
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    }
+    for (let index = 0; index < tabbableElements.length; index += 1) {
+      await user.tab({ shift: true });
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    }
   });
 
   it("filters and switches real settings destinations", async () => {

@@ -8,13 +8,14 @@ use axum::{
     routing::{get, patch, post},
 };
 use matchplane_application::{MarketplaceService, OrderService, PlaceOrderCommand};
-use matchplane_cache::{CachedBook, ValkeyCache};
+use matchplane_cache::{CacheError, CachedBook, CachedLevel, ProjectionRepairOutcome, ValkeyCache};
 use matchplane_config::{AppConfig, BearerToken, Environment};
 use matchplane_domain::{AccountId, AssetId, MarketId, OrderId, OrderSide};
 use matchplane_http::{parse_id, require_operator_bearer};
 use matchplane_observability::{Telemetry, init, shutdown_signal};
 use matchplane_storage::{
-    CandidateMatch, PgStore, StoredOrder, StoredTrade, SubmitOrderOutcome, VectorRecord,
+    BookProjection, BookProjectionLevel, CandidateMatch, PgStore, StoredOrder, StoredTrade,
+    SubmitOrderOutcome, VectorRecord,
 };
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -27,9 +28,10 @@ use tower_http::{
     timeout::TimeoutLayer,
     trace::TraceLayer,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 mod generic_marketplace;
+mod lexical_rank;
 mod marketplace;
 mod privacy;
 
@@ -131,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
     let cache = ValkeyCache::connect_with_ca(&config.valkey_url, valkey_ca_file)
         .await
         .context("gateway could not connect to Valkey")?;
+    let lexical_rank_router = lexical_rank::router(operator_auth.clone());
     let state = Arc::new(AppState {
         orders: OrderService::new(store.clone(), config.node_id),
         marketplace: MarketplaceService::new(store.clone()),
@@ -322,6 +325,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = app
         .with_state(state)
+        .merge(lexical_rank_router)
         .layer(CatchPanicLayer::new())
         .layer(CompressionLayer::new())
         .layer(RequestBodyLimitLayer::new(1_048_576))
@@ -449,16 +453,83 @@ async fn book(
     headers: HeaderMap,
 ) -> Result<Json<CachedBook>, ApiError> {
     require_operator(&state, &headers)?;
-    let _: MarketId = parse_id(&market_id)?;
-    state
-        .cache
-        .lock()
-        .await
-        .book(&market_id)
-        .await
-        .map_err(|error| ApiError::internal(error.to_string()))?
-        .map(Json)
-        .ok_or_else(|| ApiError::not_found("order book has not been projected yet"))
+    let market_id: MarketId = parse_id(&market_id)?;
+    let cache_key = market_id.to_string();
+    match state.cache.lock().await.book(&cache_key).await {
+        Ok(Some(book)) => return Ok(Json(book)),
+        Ok(None) => {}
+        Err(
+            error @ (CacheError::Json(_)
+            | CacheError::InvalidProjectionData
+            | CacheError::InvalidProjectionSequence
+            | CacheError::IncompleteProjection),
+        ) => {
+            warn!(%market_id, %error, "unreadable order book cache entry will be repaired from PostgreSQL");
+        }
+        Err(CacheError::Valkey(error)) => {
+            warn!(%market_id, %error, "Valkey book read failed; falling back to PostgreSQL");
+        }
+        Err(error) => return Err(ApiError::internal(error.to_string())),
+    }
+
+    let projection = state
+        .store
+        .latest_book_projection(market_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("order book has not been projected yet"))?;
+    let durable_sequence = projection.sequence;
+    let durable_book = cached_book(projection);
+    let mut cache = state.cache.lock().await;
+    match cache.repair_book(&durable_book).await {
+        Ok(ProjectionRepairOutcome::Repaired) => {
+            warn!(%market_id, durable_sequence, "order book cache miss repaired from PostgreSQL");
+        }
+        Ok(ProjectionRepairOutcome::Current) => {
+            info!(%market_id, durable_sequence, "concurrent order book cache repair was already current");
+        }
+        Err(CacheError::Valkey(error)) => {
+            warn!(%market_id, durable_sequence, %error, "Valkey book repair failed; serving the PostgreSQL projection");
+            return Ok(Json(durable_book));
+        }
+        Err(error) => return Err(ApiError::internal(error.to_string())),
+    }
+    match cache.book(&cache_key).await {
+        Ok(Some(book)) => Ok(Json(book)),
+        Ok(None) => Err(ApiError::internal(
+            "order book repair did not produce a readable projection",
+        )),
+        Err(
+            error @ (CacheError::Valkey(_)
+            | CacheError::Json(_)
+            | CacheError::InvalidProjectionData
+            | CacheError::InvalidProjectionSequence
+            | CacheError::IncompleteProjection),
+        ) => {
+            warn!(%market_id, durable_sequence, %error, "Valkey verification read failed; serving the PostgreSQL projection");
+            Ok(Json(durable_book))
+        }
+        Err(error) => Err(ApiError::internal(error.to_string())),
+    }
+}
+
+fn cached_book(projection: BookProjection) -> CachedBook {
+    CachedBook {
+        market_id: projection.market_id.to_string(),
+        sequence: projection.sequence,
+        bids: cached_levels(projection.bids),
+        asks: cached_levels(projection.asks),
+        state_hash: projection.state_hash.to_hex(),
+    }
+}
+
+fn cached_levels(levels: Vec<BookProjectionLevel>) -> Vec<CachedLevel> {
+    levels
+        .into_iter()
+        .map(|level| CachedLevel {
+            price: level.price,
+            quantity: level.quantity,
+        })
+        .collect()
 }
 
 async fn trades(

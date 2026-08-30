@@ -74,6 +74,10 @@ export async function forwardPaymentAdmin(
       );
     }
     upstream.searchParams.set("tenant_id", tenantId);
+    for (const parameter of ["limit", "offset"] as const) {
+      const value = query.get(parameter);
+      if (value !== null) upstream.searchParams.set(parameter, value);
+    }
   } else {
     let input: Record<string, unknown>;
     try {

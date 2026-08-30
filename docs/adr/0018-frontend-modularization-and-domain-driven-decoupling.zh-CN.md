@@ -51,9 +51,9 @@ MatchPlane 前端（`web/`）基于 Next.js 16、React 19、Tailwind CSS v4 和 
    - `SubplatformFullscreenHeader`：承载子平台与插件沉浸式全屏顶栏。
    - `PlatformOverlaysHost`：统一挂载 15+ 个抽屉与对话框（`ListingSheet`、`ModeDialog`、`WorkspaceSettingsDialog`、个人资料/密码/通行密钥/绑定/店铺列表面板以及全局 Toast）。
 
-3. **领域划分与统一索引导出**：
+3. **领域划分与显式导入**：
    - 按业务领域对组件进行分类归纳（`account`、`marketplace`、`store`、`admin`、`ui`、`shell`）。
-   - 在 `web/src/components/index.ts` 和 `web/src/hooks/index.ts` 提供统一聚合导出。
+   - 组件与 Hooks 从所属模块显式导入。不保留没有真实消费者的 barrel 门面，避免静态分析无法发现失效导出；未来如需公共门面，必须显式列出并由真实消费者使用。
 
 ## 影响
 

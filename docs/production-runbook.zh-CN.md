@@ -29,7 +29,7 @@ web 管理员 BFF 还需要网关和支付管理员 token 的缩小权限投影�
 
 拥有检索或其他代理工具的子平台，请配置清单中的 `agent.mcpServerKey`，并在 web 服务定义环境中通过 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 与该密钥绑定。每个包含操作方管理的 HTTPS `url`，需要时带 `tokenEnv`，其值从部署云端管理器挂载对加载。不要把端点或令牌写进仓库。`platform.child.tool`只要接受活跃且可见的子路径和清单中声明的工具名，且会终止调用方、强制请求超时与响应体限制。
 
-参考 `subplatforms/auto/agent` 可作为单独的子 Agent 进程运行。撰写的开发配置包含一个无根数据库/结算的 `auto-agent` 服务；生产部署应为其使用独立用户、持久化的 `MATCHPLANE_AUTO_DATA_DIR`、专用 `MATCHPLANE_AUTO_MCP_TOKEN`，并通过 HTTPS/mTLS 或受控内网网关引入 `/mcp`。生产还必须设置 `MATCHPLANE_AUTO_TENANT_ID` 和`MATCHPLANE_AUTO_DOMAIN_ID`，使服务拒绝被复用其他站点。子服务的`catalog.upsert`、`retrieval.query`和`media.upload`只处理通用ABI；支持库、媒体扫描器和字段字段仍由子平台运营方负责。激活包含MCP工具的注册前，运行一次`initialize`健康探测；没有健康端点时保持注册不可路由。
+商店 Agent 必须由商店运营方独立构建和部署，并通过运营方持有的 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 绑定到活动清单记录；核心 Compose 刻意不捆绑任何商店 Agent、token、数据卷或代理路由。生产部署应为每个 Agent 使用独立用户、持久化数据目录、专用 secret，并通过 HTTPS/mTLS 或受控内网网关暴露 `/mcp`。Agent 必须绑定活动注册给出的 tenant、domain 和 canonical path，不能从固定路径或示例名称推断作用域。子服务的 `catalog.upsert`、`retrieval.query` 和 `media.upload` 只处理通用 ABI；向量库、媒体扫描器和领域字段仍由商店运营方负责。激活包含 MCP 工具的注册前，运行一次 `initialize` 健康探测；没有健康 endpoint 时保持 registration 不可路由。
 
 路由默认会发送预设函数工具 `matchplane.platform.select_children`（`MATCHPLANE_ROUTER_AI_TOOL_MODE=auto`）。工具的可选项枚举由服务端白名单（白名单）中子节点生成，因此供应商无法路由到未注册 slug。仅支持构成 JSON 的供应商可设置 `MATCHPLANE_ROUTER_AI_TOOL_MODE=disabled`；供应商支持强制工具调用时可用 `required`。 JSON，还是回策略退。
 
@@ -134,6 +134,14 @@ journalctl -u matchplane-matcher -u matchplane-projector --since '-10 min' --no-
 然后在测试或预发机场各执行一次已认证市场介绍与一次支付供应商的沙箱交易。再确认联系审计、发件箱/事件中继、匹配器成交、Valkey投影、支付webhook/对、发票与退款记录，最后再放开生产供应商路由。
 
 ## 6. 安全更新与回滚
+
+生产迁移前先按 [PostgreSQL backup gate](./postgresql-backup-gate.md) 显式启用本机 timer、执行一次 service，再把只读校验作为迁移门禁：
+
+```sh
+sudo matchplane-postgres-backup-verify && sudo matchplane migrate
+```
+
+校验失败时不得绕过；该门禁不实现自动 restore，也不能替代加密异机副本。
 
 升级前先记录当前运行版本，并备份加密后的 PostgreSQL 与当前二进制、web 发布件、Nginx 同时配置、密钥引用。使用 `pg_restore --list`（或同等关系关系 PostgreSQL 工具）验证转储，再把第二份备份放到独立主机上。解包前下载 `SHA256SUMS` 并校验；CI 发布版本建议再校验 GitHub Artifact Attestation 与仓库、ref 对应（示例：
 `gh attestation verify matchplane-*.tar.zst --repo LIghtJUNction/matchplane`）。在健康与业务元素运行阶段保持一个针对发布版本的单次回滚定时器，至少十分钟。仅当运营方确认本次发布有效时再关闭该定时器，否则应按定时器自动回退到上一个应用版本与配置。

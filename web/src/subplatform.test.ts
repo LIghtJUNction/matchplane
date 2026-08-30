@@ -23,15 +23,15 @@ describe("nested subplatform paths", () => {
   });
 
   it("uses the registry-backed manifest endpoint for a direct child", () => {
-    const config = resolveSubplatform("/used-car");
+    const config = resolveSubplatform("/store-a");
 
-    expect(config.path).toBe("/used-car");
-    expect(config.manifestUrl).toBe("/api/platform/manifest?path=%2Fused-car");
+    expect(config.path).toBe("/store-a");
+    expect(config.manifestUrl).toBe("/api/platform/manifest?path=%2Fstore-a");
   });
 
   it("ignores query and hash values when resolving a return URL", () => {
     expect(resolveSubplatform("/?role=buyer#match-chat").slug).toBe("root");
-    expect(resolveSubplatform("/used-car?role=seller").path).toBe("/used-car");
+    expect(resolveSubplatform("/store-a?role=seller").path).toBe("/store-a");
   });
 
   it("does not treat a child path ending in root as the deployment root", () => {

@@ -4,8 +4,12 @@ set -e
 case "${1:-}" in
   remove|deconfigure|failed-upgrade)
     if command -v systemctl >/dev/null 2>&1; then
+      if [ "${1:-}" != failed-upgrade ]; then
+        systemctl disable --now matchplane-postgres-backup.timer || true
+      fi
       set -- matchplane-gateway.service matchplane-payment-service.service \
-        matchplane-event-relay.service matchplane-matcher.service \
+        matchplane-event-relay.service matchplane-conversion-projector.service \
+        matchplane-matcher.service \
         matchplane-projector.service matchplane-vector-worker.service \
         matchplane-subplatform-builder.service matchplane-federation-hub.service matchplane-web.service
       systemctl stop "$@" || true

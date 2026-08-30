@@ -10,7 +10,7 @@ import {
 const valid = {
   tenantId: "123e4567-e89b-12d3-a456-426614174000",
   domainId: "223e4567-e89b-12d3-a456-426614174000",
-  platformPath: "/used-car",
+  platformPath: "/store-a",
   role: "buyer",
 };
 

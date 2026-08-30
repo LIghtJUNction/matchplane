@@ -310,7 +310,12 @@ async function resolveSubplatformSecret(route: EmailRoute): Promise<string> {
     throw new Error("子平台邮箱 secret 存储尚未配置");
   }
   const root = path.resolve(secretRoot);
-  const candidate = path.resolve(root, match[1].toLowerCase(), match[2].toLowerCase(), match[3]);
+  const candidate = path.resolve(
+    /* turbopackIgnore: true */ root,
+    match[1].toLowerCase(),
+    match[2].toLowerCase(),
+    match[3],
+  );
   if (!isWithin(root, candidate)) throw new Error("子平台邮箱 secret 路径无效");
   try {
     const [rootReal, candidateReal] = await Promise.all([realpath(root), realpath(candidate)]);

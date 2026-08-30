@@ -69,20 +69,12 @@ export function ModeDialog({
         <AlertDialogFooter className="dialog-actions">
           <AlertDialogClose
             render={
-              <Button
-                className="button button-quiet"
-                variant="soft"
-                type="button"
-              >
+              <Button variant="soft" size="md" type="button">
                 取消
               </Button>
             }
           />
-          <Button
-            className="button button-dark"
-            type="button"
-            onClick={onConfirm}
-          >
+          <Button variant="primary" size="md" type="button" onClick={onConfirm}>
             确认切换
           </Button>
         </AlertDialogFooter>

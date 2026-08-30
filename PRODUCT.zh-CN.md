@@ -43,7 +43,7 @@ MatchPlane 是一个人工智能原生市场。访客描述他们想要什么以
 
 ## 操作上下文
 
-市场的服务时间为`/`。活跃存储使用单段路径，例如 `/matx-auto` 并且是
+市场的服务时间为`/`。活跃存储使用单段路径，例如 `/store-a` 并且是
 也可以从市场助手中找到。托管商店使用共享产品编辑器；
 综合商店可以提供自己的店面、目录检索、媒体和履行工具。
 这两种类型在公众体验中仍然是普通商店。默认情况下目录为空：MatchPlane 不会播种商家产品或复制第三方列表。登录商家通过商店编辑器输入产品详细信息和图片；产品经过平台审核后方可公开。
@@ -88,7 +88,7 @@ Better Auth 拥有帐户和会话。单一账号即可浏览、购买、开店�
 
 - 市场网络应用程序：`web/`。
 - Rust 服务和共享商业/存储箱：`services/` 和 `crates/`。
-- 存储集成兼容层：`docs/subplatform-contract.md`和`subplatforms/auto/`。
+- 商店集成契约：`docs/subplatform-contract.md`；商店包由各自仓库独立维护。
 - HTTP MCP 外观和代理切换：`web/app/api/mcp/` 和
   `web/app/api/platform/agent/handoff/`。
 

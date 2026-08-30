@@ -68,11 +68,16 @@ export async function readManagedImage(
   if (!ownerId || !fileName) return null;
   try {
     const candidate = await realpath(
-      managedFilePath(root, scope, ownerId, fileName),
+      /* turbopackIgnore: true */ managedFilePath(
+        root,
+        scope,
+        ownerId,
+        fileName,
+      ),
     );
     if (!candidate.startsWith(`${root}${path.sep}`)) return null;
     const { readFile } = await import("node:fs/promises");
-    return await readFile(candidate);
+    return await readFile(/* turbopackIgnore: true */ candidate);
   } catch {
     return null;
   }
@@ -89,9 +94,16 @@ export async function removeManagedImage(
   if (!ownerId || !fileName) return;
   try {
     const candidate = await realpath(
-      managedFilePath(root, scope, ownerId, fileName),
+      /* turbopackIgnore: true */ managedFilePath(
+        root,
+        scope,
+        ownerId,
+        fileName,
+      ),
     );
-    if (candidate.startsWith(`${root}${path.sep}`)) await unlink(candidate);
+    if (candidate.startsWith(`${root}${path.sep}`)) {
+      await unlink(/* turbopackIgnore: true */ candidate);
+    }
   } catch {
     // A failed cleanup leaves an unreferenced file. It is safer than deleting a path that did not
     // pass canonical-root validation.

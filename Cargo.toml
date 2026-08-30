@@ -5,6 +5,7 @@ members = [
   "crates/matchplane-config",
   "crates/matchplane-domain",
   "crates/matchplane-engine",
+  "crates/matchplane-matching",
   "crates/matchplane-events",
   "crates/matchplane-agent-runtime",
   "crates/matchplane-http",
@@ -13,6 +14,7 @@ members = [
   "crates/matchplane-payments",
   "crates/matchplane-protocol",
   "crates/matchplane-storage",
+  "services/matchplane-conversion-projector",
   "services/matchplane-event-relay",
   "services/matchplane-federation-hub",
   "services/matchplane-gateway",
@@ -39,6 +41,7 @@ async-trait = "0.1.92"
 axum = "0.8.9"
 base64 = "0.23.1"
 bigdecimal = { version = "0.4.10", features = ["serde"] }
+bytes = "1.12.1"
 clap = { version = "4.6.6", features = ["derive", "env"] }
 config = "0.15.25"
 futures-util = "0.3.34"
@@ -60,6 +63,7 @@ rdkafka = { version = "0.39.0", features = ["cmake-build", "ssl-vendored", "trac
 reqwest = { version = "0.13.4", default-features = false, features = ["form", "json", "rustls", "stream"] }
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "2.2.0"
+rustix = { version = "1.1.4", features = ["process"] }
 rig-core = { version = "0.42.0", default-features = false }
 rpassword = "7.5.4"
 rsa = { version = "0.9.10", features = ["sha2"] }
@@ -78,6 +82,7 @@ tokio = { version = "1.53.1", features = ["io-std", "io-util", "macros", "net", 
 tonic = { version = "0.14.6", features = ["tls-ring"] }
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
+tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.0", features = ["catch-panic", "compression-gzip", "cors", "limit", "request-id", "timeout", "trace"] }
 tracing = "0.1.44"
 tracing-opentelemetry = "0.33.0"
@@ -93,6 +98,7 @@ matchplane-application = { path = "crates/matchplane-application" }
 matchplane-config = { path = "crates/matchplane-config" }
 matchplane-domain = { path = "crates/matchplane-domain" }
 matchplane-engine = { path = "crates/matchplane-engine" }
+matchplane-matching = { path = "crates/matchplane-matching", version = "0.1.1" }
 matchplane-events = { path = "crates/matchplane-events" }
 matchplane-http = { path = "crates/matchplane-http" }
 matchplane-observability = { path = "crates/matchplane-observability" }

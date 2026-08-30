@@ -201,6 +201,8 @@ export function PasskeyPanel({
       </div>
       <div className="passkey-panel-actions">
         <Button
+          className="min-h-11"
+          size="md"
           type="button"
           variant="outline"
           onClick={() => void bind()}
@@ -224,6 +226,7 @@ export function PasskeyPanel({
                 </small>
               </span>
               <Button
+                className="min-h-11 min-w-11"
                 type="button"
                 variant="outline"
                 size="icon-sm"

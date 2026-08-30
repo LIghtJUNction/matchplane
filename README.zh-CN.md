@@ -31,9 +31,8 @@ MatchPlane 是联合人工智能匹配基础设施。 PostgreSQL 拥有订单、
 组织、清单、MCP 允许列表和路径路由模型。
 
 该存储库是一个 Rust 2024 模块化单一存储库，具有可独立部署的服务。根
-引擎是领域中立的；每个垂直都是一个安装的适配器，提供自己的清单、UI、
-代理技能、MCP 工具和可选的检索实施。该存储库包括一个
-汽车兼容性适配器仅作为示例；它不是根平台数据。
+引擎是领域中立的；每个商店从独立维护的签出或部署中提供自己的清单、UI、
+Agent Skill、MCP 工具和可选检索实现。核心仓库不内置或捆绑任何商店实例。
 
 ## 先决条件
 
@@ -119,10 +118,9 @@ UI 和 Better Auth 路线。
 建议、同意控制的介绍和单独的有限源参考
 支付服务无需假设正在匹配的内容。通过注册参与者
 `POST /v1/marketplace/participants` 与 `marketplace_sides`，然后发布不透明
-`attributes`/`terms` 由垂直行业或参与者提供。 `subplatforms/auto`下的包裹
-只是一个兼容性适配器：它提供自己的架构和 UI，并且不会植入干净的
-根部署。除非操作员明确设置，否则其旧版 HTTP 路由将被禁用
-`MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true`；新包使用清单声明的通用合同。看
+`attributes`/`terms` 由商店或参与者提供。商店包和 Agent 独立构建、部署并由
+运营方绑定；核心 Compose 刻意不捆绑任何商店。除非操作员明确设置，否则旧版 HTTP
+路由将被禁用：`MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true`；新包使用清单声明的通用合同。看
 [docs/marketplace-payments.md](docs/marketplace-payments.md) 付款及佣金
 边界。
 

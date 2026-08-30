@@ -15,6 +15,7 @@ matchplane-domain.workspace = true
 matchplane-events.workspace = true
 matchplane-observability.workspace = true
 matchplane-protocol.workspace = true
+matchplane-storage.workspace = true
 prost.workspace = true
 rdkafka.workspace = true
 tokio.workspace = true

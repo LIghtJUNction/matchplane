@@ -31,6 +31,13 @@ describe("StoreContactConsentCard", () => {
   it("shows verified bindings as read-only values and waits for explicit agreement", async () => {
     const user = userEvent.setup();
     const onAgree = vi.fn(async () => undefined);
+    const onRetrieve = vi.fn(async () => ({
+      introduction: { introduction_id: "intro-1" },
+      counterpart: {
+        party_id: "seller-1",
+        contact: { email: "seller@example.com" },
+      },
+    }));
     getVerifiedContactChannels.mockResolvedValue([
       { type: "email", value: "buyer@example.com" },
       { type: "phone", value: "+8613800000000" },
@@ -41,6 +48,7 @@ describe("StoreContactConsentCard", () => {
         action={action}
         locale="zh"
         onAgree={onAgree}
+        onRetrieve={onRetrieve as never}
       />,
     );
 
@@ -48,10 +56,16 @@ describe("StoreContactConsentCard", () => {
     expect(screen.getByText("+8613800000000")).toBeVisible();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(onAgree).not.toHaveBeenCalled();
+    expect(onRetrieve).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "同意并申请联系" }));
     await waitFor(() => expect(onAgree).toHaveBeenCalledWith(action));
     expect(screen.getByText("联系申请已发送")).toBeVisible();
+    expect(onRetrieve).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "检查店员是否同意" }));
+    await waitFor(() => expect(onRetrieve).toHaveBeenCalledWith(action));
+    expect(screen.getByText("seller@example.com")).toBeVisible();
   });
 
   it("declines without calling the contact workflow", async () => {
@@ -61,11 +75,7 @@ describe("StoreContactConsentCard", () => {
       { type: "email", value: "buyer@example.com" },
     ]);
     render(
-      <StoreContactConsentCard
-        action={action}
-        locale="zh"
-        onAgree={onAgree}
-      />,
+      <StoreContactConsentCard action={action} locale="zh" onAgree={onAgree} />,
     );
 
     await screen.findByText("buyer@example.com");
