@@ -585,7 +585,7 @@ describe("MatchChat sending state", () => {
       ],
       uiActions: [],
     });
-    render(<MatchChat home onNotice={vi.fn()} subplatform={subplatform} />);
+    render(<MatchChat onNotice={vi.fn()} subplatform={subplatform} />);
 
     await user.type(
       screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),

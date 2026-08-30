@@ -3,6 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const platformDashboardModule = vi.hoisted(() => ({ loads: 0 }));
+const media = vi.hoisted(() => ({ desktop: true }));
+
+vi.mock("@appica/ui-react/hooks/use-media-query", () => ({
+  useMediaQuery: () => media.desktop,
+}));
 
 vi.mock("./components/PlatformDashboard", async (importOriginal) => {
   platformDashboardModule.loads += 1;
@@ -122,10 +127,23 @@ beforeEach(() => {
   });
 });
 
+beforeEach(() => {
+  media.desktop = true;
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
+
+async function openRootShoppingConversation(
+  user: ReturnType<typeof userEvent.setup>,
+) {
+  await user.click(screen.getByRole("button", { name: "打开找商品" }));
+  return screen.findByRole("textbox", {
+    name: "告诉 MatchPlane 你的需求",
+  });
+}
 
 async function openStoreAConversation(
   user: ReturnType<typeof userEvent.setup>,
@@ -165,9 +183,13 @@ describe("MatchPlane workspaces", () => {
     const returnedBuyer = render(<App />);
 
     expect(
-      await screen.findByRole("textbox", {
-        name: "告诉 MatchPlane 你的需求",
+      await screen.findByRole("heading", {
+        name: "说说你想找什么。",
+        level: 1,
       }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "打开找商品" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("正在加载商城后台…")).not.toBeInTheDocument();
     expect(
@@ -195,7 +217,10 @@ describe("MatchPlane workspaces", () => {
       screen.getByRole("heading", { name: "说说你想找什么。", level: 1 }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("textbox", { name: "告诉 MatchPlane 你的需求" }),
+      screen.getByRole("textbox", { name: "描述想买的东西和预算" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "打开找商品" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "说需求" }),
@@ -931,9 +956,7 @@ describe("MatchPlane workspaces", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭我的店铺" }));
 
-    const shoppingInput = screen.getByRole("textbox", {
-      name: "告诉 MatchPlane 你的需求",
-    });
+    const shoppingInput = await openRootShoppingConversation(user);
     await user.type(shoppingInput, "想找一台轻便的通勤电脑");
     expect(shoppingInput).toHaveValue("想找一台轻便的通勤电脑");
     expect(screen.getByRole("button", { name: "发送需求" })).toBeEnabled();

@@ -32,11 +32,11 @@ describe("FloatingMarketplaceClerk", () => {
     const user = userEvent.setup();
     render(<Harness />);
 
-    const trigger = screen.getByRole("button", { name: "问选货员" });
+    const trigger = screen.getByRole("button", { name: "打开找商品" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     await user.click(trigger);
 
-    expect(await screen.findByRole("dialog", { name: "选货员" })).toHaveClass(
+    expect(await screen.findByRole("dialog", { name: "找商品" })).toHaveClass(
       "desktop-clerk-dialog",
     );
     expect(screen.getByRole("textbox", { name: "需求" })).toBeInTheDocument();
@@ -47,7 +47,7 @@ describe("FloatingMarketplaceClerk", () => {
     await user.keyboard("{Escape}");
     await waitFor(() =>
       expect(
-        screen.queryByRole("dialog", { name: "选货员" }),
+        screen.queryByRole("dialog", { name: "找商品" }),
       ).not.toBeInTheDocument(),
     );
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -59,12 +59,12 @@ describe("FloatingMarketplaceClerk", () => {
     const user = userEvent.setup();
     render(<Harness />);
 
-    await user.click(screen.getByRole("button", { name: "问选货员" }));
-    const dialog = await screen.findByRole("dialog", { name: "选货员" });
+    await user.click(screen.getByRole("button", { name: "打开找商品" }));
+    const dialog = await screen.findByRole("dialog", { name: "找商品" });
     expect(dialog).toHaveClass("mobile-clerk-drawer");
     expect(screen.getAllByRole("textbox")).toHaveLength(1);
 
-    await user.click(screen.getByRole("button", { name: "关闭选货员" }));
+    await user.click(screen.getByRole("button", { name: "关闭" }));
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
   });
 });

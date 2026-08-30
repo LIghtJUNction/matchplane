@@ -56,16 +56,16 @@ describe("MatchChat root starters", () => {
     );
 
     const starter = screen.getByRole("button", {
-      name: /描述真实需求.*说明预算、用途和不能妥协的条件/,
+      name: /预算 15 万以内的家用 SUV.*填写预算和需求，匹配的商品会出现在下方。/,
     });
     expect(
       screen.getByRole("button", {
-        name: /比较已展示商品.*只依据已展示商品和事实说明取舍/,
+        name: /比较几款合适的商品.*只依据已展示商品和事实说明取舍/,
       }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: /查看公开店铺.*只列出当前公开店铺，不附加未经证实的认证声明/,
+        name: /找一家可靠的店铺.*只列出当前公开店铺，不附加未经证实的认证声明/,
       }),
     ).toBeInTheDocument();
 
@@ -73,7 +73,7 @@ describe("MatchChat root starters", () => {
     expect(starter).toHaveFocus();
     await user.click(starter);
     expect(
-      await screen.findByText("帮我梳理预算、用途和必须满足的条件。"),
+      await screen.findByText("预算 15 万以内，帮我找一台家用 SUV"),
     ).toBeInTheDocument();
   });
 });

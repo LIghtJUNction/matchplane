@@ -19,7 +19,7 @@
   --retail-paper: var(--retail-elevated);
   --retail-ink: #141413;
   --retail-ink-soft: #2c2c2a;
-  --retail-muted: #5e5d59;
+  --retail-muted: #6c6962;
   --retail-line: color-mix(in srgb, #141413 14%, transparent);
   --retail-line-strong: color-mix(in srgb, #141413 28%, transparent);
   /* Filled near-black CTAs — no terracotta shout */
@@ -87,7 +87,7 @@
   --retail-paper: var(--retail-elevated);
   --retail-ink: #faf9f5;
   --retail-ink-soft: #e8e6df;
-  --retail-muted: #b0aea5;
+  --retail-muted: #aaa49a;
   --retail-line: color-mix(in srgb, #faf9f5 14%, transparent);
   --retail-line-strong: color-mix(in srgb, #faf9f5 28%, transparent);
   --retail-accent: #faf9f5;
@@ -852,36 +852,6 @@ select {
 .root-marketplace-products {
   margin-top: 0;
 }
-
-.root-marketplace-content.is-sparse {
-  display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(18rem, 0.85fr);
-  align-items: start;
-  gap: clamp(2.5rem, 6vw, 6rem);
-}
-
-.root-marketplace-content.is-sparse > .root-marketplace-products,
-.root-marketplace-content.is-sparse > .root-marketplace-stores {
-  width: 100%;
-  margin-inline: 0;
-}
-
-.root-marketplace-content.is-sparse .root-marketplace-stores {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.root-marketplace-content.is-sparse .root-marketplace-stores section > div {
-  grid-template-columns: 1fr;
-  gap: 0.75rem;
-}
-
-.root-marketplace-content.is-sparse .root-marketplace-stores section > div > a {
-  min-height: 8.5rem;
-  padding: 1rem;
-}
-
 
 .root-marketplace-products-heading {
   margin-bottom: 1.4rem;
