@@ -90,22 +90,26 @@ export function PlatformHeader({
   return (
     <header className="app-header">
       <div className="header-inner">
-        <div className="brand-cluster">
-          <Brand
-            label={subplatform.brandName}
-            logoUrl={
-              subplatform.slug === "root" ? subplatform.brandLogoUrl : undefined
-            }
-            homeHref={subplatform.slug === "root" ? "#top" : subplatform.path}
-          />
+        <div className="header-navigation">
+          <div className="brand-cluster">
+            <Brand
+              label={subplatform.brandName}
+              logoUrl={
+                subplatform.slug === "root"
+                  ? subplatform.brandLogoUrl
+                  : undefined
+              }
+              homeHref={subplatform.slug === "root" ? "#top" : subplatform.path}
+            />
+            {subplatform.slug === "root" ? null : (
+              <a className="root-platform-link" href="/">
+                {ui.rootPlatform}
+              </a>
+            )}
+          </div>
           {subplatform.slug === "root" ? (
             <PlatformMenu locale={locale} />
           ) : null}
-          {subplatform.slug === "root" ? null : (
-            <a className="root-platform-link" href="/">
-              {ui.rootPlatform}
-            </a>
-          )}
         </div>
         <div className="header-actions">
           <PreferenceControls

@@ -707,8 +707,9 @@ main.subplatform-fullscreen-main { min-height: 0; padding: 0; overflow: hidden; 
 .match-chat-compose-attachments { margin-top: 0.8rem; }
 .match-chat-compose-attachments li { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--paper); }
 .match-chat-compose-attachments li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.match-chat-compose-attachments li button { display: grid; place-items: center; width: 1.25rem; height: 1.25rem; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
-.match-chat-compose-attachments li button:hover { color: var(--ink); background: var(--mist); }
+.match-chat-compose-attachments li button { display: grid; place-items: center; width: 2.75rem; min-width: 2.75rem; height: 2.75rem; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.match-chat-compose-attachments li button:hover, .match-chat-compose-attachments li button:focus-visible { color: var(--ink); background: var(--mist); }
+.match-chat-compose-attachments li button:disabled { cursor: not-allowed; opacity: 0.55; }
 
 /* MatchChat Starter Suggestions & Assistant UI */
 .match-chat-assistant-tag { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.68rem; font-weight: 650; color: var(--muted); margin-bottom: 0.35rem; }
@@ -1566,6 +1567,57 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .seller-upload-form input, .seller-upload-form select, .seller-upload-form textarea { min-height: 2.9rem; font-size: 0.8rem; }
 .seller-upload-form textarea { min-height: 7rem; resize: vertical; line-height: 1.65; }
 .seller-upload-form label > small { color: var(--muted); font-size: 0.68rem; }
+.supply-field-editor { grid-column: 1 / -1; min-width: 0; display: grid; gap: 1rem; padding-block: 0.25rem; }
+.supply-field-progress { min-width: 0; width: 100%; display: grid; gap: 0.5rem; }
+.supply-field-progress progress, .supply-field-group-header progress { width: 100%; height: 0.35rem; overflow: hidden; border: 0; border-radius: 0.2rem; background: var(--paper-deep); accent-color: var(--focus); }
+.supply-field-progress-copy { min-width: 0; margin: 0; padding-bottom: 0.85rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 0.7rem; line-height: 1.45; font-variant-numeric: tabular-nums; }
+.supply-field-progress-copy > * { min-width: 0; overflow-wrap: anywhere; }
+.supply-field-groups { min-width: 0; display: grid; gap: 1.35rem; }
+.supply-field-group { min-width: 0; margin: 0; padding: 1.05rem 0 0; border: 0; border-top: 1px solid var(--line); }
+.supply-field-group:first-child { padding-top: 0; border-top: 0; }
+.supply-field-group-title { width: 100%; margin: 0; padding: 0; color: var(--ink); font-size: 0.82rem; font-weight: 720; line-height: 1.45; }
+.supply-field-group-header { width: 100%; margin: 0.35rem 0 0.8rem; padding: 0; display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.supply-field-group-header .supply-field-progress-copy { flex: 1 1 auto; padding: 0; border: 0; }
+.supply-field-group-header progress { flex: 0 1 8rem; max-width: 8rem; }
+.supply-field-group-header > * { min-width: 0; overflow-wrap: anywhere; }
+.supply-field-grid { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.8rem 0.9rem; }
+.supply-field-control { min-width: 0; display: grid; align-content: start; gap: 0.38rem; color: var(--ink-soft); font-size: 0.74rem; line-height: 1.45; overflow-wrap: anywhere; }
+.supply-field-control > label { display: inline-flex; align-items: baseline; justify-self: start; gap: 0.2rem; }
+.supply-field-control > label > [aria-hidden="true"] { color: var(--danger); }
+.supply-field-control.is-wide { grid-column: 1 / -1; }
+.supply-field-input-shell { position: relative; min-width: 0; display: block; }
+.supply-field-input-shell > input, .supply-field-input-shell > select, .supply-field-input-shell > textarea { min-height: 2.75rem; }
+.supply-field-control input { font-variant-numeric: tabular-nums; }
+.supply-field-input-shell:has(.supply-field-unit) > input { padding-inline-end: 4rem; font-variant-numeric: tabular-nums; }
+.supply-field-unit { position: absolute; inset-inline-end: 0.8rem; top: 50%; max-width: 3rem; overflow: hidden; transform: translateY(-50%); color: var(--muted); font-size: 0.68rem; line-height: 1; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.supply-field-help { color: var(--muted); font-size: 0.68rem; font-weight: 450; line-height: 1.5; overflow-wrap: anywhere; }
+.supply-field-control :is(input, select, textarea):hover:not(:disabled) { border-color: var(--line-strong); }
+.supply-field-control :is(input, select, textarea):focus-visible { border-color: var(--focus); box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--focus) 18%, transparent); }
+.supply-field-control :is(input, select, textarea):disabled { cursor: not-allowed; background: var(--paper-deep); color: var(--muted); opacity: 0.72; }
+.seller-media-list { display: grid; gap: 0; }
+.seller-media-list li { width: 100%; max-width: none; min-height: 3.25rem; padding: 0.35rem 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+.seller-media-list li:first-child { border-top: 0; }
+.seller-media-list li > span:first-child { min-width: 7rem; flex: 1 1 12rem; }
+.seller-media-cover { flex: 0 0 auto; color: var(--ink); font-family: var(--font-mono); font-size: 0.64rem; font-weight: 720; letter-spacing: 0.04em; white-space: nowrap; }
+.seller-media-item-actions { margin-inline-start: auto; display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 0.2rem; }
+.seller-media-list li .seller-media-item-actions > button { width: auto; min-width: 2.75rem; min-height: 2.75rem; height: 2.75rem; padding: 0 0.68rem; border-radius: 0.6rem; color: var(--muted); font-size: 0.68rem; }
+.seller-media-list li .seller-media-item-actions > button:hover, .seller-media-list li .seller-media-item-actions > button:focus-visible { background: var(--mist); color: var(--ink); }
+.seller-media-list li .seller-media-item-actions > button:focus-visible { outline: 0; box-shadow: 0 0 0 0.12rem color-mix(in srgb, var(--focus) 24%, transparent); }
+.seller-media-list li .seller-media-item-actions > button:disabled { cursor: not-allowed; background: transparent; color: var(--muted); opacity: 0.55; }
+.seller-media-list li .seller-media-cover-action { color: var(--ink-soft); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 0.16em; }
+@media (max-width: 760px) {
+.seller-upload-form { grid-template-columns: minmax(0, 1fr); }
+.seller-upload-wide, .seller-upload-actions, .supply-field-editor { grid-column: auto; }
+.supply-field-progress > .supply-field-progress-copy { align-items: flex-start; flex-direction: column; gap: 0.2rem; }
+.supply-field-group-header { align-items: center; }
+.supply-field-group-header .supply-field-progress-copy { display: block; }
+.supply-field-group-header progress { flex: 0 1 6rem; max-width: 6rem; }
+.supply-field-grid { grid-template-columns: minmax(0, 1fr); gap: 0.78rem; }
+.supply-field-control.is-wide { grid-column: auto; }
+.supply-field-input-shell > input, .supply-field-input-shell > select { min-height: 2.75rem; }
+.seller-media-list li { align-items: flex-start; }
+.seller-media-item-actions { width: 100%; margin-inline-start: 0; justify-content: flex-start; }
+}
 .seller-product-empty { min-height: 16rem; align-content: center; }
 .seller-product-empty strong { color: var(--ink); font-size: 1.1rem; }
 .seller-product-empty .button { margin-top: 0.4rem; }

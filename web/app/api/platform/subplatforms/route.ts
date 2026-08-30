@@ -793,13 +793,20 @@ interface Manifest {
       attribute?: string;
       value?: string;
     }>;
+    /** Public offer attributes only; private vehicle records cannot be declared here. */
     supplyFields?: Array<{
       key: string;
       label: string;
-      type?: string;
+      type?: "text" | "textarea" | "number" | "url" | "date" | "select";
       required?: boolean;
       placeholder?: string;
       options?: string[];
+      group?: string;
+      help?: string;
+      unit?: string;
+      min?: number;
+      max?: number;
+      step?: number;
     }>;
   };
   rootApiVersion: "v1";

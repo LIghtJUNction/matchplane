@@ -1,4 +1,5 @@
 import type { InterfaceLocale } from "./lib/preferences";
+import { isSafePublicAttributeKey } from "./storefront-ranking-shared";
 
 export type PricingMode = "fixed" | "range" | "negotiable" | "none";
 
@@ -31,6 +32,30 @@ export interface ChatUiConfig {
  * adapter; it must never be inferred from pricing or a schema.
  */
 export type MarketplaceContract = "generic-v1" | "legacy-v1";
+
+export type SupplyFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "url"
+  | "date"
+  | "select";
+
+/** Public offer attribute declared by a mounted package. */
+export interface SupplyFieldConfig {
+  key: string;
+  label: string;
+  type?: SupplyFieldType;
+  required?: boolean;
+  placeholder?: string;
+  options?: string[];
+  group?: string;
+  help?: string;
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+}
 
 export interface SubplatformConfig {
   slug: string;
@@ -65,14 +90,8 @@ export interface SubplatformConfig {
       attribute?: string;
       value?: string;
     }>;
-    supplyFields?: Array<{
-      key: string;
-      label: string;
-      type?: "text" | "number" | "url" | "date" | "select";
-      required?: boolean;
-      placeholder?: string;
-      options?: string[];
-    }>;
+    /** Public attributes only; private inventory or contact data is never declared here. */
+    supplyFields?: SupplyFieldConfig[];
   };
   assetSchema?: Record<string, unknown>;
   /** Capability names exposed by the package's authenticated Agent/MCP server. */
@@ -491,22 +510,17 @@ function validUi(
         .slice(0, 32)
     : undefined;
   const supplyFields = Array.isArray(value.supplyFields)
-    ? value.supplyFields
-        .filter(
-          (field) =>
-            field &&
-            typeof field.key === "string" &&
-            /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(field.key) &&
-            typeof field.label === "string" &&
-            field.label.length <= 200 &&
-            (!field.options ||
-              (Array.isArray(field.options) &&
-                field.options.every(
-                  (option) =>
-                    typeof option === "string" && option.length <= 200,
-                ))),
-        )
-        .slice(0, 64)
+    ? (() => {
+        const fields: SupplyFieldConfig[] = [];
+        const keys = new Set<string>();
+        for (const candidate of value.supplyFields.slice(0, 64)) {
+          const field = validSupplyField(candidate);
+          if (!field || keys.has(field.key)) continue;
+          keys.add(field.key);
+          fields.push(field);
+        }
+        return fields;
+      })()
     : undefined;
   if (!chat && !copy && !filters?.length && !supplyFields?.length)
     return undefined;
@@ -516,6 +530,120 @@ function validUi(
     ...(filters?.length ? { filters } : {}),
     ...(supplyFields?.length ? { supplyFields } : {}),
   };
+}
+
+const SUPPLY_NUMBER_LIMIT = 1_000_000_000_000_000;
+const SUPPLY_FIELD_KEYS = new Set([
+  "key",
+  "label",
+  "type",
+  "required",
+  "placeholder",
+  "options",
+  "group",
+  "help",
+  "unit",
+  "min",
+  "max",
+  "step",
+]);
+
+function validSupplyField(value: unknown): SupplyFieldConfig | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const field = value as Record<string, unknown>;
+  if (
+    Object.keys(field).some((key) => !SUPPLY_FIELD_KEYS.has(key)) ||
+    typeof field.key !== "string" ||
+    !/^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(field.key) ||
+    !isSafePublicAttributeKey(field.key)
+  )
+    return undefined;
+  const label = boundedString(field.label, 200);
+  if (!label) return undefined;
+  const type = field.type;
+  if (
+    type !== undefined &&
+    type !== "text" &&
+    type !== "textarea" &&
+    type !== "number" &&
+    type !== "url" &&
+    type !== "date" &&
+    type !== "select"
+  )
+    return undefined;
+  if (field.required !== undefined && typeof field.required !== "boolean")
+    return undefined;
+  const placeholder = boundedString(field.placeholder, 500, true);
+  if (field.placeholder !== undefined && placeholder === undefined)
+    return undefined;
+  const group = boundedString(field.group, 120);
+  if (field.group !== undefined && !group) return undefined;
+  const help = boundedString(field.help, 500);
+  if (field.help !== undefined && !help) return undefined;
+  const unit = boundedString(field.unit, 40);
+  if (field.unit !== undefined && !unit) return undefined;
+  let options: string[] | undefined;
+  if (field.options !== undefined) {
+    if (!Array.isArray(field.options) || field.options.length > 64)
+      return undefined;
+    options = [];
+    for (const option of field.options) {
+      const normalized = boundedString(option, 200);
+      if (!normalized || options.includes(normalized)) return undefined;
+      options.push(normalized);
+    }
+  }
+  if (
+    (type === "select" && !options?.length) ||
+    (type !== "select" && options !== undefined)
+  )
+    return undefined;
+  const min = boundedSupplyNumber(field.min);
+  const max = boundedSupplyNumber(field.max);
+  const step = boundedSupplyNumber(field.step);
+  const hasNumericConstraint =
+    min !== undefined || max !== undefined || step !== undefined;
+  if (
+    (field.min !== undefined && min === undefined) ||
+    (field.max !== undefined && max === undefined) ||
+    (field.step !== undefined && (step === undefined || step <= 0)) ||
+    (min !== undefined && max !== undefined && min > max) ||
+    (hasNumericConstraint && type !== "number")
+  )
+    return undefined;
+  return {
+    key: field.key,
+    label,
+    ...(type !== undefined ? { type } : {}),
+    ...(field.required !== undefined ? { required: field.required } : {}),
+    ...(placeholder !== undefined ? { placeholder } : {}),
+    ...(options !== undefined ? { options } : {}),
+    ...(group ? { group } : {}),
+    ...(help ? { help } : {}),
+    ...(unit ? { unit } : {}),
+    ...(min !== undefined ? { min } : {}),
+    ...(max !== undefined ? { max } : {}),
+    ...(step !== undefined ? { step } : {}),
+  };
+}
+
+function boundedString(
+  value: unknown,
+  maximum: number,
+  allowEmpty = false,
+): string | undefined {
+  if (typeof value !== "string" || value.length > maximum) return undefined;
+  const normalized = value.trim();
+  return normalized || allowEmpty ? normalized : undefined;
+}
+
+function boundedSupplyNumber(value: unknown): number | undefined {
+  return typeof value === "number" &&
+    Number.isFinite(value) &&
+    Math.abs(value) <= SUPPLY_NUMBER_LIMIT
+    ? value
+    : undefined;
 }
 
 function validAssetSchema(

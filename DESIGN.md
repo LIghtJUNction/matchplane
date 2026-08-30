@@ -87,6 +87,16 @@ colors:
 - [confirmed] 商品图片使用商品名作为替代文本，纯装饰图标隐藏于辅助技术。
 - [confirmed] 320px 宽度下关键内容、对话输入、检索路径、调色盘、登录、商品动作和失败恢复均可达。
 
+## Merchant Vehicle Intake
+
+- [confirmed] 二手车车源录入属于高频操作型场景：桌面端使用紧凑、可扫读的分组编辑器，移动端保持单列和固定的保存/继续动作，不复制第三方产品的后台外观。
+- [confirmed] 信息顺序遵循“车辆识别 → 车况与证明 → 价格与库存 → 照片与视频 → 预览与发布”；每组只呈现完成当前任务所需字段，并允许保存草稿后恢复。
+- [confirmed] 借鉴大风车仅限全生命周期、快速新增、紧凑库存摘要与一份车源多渠道复用；不得复制其品牌、橙色视觉、Logo、图标、营销横幅、专有术语或未公开业务规则。
+- [confirmed] 公开资料与内部经营资料必须强隔离。车型、年月、里程、公开售价模式、城市、车况摘要、配置和公开媒体可发布；VIN、车牌与证件原图、车主或供应方联系方式、采购价、整备成本、利润、精确库位和内部备注不得进入公开目录或公开 AI 上下文。
+- [confirmed] 车辆资料完整度与库存生命周期分开表达；草稿、待补充、可提交审核、已发布、已暂停和已售不得被一个含混状态替代。
+- [confirmed] 媒体上传必须明确封面、顺序、数量限制、逐项进度、失败项和删除动作；部分失败不得丢失已成功上传的图片，证件和识别资料不得混入公开相册。
+- [confirmed] 发布前提供买家视角预览；多渠道发布必须逐项选择，不默认全网同步。联系资料仍只能通过 MatchPlane 的联系同意流程释放。
+
 ## Source Evidence & Confidence
 
 - [observed] path: `PRODUCT.md`
@@ -102,22 +112,22 @@ colors:
   sha256: `79bc80eab49b1fef084f75540f608121a6578c5c72b0d3bf86485de097502970`
   confidence: high
 - [observed] path: `web/src/components/MarketplaceHome.tsx`
-  sha256: `83d75d15efae11321b7f557b1feffcaec2c438fe1c6f8a9d43cb39fbc03153dc`
+  sha256: `83565df324920fae379d6b0d393c8b9bc04154d8092ac112bf2a89378f85d652`
   confidence: high
 - [observed] path: `web/src/components/MarketplaceSearchTrace.tsx`
-  sha256: `ecba4c6ed6181b051a8e3927c3e8b23b130234a8401df661ee05ea0f52c38fb1`
+  sha256: `402e7ada033d4b9f6b1dbc43c40a888c2bddcb7200748e69273c4f13bdc23197`
   confidence: high
 - [observed] path: `web/src/components/MatchChat.tsx`
-  sha256: `aabfe376849185a4f52e2814cd1b88d71fed9fc6485e9f9cda90a31d8419199c`
+  sha256: `064d7938144664a43f6670d1314b3e9617fcaa465e9a6d78a07179c7a85cf51b`
   confidence: high
 - [observed] path: `web/src/platform-router.ts`
-  sha256: `7f4db1c78aacebb1a00164ecaa587cf00269691920b3b7078c140829269fc894`
+  sha256: `68b8c827aeb934e5d319114b4ce75e2d7885f9b7ce3e871aaca404fe061e2b03`
   confidence: high
 - [observed] path: `web/src/retail-ui.css`
-  sha256: `d13df480447b6957cfe939acce26f19c571d45d03f5612bd2994cf858f44a343`
+  sha256: `fb9fa261ebe20a2b60308261b1fe145ea496d76f829e654018246ebed13d9841`
   confidence: high
 - [observed] path: `web/src/App.tsx`
-  sha256: `462072447d1da79539b94c4f8f33729e5e60829e0988d8a2fb2682cd984a698e`
+  sha256: `3980e0ab70fac98bda16f2f4cecd92cf9057cf404169e825f350021a587c9bd4`
   confidence: high
 
 ## Known Gaps & Exceptions

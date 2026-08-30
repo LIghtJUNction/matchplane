@@ -268,9 +268,7 @@ export function useSubplatformRoute({
         relativeBrowserLocation(searchParams),
       );
     }
-    setSubplatform(
-      seedInitialStoreIdentity(resolveSubplatform(requestedPath)),
-    );
+    setSubplatform(seedInitialStoreIdentity(resolveSubplatform(requestedPath)));
     void loadSubplatform(requestedPath).then((loaded) =>
       setSubplatform(seedInitialStoreIdentity(loaded)),
     );

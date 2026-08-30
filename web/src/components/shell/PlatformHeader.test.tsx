@@ -74,6 +74,22 @@ function renderHeader(
 }
 
 describe("PlatformHeader account actions", () => {
+  it("keeps root store navigation separate from the brand anchor", () => {
+    const { container } = renderHeader(null);
+    const navigation = container.querySelector<HTMLDivElement>(
+      ".header-navigation",
+    );
+    const brandCluster = container.querySelector<HTMLDivElement>(
+      ".brand-cluster",
+    );
+    const storeMenu = screen.getByTestId("platform-menu");
+
+    expect(navigation).toContainElement(brandCluster);
+    expect(navigation).toContainElement(storeMenu);
+    expect(brandCluster).not.toContainElement(storeMenu);
+    expect(storeMenu.parentElement).toBe(navigation);
+  });
+
   it("keeps merchant and platform administration inside one avatar menu", async () => {
     const user = userEvent.setup();
     const { container, onOpenAccountSection } = renderHeader({

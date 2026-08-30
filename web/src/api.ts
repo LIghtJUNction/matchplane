@@ -1,5 +1,6 @@
 import type { AssetListing } from "./types";
 import {
+  DEFAULT_MAX_MEDIA_BYTES,
   MAX_MEDIA_BYTES,
   MEDIA_ATTACHMENT_PROTOCOL,
   parseMediaUploadResponse,
@@ -17,6 +18,51 @@ export type { MarketplaceAttachment } from "./media-attachment";
 const apiBase = (
   process.env.NEXT_PUBLIC_MATCHPLANE_API_BASE_URL ?? "/api"
 ).replace(/\/$/, "");
+
+/** Conservative browser relay limit shared with the default media facade deployment. */
+export const MARKETPLACE_ATTACHMENT_MAX_BYTES = DEFAULT_MAX_MEDIA_BYTES;
+export const MAX_MARKETPLACE_ATTACHMENTS_PER_MESSAGE = 8;
+const SUPPORTED_MARKETPLACE_ATTACHMENT_MEDIA_TYPES = [
+  "image/avif",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/json",
+  "application/pdf",
+  "application/zip",
+  "text/plain",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/ogg",
+  "audio/wav",
+  "audio/webm",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+] as const;
+const supportedMarketplaceAttachmentMediaTypes = new Set<string>(
+  SUPPORTED_MARKETPLACE_ATTACHMENT_MEDIA_TYPES,
+);
+export const MARKETPLACE_ATTACHMENT_ACCEPT =
+  SUPPORTED_MARKETPLACE_ATTACHMENT_MEDIA_TYPES.join(",");
+
+export type MarketplaceAttachmentFileError =
+  | "empty"
+  | "too_large"
+  | "unsupported_type";
+
+export function validateMarketplaceAttachmentFile(
+  file: Pick<File, "size" | "type">,
+): MarketplaceAttachmentFileError | null {
+  if (file.size < 1) return "empty";
+  if (file.size > MARKETPLACE_ATTACHMENT_MAX_BYTES) return "too_large";
+  if (!supportedMarketplaceAttachmentMediaTypes.has(file.type.toLowerCase()))
+    return "unsupported_type";
+  return null;
+}
 
 export interface PartySession {
   tenantId: string;
@@ -4474,9 +4520,13 @@ export async function uploadMarketplaceAttachment(input: {
   intentId?: string;
   kind?: "image" | "document" | "video" | "audio" | "file";
 }): Promise<MarketplaceAttachment> {
-  if (input.file.size < 1 || input.file.size > MAX_MEDIA_BYTES) {
-    throw new MarketplaceApiError(413, "附件超过当前部署支持的大小上限");
-  }
+  const validationError = validateMarketplaceAttachmentFile(input.file);
+  if (validationError === "empty")
+    throw new MarketplaceApiError(400, "附件不能为空");
+  if (validationError === "too_large")
+    throw new MarketplaceApiError(413, "单个附件不能超过 25 MiB");
+  if (validationError === "unsupported_type")
+    throw new MarketplaceApiError(400, "附件类型不受支持");
   const bytes = new Uint8Array(await input.file.arrayBuffer());
   const dataBase64 = bytesToBase64(bytes);
   const requestId = crypto.randomUUID();

@@ -257,34 +257,38 @@ export function MarketplaceHome({
           className={`root-marketplace-entry${searchTrace ? " has-results" : ""}`}
           aria-labelledby="root-marketplace-title"
         >
-          <header className="root-marketplace-catalog-intro">
-            <p className="root-marketplace-brand">{brandName}</p>
-            <h1 id="root-marketplace-title">
-              {locale === "en"
-                ? "Describe what you are looking for."
-                : "说说你想找什么。"}
-            </h1>
-            <span>
-              {locale === "en"
-                ? `${brandName} searches public stores and keeps every visible result tied to its source.`
-                : `${brandName} 会检索公开店铺，并保留每个可见结果的真实来源。`}
-            </span>
-            <ul className="root-marketplace-entry-facts">
-              <li>
+          <div className="root-marketplace-entry-frame">
+            <header className="root-marketplace-catalog-intro">
+              <p className="root-marketplace-brand">{brandName}</p>
+              <h1 id="root-marketplace-title">
                 {locale === "en"
-                  ? "Browse without signing in"
-                  : "无需登录即可浏览"}
-              </li>
-              <li>
-                {locale === "en" ? "Public listings only" : "只检索公开商品"}
-              </li>
-              <li>
-                {locale === "en" ? "Sources stay visible" : "结果来源始终可见"}
-              </li>
-            </ul>
-          </header>
-          <div className="root-marketplace-concierge">
-            <div className="root-marketplace-chat-shell">{assistant}</div>
+                  ? "Describe what you are looking for."
+                  : "说说你想找什么。"}
+              </h1>
+              <span>
+                {locale === "en"
+                  ? `${brandName} searches public stores and keeps every visible result tied to its source.`
+                  : `${brandName} 会检索公开店铺，并保留每个可见结果的真实来源。`}
+              </span>
+              <ul className="root-marketplace-entry-facts">
+                <li>
+                  {locale === "en"
+                    ? "Browse without signing in"
+                    : "无需登录即可浏览"}
+                </li>
+                <li>
+                  {locale === "en" ? "Public listings only" : "只检索公开商品"}
+                </li>
+                <li>
+                  {locale === "en"
+                    ? "Sources stay visible"
+                    : "结果来源始终可见"}
+                </li>
+              </ul>
+            </header>
+            <div className="root-marketplace-concierge">
+              <div className="root-marketplace-chat-shell">{assistant}</div>
+            </div>
           </div>
           {searchTrace ? (
             <MarketplaceSearchTrace

@@ -6,6 +6,7 @@ const api = vi.hoisted(() => ({
   createHostedStore: vi.fn(),
   createStoreCollaboratorInvite: vi.fn(),
   getOwnedStores: vi.fn(),
+  MarketplaceApiError: Error,
 }));
 
 vi.mock("../api", () => api);
@@ -62,6 +63,26 @@ describe("hosted store onboarding", () => {
       "href",
       "/store-a1b2c3d4e5f6?console=products",
     );
+  });
+
+  it("keeps the failure recovery usable before returning to the empty state", async () => {
+    const user = userEvent.setup();
+    api.getOwnedStores
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce([]);
+    render(<HostedStoreOnboarding locale="zh" onNotice={vi.fn()} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "店铺列表没有加载成功",
+    );
+    const retry = screen.getByRole("button", { name: "重新加载" });
+    expect(retry).toHaveClass("min-h-11");
+    await user.click(retry);
+
+    expect(await screen.findByRole("button", { name: "开一家店" })).toHaveClass(
+      "min-h-11",
+    );
+    expect(api.getOwnedStores).toHaveBeenCalledTimes(2);
   });
 
   it("shows active stores first and keeps inactive stores in a secondary disclosure", async () => {

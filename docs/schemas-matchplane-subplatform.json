@@ -78,6 +78,7 @@
         },
         "supplyFields": {
           "type": "array",
+          "description": "Store-package-owned public catalog attribute fields. Never use for private records, canonical price/inventory/media, contact data, sensitive identifiers, costs, profit, storage location, or internal notes.",
           "maxItems": 64,
           "items": {
             "type": "object",
@@ -86,11 +87,31 @@
             "properties": {
               "key": { "type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$" },
               "label": { "type": "string", "minLength": 1, "maxLength": 200 },
-              "type": { "enum": ["text", "number", "url", "date", "select"] },
+              "type": { "enum": ["text", "textarea", "number", "url", "date", "select"] },
               "required": { "type": "boolean" },
               "placeholder": { "type": "string", "maxLength": 500 },
-              "options": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 200 } }
-            }
+              "group": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "help": { "type": "string", "minLength": 1, "maxLength": 500 },
+              "unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "min": { "type": "number", "minimum": -1000000000000000, "maximum": 1000000000000000 },
+              "max": { "type": "number", "minimum": -1000000000000000, "maximum": 1000000000000000 },
+              "step": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000000000000 },
+              "options": { "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 200 } }
+            },
+            "allOf": [
+              {
+                "if": { "required": ["options"] },
+                "then": { "properties": { "type": { "const": "select" } }, "required": ["type"] }
+              },
+              {
+                "if": { "properties": { "type": { "const": "select" } }, "required": ["type"] },
+                "then": { "required": ["options"] }
+              },
+              {
+                "if": { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }, { "required": ["step"] }] },
+                "then": { "properties": { "type": { "const": "number" } }, "required": ["type"] }
+              }
+            ]
           }
         }
       }

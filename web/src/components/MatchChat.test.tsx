@@ -1,4 +1,10 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -78,6 +84,29 @@ const subplatform = {
   label: "MatchPlane",
   ui: {},
 } as SubplatformConfig;
+
+const mediaSubplatform = {
+  slug: "tools",
+  path: "/tools",
+  label: "工具平台",
+  tenantId: "11111111-1111-4111-8111-111111111111",
+  domainId: "55555555-5555-4555-8555-555555555555",
+  pricing: { mode: "none" },
+  marketplaceContract: "generic-v1",
+  agentMcpTools: ["media.upload"],
+  ui: {},
+} as SubplatformConfig;
+
+function uploadedImage(file: File, sequence: number) {
+  return {
+    attachment_ref: `media://tools/image-${sequence}`,
+    kind: "image" as const,
+    file_name: file.name,
+    media_type: file.type,
+    size_bytes: file.size,
+    sha256: String(sequence).padStart(64, "a"),
+  };
+}
 
 afterEach(() => {
   resolveRoute.current?.();
@@ -325,6 +354,326 @@ describe("MatchChat sending state", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(document.querySelector(".match-chat-recommendations")).toBeNull();
+  });
+
+  it("uploads every selected image in order and permits a later same-name selection", async () => {
+    const user = userEvent.setup();
+    let sequence = 0;
+    uploadMarketplaceAttachment.mockImplementation(
+      async ({ file }: { file: File }) => uploadedImage(file, ++sequence),
+    );
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        role="seller"
+        subplatform={mediaSubplatform}
+      />,
+    );
+    const input = screen.getByLabelText("添加附件");
+    const front = new File(["front"], "front.jpg", { type: "image/jpeg" });
+    const rear = new File(["rear"], "rear.png", { type: "image/png" });
+
+    await user.upload(input, [front, rear]);
+    await waitFor(() =>
+      expect(uploadMarketplaceAttachment).toHaveBeenCalledTimes(2),
+    );
+    expect(
+      Array.from(
+        screen
+          .getByRole("list", { name: "待发送附件" })
+          .querySelectorAll("li span"),
+        (item) => item.textContent,
+      ),
+    ).toEqual(["front.jpg", "rear.png"]);
+    expect(input).toHaveValue("");
+
+    await user.upload(
+      input,
+      new File(["new front"], "front.jpg", { type: "image/jpeg" }),
+    );
+    await waitFor(() =>
+      expect(uploadMarketplaceAttachment).toHaveBeenCalledTimes(3),
+    );
+    expect(
+      Array.from(
+        screen
+          .getByRole("list", { name: "待发送附件" })
+          .querySelectorAll("li span"),
+        (item) => item.textContent,
+      ),
+    ).toEqual(["front.jpg", "rear.png", "front.jpg"]);
+  });
+
+  it("keeps successful images when another image in the batch fails", async () => {
+    const user = userEvent.setup();
+    let sequence = 0;
+    uploadMarketplaceAttachment.mockImplementation(
+      async ({ file }: { file: File }) => {
+        if (file.name === "broken.jpg") throw new Error("图片存储暂不可用");
+        return uploadedImage(file, ++sequence);
+      },
+    );
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        role="seller"
+        subplatform={mediaSubplatform}
+      />,
+    );
+
+    await user.upload(screen.getByLabelText("添加附件"), [
+      new File(["one"], "first.jpg", { type: "image/jpeg" }),
+      new File(["broken"], "broken.jpg", { type: "image/jpeg" }),
+      new File(["three"], "third.webp", { type: "image/webp" }),
+    ]);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("已上传 2 个附件");
+    expect(alert).toHaveTextContent("broken.jpg: 图片存储暂不可用");
+    expect(uploadMarketplaceAttachment).toHaveBeenCalledTimes(3);
+    expect(
+      Array.from(
+        screen
+          .getByRole("list", { name: "待发送附件" })
+          .querySelectorAll("li span"),
+        (item) => item.textContent,
+      ),
+    ).toEqual(["first.jpg", "third.webp"]);
+
+    await user.type(screen.getByRole("textbox"), "发送已成功上传的图片");
+    await user.click(screen.getByRole("button", { name: "发送供给" }));
+    await waitFor(() => expect(createMarketplaceIntent).toHaveBeenCalled());
+    expect(screen.queryByText("部分附件未能添加")).not.toBeInTheDocument();
+  });
+
+  it("localizes server upload failures instead of leaking Chinese copy into English UI", async () => {
+    const user = userEvent.setup();
+    uploadMarketplaceAttachment.mockRejectedValueOnce(
+      new Error("图片存储暂不可用"),
+    );
+    render(
+      <MatchChat
+        locale="en"
+        onNotice={vi.fn()}
+        role="seller"
+        subplatform={mediaSubplatform}
+      />,
+    );
+
+    await user.upload(
+      screen.getByLabelText("Add attachment"),
+      new File(["broken"], "broken.jpg", { type: "image/jpeg" }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "broken.jpg: the upload did not complete; try again",
+    );
+    expect(alert).not.toHaveTextContent("图片存储暂不可用");
+  });
+
+  it("does not request uploads beyond the eight-attachment message limit", async () => {
+    const user = userEvent.setup();
+    let sequence = 0;
+    uploadMarketplaceAttachment.mockImplementation(
+      async ({ file }: { file: File }) => uploadedImage(file, ++sequence),
+    );
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        role="seller"
+        subplatform={mediaSubplatform}
+      />,
+    );
+    const files = Array.from(
+      { length: 9 },
+      (_, index) =>
+        new File([String(index)], `image-${index + 1}.jpg`, {
+          type: "image/jpeg",
+        }),
+    );
+
+    await user.upload(screen.getByLabelText("添加附件"), files);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("image-9.jpg");
+    expect(alert).toHaveTextContent("每条消息 8 个附件的上限");
+    expect(uploadMarketplaceAttachment).toHaveBeenCalledTimes(8);
+    expect(
+      screen.getByRole("list", { name: "待发送附件" }).querySelectorAll("li"),
+    ).toHaveLength(8);
+  });
+
+  it("does not let a rejected file consume an attachment slot", async () => {
+    const user = userEvent.setup();
+    let sequence = 0;
+    uploadMarketplaceAttachment.mockImplementation(
+      async ({ file }: { file: File }) => uploadedImage(file, ++sequence),
+    );
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        role="seller"
+        subplatform={mediaSubplatform}
+      />,
+    );
+    const validFiles = Array.from(
+      { length: 8 },
+      (_, index) =>
+        new File([String(index)], `valid-${index + 1}.jpg`, {
+          type: "image/jpeg",
+        }),
+    );
+
+    await user.upload(screen.getByLabelText("添加附件"), [
+      new File([], "empty.jpg", { type: "image/jpeg" }),
+      ...validFiles,
+    ]);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("empty.jpg: 文件内容为空");
+    expect(alert).not.toHaveTextContent("附件的上限");
+    expect(uploadMarketplaceAttachment).toHaveBeenCalledTimes(8);
+    expect(
+      screen.getByRole("list", { name: "待发送附件" }).querySelectorAll("li"),
+    ).toHaveLength(8);
+  });
+
+  it("uses a failed upload's slot for a later valid file", async () => {
+    const user = userEvent.setup();
+    let sequence = 0;
+    uploadMarketplaceAttachment.mockImplementation(
+      async ({ file }: { file: File }) => {
+        if (file.name === "broken.jpg") throw new Error("图片存储暂不可用");
+        return uploadedImage(file, ++sequence);
+      },
+    );
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        role="seller"
+        subplatform={mediaSubplatform}
+      />,
+    );
+    const validFiles = Array.from(
+      { length: 8 },
+      (_, index) =>
+        new File([String(index)], `fallback-${index + 1}.jpg`, {
+          type: "image/jpeg",
+        }),
+    );
+
+    await user.upload(screen.getByLabelText("添加附件"), [
+      new File(["broken"], "broken.jpg", { type: "image/jpeg" }),
+      ...validFiles,
+    ]);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("broken.jpg: 图片存储暂不可用");
+    expect(alert).not.toHaveTextContent("附件的上限");
+    expect(uploadMarketplaceAttachment).toHaveBeenCalledTimes(9);
+    expect(
+      screen.getByRole("list", { name: "待发送附件" }).querySelectorAll("li"),
+    ).toHaveLength(8);
+  });
+
+  it("sends every successful attachment ref and clears them only after success", async () => {
+    const user = userEvent.setup();
+    let sequence = 0;
+    uploadMarketplaceAttachment.mockImplementation(
+      async ({ file }: { file: File }) => uploadedImage(file, ++sequence),
+    );
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        role="seller"
+        subplatform={mediaSubplatform}
+      />,
+    );
+    await user.upload(screen.getByLabelText("添加附件"), [
+      new File(["front"], "front.jpg", { type: "image/jpeg" }),
+      new File(["rear"], "rear.jpg", { type: "image/jpeg" }),
+    ]);
+    await screen.findByText("rear.jpg");
+    await user.type(screen.getByRole("textbox"), "两张图片属于同一批供给");
+    await user.click(screen.getByRole("button", { name: "发送供给" }));
+
+    await waitFor(() => expect(createMarketplaceIntent).toHaveBeenCalled());
+    expect(createMarketplaceIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attributes: expect.objectContaining({
+          attachments: [
+            expect.objectContaining({
+              attachment_ref: "media://tools/image-1",
+              file_name: "front.jpg",
+            }),
+            expect.objectContaining({
+              attachment_ref: "media://tools/image-2",
+              file_name: "rear.jpg",
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "供给描述已整理；请在下方提交资料，提交后才会写入系统",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("list", { name: "待发送附件" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("locks submission before asynchronous session resolution", async () => {
+    const user = userEvent.setup();
+    uploadMarketplaceAttachment.mockImplementation(
+      async ({ file }: { file: File }) => uploadedImage(file, 1),
+    );
+    const sellerSession = {
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      partyId: "22222222-2222-4222-8222-222222222222",
+      role: "seller",
+      accessToken: "seller-session",
+      accessTokenExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    } as const;
+    render(
+      <MatchChat
+        onNotice={vi.fn()}
+        role="seller"
+        subplatform={mediaSubplatform}
+      />,
+    );
+    await user.upload(
+      screen.getByLabelText("添加附件"),
+      new File(["front"], "front.jpg", { type: "image/jpeg" }),
+    );
+    await screen.findByText("front.jpg");
+
+    let resolveSession: ((session: typeof sellerSession) => void) | undefined;
+    getMarketplaceSession.mockImplementationOnce(
+      () =>
+        new Promise<typeof sellerSession>((resolve) => {
+          resolveSession = resolve;
+        }),
+    );
+    await user.type(screen.getByRole("textbox"), "只提交一次的供给");
+    const form = screen.getByRole("textbox").closest("form");
+    expect(form).not.toBeNull();
+
+    fireEvent.submit(form!);
+    fireEvent.submit(form!);
+
+    expect(createMarketplaceIntent).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "发送供给" })).toBeDisabled();
+    await act(async () => {
+      resolveSession?.(sellerSession);
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(createMarketplaceIntent).toHaveBeenCalledTimes(1),
+    );
   });
 
   it.each([

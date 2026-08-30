@@ -110,19 +110,39 @@
   margin-top: 0.3rem;
 }
 
-.workspace-settings-dialog-stores {
+.workspace-settings-dialog.workspace-settings-dialog-stores {
   width: min(calc(100vw - 2rem), 58rem);
   height: auto;
-  min-height: min(28rem, calc(100dvh - 2rem));
+  min-height: 0;
   max-height: calc(100dvh - 2rem);
 }
 
-.workspace-settings-dialog-stores .workspace-settings-layout {
+.workspace-settings-dialog.workspace-settings-dialog-stores
+  .workspace-settings-layout {
   grid-template-columns: 13rem minmax(0, 1fr);
 }
 
 .workspace-settings-dialog-stores .workspace-settings-content {
   padding-inline: clamp(1rem, 2.5vw, 1.7rem);
+}
+
+.workspace-settings-dialog-stores .hosted-store-empty-state {
+  min-height: 0;
+  padding: 1.5rem 1rem;
+  border-color: color-mix(
+    in srgb,
+    var(--retail-ink) 36%,
+    var(--retail-line-strong)
+  );
+  background: color-mix(
+    in srgb,
+    var(--retail-accent-soft) 42%,
+    var(--retail-surface)
+  );
+}
+
+.workspace-settings-dialog-stores .hosted-store-empty-state p {
+  color: var(--retail-ink-soft);
 }
 
 .workspace-settings-dialog-stores .hosted-store-onboarding {
@@ -204,16 +224,47 @@
     border-left: 0;
   }
 
-  .workspace-settings-dialog-stores {
+  .workspace-settings-dialog.workspace-settings-dialog-stores {
     width: 100vw;
     height: 100dvh;
     max-height: 100dvh;
     border-radius: 0;
   }
 
-  .workspace-settings-dialog-stores .workspace-settings-layout {
+  .workspace-settings-dialog.workspace-settings-dialog-stores
+    .workspace-settings-layout {
     grid-template-columns: 1fr;
   }
+
+  .workspace-settings-dialog-stores .workspace-settings-navigation button {
+    min-height: 2.75rem;
+  }
+}
+
+.login-card .login-form .login-legal-checkbox input[type="checkbox"] {
+  box-sizing: border-box;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  margin: 0.12rem 0 0;
+  padding: 0;
+  border-radius: 0.25rem;
+  accent-color: var(--retail-ink);
+}
+
+.login-card
+  .login-form
+  .login-legal-checkbox
+  input[type="checkbox"]:focus-visible {
+  outline: 3px solid var(--retail-focus);
+  outline-offset: 3px;
+  box-shadow: none;
+}
+
+.login-legal-copy {
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .match-chat-form:focus-within,

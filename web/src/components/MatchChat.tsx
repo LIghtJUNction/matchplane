@@ -39,8 +39,12 @@ import {
   getBuyerRecommendations,
   isLiveMarketplaceEnabled,
   listingIdFromBackend,
+  MARKETPLACE_ATTACHMENT_ACCEPT,
+  MARKETPLACE_ATTACHMENT_MAX_BYTES,
+  MAX_MARKETPLACE_ATTACHMENTS_PER_MESSAGE,
   MarketplaceApiError,
   uploadMarketplaceAttachment,
+  validateMarketplaceAttachmentFile,
   querySubplatformRetrieval,
   updateMarketplaceIntent,
   upsertMarketplaceProfile,
@@ -175,6 +179,80 @@ type ChatHandoffStatus = NonNullable<ChatMessage["handoff"]>["status"];
 
 function localeText(locale: InterfaceLocale, en: string, zh: string): string {
   return locale === "en" ? en : zh;
+}
+
+interface MediaUploadIssue {
+  fileName: string;
+  detail: string;
+}
+
+function mediaFileValidationDetail(
+  error: NonNullable<ReturnType<typeof validateMarketplaceAttachmentFile>>,
+  locale: InterfaceLocale,
+): string {
+  if (error === "empty")
+    return localeText(locale, "the file is empty", "文件内容为空");
+  if (error === "too_large")
+    return localeText(
+      locale,
+      `each file must be ${MARKETPLACE_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MiB or smaller`,
+      `单个文件不能超过 ${MARKETPLACE_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MiB`,
+    );
+  return localeText(
+    locale,
+    "this file type is not supported",
+    "不支持这种文件类型",
+  );
+}
+
+function formatMediaUploadIssues(
+  issues: MediaUploadIssue[],
+  uploadedCount: number,
+  locale: InterfaceLocale,
+): string {
+  const shown = issues.slice(0, 4);
+  const details = shown
+    .map((issue) => `${issue.fileName}: ${issue.detail}`)
+    .join(locale === "en" ? "; " : "；");
+  const hiddenCount = issues.length - shown.length;
+  const hidden = hiddenCount
+    ? localeText(
+        locale,
+        `; and ${hiddenCount} more file${hiddenCount === 1 ? "" : "s"}`,
+        `；另有 ${hiddenCount} 个文件未添加`,
+      )
+    : "";
+  const uploaded = uploadedCount
+    ? localeText(
+        locale,
+        `${uploadedCount} attachment${uploadedCount === 1 ? "" : "s"} uploaded. `,
+        `已上传 ${uploadedCount} 个附件。`,
+      )
+    : localeText(locale, "No attachments were added. ", "没有添加附件。");
+  return `${uploaded}${localeText(
+    locale,
+    `${issues.length} file${issues.length === 1 ? "" : "s"} could not be added: `,
+    `${issues.length} 个文件未能添加：`,
+  )}${details}${hidden}`;
+}
+
+function mediaUploadFailureDetail(
+  error: unknown,
+  locale: InterfaceLocale,
+): string {
+  if (locale === "zh" && error instanceof Error) return error.message;
+  if (locale === "en" && error instanceof MarketplaceApiError) {
+    if (error.status === 413)
+      return "the file exceeds the current upload limit";
+    if (error.status === 400) return "the upload service rejected the file";
+    if (error.status === 401 || error.status === 403)
+      return "your sign-in no longer permits this upload";
+  }
+  return localeText(
+    locale,
+    "the upload did not complete; try again",
+    "上传没有完成，请稍后重试",
+  );
 }
 
 function assistantRoleLabel(
@@ -718,6 +796,7 @@ export function MatchChat({
     null,
   );
   const [sending, setSending] = useState(false);
+  const [authResolving, setAuthResolving] = useState(false);
   const [chatError, setChatError] = useState<RecoverableChatError | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [shoppingMemoryOpen, setShoppingMemoryOpen] = useState(false);
@@ -725,6 +804,7 @@ export function MatchChat({
     MarketplaceAttachment[]
   >([]);
   const [mediaUploading, setMediaUploading] = useState(false);
+  const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
   const [composerFocused, setComposerFocused] = useState(false);
   const [supplyDiscoveryEnabled, setSupplyDiscoveryEnabled] = useState(
     copy.buyerDiscoveryDefault,
@@ -736,6 +816,10 @@ export function MatchChat({
     new Map<string, { intentId: string; version: number }>(),
   );
   const focusInputAfterErrorRef = useRef(false);
+  const mediaUploadInFlightRef = useRef(false);
+  const authResolvingRef = useRef(false);
+  const submissionInFlightRef = useRef(false);
+  const submissionBusy = sending || authResolving;
   const submitMessageRef = useRef<
     ((rawText: string, session?: PartySession) => Promise<void>) | null
   >(null);
@@ -976,6 +1060,7 @@ export function MatchChat({
     setChatError(null);
     setSellerRouteChoices([]);
     setConversationAttachments([]);
+    setMediaUploadError(null);
     setSupplyDiscoveryEnabled(copy.buyerDiscoveryDefault);
     conversationIdRef.current = null;
     intentByTargetRef.current.clear();
@@ -983,7 +1068,15 @@ export function MatchChat({
 
   const chooseSellerRoute = useCallback(
     async (target: PlatformRouteHop) => {
-      if (!onSellerPlatformSelected || sending) return;
+      if (
+        !onSellerPlatformSelected ||
+        sending ||
+        authResolvingRef.current ||
+        submissionInFlightRef.current ||
+        mediaUploadInFlightRef.current
+      )
+        return;
+      submissionInFlightRef.current = true;
       setSending(true);
       try {
         await onSellerPlatformSelected(target);
@@ -1002,6 +1095,7 @@ export function MatchChat({
           error instanceof Error ? error.message : runtime.routeOpenError,
         );
       } finally {
+        submissionInFlightRef.current = false;
         setSending(false);
       }
     },
@@ -1009,73 +1103,135 @@ export function MatchChat({
   );
 
   const uploadFiles = useCallback(
-    async (files: FileList | null) => {
-      if (!files || !files.length || mediaUploading) return;
-      if (!mediaUploadEnabled) return;
+    async (files: readonly File[]) => {
+      if (
+        !files.length ||
+        !mediaUploadEnabled ||
+        sending ||
+        authResolvingRef.current ||
+        submissionInFlightRef.current ||
+        mediaUploadInFlightRef.current
+      )
+        return;
       if (!subplatform.tenantId || !subplatform.domainId) {
-        onNotice(
-          locale === "en"
-            ? "This platform is not ready to receive attachments."
-            : "当前平台尚未完成资料上传配置",
+        const detail = localeText(
+          locale,
+          "This platform is not ready to receive attachments.",
+          "当前平台尚未完成资料上传配置",
         );
+        setMediaUploadError(detail);
+        onNotice(detail);
         return;
       }
-      const session = await getMarketplaceSession({
-        subplatform: subplatform.slug,
-        platformPath: subplatform.path,
-        tenantId: subplatform.tenantId,
-        domainId: subplatform.domainId,
-        role,
-      });
-      if (!session) {
-        const next = `${window.location.pathname}${window.location.search}`;
-        window.location.assign(
-          `/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`,
-        );
-        return;
-      }
-      const remaining = Math.max(0, 8 - conversationAttachments.length);
+      const remaining = Math.max(
+        0,
+        MAX_MARKETPLACE_ATTACHMENTS_PER_MESSAGE -
+          conversationAttachments.length,
+      );
       if (!remaining) {
-        onNotice(
-          locale === "en"
-            ? "You can add up to 8 attachments."
-            : "最多添加 8 个附件",
+        const detail = localeText(
+          locale,
+          `A message can include up to ${MAX_MARKETPLACE_ATTACHMENTS_PER_MESSAGE} attachments.`,
+          `每条消息最多添加 ${MAX_MARKETPLACE_ATTACHMENTS_PER_MESSAGE} 个附件`,
         );
+        const summary = formatMediaUploadIssues(
+          files.map((file) => ({ fileName: file.name, detail })),
+          0,
+          locale,
+        );
+        setMediaUploadError(summary);
+        onNotice(summary);
         return;
       }
+
+      mediaUploadInFlightRef.current = true;
       setMediaUploading(true);
+      setMediaUploadError(null);
       try {
-        const uploaded: MarketplaceAttachment[] = [];
-        for (const file of Array.from(files).slice(0, remaining)) {
-          uploaded.push(
-            await uploadMarketplaceAttachment({
-              platformPath: subplatform.path,
-              tenantId: subplatform.tenantId,
-              domainId: subplatform.domainId,
-              file,
-            }),
+        const session = await getMarketplaceSession({
+          subplatform: subplatform.slug,
+          platformPath: subplatform.path,
+          tenantId: subplatform.tenantId,
+          domainId: subplatform.domainId,
+          role,
+        });
+        if (!session) {
+          const next = `${window.location.pathname}${window.location.search}`;
+          window.location.assign(
+            `/login?role=${encodeURIComponent(role)}&next=${encodeURIComponent(next)}`,
           );
+          return;
         }
-        setConversationAttachments((current) =>
-          [...current, ...uploaded].slice(0, 8),
-        );
-        if (files.length > remaining)
-          onNotice(
-            locale === "en"
-              ? "Only the first 8 attachments were kept."
-              : "最多保留 8 个附件",
+
+        const issues: MediaUploadIssue[] = [];
+        const uploaded: MarketplaceAttachment[] = [];
+        for (const file of files) {
+          const validationError = validateMarketplaceAttachmentFile(file);
+          if (validationError) {
+            issues.push({
+              fileName: file.name,
+              detail: mediaFileValidationDetail(validationError, locale),
+            });
+            continue;
+          }
+          if (uploaded.length >= remaining) {
+            issues.push({
+              fileName: file.name,
+              detail: localeText(
+                locale,
+                `the ${MAX_MARKETPLACE_ATTACHMENTS_PER_MESSAGE}-attachment message limit was reached`,
+                `已达到每条消息 ${MAX_MARKETPLACE_ATTACHMENTS_PER_MESSAGE} 个附件的上限`,
+              ),
+            });
+            continue;
+          }
+          try {
+            uploaded.push(
+              await uploadMarketplaceAttachment({
+                platformPath: subplatform.path,
+                tenantId: subplatform.tenantId,
+                domainId: subplatform.domainId,
+                file,
+              }),
+            );
+          } catch (error) {
+            issues.push({
+              fileName: file.name,
+              detail: mediaUploadFailureDetail(error, locale),
+            });
+          }
+        }
+        if (uploaded.length) {
+          // Use a functional update after the awaits so this batch cannot overwrite newer state.
+          setConversationAttachments((current) => [...current, ...uploaded]);
+        }
+        if (issues.length) {
+          const summary = formatMediaUploadIssues(
+            issues,
+            uploaded.length,
+            locale,
           );
+          setMediaUploadError(summary);
+          onNotice(summary);
+        }
       } catch (error) {
         const detail =
           error instanceof Error
             ? error.message
             : localeText(
                 locale,
-                "Could not upload the attachment.",
-                "附件上传失败，请稍后重试",
+                "the upload could not start",
+                "无法开始上传，请稍后重试",
               );
-        onNotice(detail);
+        const summary = formatMediaUploadIssues(
+          files.map((file) => ({ fileName: file.name, detail })),
+          0,
+          locale,
+        );
+        setMediaUploadError(summary);
+        onNotice(summary);
       } finally {
+        mediaUploadInFlightRef.current = false;
         setMediaUploading(false);
       }
     },
@@ -1083,9 +1239,9 @@ export function MatchChat({
       conversationAttachments.length,
       locale,
       mediaUploadEnabled,
-      mediaUploading,
       onNotice,
       role,
+      sending,
       subplatform.domainId,
       subplatform.path,
       subplatform.slug,
@@ -1100,11 +1256,19 @@ export function MatchChat({
       operationDraftScope: ChatDraftScope = draftScope(),
     ) => {
       const text = rawText.trim();
-      if ((!text && !conversationAttachments.length) || sending) return;
+      if (
+        (!text && !conversationAttachments.length) ||
+        sending ||
+        submissionInFlightRef.current ||
+        mediaUploadInFlightRef.current
+      )
+        return;
 
+      submissionInFlightRef.current = true;
       setSending(true);
       const failedUserMessageId = chatError?.failedUserMessageId;
       setChatError(null);
+      setMediaUploadError(null);
       setMessage("");
       const submittedAttachments = conversationAttachments;
       setConversationAttachments([]);
@@ -1667,6 +1831,7 @@ export function MatchChat({
         setConversationAttachments(submittedAttachments);
         focusInputAfterErrorRef.current = true;
       } finally {
+        submissionInFlightRef.current = false;
         setSending(false);
       }
     },
@@ -1709,7 +1874,8 @@ export function MatchChat({
       operationDraftScope: ChatDraftScope = draftScope(),
     ) => {
       const text = rawText.trim();
-      if (!text || sending) return;
+      if (!text || sending || submissionInFlightRef.current) return;
+      submissionInFlightRef.current = true;
       setSending(true);
       onSearchTrace?.(null);
       const failedUserMessageId = chatError?.failedUserMessageId;
@@ -1814,6 +1980,7 @@ export function MatchChat({
         persistDraft(text, operationDraftScope);
         focusInputAfterErrorRef.current = true;
       } finally {
+        submissionInFlightRef.current = false;
         setSending(false);
       }
     },
@@ -2033,42 +2200,56 @@ export function MatchChat({
   const send = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     const text = message.trim();
-    if ((!text && !conversationAttachments.length) || sending) return;
+    if (
+      (!text && !conversationAttachments.length) ||
+      sending ||
+      authResolvingRef.current ||
+      submissionInFlightRef.current ||
+      mediaUploadInFlightRef.current
+    )
+      return;
     const operationDraftScope = draftScope();
+    authResolvingRef.current = true;
+    setAuthResolving(true);
 
     void (async () => {
-      const scopedMarketplace =
-        subplatform.slug !== "root" && Boolean(subplatform.domainId);
-      const session = scopedMarketplace
-        ? await getMarketplaceSession({
-            subplatform: subplatform.slug,
-            platformPath: subplatform.path,
-            tenantId: subplatform.tenantId,
-            domainId: subplatform.domainId,
-            role,
-          })
-        : null;
-      const authState = scopedMarketplace
-        ? null
-        : await authClient.getSession({
-            fetchOptions: authFetchOptions(subplatform.slug),
-          });
-      if (!isSeller) {
-        setSignedIn(Boolean(session || authState?.data));
-        void submitGuestMessage(text, undefined, operationDraftScope);
-        return;
+      try {
+        const scopedMarketplace =
+          subplatform.slug !== "root" && Boolean(subplatform.domainId);
+        const session = scopedMarketplace
+          ? await getMarketplaceSession({
+              subplatform: subplatform.slug,
+              platformPath: subplatform.path,
+              tenantId: subplatform.tenantId,
+              domainId: subplatform.domainId,
+              role,
+            })
+          : null;
+        const authState = scopedMarketplace
+          ? null
+          : await authClient.getSession({
+              fetchOptions: authFetchOptions(subplatform.slug),
+            });
+        if (!isSeller && !conversationAttachments.length) {
+          setSignedIn(Boolean(session || authState?.data));
+          await submitGuestMessage(text, undefined, operationDraftScope);
+          return;
+        }
+        if (!session && !authState?.data) {
+          const next = `${window.location.pathname}${window.location.search}`;
+          window.sessionStorage.setItem(
+            PENDING_CHAT_KEY,
+            JSON.stringify({ text, next } satisfies PendingChat),
+          );
+          window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+          return;
+        }
+        setSignedIn(true);
+        await submitMessage(text, session ?? undefined, operationDraftScope);
+      } finally {
+        authResolvingRef.current = false;
+        setAuthResolving(false);
       }
-      if (!session && !authState?.data) {
-        const next = `${window.location.pathname}${window.location.search}`;
-        window.sessionStorage.setItem(
-          PENDING_CHAT_KEY,
-          JSON.stringify({ text, next } satisfies PendingChat),
-        );
-        window.location.assign(`/login?next=${encodeURIComponent(next)}`);
-        return;
-      }
-      setSignedIn(true);
-      void submitMessage(text, session ?? undefined, operationDraftScope);
     })().catch((error) =>
       onNotice(error instanceof Error ? error.message : runtime.authFailed),
     );
@@ -2086,7 +2267,13 @@ export function MatchChat({
   };
 
   const startNewConversation = useCallback(() => {
-    if (sending) return;
+    if (
+      sending ||
+      authResolvingRef.current ||
+      submissionInFlightRef.current ||
+      mediaUploadInFlightRef.current
+    )
+      return;
     window.sessionStorage.removeItem(conversationStorageKey);
     clearStoredDraft();
     setActiveHistoryId(crypto.randomUUID());
@@ -2094,6 +2281,7 @@ export function MatchChat({
     setMessage("");
     setMessages([]);
     setConversationAttachments([]);
+    setMediaUploadError(null);
     setConversationHistoryOpen(false);
     onSearchTrace?.(null);
     conversationIdRef.current = null;
@@ -2101,7 +2289,13 @@ export function MatchChat({
   }, [clearStoredDraft, conversationStorageKey, onSearchTrace, sending]);
 
   const clearConversation = () => {
-    if (sending) return;
+    if (
+      sending ||
+      authResolvingRef.current ||
+      submissionInFlightRef.current ||
+      mediaUploadInFlightRef.current
+    )
+      return;
     if (conversationOwner && activeHistoryId) {
       setConversationHistory(
         deleteConversationHistory({
@@ -2119,11 +2313,18 @@ export function MatchChat({
   const openHistoricalConversation = (
     conversation: ConversationHistoryRecord<ChatMessage>,
   ) => {
-    if (sending) return;
+    if (
+      sending ||
+      authResolvingRef.current ||
+      submissionInFlightRef.current ||
+      mediaUploadInFlightRef.current
+    )
+      return;
     setActiveHistoryId(conversation.id);
     setChatError(null);
     setMessages(conversation.messages);
     setConversationAttachments([]);
+    setMediaUploadError(null);
     setConversationHistoryOpen(false);
     onSearchTrace?.(null);
     conversationIdRef.current = null;
@@ -2135,7 +2336,13 @@ export function MatchChat({
   };
 
   const deleteHistoricalConversation = (id: string) => {
-    if (!conversationOwner) return;
+    if (
+      !conversationOwner ||
+      authResolvingRef.current ||
+      submissionInFlightRef.current ||
+      mediaUploadInFlightRef.current
+    )
+      return;
     setConversationHistory(
       deleteConversationHistory({
         storage: window.localStorage,
@@ -2156,7 +2363,15 @@ export function MatchChat({
   };
 
   useEffect(() => {
-    const openConversationHistory = () => setConversationHistoryOpen(true);
+    const openConversationHistory = () => {
+      if (
+        authResolvingRef.current ||
+        submissionInFlightRef.current ||
+        mediaUploadInFlightRef.current
+      )
+        return;
+      setConversationHistoryOpen(true);
+    };
     window.addEventListener(
       "matchplane:new-shopping-conversation",
       startNewConversation,
@@ -2189,6 +2404,7 @@ export function MatchChat({
               type="button"
               aria-label={locale === "en" ? "Conversation options" : "对话选项"}
               title={locale === "en" ? "Conversation options" : "对话选项"}
+              disabled={submissionBusy || mediaUploading}
             >
               <MoreHorizontal size={17} aria-hidden="true" />
             </Button>
@@ -2214,7 +2430,7 @@ export function MatchChat({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="match-chat-clear-menu-item"
-                disabled={sending}
+                disabled={submissionBusy || mediaUploading}
                 onClick={clearConversation}
               >
                 <Trash2 size={15} aria-hidden="true" />
@@ -2225,7 +2441,9 @@ export function MatchChat({
         </DropdownMenuContent>
       </DropdownMenu>
       <span className="sr-only" aria-live="polite">
-        {!sending && signedIn ? label("signedInChatStatus", "已登录") : ""}
+        {!submissionBusy && signedIn
+          ? label("signedInChatStatus", "已登录")
+          : ""}
       </span>
     </>
   );
@@ -2234,7 +2452,7 @@ export function MatchChat({
     <section
       className={
         home
-          ? `home-chat w-full${messages.length || sending || chatError ? " has-conversation" : ""}`
+          ? `home-chat w-full${messages.length || submissionBusy || chatError ? " has-conversation" : ""}`
           : "match-chat" +
             (isRoot ? " is-root" : "") +
             (isSeller ? " is-seller" : "") +
@@ -2339,7 +2557,9 @@ export function MatchChat({
                         key={option.id}
                         type="button"
                         aria-pressed={choice.selectedValue === option.value}
-                        disabled={sending || Boolean(choice.selectedValue)}
+                        disabled={
+                          submissionBusy || Boolean(choice.selectedValue)
+                        }
                         onClick={() =>
                           void submitGuestMessage(option.value, {
                             messageId: item.id,
@@ -2462,7 +2682,7 @@ export function MatchChat({
               key={target.path}
               type="button"
               className="match-chat-route-choice"
-              disabled={sending}
+              disabled={submissionBusy}
               onClick={() => void chooseSellerRoute(target)}
             >
               <span>{target.displayName}</span>
@@ -2477,27 +2697,48 @@ export function MatchChat({
           className="match-chat-compose-attachments"
           aria-label={locale === "en" ? "Attachments to send" : "待发送附件"}
         >
-          {conversationAttachments.map((attachment) => (
-            <li key={attachment.attachment_ref}>
+          {conversationAttachments.map((attachment, attachmentIndex) => (
+            <li key={`${attachment.attachment_ref}:${attachmentIndex}`}>
               <span title={attachment.file_name}>{attachment.file_name}</span>
               <button
                 type="button"
                 aria-label={`${locale === "en" ? "Remove" : "移除"} ${attachment.file_name}`}
-                onClick={() =>
-                  setConversationAttachments((current) =>
-                    current.filter(
-                      (item) =>
-                        item.attachment_ref !== attachment.attachment_ref,
-                    ),
+                onClick={() => {
+                  if (
+                    submissionBusy ||
+                    authResolvingRef.current ||
+                    submissionInFlightRef.current ||
+                    mediaUploadInFlightRef.current
                   )
-                }
-                disabled={sending || mediaUploading}
+                    return;
+                  setConversationAttachments((current) =>
+                    current.filter((_, index) => index !== attachmentIndex),
+                  );
+                }}
+                disabled={submissionBusy || mediaUploading}
               >
                 <Trash2 size={14} aria-hidden="true" />
               </button>
             </li>
           ))}
         </ul>
+      ) : null}
+      {mediaUploadError ? (
+        <div className="home-chat-error match-chat-upload-error" role="alert">
+          <span className="home-chat-error-copy">
+            <strong>
+              {locale === "en"
+                ? "Some attachments were not added"
+                : "部分附件未能添加"}
+            </strong>
+            <span>{mediaUploadError}</span>
+            <small>
+              {locale === "en"
+                ? "Successful uploads remain ready to send. Select failed files again to retry."
+                : "已成功的附件仍会保留；可重新选择失败文件重试。"}
+            </small>
+          </span>
+        </div>
       ) : null}
       {chatError ? (
         <div className="home-chat-error" role="alert">
@@ -2520,7 +2761,7 @@ export function MatchChat({
           <button
             type="button"
             onClick={() => inputRef.current?.form?.requestSubmit()}
-            disabled={sending || mediaUploading}
+            disabled={submissionBusy || mediaUploading}
           >
             <RefreshCw size={15} aria-hidden="true" />
             {locale === "en" ? "Retry answer" : "重试回答"}
@@ -2542,20 +2783,35 @@ export function MatchChat({
             }
             htmlFor="match-chat-attachment-input"
           >
-            <FileUp size={17} aria-hidden="true" />
+            {mediaUploading ? (
+              <LoaderCircle
+                className="match-chat-spinner"
+                size={17}
+                aria-hidden="true"
+              />
+            ) : (
+              <FileUp size={17} aria-hidden="true" />
+            )}
             <span className="sr-only">
-              {locale === "en" ? "Add attachment" : "添加附件"}
+              {mediaUploading
+                ? localeText(locale, "Uploading attachments", "正在上传附件")
+                : localeText(locale, "Add attachment", "添加附件")}
             </span>
             <input
               id="match-chat-attachment-input"
               type="file"
-              accept="image/*,application/pdf,text/plain,application/json"
+              accept={MARKETPLACE_ATTACHMENT_ACCEPT}
               multiple
               onChange={(event) => {
-                void uploadFiles(event.currentTarget.files);
+                // FileList is live: snapshot before clearing so files survive the first await.
+                const selectedFiles = Array.from(
+                  event.currentTarget.files ?? [],
+                );
                 event.currentTarget.value = "";
+                void uploadFiles(selectedFiles);
               }}
-              disabled={sending || mediaUploading}
+              disabled={submissionBusy || mediaUploading}
+              aria-busy={submissionBusy || mediaUploading}
             />
           </label>
         ) : null}
@@ -2586,8 +2842,8 @@ export function MatchChat({
           rows={home ? 1 : 2}
           maxLength={10000}
           aria-describedby="match-chat-footnote"
-          readOnly={sending}
-          aria-disabled={sending}
+          readOnly={submissionBusy}
+          aria-disabled={submissionBusy}
         />
         <Button
           className={
@@ -2600,20 +2856,23 @@ export function MatchChat({
               ? label("sendSupplyLabel", "发送供给")
               : label("sendDemandLabel", "发送需求")
           }
-          aria-busy={sending}
+          aria-busy={submissionBusy || mediaUploading}
           disabled={
-            (!message.trim() && !conversationAttachments.length) || sending
+            (!message.trim() && !conversationAttachments.length) ||
+            submissionBusy ||
+            mediaUploading
           }
         >
           <MatchChatMetalHalo
             active={
               composerFocused &&
               Boolean(message.trim() || conversationAttachments.length) &&
-              !sending
+              !submissionBusy &&
+              !mediaUploading
             }
           />
           <span className="relative z-10 inline-flex">
-            {sending ? (
+            {submissionBusy ? (
               <LoaderCircle
                 className="match-chat-spinner"
                 size={18}
@@ -2644,6 +2903,7 @@ export function MatchChat({
                 key={card.id}
                 type="button"
                 className="match-chat-starter-card"
+                disabled={submissionBusy}
                 onClick={() => {
                   if (isRoot && !isSeller) {
                     void submitGuestMessage(card.prompt);
@@ -2677,7 +2937,7 @@ export function MatchChat({
             onChange={(event) =>
               setSupplyDiscoveryEnabled(event.currentTarget.checked)
             }
-            disabled={sending}
+            disabled={submissionBusy}
           />
           <span>{copy.buyerDiscoveryLabel}</span>
         </label>

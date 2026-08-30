@@ -71,6 +71,34 @@ Key 不会创建被冒充的用户会话。轮换方式是创建替代 key、更
 
 领域文案、定价能力、筛选器与商家字段属于软件包，不属于根实现。软件包可在清单中声明 `pricing`、`ui.chat`、`ui.copy`、`ui.filters` 与 `ui.supplyFields`；根服务会校验并传递给通用 shell/plugin。联系方式是例外：包不能声明手填字段，交换只使用根 Better Auth 账号已验证的邮箱或手机，并要求双方明确同意。默认走领域中立 marketplace 合约。仍需使用旧垂直适配器的软件包必须显式声明 `marketplaceContract: "legacy-v1"`；仅定价或存在 schema 并不隐式选择该适配器。网关的 legacy HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明或默认业务货币。卖家提交由激活包 schema 定义的值，根服务仅保存并转发其结构化属性。
 
+### 公开供给字段
+
+`ui.supplyFields` 永远声明可写入公开 offer attributes，并可投影到公开目录、检索和公开 AI 上下文的字段；它不是私密档案设施。根按清单顺序渲染通用编辑器，并按 `group` 生成分组；没有分组的字段归入通用“补充资料”组。根只理解声明的展示元数据（`type`、`required`、`placeholder`、`group`、`help`、`unit`、`min`、`max`、`step` 和 `options`）。具体字段键、标签、分组、选项和校验边界归当前激活的 store package 所有；根不得硬编码车辆或其他垂直领域字段。
+
+公开长文本使用 `textarea`；`select` 必须提供非空且不重复的 `options`；声明 `min`、`max` 或正数 `step` 的字段必须使用 `number`。同时声明 `min` 与 `max` 时，包必须保证 `min <= max`。价格、库存和媒体继续使用 canonical offer fields；不得在 `supplyFields` 中重复声明，也不得把它们编码为领域 attributes。
+
+包不得在 `supplyFields` 中声明 VIN/车辆识别代码或车架号、车牌、身份证明/行驶证/登记证/发票等证件、车主/供应方/联系人资料、采购价或收购价、整备成本、利润、精确库位或内部备注。这些值即使由卖家录入也属于私密资料。未来的私密车辆档案必须使用独立的存储与媒体域，具备明确的 ACL、审计轨迹、保留规则和受控投影；不得复用公开 attributes 或公开目录。
+
+以下示例借鉴大风车式公开信息架构，但不复制大风车品牌、视觉、专有文案或未公开规则。示例字段归 store package 所有；根只负责分组和渲染：
+
+```json
+{
+  "ui": {
+    "supplyFields": [
+      { "key": "vehicle.brand", "label": "Brand", "type": "text", "required": true, "group": "Vehicle identity", "help": "Public manufacturer or marque." },
+      { "key": "vehicle.model", "label": "Model", "type": "text", "required": true, "group": "Vehicle identity", "help": "Public model and trim name." },
+      { "key": "vehicle.year", "label": "Model year", "type": "number", "group": "Vehicle identity", "help": "Four-digit model year.", "min": 1900, "max": 2100, "step": 1 },
+      { "key": "vehicle.registration_date", "label": "First registration date", "type": "date", "group": "Vehicle identity", "help": "Public month or date of first registration." },
+      { "key": "vehicle.mileage_km", "label": "Mileage", "type": "number", "required": true, "group": "Condition", "help": "Current odometer reading shown to buyers.", "unit": "km", "min": 0, "max": 2000000, "step": 1000 },
+      { "key": "vehicle.energy", "label": "Energy type", "type": "select", "group": "Specifications", "help": "Public propulsion category.", "options": ["Gasoline", "Diesel", "Hybrid", "Electric", "Other"] },
+      { "key": "vehicle.transmission", "label": "Transmission", "type": "select", "group": "Specifications", "help": "Public transmission category.", "options": ["Automatic", "Manual", "Other"] },
+      { "key": "vehicle.exterior_color", "label": "Exterior color", "type": "text", "group": "Specifications", "help": "Buyer-visible exterior color." },
+      { "key": "vehicle.condition_summary", "label": "Condition summary", "type": "textarea", "group": "Condition", "help": "Describe buyer-visible condition facts; omit private identifiers and internal notes." }
+    ]
+  }
+}
+```
+
 ### Agent 资料上传
 
 需要让买方或卖方在聊天里交图片、PDF 或其他材料的包，必须同时提供真实的 `media.upload` MCP 工具并把它写进 `agent.mcpTools`。根 web 的 `POST /api/platform/media/upload` 只做 Better Auth/API-key、tenant/domain/path、MIME、文件名、base64 长度和 `request_id` 形状校验，然后把有限时的请求转发给这个子平台工具；根不保存原始二进制、不扫描、不解析车辆或其他领域字段。子平台负责恶意内容扫描、图片尺寸/文本提取、内容寻址存储、`request_id` 幂等与保留策略，并返回 [`docs/media-attachment-protocol-v1.json`](media-attachment-protocol-v1.json) 约定的 `media://` 引用。聊天草稿会把引用交给子平台 Agent，人工编辑器必须允许供给方查看、修改和删除后再创建 offer。

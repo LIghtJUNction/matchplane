@@ -17,13 +17,9 @@ function storeIdentityFromManifest(manifest: string | null): {
       description?: unknown;
     };
     const name =
-      typeof value.displayName === "string"
-        ? value.displayName.trim()
-        : "";
+      typeof value.displayName === "string" ? value.displayName.trim() : "";
     const description =
-      typeof value.description === "string"
-        ? value.description.trim()
-        : "";
+      typeof value.description === "string" ? value.description.trim() : "";
     const identity: { name?: string; description?: string } = {};
     if (name) identity.name = name;
     if (description) identity.description = description;

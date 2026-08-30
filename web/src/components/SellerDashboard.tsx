@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { ArrowRight, FileUp, Pencil, Trash2 } from "lucide-react";
@@ -38,7 +39,13 @@ import {
   subplatformContactLabel,
   type SubplatformConfig,
 } from "../subplatform";
+import {
+  serializeSupplyFieldValues,
+  supplyFieldValuesFromAttributes,
+  withoutSupplyFieldAttributes,
+} from "../supply-fields";
 import { SectionHeading, spring } from "./Primitives";
+import { SupplyFieldEditor } from "./SupplyFieldEditor";
 
 interface SellerDashboardProps {
   locale: InterfaceLocale;
@@ -86,8 +93,7 @@ const sellerEnglishFallbacks: Record<string, string> = {
   pricingNoteLabel: "Negotiation terms",
   pricingNotePlaceholder: "Explain the price, terms, or negotiable range",
   advancedAttributesLabel: "Advanced attributes (JSON)",
-  reviewNotice:
-    "The mall reviews every submission before buyers can see it.",
+  reviewNotice: "The mall reviews every submission before buyers can see it.",
   submittingLabel: "Submitting…",
   submitForReviewLabel: "Submit for review",
   submissionHistoryEyebrow: "Submission history",
@@ -129,7 +135,11 @@ export function SellerDashboard({
   const [stockQuantity, setStockQuantity] = useState("1");
   const [productDescription, setProductDescription] = useState("");
   const [askingAmount, setAskingAmount] = useState("");
+  const [supplyFieldValues, setSupplyFieldValues] = useState<
+    Record<string, string>
+  >({});
   const pricing = pricingFor(subplatform);
+  const supplyFields = subplatform.ui?.supplyFields ?? [];
   const copy = (
     key: string,
     fallbackZh: string,
@@ -143,6 +153,8 @@ export function SellerDashboard({
   const [draftImported, setDraftImported] = useState(false);
   const [attachments, setAttachments] = useState<MarketplaceAttachment[]>([]);
   const [mediaUploading, setMediaUploading] = useState(false);
+  const mediaUploadingRef = useRef(false);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submissions, setSubmissions] = useState<SellerRecord[]>([]);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
@@ -404,9 +416,7 @@ export function SellerDashboard({
         role: "seller",
       });
       if (!session) {
-        onNotice(
-          copy("contactLoginNotice", "请先登录，再查看对方的联系方式"),
-        );
+        onNotice(copy("contactLoginNotice", "请先登录，再查看对方的联系方式"));
         return;
       }
       const contact = await retrieveMarketplaceContact({
@@ -456,8 +466,10 @@ export function SellerDashboard({
   const importAgentDraft = () => {
     if (!agentDraft) return;
     setProductDescription(agentDraft.narrative);
-    if (agentDraft.attachments?.length)
-      setAttachments(agentDraft.attachments.slice(0, 8));
+    setSupplyFieldValues(
+      supplyFieldValuesFromAttributes(supplyFields, agentDraft.attributes),
+    );
+    setAttachments(agentDraft.attachments?.slice(0, 8) ?? []);
     setDraftImported(true);
     onNotice(
       copy(
@@ -478,6 +490,8 @@ export function SellerDashboard({
     setProductDescription("");
     setAskingAmount("");
     setCurrency(pricingCurrency ?? "");
+    setSupplyFieldValues(supplyFieldValuesFromAttributes(supplyFields, {}));
+    setDraftImported(false);
     setAttachments([]);
   };
 
@@ -507,6 +521,9 @@ export function SellerDashboard({
     );
     setProductDescription(
       stringAttribute(offer.attributes, ["description"]) ?? "",
+    );
+    setSupplyFieldValues(
+      supplyFieldValuesFromAttributes(supplyFields, offer.attributes),
     );
     setAskingAmount(
       typeof offer.terms.amount_minor === "string"
@@ -609,7 +626,7 @@ export function SellerDashboard({
   };
 
   const uploadFiles = async (files: FileList | null) => {
-    if (!files || !files.length || mediaUploading) return;
+    if (!files || !files.length || mediaUploadingRef.current) return;
     if (!subplatform.tenantId || !subplatform.domainId) {
       onNotice(
         copy(
@@ -620,6 +637,7 @@ export function SellerDashboard({
       );
       return;
     }
+    const selectedFiles = Array.from(files);
     const remaining = Math.max(0, 8 - attachments.length);
     if (!remaining) {
       onNotice(
@@ -631,39 +649,49 @@ export function SellerDashboard({
       );
       return;
     }
+    const filesToUpload = selectedFiles.slice(0, remaining);
+    const failedFiles: string[] = [];
+    let successfulUploads = 0;
+    mediaUploadingRef.current = true;
     setMediaUploading(true);
     try {
-      const uploaded: MarketplaceAttachment[] = [];
-      for (const file of Array.from(files).slice(0, remaining)) {
-        uploaded.push(
-          await uploadMarketplaceAttachment({
+      for (const file of filesToUpload) {
+        try {
+          const uploaded = await uploadMarketplaceAttachment({
             platformPath: subplatform.path,
             tenantId: subplatform.tenantId,
             domainId: subplatform.domainId,
             file,
-          }),
-        );
+          });
+          successfulUploads += 1;
+          setAttachments((current) => [...current, uploaded].slice(0, 8));
+        } catch {
+          failedFiles.push(file.name);
+        }
       }
-      setAttachments((current) => [...current, ...uploaded].slice(0, 8));
-      if (files.length > remaining)
+      if (selectedFiles.length > remaining)
         onNotice(
           copy(
             "mediaLimitNotice",
-            "最多上传 8 张图片",
-            "You can add up to 8 images",
+            "最多上传 8 张图片，超出部分没有上传",
+            "You can add up to 8 images; extra files were not uploaded",
           ),
         );
-    } catch (error) {
-      onNotice(
-        error instanceof Error
-          ? error.message
-          : copy(
-              "mediaUploadError",
-              "图片上传失败，请再试一次",
-              "Could not upload the image; try again",
-            ),
-      );
+      if (failedFiles.length) {
+        onNotice(
+          `${copy(
+            "mediaUploadPartialError",
+            `${failedFiles.length} 张图片上传失败，已保留 ${successfulUploads} 张成功图片`,
+            `${failedFiles.length} image(s) failed; ${successfulUploads} successful image(s) were kept`,
+          )}：${failedFiles.join(locale === "en" ? ", " : "、")}。${copy(
+            "mediaUploadRetryHint",
+            "请检查失败图片后重新选择上传",
+            "Check the failed images and select them again to retry",
+          )}`,
+        );
+      }
     } finally {
+      mediaUploadingRef.current = false;
       setMediaUploading(false);
     }
   };
@@ -678,6 +706,88 @@ export function SellerDashboard({
 
   const submit = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const serializedSupplyFields = serializeSupplyFieldValues(
+      supplyFields,
+      supplyFieldValues,
+    );
+    if (serializedSupplyFields.error) {
+      const invalidField = supplyFields.find(
+        (field) => field.key === serializedSupplyFields.error?.key,
+      );
+      let recovery: string;
+      switch (serializedSupplyFields.error.reason) {
+        case "required":
+          recovery = copy(
+            "supplyFieldRequiredRecovery",
+            "请填写这个必填字段后再提交",
+            "Complete this required field before submitting",
+          );
+          break;
+        case "number":
+          recovery = copy(
+            "supplyFieldNumberRecovery",
+            "请输入有效数字后再提交",
+            "Enter a valid number before submitting",
+          );
+          break;
+        case "min":
+          recovery = copy(
+            "supplyFieldMinRecovery",
+            invalidField?.min === undefined
+              ? "请输入不低于最小值的数字"
+              : `请输入不小于 ${invalidField.min} 的数字`,
+            invalidField?.min === undefined
+              ? "Enter a number at or above the minimum"
+              : `Enter a number of at least ${invalidField.min}`,
+          );
+          break;
+        case "max":
+          recovery = copy(
+            "supplyFieldMaxRecovery",
+            invalidField?.max === undefined
+              ? "请输入不高于最大值的数字"
+              : `请输入不大于 ${invalidField.max} 的数字`,
+            invalidField?.max === undefined
+              ? "Enter a number at or below the maximum"
+              : `Enter a number no greater than ${invalidField.max}`,
+          );
+          break;
+        case "step":
+          recovery = copy(
+            "supplyFieldStepRecovery",
+            invalidField?.step === undefined
+              ? "请输入符合步进要求的数字"
+              : `请按 ${invalidField.step} 的步进填写数字`,
+            invalidField?.step === undefined
+              ? "Enter a number that matches the required increment"
+              : `Use increments of ${invalidField.step}`,
+          );
+          break;
+        case "option":
+          recovery = copy(
+            "supplyFieldOptionRecovery",
+            "请从提供的选项中重新选择",
+            "Choose one of the available options",
+          );
+          break;
+        case "url":
+          recovery = copy(
+            "supplyFieldUrlRecovery",
+            "请输入以 http:// 或 https:// 开头的完整网址",
+            "Enter a complete URL beginning with http:// or https://",
+          );
+          break;
+        case "date":
+          recovery = copy(
+            "supplyFieldDateRecovery",
+            "请输入有效日期",
+            "Enter a valid date",
+          );
+          break;
+      }
+      onNotice(`${serializedSupplyFields.error.label}：${recovery}`);
+      return;
+    }
     const normalizedName = displayName.trim();
     const normalizedCategory = category.trim();
     const normalizedKey = externalKey.trim() || `offer-${crypto.randomUUID()}`;
@@ -770,8 +880,12 @@ export function SellerDashboard({
       stock_quantity: normalizedStock,
     };
     const attributesWithAttachments = {
-      ...(editingOffer?.attributes ?? {}),
+      ...withoutSupplyFieldAttributes(
+        supplyFields,
+        editingOffer?.attributes ?? {},
+      ),
       ...parsedAttributes,
+      ...serializedSupplyFields.attributes,
       attachments: attachments.map(publicAttachment),
     };
 
@@ -898,7 +1012,11 @@ export function SellerDashboard({
           </strong>
           <span>
             {submissions.length
-              ? `${submissions.length} 件商品`
+              ? `${submissions.length} ${copy(
+                  "offerCountUnitLabel",
+                  "件商品",
+                  "offers",
+                )}`
               : copy("noSubmissionsLabel", "还没有商品")}
           </span>
         </div>
@@ -913,8 +1031,9 @@ export function SellerDashboard({
               resetOfferForm();
               setActivePanel("details");
             }}
+            disabled={mediaUploading || submitting}
           >
-            发布商品
+            {copy("publishOfferAction", "发布商品", "Publish offer")}
             <ArrowRight size={16} aria-hidden="true" />
           </button>
         </div>
@@ -936,6 +1055,7 @@ export function SellerDashboard({
           aria-controls="seller-panel-history"
           className={activePanel === "history" ? "is-active" : ""}
           onClick={() => setActivePanel("history")}
+          disabled={mediaUploading}
         >
           {copy("sellerHistoryTab", "商品列表", "Products")}
           <span>{submissions.length}</span>
@@ -947,6 +1067,7 @@ export function SellerDashboard({
           aria-controls="seller-panel-details"
           className={activePanel === "details" ? "is-active" : ""}
           onClick={() => setActivePanel("details")}
+          disabled={mediaUploading}
         >
           {editingOffer
             ? copy("sellerEditTab", "编辑商品", "Edit")
@@ -960,6 +1081,7 @@ export function SellerDashboard({
             aria-controls="seller-panel-demand"
             className={activePanel === "demand" ? "is-active" : ""}
             onClick={() => setActivePanel("demand")}
+            disabled={mediaUploading}
           >
             {copy("sellerDemandTab", "找买家", "Find buyers")}
           </button>
@@ -971,6 +1093,7 @@ export function SellerDashboard({
           aria-controls="seller-panel-contacts"
           className={activePanel === "contacts" ? "is-active" : ""}
           onClick={() => setActivePanel("contacts")}
+          disabled={mediaUploading}
         >
           {copy("sellerContactsTab", "联系申请", "Contacts")}
           <span>{introductions.length}</span>
@@ -992,21 +1115,41 @@ export function SellerDashboard({
             title={
               editingOffer
                 ? copy("editOfferTitle", "编辑商品", "Edit offer")
-                : copy("uploadTitle", "发布商品")
+                : copy("uploadTitle", "发布商品", "Publish offer")
             }
-            action={editingOffer ? "取消编辑" : "返回商品列表"}
-            onAction={
-              editingOffer ? cancelOfferEdit : () => setActivePanel("history")
+            action={
+              editingOffer
+                ? copy("cancelOfferEditAction", "取消编辑", "Cancel edit")
+                : copy(
+                    "backToOfferListAction",
+                    "返回商品列表",
+                    "Back to offers",
+                  )
             }
+            onAction={() => {
+              if (mediaUploading || submitting) return;
+              if (editingOffer) cancelOfferEdit();
+              else setActivePanel("history");
+            }}
           />
           <p className="seller-upload-intro">
             {editingOffer
-              ? "保存后商品会回到待审核状态，商城审核通过后买家才能看到新内容。"
-              : "填写买家真正需要看到的信息。提交后商城会先审核，通过后才会公开展示。"}
+              ? copy(
+                  "editOfferIntro",
+                  "保存后商品会回到待审核状态，商城审核通过后买家才能看到新内容。",
+                  "After saving, the offer returns to review and stays hidden until approved.",
+                )
+              : copy(
+                  "createOfferIntro",
+                  "填写买家真正需要看到的信息。提交后商城会先审核，通过后才会公开展示。",
+                  "Add the information buyers need. The offer becomes public only after review.",
+                )}
           </p>
           {editingOffer ? (
             <div className="seller-edit-notice" role="status">
-              正在编辑“{editingOffer.display_name}” · 当前版本{" "}
+              {copy("editingOfferLabel", "正在编辑", "Editing")}“
+              {editingOffer.display_name}” ·{" "}
+              {copy("currentOfferVersionLabel", "当前版本", "Current version")}{" "}
               {editingOffer.version}
             </div>
           ) : null}
@@ -1026,7 +1169,7 @@ export function SellerDashboard({
                 className="text-action"
                 type="button"
                 onClick={importAgentDraft}
-                disabled={draftImported}
+                disabled={draftImported || mediaUploading || submitting}
               >
                 {draftImported
                   ? copy(
@@ -1042,81 +1185,161 @@ export function SellerDashboard({
               </button>
             </div>
           ) : null}
-          <div className="seller-media-uploader seller-upload-wide">
-            <div className="seller-media-uploader-heading">
-              <div>
-                <strong>商品图片</strong>
-                <small>上传清晰实拍图，至少一张；第一张作为商品封面。</small>
-              </div>
-              <label
-                className="text-action seller-media-picker"
-                htmlFor="seller-media-input"
-              >
-                <FileUp size={16} aria-hidden="true" />
-                {mediaUploading ? "上传中…" : "上传图片"}
+          <form className="seller-upload-form" onSubmit={submit} noValidate>
+            <div className="seller-media-uploader seller-upload-wide">
+              <div className="seller-media-uploader-heading">
+                <div>
+                  <strong>
+                    {copy("offerMediaTitle", "商品图片", "Offer images")}
+                  </strong>
+                  <small>
+                    {copy(
+                      "offerMediaHelp",
+                      "上传清晰实拍图，至少一张；第一张作为商品封面。",
+                      "Add at least one clear real photo; the first image is the cover.",
+                    )}
+                  </small>
+                </div>
+                <button
+                  className="text-action seller-media-picker"
+                  type="button"
+                  disabled={
+                    mediaUploading || submitting || attachments.length >= 8
+                  }
+                  aria-busy={mediaUploading}
+                  onClick={() => mediaInputRef.current?.click()}
+                >
+                  <FileUp size={16} aria-hidden="true" />
+                  {mediaUploading
+                    ? copy("mediaUploadingLabel", "上传中…", "Uploading…")
+                    : attachments.length
+                      ? copy(
+                          "mediaAddMoreLabel",
+                          "继续添加图片",
+                          "Add more images",
+                        )
+                      : copy("uploadMediaLabel", "上传图片", "Upload images")}
+                </button>
                 <input
+                  ref={mediaInputRef}
                   id="seller-media-input"
                   type="file"
                   accept="image/*"
                   multiple
+                  hidden
+                  disabled={
+                    mediaUploading || submitting || attachments.length >= 8
+                  }
                   onChange={(event) => {
                     void uploadFiles(event.currentTarget.files);
                     event.currentTarget.value = "";
                   }}
-                  disabled={mediaUploading || submitting}
                 />
-              </label>
+              </div>
+              {attachments.length ? (
+                <ul
+                  className="seller-media-list"
+                  aria-label={copy(
+                    "mediaListLabel",
+                    "已上传的图片",
+                    "Uploaded images",
+                  )}
+                >
+                  {attachments.map((attachment, index) => (
+                    <li key={attachment.attachment_ref}>
+                      <span title={attachment.file_name}>
+                        {attachment.file_name}
+                      </span>
+                      <small>
+                        {formatAttachmentSize(attachment.size_bytes)}
+                      </small>
+                      {index === 0 ? (
+                        <span className="seller-media-cover">
+                          {copy("mediaCoverLabel", "封面", "Cover")}
+                        </span>
+                      ) : null}
+                      <div className="seller-media-item-actions">
+                        {index > 0 ? (
+                          <button
+                            className="seller-media-cover-action"
+                            type="button"
+                            onClick={() =>
+                              setAttachments((current) => {
+                                const currentIndex = current.findIndex(
+                                  (item) =>
+                                    item.attachment_ref ===
+                                    attachment.attachment_ref,
+                                );
+                                if (currentIndex <= 0) return current;
+                                const next = [...current];
+                                const [cover] = next.splice(currentIndex, 1);
+                                return cover ? [cover, ...next] : current;
+                              })
+                            }
+                            disabled={mediaUploading || submitting}
+                          >
+                            {copy(
+                              "setMediaCoverLabel",
+                              "设为封面",
+                              "Set as cover",
+                            )}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          aria-label={`${copy(
+                            "removeMediaLabel",
+                            "删除图片",
+                            "Remove image",
+                          )} ${attachment.file_name}`}
+                          onClick={() =>
+                            setAttachments((current) =>
+                              current.filter(
+                                (item) =>
+                                  item.attachment_ref !==
+                                  attachment.attachment_ref,
+                              ),
+                            )
+                          }
+                          disabled={mediaUploading || submitting}
+                        >
+                          <Trash2 size={15} aria-hidden="true" />
+                          <span>
+                            {copy("removeMediaAction", "删除", "Remove")}
+                          </span>
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
-            {attachments.length ? (
-              <ul
-                className="seller-media-list"
-                aria-label={copy("mediaListLabel", "已上传的图片")}
-              >
-                {attachments.map((attachment) => (
-                  <li key={attachment.attachment_ref}>
-                    <span title={attachment.file_name}>
-                      {attachment.file_name}
-                    </span>
-                    <small>{formatAttachmentSize(attachment.size_bytes)}</small>
-                    <button
-                      type="button"
-                      aria-label={`${copy("removeMediaLabel", "删除图片")} ${attachment.file_name}`}
-                      onClick={() =>
-                        setAttachments((current) =>
-                          current.filter(
-                            (item) =>
-                              item.attachment_ref !== attachment.attachment_ref,
-                          ),
-                        )
-                      }
-                      disabled={mediaUploading || submitting}
-                    >
-                      <Trash2 size={15} aria-hidden="true" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-          <form className="seller-upload-form" onSubmit={submit}>
             <label htmlFor="seller-display-name">
-              <span>商品名称</span>
+              <span>{copy("offerNameLabel", "商品名称", "Offer name")}</span>
               <input
                 id="seller-display-name"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="写清品牌、型号或商品内容"
+                placeholder={copy(
+                  "offerNamePlaceholder",
+                  "写清品牌、型号或商品内容",
+                  "Describe the brand, model, or offer clearly",
+                )}
                 maxLength={500}
                 required
               />
             </label>
             <label htmlFor="seller-category">
-              <span>商品分类</span>
+              <span>{copy("offerCategoryLabel", "商品分类", "Category")}</span>
               <input
                 id="seller-category"
                 value={category}
                 onChange={(event) => setCategory(event.target.value)}
-                placeholder="填写你的商品分类"
+                placeholder={copy(
+                  "offerCategoryPlaceholder",
+                  "填写你的商品分类",
+                  "Enter a category",
+                )}
                 maxLength={120}
                 required
               />
@@ -1125,17 +1348,37 @@ export function SellerDashboard({
               className="seller-upload-wide"
               htmlFor="seller-product-description"
             >
-              <span>商品描述</span>
+              <span>
+                {copy("offerDescriptionLabel", "商品描述", "Description")}
+              </span>
               <textarea
                 id="seller-product-description"
                 value={productDescription}
                 onChange={(event) => setProductDescription(event.target.value)}
                 rows={4}
                 maxLength={4000}
-                placeholder="介绍商品特点、包含内容、使用条件和交付说明"
+                placeholder={copy(
+                  "offerDescriptionPlaceholder",
+                  "介绍商品特点、包含内容、使用条件和交付说明",
+                  "Describe what is included, key details, conditions, and delivery",
+                )}
                 required
               />
             </label>
+            {supplyFields.length ? (
+              <SupplyFieldEditor
+                fields={supplyFields}
+                values={supplyFieldValues}
+                onValueChange={(key, value) =>
+                  setSupplyFieldValues((current) => ({
+                    ...current,
+                    [key]: value,
+                  }))
+                }
+                disabled={mediaUploading || submitting}
+                locale={locale}
+              />
+            ) : null}
             <label htmlFor="seller-asking-amount">
               <span>
                 {copy("priceLabel", "价格")}
@@ -1151,7 +1394,7 @@ export function SellerDashboard({
               />
             </label>
             <label htmlFor="seller-delivery-mode">
-              <span>交付方式</span>
+              <span>{copy("deliveryModeLabel", "交付方式", "Delivery")}</span>
               <select
                 id="seller-delivery-mode"
                 value={deliveryMode}
@@ -1160,14 +1403,36 @@ export function SellerDashboard({
                 }
                 required
               >
-                <option value="">选择交付方式</option>
-                <option value="digital">线上发送（不用邮寄）</option>
-                <option value="shipping">快递发货</option>
-                <option value="service">到店或上门服务</option>
+                <option value="">
+                  {copy(
+                    "deliveryModePlaceholder",
+                    "选择交付方式",
+                    "Choose delivery",
+                  )}
+                </option>
+                <option value="digital">
+                  {copy(
+                    "digitalDeliveryLabel",
+                    "线上发送（不用邮寄）",
+                    "Digital delivery",
+                  )}
+                </option>
+                <option value="shipping">
+                  {copy("shippingDeliveryLabel", "快递发货", "Shipping")}
+                </option>
+                <option value="service">
+                  {copy(
+                    "serviceDeliveryLabel",
+                    "到店或上门服务",
+                    "In-store or on-site service",
+                  )}
+                </option>
               </select>
             </label>
             <label htmlFor="seller-stock">
-              <span>可售库存</span>
+              <span>
+                {copy("offerStockLabel", "可售库存", "Available stock")}
+              </span>
               <input
                 id="seller-stock"
                 value={stockQuantity}
@@ -1178,7 +1443,13 @@ export function SellerDashboard({
                 step={1}
                 required
               />
-              <small>填 0 表示暂时售罄</small>
+              <small>
+                {copy(
+                  "offerStockHelp",
+                  "填 0 表示暂时售罄",
+                  "Enter 0 when temporarily sold out",
+                )}
+              </small>
             </label>
             <div className="seller-upload-actions seller-upload-wide">
               <p>
@@ -1193,6 +1464,7 @@ export function SellerDashboard({
                 type="submit"
                 disabled={
                   submitting ||
+                  mediaUploading ||
                   !isLiveMarketplaceEnabled() ||
                   !subplatform.domainId ||
                   (usesLegacyMarketplace &&
@@ -1201,13 +1473,13 @@ export function SellerDashboard({
                       !Number.isInteger(pricingScale)))
                 }
                 title={
-                  !isLiveMarketplaceEnabled()
-                    ? copy(
+                  isLiveMarketplaceEnabled()
+                    ? undefined
+                    : copy(
                         "supplyApiUnavailableNotice",
                         "当前环境暂时无法发布商品，内容不会被保存",
                         "The live supply API is disabled; nothing will be saved",
                       )
-                    : undefined
                 }
                 whileTap={{ scale: 0.97 }}
                 transition={spring}
@@ -1241,8 +1513,8 @@ export function SellerDashboard({
       >
         <SectionHeading
           titleId="seller-submissions-title"
-          title={copy("submissionHistoryTitle", "商品列表")}
-          action="发布商品"
+          title={copy("submissionHistoryTitle", "商品列表", "Offers")}
+          action={copy("publishOfferAction", "发布商品", "Publish offer")}
           onAction={() => {
             resetOfferForm();
             setActivePanel("details");
@@ -1386,14 +1658,26 @@ export function SellerDashboard({
         ) : (
           <div className="seller-empty-state seller-product-empty">
             <FileUp size={24} aria-hidden="true" />
-            <strong>还没有商品</strong>
-            <p>发布第一件商品，审核通过后买家就能在商城看到。</p>
+            <strong>
+              {copy("noSubmissionsLabel", "还没有商品", "No offers yet")}
+            </strong>
+            <p>
+              {copy(
+                "firstOfferHelp",
+                "发布第一件商品，审核通过后买家就能在商城看到。",
+                "Publish your first offer; buyers can see it after approval.",
+              )}
+            </p>
             <button
               className="button button-dark"
               type="button"
               onClick={() => setActivePanel("details")}
             >
-              发布第一件商品
+              {copy(
+                "publishFirstOfferAction",
+                "发布第一件商品",
+                "Publish your first offer",
+              )}
             </button>
           </div>
         )}
@@ -1452,11 +1736,7 @@ export function SellerDashboard({
                                 "重新寻找",
                                 "Search again",
                               )
-                            : copy(
-                                "findDemandLabel",
-                                "找买家",
-                                "Find buyers",
-                              )}
+                            : copy("findDemandLabel", "找买家", "Find buyers")}
                         <ArrowRight size={15} aria-hidden="true" />
                       </button>
                     </div>

@@ -229,9 +229,7 @@ describe("MarketplaceHome actions", () => {
     renderHome({ brandName: "青禾商城" });
 
     expect(screen.getByText("青禾商城")).toBeInTheDocument();
-    expect(
-      screen.getByText(/青禾商城 会检索公开店铺/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/青禾商城 会检索公开店铺/)).toBeInTheDocument();
   });
 
   it.each([

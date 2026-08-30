@@ -330,7 +330,11 @@ describe("MatchPlane workspaces", () => {
     expect(screen.queryByLabelText("店铺名称")).not.toBeInTheDocument();
     await user.click(manageProducts);
     expect(
-      await screen.findByRole("dialog", { name: "Store A" }, { timeout: 10_000 }),
+      await screen.findByRole(
+        "dialog",
+        { name: "Store A" },
+        { timeout: 10_000 },
+      ),
     ).toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
     expect(window.location.href).not.toContain("/login");
@@ -730,7 +734,10 @@ describe("MatchPlane workspaces", () => {
             : input instanceof URL
               ? input.toString()
               : input.url;
-        return url.startsWith("/api/admin/payment-mode") && request?.method === "POST";
+        return (
+          url.startsWith("/api/admin/payment-mode") &&
+          request?.method === "POST"
+        );
       }),
     ).toBe(false);
 

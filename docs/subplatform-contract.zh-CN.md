@@ -71,6 +71,34 @@ await auth.api.verifyApiKey({
 
 领域文案、定价能力、筛选器与商品字段不属于根实现。包可在清单中声明 `pricing`、`ui.chat`、`ui.copy`、`ui.filters` 与 `ui.supplyFields`；根服务会校验并传递给通用外壳/插件。联系方式是例外：包不能声明手填字段，交换只使用根 Better Auth 账号中已验证的邮箱或手机，并要求双方明确同意。默认走领域中立市场合约。仍需使用旧仓储的帐篷必须显式声明`marketplaceContract: "legacy-v1"`；仅定价或存在架构并不隐式选择该适配。网关的旧版 HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明默认或业务货币。卖家提交由激活包架构定义的值，根服务仅保存并转发其配置属性。
 
+### 公开供给字段
+
+`ui.supplyFields` 永远声明可写入公开 offer attributes，并可投影到公开目录、检索和公开 AI 上下文的字段；它不是私密档案设施。根按清单顺序渲染通用编辑器，并按 `group` 生成分组；没有分组的字段归入通用“补充资料”组。根只理解声明的展示元数据（`type`、`required`、`placeholder`、`group`、`help`、`unit`、`min`、`max`、`step` 和 `options`）。具体字段键、标签、分组、选项和校验边界归当前激活的 store package 所有；根不得硬编码车辆或其他垂直领域字段。
+
+公开长文本使用 `textarea`；`select` 必须提供非空且不重复的 `options`；声明 `min`、`max` 或正数 `step` 的字段必须使用 `number`。同时声明 `min` 与 `max` 时，包必须保证 `min <= max`。价格、库存和媒体继续使用 canonical offer fields；不得在 `supplyFields` 中重复声明，也不得把它们编码为领域 attributes。
+
+包不得在 `supplyFields` 中声明 VIN/车辆识别代码或车架号、车牌、身份证明/行驶证/登记证/发票等证件、车主/供应方/联系人资料、采购价或收购价、整备成本、利润、精确库位或内部备注。这些值即使由卖家录入也属于私密资料。未来的私密车辆档案必须使用独立的存储与媒体域，具备明确的 ACL、审计轨迹、保留规则和受控投影；不得复用公开 attributes 或公开目录。
+
+以下示例借鉴大风车式公开信息架构，但不复制大风车品牌、视觉、专有文案或未公开规则。示例字段归 store package 所有；根只负责分组和渲染：
+
+```json
+{
+  "ui": {
+    "supplyFields": [
+      { "key": "vehicle.brand", "label": "品牌", "type": "text", "required": true, "group": "车辆识别", "help": "向买家公开的制造商或品牌。" },
+      { "key": "vehicle.model", "label": "车型", "type": "text", "required": true, "group": "车辆识别", "help": "向买家公开的车型与款型名称。" },
+      { "key": "vehicle.year", "label": "年款", "type": "number", "group": "车辆识别", "help": "四位数年款。", "min": 1900, "max": 2100, "step": 1 },
+      { "key": "vehicle.registration_date", "label": "首次上牌日期", "type": "date", "group": "车辆识别", "help": "公开的首次登记月份或日期。" },
+      { "key": "vehicle.mileage_km", "label": "表显里程", "type": "number", "required": true, "group": "车况", "help": "向买家展示的当前里程表读数。", "unit": "km", "min": 0, "max": 2000000, "step": 1000 },
+      { "key": "vehicle.energy", "label": "能源类型", "type": "select", "group": "参数配置", "help": "公开的动力类别。", "options": ["汽油", "柴油", "混合动力", "纯电", "其他"] },
+      { "key": "vehicle.transmission", "label": "变速箱", "type": "select", "group": "参数配置", "help": "公开的变速箱类别。", "options": ["自动", "手动", "其他"] },
+      { "key": "vehicle.exterior_color", "label": "外观颜色", "type": "text", "group": "参数配置", "help": "买家可见的车身外观颜色。" },
+      { "key": "vehicle.condition_summary", "label": "车况摘要", "type": "textarea", "group": "车况", "help": "描述买家可见的车况事实；不要填写私密标识或内部备注。" }
+    ]
+  }
+}
+```
+
 ### 代理资料上传
 
 需要让请求或卖方在聊天里交图片、PDF或其他材料的包，必须同时提供真实的`media.upload` MCP工具并把它写进`agent.mcpTools`。根网络的`POST /api/platform/media/upload`只做更好的Auth/API-key、tenant/domain/path、MIME、文件名、base64长度和`request_id`形状校验，然后把有限时的请求转发给这个子平台工具；根不保存原始二进制、不扫描、不解析车辆或其他字段字段。子平台负责有效内容扫描、图片/文本提取、存储、`request_id`幂等与保留策略，并返回[`docs/media-attachment-protocol-v1.json`](media-attachment-protocol-v1.json)约定的`media://`引用。聊天草稿引用了交换子平台代理，人工编辑器必须允许参数查看、修改和重新创建报价。

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUpRight, MessageSquareMore } from "lucide-react";
+import { ArrowUpRight, MessageSquareMore, Store } from "lucide-react";
 
 import { getStores, type StoreSummary } from "../api";
 import type { InterfaceLocale } from "../lib/preferences";
@@ -57,17 +57,12 @@ export function StorefrontDirectory({
       aria-labelledby="home-storefront-title"
       aria-busy={!resolved}
     >
-      <div className="storefront-directory-heading mb-8 flex items-end justify-between gap-4">
-        <div>
-          <h2
-            className="text-2xl font-semibold tracking-[-0.03em] text-foreground-intense"
-            id="home-storefront-title"
-          >
-            {locale === "en" ? "Stores" : "店铺"}
-          </h2>
-        </div>
+      <div className="storefront-directory-heading">
+        <h2 id="home-storefront-title">
+          {locale === "en" ? "Stores" : "店铺"}
+        </h2>
         {resolved && stores.length ? (
-          <span className="text-sm text-foreground-muted">
+          <span className="storefront-directory-count">
             {locale === "en"
               ? `${stores.length} live`
               : `${stores.length} 家在营业`}
@@ -77,54 +72,56 @@ export function StorefrontDirectory({
 
       {resolved ? (
         stores.length ? (
-          <div className="storefront-directory-grid grid gap-x-8 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
+          <ul
+            className="storefront-directory-grid"
+            data-store-count={stores.length > 4 ? "many" : stores.length}
+            aria-labelledby="home-storefront-title"
+          >
             {stores.map((store) => (
-              <article
-                className="storefront-directory-card group flex min-h-40 flex-col py-2 transition-transform duration-150 hover:-translate-y-0.5 motion-reduce:transition-none motion-reduce:hover:transform-none"
-                key={store.id}
-              >
-                <a
-                  className="storefront-directory-link flex flex-1 flex-col"
-                  href={store.path}
-                >
-                  <div className="flex items-start justify-between gap-3">
+              <li className="storefront-directory-item" key={store.id}>
+                <article className="storefront-directory-card">
+                  <a className="storefront-directory-link" href={store.path}>
                     <span
-                      className="grid size-10 shrink-0 place-items-center rounded-full bg-background-muted text-xs font-semibold text-foreground-intense"
+                      className="storefront-directory-icon"
                       aria-hidden="true"
                     >
-                      {storeInitials(store.displayName)}
+                      <Store />
                     </span>
-                    <ArrowUpRight
-                      className="size-4 text-foreground-muted transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 motion-reduce:transition-none"
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <strong className="mt-5 line-clamp-2 text-base font-semibold text-foreground-intense">
-                    {store.displayName}
-                  </strong>
-                  <p className="mt-2 line-clamp-2 text-sm leading-6 text-foreground-muted">
-                    {store.description ||
-                      (locale === "en"
-                        ? "Browse published products in this store."
-                        : "进入店铺浏览已发布商品。")}
-                  </p>
-                  <span className="mt-auto pt-4 text-xs font-medium text-foreground-strong">
-                    {locale === "en" ? "Enter store" : "进入店铺"}
-                  </span>
-                </a>
-                {onDescribeNeed ? (
-                  <button
-                    className="storefront-demand-action"
-                    type="button"
-                    onClick={() => onDescribeNeed(store.path)}
-                  >
-                    <MessageSquareMore aria-hidden="true" />
-                    {locale === "en" ? "Describe a need" : "说需求"}
-                  </button>
-                ) : null}
-              </article>
+                    <span className="storefront-directory-copy">
+                      <strong>{store.displayName}</strong>
+                      <span className="storefront-directory-description">
+                        {store.description ||
+                          (locale === "en"
+                            ? "Browse published products in this store."
+                            : "进入店铺浏览已发布商品。")}
+                      </span>
+                      <span className="storefront-directory-meta">
+                        {store.status === "active" ? (
+                          <span className="storefront-directory-live">
+                            {locale === "en" ? "Open" : "营业中"}
+                          </span>
+                        ) : null}
+                        <span className="storefront-directory-entry">
+                          {locale === "en" ? "Enter store" : "进入店铺"}
+                          <ArrowUpRight aria-hidden="true" />
+                        </span>
+                      </span>
+                    </span>
+                  </a>
+                  {onDescribeNeed ? (
+                    <button
+                      className="storefront-demand-action"
+                      type="button"
+                      onClick={() => onDescribeNeed(store.path)}
+                    >
+                      <MessageSquareMore aria-hidden="true" />
+                      {locale === "en" ? "Describe a need" : "说需求"}
+                    </button>
+                  ) : null}
+                </article>
+              </li>
             ))}
-          </div>
+          </ul>
         ) : failed ? (
           <div
             className="storefront-directory-status py-10 text-sm text-foreground-muted"
@@ -159,8 +156,4 @@ export function StorefrontDirectory({
       )}
     </section>
   );
-}
-
-function storeInitials(value: string): string {
-  return [...value.trim()].slice(0, 2).join("").toUpperCase() || "MP";
 }

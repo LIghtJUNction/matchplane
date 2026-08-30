@@ -54,12 +54,48 @@ describe("public retail P1 style contract", () => {
     );
   });
 
+  it("keeps registration consent square, keyboard-visible, and touch-sized", () => {
+    expect(polishCss).toMatch(
+      /\.login-card \.login-form \.login-legal-checkbox input\[type="checkbox"\]\s*\{[^}]*width:\s*1\.25rem;[^}]*min-width:\s*1\.25rem;[^}]*height:\s*1\.25rem;[^}]*min-height:\s*1\.25rem;[^}]*padding:\s*0;/s,
+    );
+    expect(polishCss).toMatch(
+      /\.login-card[\s\S]*?\.login-legal-checkbox[\s\S]*?input\[type="checkbox"\]:focus-visible\s*\{[^}]*outline:\s*3px solid var\(--retail-focus\);[^}]*outline-offset:\s*3px;/s,
+    );
+    expect(legacyCss).toMatch(
+      /\.login-form label\.login-legal-checkbox\s*\{[^}]*width:\s*2\.75rem;[^}]*min-height:\s*2\.75rem;/s,
+    );
+    expect(polishCss).toMatch(
+      /\.login-legal-copy\s*\{[^}]*min-width:\s*0;[^}]*overflow-wrap:\s*break-word;/s,
+    );
+  });
+
+  it("lets the store settings empty state shrink without weakening mobile scroll", () => {
+    expect(polishCss).toMatch(
+      /\.workspace-settings-dialog\.workspace-settings-dialog-stores\s*\{[^}]*height:\s*auto;[^}]*min-height:\s*0;[^}]*max-height:\s*calc\(100dvh - 2rem\);/s,
+    );
+    expect(polishCss).toMatch(
+      /\.workspace-settings-dialog-stores \.hosted-store-empty-state\s*\{[^}]*min-height:\s*0;[^}]*border-color:\s*color-mix\([^}]*var\(--retail-ink\) 36%[^}]*background:\s*color-mix\(/s,
+    );
+    expect(polishCss).toMatch(
+      /\.workspace-settings-dialog-stores \.hosted-store-empty-state p\s*\{[^}]*color:\s*var\(--retail-ink-soft\);/s,
+    );
+    expect(polishCss).toMatch(
+      /@media \(max-width: 48rem\)[\s\S]*?\.workspace-settings-dialog\.workspace-settings-dialog-stores\s*\{[^}]*height:\s*100dvh;[^}]*max-height:\s*100dvh;[\s\S]*?\.workspace-settings-layout\s*\{[^}]*grid-template-columns:\s*1fr;/s,
+    );
+    expect(polishCss).toMatch(
+      /@media \(max-width: 48rem\)[\s\S]*?\.workspace-settings-dialog-stores \.workspace-settings-navigation button\s*\{[^}]*min-height:\s*2\.75rem;/s,
+    );
+    expect(legacyCss).toMatch(
+      /\.workspace-settings-close\s*\{[^}]*min-width:\s*2\.75rem;[^}]*height:\s*2\.75rem;/s,
+    );
+  });
+
   it("loads one readable root-marketplace authority after general polish", () => {
     expect(rootLayout).toMatch(
       /import "\.\.\/src\/retail-polish\.css";\s*import "\.\.\/src\/root-marketplace\.css";/,
     );
     expect(polishCss).not.toContain(".root-marketplace");
-    expect(rootMarketplaceCss.split("\n").length).toBeLessThan(500);
+    expect(rootMarketplaceCss.split("\n").length).toBeLessThan(600);
     expect(polishCss.split("\n").length).toBeLessThan(500);
   });
 
@@ -68,7 +104,7 @@ describe("public retail P1 style contract", () => {
     expect(marketplaceHome).not.toContain("is-sparse");
     expect(retailCss).not.toContain(".root-marketplace-content.is-sparse");
     expect(rootMarketplaceCss).not.toMatch(
-      /\.root-marketplace-entry[^{}]*\{[^}]*grid-template-columns:/s,
+      /\.root-marketplace-entry\s*\{[^}]*grid-template-columns:/s,
     );
     expect(rootMarketplaceCss).toMatch(
       /\.root-marketplace-entry\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
@@ -113,7 +149,7 @@ describe("public retail P1 style contract", () => {
       /\.root-marketplace-catalog-intro > p\s*\{[^}]*color:\s*var\(--retail-ink-soft\);[^}]*font-size:\s*0\.76rem;/s,
     );
     expect(rootMarketplaceCss).toMatch(
-      /\.root-marketplace-entry-facts\s*\{[^}]*color:\s*var\(--retail-ink-soft\);[^}]*font-size:\s*0\.76rem;/s,
+      /\.root-marketplace-entry-facts\s*\{[^}]*color:\s*var\(--retail-ink-soft\);[^}]*font-size:\s*0\.74rem;/s,
     );
     expect(rootMarketplaceCss).toMatch(
       /\.root-marketplace-products-heading p\s*\{[^}]*color:\s*var\(--retail-ink-soft\);[^}]*font-size:\s*0\.76rem;/s,

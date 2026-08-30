@@ -1,4 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,6 +46,36 @@ describe("StorefrontDirectory", () => {
       document.querySelectorAll(".storefront-directory-card"),
     ).toHaveLength(1);
     expect(screen.getByText("1 家在营业")).toBeInTheDocument();
+  });
+
+  it("keeps four long bilingual stores compact, bounded, and keyboard navigable", async () => {
+    const user = userEvent.setup();
+    getStoresMock.mockResolvedValueOnce(
+      Array.from({ length: 4 }, (_, index) => ({
+        id: `store-${index + 1}`,
+        slug: `store-${index + 1}`,
+        path: `/store-${index + 1}`,
+        displayName:
+          index === 0
+            ? "North China Independent Makers and Daily Objects 北方独立设计与日用器物店"
+            : `Store ${index + 1}`,
+        description:
+          "A long English description with 中文说明 that must wrap without escaping its store boundary.",
+        integrationKind: "hosted" as const,
+        status: "active" as const,
+      })),
+    );
+
+    render(<StorefrontDirectory locale="en" />);
+
+    const list = await screen.findByRole("list", { name: "Stores" });
+    expect(list).toHaveAttribute("data-store-count", "4");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(list).getAllByRole("link")).toHaveLength(4);
+    expect(within(list).getAllByText("Open")).toHaveLength(4);
+
+    await user.tab();
+    expect(within(list).getAllByRole("link")[0]).toHaveFocus();
   });
 
   it("reports successful API paths and clears them on cleanup", async () => {
@@ -92,5 +125,37 @@ describe("StorefrontDirectory", () => {
 
     await user.click(await screen.findByRole("button", { name: "说需求" }));
     expect(onDescribeNeed).toHaveBeenCalledWith("/useful-store");
+  });
+
+  it("locks the root header and directory responsive interaction contract", () => {
+    const css = readFileSync(
+      join(process.cwd(), "src/retail-ui.css"),
+      "utf8",
+    );
+
+    expect(css).toMatch(
+      /\.app-shell:has\(\.root-marketplace-page\) \.brand-cluster \{\s*display: none;/,
+    );
+    expect(css).toMatch(
+      /\.app-shell:has\(\.root-marketplace-page\) \.header-navigation \{\s*pointer-events: auto;/,
+    );
+    expect(css).not.toMatch(
+      /\.app-shell:has\(\.root-marketplace-page\)[^{]*\.brand-cluster[^}]*visibility: visible;/,
+    );
+    expect(css).toMatch(
+      /\.storefront-directory-grid\[data-store-count="1"\][^{]*\{[^}]*max-width: 32rem;[^}]*grid-template-columns: minmax\(0, 1fr\);/s,
+    );
+    expect(css).toMatch(
+      /\.storefront-directory-grid\[data-store-count="4"\][^{]*\{[^}]*max-width: 48rem;[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(
+      /\.storefront-directory-link:focus-visible \{[^}]*outline: 3px solid var\(--retail-focus\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 40rem\)[\s\S]*?\.storefront-directory-grid \{[^}]*grid-template-columns: minmax\(0, 1fr\);/,
+    );
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.storefront-directory-entry svg \{[^}]*transition: none;/,
+    );
   });
 });
