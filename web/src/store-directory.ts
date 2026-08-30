@@ -1,6 +1,8 @@
 import { authDatabase } from "./lib/auth";
-import type { PlatformRouteCandidate } from "./platform-router";
 import { isUuid } from "./lib/uuid";
+import type { PlatformRouteCandidate } from "./platform-router";
+import { parseProductTemplates } from "./product-templates";
+import { isSafePublicAttributeKey } from "./storefront-ranking-shared";
 
 /** Assistant retrieval admits at most this many public stores. */
 export const MAX_PUBLIC_STORES = 500;
@@ -86,8 +88,9 @@ export async function readPublicStoresFromDatabase(
             store.domain_id::text AS "domainId",
             COALESCE(registration.manifest -> 'capabilities', '[]'::jsonb) AS capabilities,
             COALESCE(registration.manifest -> 'agent' -> 'stages', '[]'::jsonb) AS "agentStages",
-            COALESCE(registration.manifest -> 'agent' -> 'skills', '[]'::jsonb) AS "agentSkills"
-            ,COALESCE(registration.manifest -> 'ui' -> 'supplyFields', '[]'::jsonb) AS "publicFields"
+            COALESCE(registration.manifest -> 'agent' -> 'skills', '[]'::jsonb) AS "agentSkills",
+            registration.manifest -> 'productTemplates' AS "productTemplates",
+            COALESCE(registration.manifest -> 'ui' -> 'supplyFields', '[]'::jsonb) AS "legacyPublicFields"
        FROM stores store
        JOIN store_path_aliases alias
          ON alias.tenant_id = store.tenant_id
@@ -156,7 +159,10 @@ export async function readPublicStoresFromDatabase(
         capabilities: boundedStrings(row.capabilities, 64),
         agentStages: boundedStrings(row.agentStages, 8),
         agentSkills: boundedStrings(row.agentSkills, 32),
-        publicFields: boundedFieldKeys(row.publicFields, 32),
+        publicFields: publicFieldKeys(
+          row.productTemplates,
+          row.legacyPublicFields,
+        ),
         tenantId,
         domainId,
       },
@@ -189,6 +195,22 @@ function validatedDirectoryLimit(
   return value;
 }
 
+function publicFieldKeys(
+  productTemplates: unknown,
+  legacyPublicFields: unknown,
+): string[] {
+  if (productTemplates !== null && productTemplates !== undefined) {
+    const templates = parseProductTemplates(productTemplates);
+    return templates
+      ? boundedFieldKeys(
+          templates.flatMap((template) => template.supplyFields),
+          128,
+        )
+      : [];
+  }
+  return boundedFieldKeys(legacyPublicFields, 128);
+}
+
 function boundedFieldKeys(value: unknown, maximum: number): string[] {
   if (!Array.isArray(value)) return [];
   return [
@@ -196,7 +218,9 @@ function boundedFieldKeys(value: unknown, maximum: number): string[] {
       value.flatMap((item): string[] => {
         if (!item || typeof item !== "object" || Array.isArray(item)) return [];
         const key = (item as { key?: unknown }).key;
-        return typeof key === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(key)
+        return typeof key === "string" &&
+          /^[A-Za-z0-9_.-]{1,128}$/.test(key) &&
+          isSafePublicAttributeKey(key)
           ? [key]
           : [];
       }),

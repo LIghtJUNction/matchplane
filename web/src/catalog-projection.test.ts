@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import catalogProjectionSchema from "../../docs/catalog-protocol-v2.json";
 import {
   buildCatalogProjectionArguments,
   parseCatalogProjectionAck,
@@ -12,6 +13,7 @@ const offerId = "33333333-3333-4333-8333-333333333333";
 
 function projection(
   attributes: Record<string, unknown> = { color: "ivory", year: 2026 },
+  productTemplateId: string | null = null,
 ) {
   return buildCatalogProjectionArguments({
     requestId,
@@ -22,6 +24,7 @@ function projection(
       offerId,
       externalKey: "stock-1",
       displayName: "Canonical offer",
+      productTemplateId,
       attributes,
       terms: { currency: "CNY", amount_minor: "1234" },
       status: "active",
@@ -50,6 +53,30 @@ function ack(input = projection()): Record<string, unknown> {
 }
 
 describe("catalog projection v2", () => {
+  it("always sends the nullable snake_case product template binding", () => {
+    expect(projection(undefined, "camera").offer.product_template_id).toBe(
+      "camera",
+    );
+    expect(projection().offer).toHaveProperty("product_template_id", null);
+  });
+
+  it("changes the digest when the product template binding changes", () => {
+    expect(projection(undefined, "camera").projection_digest).not.toBe(
+      projection(undefined, "book.v2").projection_digest,
+    );
+  });
+
+  it("keeps the client schema nullable but requires the field", () => {
+    const offerSchema = catalogProjectionSchema.properties.offer;
+    expect(offerSchema.required).toContain("product_template_id");
+    expect(offerSchema.properties.product_template_id).toEqual({
+      description:
+        "Manifest-declared product template binding; legacy offers without a template catalog send null.",
+      type: ["string", "null"],
+      pattern: "^[a-z][a-z0-9._-]{0,63}$",
+    });
+  });
+
   it("produces the same digest regardless of JSON object key order", () => {
     expect(projection({ year: 2026, color: "ivory" }).projection_digest).toBe(
       projection({ color: "ivory", year: 2026 }).projection_digest,

@@ -12,6 +12,7 @@ import {
 } from "../../../src/lib/body-limit";
 import { validateMcpToolArguments } from "../../../src/mcp-contract";
 import { executeAuthenticatedChildTool } from "../../../src/platform-child-tool";
+import { PRODUCT_TEMPLATE_ID_PATTERN } from "../../../src/product-templates";
 
 export const runtime = "nodejs";
 
@@ -339,11 +340,11 @@ async function callMarketplaceTool(
     body = JSON.stringify(args);
   } else if (name === "marketplace.offer.create") {
     path = "/v1/marketplace/offers";
-    body = JSON.stringify(args);
+    body = JSON.stringify(marketplaceOfferArguments(args));
   } else if (name === "marketplace.offer.update") {
     method = "PATCH";
     path = `/v1/marketplace/offers/${encodeURIComponent(String(args.offer_id))}`;
-    body = JSON.stringify(args);
+    body = JSON.stringify(marketplaceOfferArguments(args));
   } else if (name === "marketplace.offer.withdraw") {
     path = `/v1/marketplace/offers/${encodeURIComponent(String(args.offer_id))}/withdraw`;
     body = JSON.stringify(args);
@@ -485,9 +486,11 @@ async function callMarketplaceTool(
   } catch {
     return rpcError(id, -32003, "marketplace gateway is unavailable");
   }
-  const payload = await readUpstreamJson(
-    result,
-    "marketplace tool returned invalid JSON",
+  const payload = marketplaceProductTemplateProjection(
+    await readUpstreamJsonValue(
+      result,
+      "marketplace tool returned invalid JSON",
+    ),
   );
   return NextResponse.json(
     {
@@ -530,6 +533,49 @@ function supportedTool(name: unknown): name is string {
   );
 }
 
+function marketplaceOfferArguments(
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const { productTemplateId, ...wireArguments } = args;
+  return productTemplateId === undefined
+    ? wireArguments
+    : { ...wireArguments, product_template_id: productTemplateId };
+}
+
+type MarketplaceToolPayload =
+  | Record<string, unknown>
+  | Record<string, unknown>[];
+
+function marketplaceProductTemplateProjection(
+  value: MarketplaceToolPayload,
+): MarketplaceToolPayload {
+  if (Array.isArray(value)) return value.map(projectMarketplaceOffer);
+  const projected = projectMarketplaceOffer(value);
+  if (projected !== value) return projected;
+  const nestedOffer = value.offer;
+  if (!isRecord(nestedOffer)) return value;
+  const projectedOffer = projectMarketplaceOffer(nestedOffer);
+  return projectedOffer === nestedOffer
+    ? value
+    : { ...value, offer: projectedOffer };
+}
+
+/** Project only a canonical offer object; package-owned attributes and terms stay opaque. */
+function projectMarketplaceOffer(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  if (
+    typeof value.offer_id !== "string" ||
+    !Object.hasOwn(value, "product_template_id")
+  ) {
+    return value;
+  }
+  const { product_template_id: wireTemplateId, ...offer } = value;
+  return Object.hasOwn(offer, "productTemplateId")
+    ? offer
+    : { ...offer, productTemplateId: wireTemplateId };
+}
+
 function stringArgument(
   args: Record<string, unknown>,
   key: string,
@@ -568,12 +614,23 @@ async function readUpstreamJson(
   response: Response,
   fallback: string,
 ): Promise<Record<string, unknown>> {
+  const payload = await readUpstreamJsonValue(response, fallback);
+  return isRecord(payload) ? payload : { error: fallback };
+}
+
+async function readUpstreamJsonValue(
+  response: Response,
+  fallback: string,
+): Promise<MarketplaceToolPayload> {
   try {
     const payload = await readJsonResponseBody<unknown>(
       response,
       MAX_UPSTREAM_RESPONSE_BYTES,
     );
-    return isRecord(payload) ? payload : { error: fallback };
+    if (isRecord(payload)) return payload;
+    return Array.isArray(payload) && payload.every(isRecord)
+      ? payload
+      : { error: fallback };
   } catch {
     return { error: fallback };
   }
@@ -1283,6 +1340,10 @@ function marketplaceOfferSchema(): Record<string, unknown> {
       asset_id: { type: ["string", "null"], format: "uuid" },
       external_key: { type: "string", minLength: 1, maxLength: 256 },
       display_name: { type: "string", minLength: 1, maxLength: 500 },
+      productTemplateId: {
+        type: "string",
+        pattern: PRODUCT_TEMPLATE_ID_PATTERN.source,
+      },
       attributes: { type: "object" },
       terms: { type: "object" },
       expires_at: { type: ["string", "null"], format: "date-time" },
@@ -1316,6 +1377,10 @@ function marketplaceOfferUpdateSchema(): Record<string, unknown> {
       supply_party_id: { type: "string", format: "uuid" },
       offer_id: { type: "string", format: "uuid" },
       display_name: { type: "string", minLength: 1, maxLength: 500 },
+      productTemplateId: {
+        type: "string",
+        pattern: PRODUCT_TEMPLATE_ID_PATTERN.source,
+      },
       attributes: { type: "object" },
       terms: { type: "object" },
       expected_version: { type: "integer", minimum: 1 },

@@ -48,6 +48,7 @@ function snapshot(version = "7") {
     canonical_version: version,
     external_key: "relay-offer",
     display_name: "Relay offer",
+    product_template_id: "camera",
     attributes: { material: "paper" },
     terms: {},
     offer_status: "withdrawn",
@@ -96,7 +97,11 @@ describe("catalog projection relay", () => {
           canonical_version: number;
           projection_digest: string;
           scope: Record<string, unknown>;
-          offer: { offer_id: string; status: string };
+          offer: {
+            offer_id: string;
+            product_template_id: string | null;
+            status: string;
+          };
         };
         return {
           ok: true,
@@ -131,6 +136,15 @@ describe("catalog projection relay", () => {
       },
     );
     expect(mocks.invoke).toHaveBeenCalledOnce();
+    const projection = mocks.invoke.mock.calls[0]?.[0]?.arguments as {
+      offer: { product_template_id: string | null };
+    };
+    expect(projection.offer.product_template_id).toBe("camera");
+    expect(
+      mocks.query.mock.calls.some(([statement]) =>
+        String(statement).includes("offer.product_template_id"),
+      ),
+    ).toBe(true);
     expect(String(mocks.query.mock.calls.at(-1)?.[0])).toContain("status = $3");
   });
 

@@ -1,4 +1,8 @@
 import type { InterfaceLocale } from "./lib/preferences";
+import {
+  parseProductTemplateCatalog,
+  type ProductTemplateConfig,
+} from "./product-templates";
 import { isSafePublicAttributeKey } from "./storefront-ranking-shared";
 
 export type PricingMode = "fixed" | "range" | "negotiable" | "none";
@@ -78,6 +82,9 @@ export interface SubplatformConfig {
   pricing?: PricingConfig;
   marketplaceContract?: MarketplaceContract;
   email?: { providerKey?: string; fromAddress?: string };
+  /** Public product schemas declared by the package manifest. */
+  productTemplates?: ProductTemplateConfig[];
+  defaultProductTemplateId?: string;
   /** Optional copy/schema hints owned by the mounted subplatform; root UI remains domain-neutral. */
   ui?: {
     chat?: ChatUiConfig;
@@ -215,6 +222,8 @@ export async function loadSubplatform(
       pricing?: PricingConfig;
       marketplaceContract?: MarketplaceContract;
       email?: { providerKey?: string; fromAddress?: string };
+      productTemplates?: unknown;
+      defaultProductTemplateId?: unknown;
       ui?: {
         chat?: ChatUiConfig;
         copy?: Record<string, string>;
@@ -227,6 +236,8 @@ export async function loadSubplatform(
         hosted?: { entry?: string; url?: string; digest?: string };
       };
     };
+    const productTemplateCatalog = parseProductTemplateCatalog(manifest);
+    if (!productTemplateCatalog) return base;
     const pricing =
       validPricing(manifest.pricing) ??
       (manifest.currency?.trim()
@@ -263,6 +274,10 @@ export async function loadSubplatform(
           ? "legacy-v1"
           : "generic-v1",
       email: manifest.email,
+      productTemplates: productTemplateCatalog.productTemplates.length
+        ? productTemplateCatalog.productTemplates
+        : undefined,
+      defaultProductTemplateId: productTemplateCatalog.defaultProductTemplateId,
       ui: validUi(manifest.ui),
       assetSchema: validAssetSchema(manifest.assetSchema),
       agentMcpTools: validMcpTools(manifest.agent?.mcpTools),

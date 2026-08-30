@@ -53,6 +53,7 @@ export async function syncCanonicalMarketplaceOffer(input: {
             offer.supply_party_id::text AS supply_party_id,
             offer.external_key,
             offer.display_name,
+            offer.product_template_id,
             offer.attributes,
             offer.terms,
             offer.status,
@@ -136,6 +137,7 @@ export async function syncCanonicalMarketplaceOffer(input: {
         offerId: offer.offer_id,
         externalKey: offer.external_key,
         displayName: offer.display_name,
+        productTemplateId: offer.product_template_id,
         attributes: asObject(offer.attributes),
         terms: asObject(offer.terms),
         status: offer.status,
@@ -217,6 +219,7 @@ interface CanonicalOfferRow {
   supply_party_id: string;
   external_key: string;
   display_name: string;
+  product_template_id: string | null;
   attributes: unknown;
   terms: unknown;
   status: CatalogOfferStatus;

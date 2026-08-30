@@ -50,6 +50,7 @@ interface CanonicalProjectionSnapshot {
   canonicalVersion: number;
   externalKey: string;
   displayName: string;
+  productTemplateId: string | null;
   attributes: Record<string, unknown>;
   terms: Record<string, unknown>;
   status: CatalogOfferStatus;
@@ -286,6 +287,7 @@ async function deliverProjectionJob(
         offerId: snapshot.offerId,
         externalKey: snapshot.externalKey,
         displayName: snapshot.displayName,
+        productTemplateId: snapshot.productTemplateId,
         attributes: snapshot.attributes,
         terms: snapshot.terms,
         status: snapshot.status,
@@ -346,6 +348,7 @@ async function readCanonicalProjectionSnapshot(
             offer.version::text AS canonical_version,
             offer.external_key,
             offer.display_name,
+            offer.product_template_id,
             offer.attributes,
             offer.terms,
             offer.status AS offer_status,
@@ -388,6 +391,7 @@ async function readCanonicalProjectionSnapshot(
     canonicalVersion: safeDatabaseVersion(row.canonical_version),
     externalKey: String(row.external_key),
     displayName: String(row.display_name),
+    productTemplateId: optionalString(row.product_template_id),
     attributes: objectValue(row.attributes),
     terms: objectValue(row.terms),
     status: offerStatus(row.offer_status),

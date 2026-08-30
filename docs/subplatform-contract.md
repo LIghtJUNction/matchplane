@@ -44,60 +44,87 @@ Key 不会创建被冒充的用户会话。轮换方式是创建替代 key、更
 ```json
 {
   "apiVersion": "matchplane.subplatform/v1",
-  "id": "com.example.auto",
-  "slug": "auto",
-  "displayName": "Example Auto",
+  "id": "com.example.catalog",
+  "slug": "catalog",
+  "displayName": "Example Catalog",
   "description": "...",
   "marketplaceContract": "generic-v1",
   "pricing": { "mode": "fixed", "currency": "XXX", "currencyScale": 2, "label": "Price" },
-  "email": { "providerKey": "example-auto", "fromAddress": "no-reply@example.com" },
+  "productTemplates": [
+    {
+      "id": "book",
+      "label": "Book",
+      "category": "books",
+      "supplyFields": [
+        { "key": "book.author", "label": "Author", "type": "text", "required": true },
+        { "key": "book.isbn", "label": "ISBN", "type": "text" }
+      ]
+    }
+  ],
+  "email": { "providerKey": "example-catalog", "fromAddress": "no-reply@example.com" },
   "rootApiVersion": "v1",
   "entry": "src/index.ts",
-  "routes": ["/auto"],
+  "routes": ["/catalog"],
   "capabilities": ["demand", "supply", "explainable_matching"],
   "requiredScopes": ["marketplace:read", "marketplace:write"],
   "agent": {
     "protocol": "matchplane.agent/v1",
-    "stages": ["merchant", "inventory"],
+    "stages": ["catalog", "fulfillment"],
     "skills": ["matchplane.matching.v1"],
     "mcpTools": ["catalog.search", "merchant.search", "media.upload"],
-    "mcpServerKey": "example-auto"
+    "mcpServerKey": "example-catalog"
   },
   "assets": { "staticDirectory": "dist", "buildCommand": "bun run build" }
 }
 ```
 
-根服务在注册前会按 schema 验证清单。`id` 在全局稳定；`slug` 在根租户内唯一，并作为 URL 路径。`rootApiVersion` 与能力在启用前协商。可选 `agent` 块仅声明协议、工作流阶段与 MCP 工具名，不包含 endpoint、凭据或向量库配置。`agent.stages` 是子平台自有的 taxonomy key，根只校验长度/字符边界；`merchant`、`inventory` 只是二手车示例，不是全局枚举。`mcpServerKey` 仅是稳定的查找键。部署管理员可通过 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 将该 key 绑定到 HTTPS MCP endpoint；软件包本身不能指定 URL 或提供 bearer token。带有 `agent:tool` 权限的已认证 Agent 可调用通用 HTTP MCP 工具 `platform.child.tool`，传入当前 `platform_path`、白名单内 `tool_name` 和受限 JSON `arguments`。根服务会在转发前再次检查路径可见性与活跃注册，剥离调用方 API key，仅添加受限路由头、请求超时和响应体限制，并将子平台 MCP 结果作为可审计工具响应返回。终端未配置时返回明确的 degraded 错误，不会回退到根凭据或任意 URL。
+根服务在注册前会按 schema 验证清单。`id` 在全局稳定；`slug` 在根租户内唯一，并作为 URL 路径。`rootApiVersion` 与能力在启用前协商。可选 `agent` 块仅声明协议、工作流阶段与 MCP 工具名，不包含 endpoint、凭据或向量库配置。`agent.stages` 是子平台自有的 taxonomy key，根只校验长度/字符边界；`catalog` 与 `fulfillment` 只是领域中立示例，不是全局枚举。`mcpServerKey` 仅是稳定的查找键。部署管理员可通过 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 将该 key 绑定到 HTTPS MCP endpoint；软件包本身不能指定 URL 或提供 bearer token。带有 `agent:tool` 权限的已认证 Agent 可调用通用 HTTP MCP 工具 `platform.child.tool`，传入当前 `platform_path`、白名单内 `tool_name` 和受限 JSON `arguments`。根服务会在转发前再次检查路径可见性与活跃注册，剥离调用方 API key，仅添加受限路由头、请求超时和响应体限制，并将子平台 MCP 结果作为可审计工具响应返回。终端未配置时返回明确的 degraded 错误，不会回退到根凭据或任意 URL。
 
-领域文案、定价能力、筛选器与商家字段属于软件包，不属于根实现。软件包可在清单中声明 `pricing`、`ui.chat`、`ui.copy`、`ui.filters` 与 `ui.supplyFields`；根服务会校验并传递给通用 shell/plugin。联系方式是例外：包不能声明手填字段，交换只使用根 Better Auth 账号已验证的邮箱或手机，并要求双方明确同意。默认走领域中立 marketplace 合约。仍需使用旧垂直适配器的软件包必须显式声明 `marketplaceContract: "legacy-v1"`；仅定价或存在 schema 并不隐式选择该适配器。网关的 legacy HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明或默认业务货币。卖家提交由激活包 schema 定义的值，根服务仅保存并转发其结构化属性。
+领域文案、定价能力、筛选器与商品字段归软件包所有，不属于根实现。包可声明 `pricing`、顶层 `productTemplates` 与 `defaultProductTemplateId`，或使用旧版 `ui.supplyFields`，也可声明 `ui.chat`、`ui.copy` 和 `ui.filters`。`productTemplates` 与 `ui.supplyFields` 不得同时出现；注册必须拒绝这种含混清单。联系方式是例外：包不能声明手填字段，交换只使用根 Better Auth 账号已验证的邮箱或手机，并要求双方明确同意。默认走领域中立 marketplace 合约。仍需使用旧垂直适配器的软件包必须显式声明 `marketplaceContract: "legacy-v1"`；仅定价或存在 schema 并不隐式选择该适配器。网关的 legacy HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明或默认业务货币。卖家提交由激活包 schema 定义的值，根服务仅保存并转发其结构化属性。
 
-### 公开供给字段
+### Product templates and public supply fields
 
-`ui.supplyFields` 永远声明可写入公开 offer attributes，并可投影到公开目录、检索和公开 AI 上下文的字段；它不是私密档案设施。根按清单顺序渲染通用编辑器，并按 `group` 生成分组；没有分组的字段归入通用“补充资料”组。根只理解声明的展示元数据（`type`、`required`、`placeholder`、`group`、`help`、`unit`、`min`、`max`、`step` 和 `options`）。具体字段键、标签、分组、选项和校验边界归当前激活的 store package 所有；根不得硬编码车辆或其他垂直领域字段。
+A manifest may declare at most 16 top-level `productTemplates`. Each template has the shape `{ id, label, description?, category?, supplyFields }`. Its `id` is a stable package contract: IDs are unique within the manifest and MUST NOT be renamed or reused for a different meaning. One template may omit `defaultProductTemplateId`; two or more templates require it, and the value must name a declared template. An unknown default or template reference fails closed rather than falling back to the first template.
 
-公开长文本使用 `textarea`；`select` 必须提供非空且不重复的 `options`；声明 `min`、`max` 或正数 `step` 的字段必须使用 `number`。同时声明 `min` 与 `max` 时，包必须保证 `min <= max`。价格、库存和媒体继续使用 canonical offer fields；不得在 `supplyFields` 中重复声明，也不得把它们编码为领域 attributes。
+Each template may declare at most 64 `supplyFields`. Across the manifest there may be at most 256 field declarations and 128 distinct field keys. Keys are unique inside a template. When a key is shared by multiple templates, its normalized definition—including label, type, required flag, display metadata, numeric constraints, and options—must be identical. This lets a value survive an explicit template switch without changing its meaning. A package release must not delete an ID referenced by an existing canonical offer; publish a migration and retain the old definition until no offer uses it.
 
-包不得在 `supplyFields` 中声明 VIN/车辆识别代码或车架号、车牌、身份证明/行驶证/登记证/发票等证件、车主/供应方/联系人资料、采购价或收购价、整备成本、利润、精确库位或内部备注。这些值即使由卖家录入也属于私密资料。未来的私密车辆档案必须使用独立的存储与媒体域，具备明确的 ACL、审计轨迹、保留规则和受控投影；不得复用公开 attributes 或公开目录。
+`ui.supplyFields` is the legacy single-template form. A manifest may use legacy fields or `productTemplates`, never both. Legacy offers keep `product_template_id: null` and continue through the legacy field flow; their presence does not create an implicit template ID. New template-aware offers persist the selected ID in the canonical `product_template_id` field atomically with their attributes. Unknown, disabled, deleted, or cross-store template IDs block create/update/activation. Public reads fail closed to canonical safe fields only.
 
-以下示例借鉴大风车式公开信息架构，但不复制大风车品牌、视觉、专有文案或未公开规则。示例字段归 store package 所有；根只负责分组和渲染：
+Store selection is private runtime state, not manifest structure: `stores.metadata.product_templates` may record enabled IDs and a default ID for that store. The full metadata object, enabled/default choices, store version, registration internals, credentials, contacts, and drafts are never public. Public storefront, retrieval, and AI projections use an explicit allow-list: canonical public offer fields plus only attributes declared by the offer's resolved template (or the legacy allow-list for a legacy offer). No attribute becomes public merely because it exists in JSON.
+
+Long public text uses `textarea`; `select` requires non-empty unique `options`; fields with `min`, `max`, or positive `step` use `number`, and packages must ensure `min <= max`. Canonical price, inventory, media, identity/contact data, credentials, acquisition cost, margin, exact storage location, and internal notes must not be duplicated in `supplyFields`.
+
+Domain-neutral examples:
 
 ```json
 {
-  "ui": {
-    "supplyFields": [
-      { "key": "vehicle.brand", "label": "Brand", "type": "text", "required": true, "group": "Vehicle identity", "help": "Public manufacturer or marque." },
-      { "key": "vehicle.model", "label": "Model", "type": "text", "required": true, "group": "Vehicle identity", "help": "Public model and trim name." },
-      { "key": "vehicle.year", "label": "Model year", "type": "number", "group": "Vehicle identity", "help": "Four-digit model year.", "min": 1900, "max": 2100, "step": 1 },
-      { "key": "vehicle.registration_date", "label": "First registration date", "type": "date", "group": "Vehicle identity", "help": "Public month or date of first registration." },
-      { "key": "vehicle.mileage_km", "label": "Mileage", "type": "number", "required": true, "group": "Condition", "help": "Current odometer reading shown to buyers.", "unit": "km", "min": 0, "max": 2000000, "step": 1000 },
-      { "key": "vehicle.energy", "label": "Energy type", "type": "select", "group": "Specifications", "help": "Public propulsion category.", "options": ["Gasoline", "Diesel", "Hybrid", "Electric", "Other"] },
-      { "key": "vehicle.transmission", "label": "Transmission", "type": "select", "group": "Specifications", "help": "Public transmission category.", "options": ["Automatic", "Manual", "Other"] },
-      { "key": "vehicle.exterior_color", "label": "Exterior color", "type": "text", "group": "Specifications", "help": "Buyer-visible exterior color." },
-      { "key": "vehicle.condition_summary", "label": "Condition summary", "type": "textarea", "group": "Condition", "help": "Describe buyer-visible condition facts; omit private identifiers and internal notes." }
-    ]
-  }
+  "productTemplates": [
+    {
+      "id": "book",
+      "label": "Book",
+      "description": "A physical or digital book offered by the store.",
+      "category": "books",
+      "supplyFields": [
+        { "key": "book.author", "label": "Author", "type": "text", "required": true, "group": "Publication" },
+        { "key": "book.isbn", "label": "ISBN", "type": "text", "group": "Publication" },
+        { "key": "delivery.format", "label": "Format", "type": "select", "options": ["Hardcover", "Paperback", "Digital"] }
+      ]
+    },
+    {
+      "id": "generic-service",
+      "label": "Service",
+      "category": "services",
+      "supplyFields": [
+        { "key": "service.duration_minutes", "label": "Duration", "type": "number", "unit": "min", "min": 1, "step": 1 },
+        { "key": "service.delivery_mode", "label": "Delivery mode", "type": "select", "options": ["Remote", "On-site"] }
+      ]
+    }
+  ],
+  "defaultProductTemplateId": "book"
 }
 ```
+
+Real vertical templates, including used-vehicle schemas and any associated private-record model, belong in a separately versioned store package. The root repository and this contract contain only domain-neutral examples; they do not copy a real merchant instance, brand, proprietary terminology, or private business rules.
 
 ### Agent 资料上传
 

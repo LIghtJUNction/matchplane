@@ -14,6 +14,13 @@ import {
   validateSubplatformMcpEndpointUrl,
 } from "../../../../../src/platform-agent-tool";
 import { isUuid } from "../../../../../src/lib/uuid";
+import {
+  MAX_PRODUCT_TEMPLATES,
+  parseProductTemplateCatalog,
+  supplyFieldDefinitionsEqual,
+  type ProductTemplateCatalog,
+  type ProductTemplateConfig,
+} from "../../../../../src/product-templates";
 
 export const runtime = "nodejs";
 
@@ -203,15 +210,16 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const currentActiveResult = await client.query<ActiveRegistration>(
-      `SELECT id, version::text AS version
+      `SELECT id, version::text AS version, manifest
          FROM subplatform_registrations
         WHERE tenant_id = $1::uuid
           AND slug = $2
+          AND domain_id = $3::uuid
           AND state = 'active'
         ORDER BY version DESC
         LIMIT 1
         FOR UPDATE`,
-      [target.tenantId, target.slug],
+      [target.tenantId, target.slug, target.domainId],
     );
     const currentActive = currentActiveResult.rows[0];
     if (target.state === "active") {
@@ -245,6 +253,19 @@ export async function POST(request: Request): Promise<Response> {
       await client.query("ROLLBACK");
       return NextResponse.json(
         { error: "目标注册版本必须严格新于当前激活版本" },
+        { status: 409 },
+      );
+    }
+
+    const templateStabilityError = await productTemplateStabilityError(
+      client,
+      target,
+      currentActive,
+    );
+    if (templateStabilityError) {
+      await client.query("ROLLBACK");
+      return NextResponse.json(
+        { error: templateStabilityError },
         { status: 409 },
       );
     }
@@ -332,6 +353,15 @@ interface RegistrationRow {
 interface ActiveRegistration {
   id: string;
   version: string;
+  manifest: unknown;
+}
+
+interface LockedStore {
+  storeId: string;
+}
+
+interface OfferTemplateReference {
+  productTemplateId: string | null;
 }
 
 interface ActivationResponseRow {
@@ -371,6 +401,129 @@ async function validateDeclaredMcpTools(
     return `子平台 MCP endpoint 健康检查失败（HTTP ${probe.status}），暂不能启用已声明工具`;
   }
   return null;
+}
+
+async function productTemplateStabilityError(
+  client: PoolClient,
+  target: RegistrationRow,
+  currentActive: ActiveRegistration | undefined,
+): Promise<string | null> {
+  const storeResult = await client.query<LockedStore>(
+    `SELECT id::text AS "storeId"
+       FROM stores
+      WHERE tenant_id = $1::uuid
+        AND domain_id = $2::uuid
+        AND organization_id = $3::uuid
+      LIMIT 1
+      FOR UPDATE`,
+    [target.tenantId, target.domainId, target.organizationId],
+  );
+  const store = storeResult.rows[0];
+  if (!store) return null;
+
+  const references = await client.query<OfferTemplateReference>(
+    `SELECT product_template_id AS "productTemplateId"
+       FROM marketplace_offers
+      WHERE tenant_id = $1::uuid
+        AND domain_id = $2::uuid
+        AND store_id = $3::uuid
+      GROUP BY product_template_id
+      ORDER BY product_template_id NULLS FIRST
+      LIMIT $4`,
+    [
+      target.tenantId,
+      target.domainId,
+      store.storeId,
+      MAX_PRODUCT_TEMPLATES + 1,
+    ],
+  );
+  if (!references.rows.length) return null;
+
+  const targetCatalog = parseProductTemplateCatalog(target.manifest);
+  if (!targetCatalog) return "目标版本的商品模板目录无效，不能安全激活";
+  const currentCatalog = currentActive
+    ? parseProductTemplateCatalog(currentActive.manifest)
+    : null;
+  return productTemplateReferenceStabilityError(
+    references.rows,
+    currentCatalog,
+    targetCatalog,
+  );
+}
+
+function productTemplateReferenceStabilityError(
+  references: OfferTemplateReference[],
+  currentCatalog: ProductTemplateCatalog | null,
+  targetCatalog: ProductTemplateCatalog,
+): string | null {
+  const hasLegacyReferences = references.some(
+    ({ productTemplateId }) => productTemplateId === null,
+  );
+  const referencedTemplateIds = references.flatMap(({ productTemplateId }) =>
+    productTemplateId === null ? [] : [productTemplateId],
+  );
+  if (hasLegacyReferences && targetCatalog.productTemplates.length > 0) {
+    return "店铺仍有未绑定商品模板的历史供给，请先显式迁移后再激活商品模板目录";
+  }
+  if (
+    referencedTemplateIds.length > 0 &&
+    targetCatalog.productTemplates.length === 0
+  ) {
+    return "目标版本不能切回 legacy manifest：店铺供给仍引用商品模板";
+  }
+  if (!referencedTemplateIds.length) return null;
+  if (!currentCatalog) {
+    return "当前激活版本无法证明现存商品模板引用的稳定语义";
+  }
+  return referencedTemplateDefinitionError(
+    referencedTemplateIds,
+    currentCatalog,
+    targetCatalog,
+  );
+}
+
+function referencedTemplateDefinitionError(
+  referencedTemplateIds: string[],
+  currentCatalog: ProductTemplateCatalog,
+  targetCatalog: ProductTemplateCatalog,
+): string | null {
+  const currentTemplates = new Map(
+    currentCatalog.productTemplates.map((template) => [template.id, template]),
+  );
+  const targetTemplates = new Map(
+    targetCatalog.productTemplates.map((template) => [template.id, template]),
+  );
+  for (const templateId of referencedTemplateIds) {
+    const targetTemplate = targetTemplates.get(templateId);
+    if (!targetTemplate) {
+      return `目标版本缺少仍被店铺供给引用的商品模板：${templateId}`;
+    }
+    const currentTemplate = currentTemplates.get(templateId);
+    if (!currentTemplate) {
+      return `当前激活版本缺少店铺供给已引用的商品模板：${templateId}`;
+    }
+    if (!sameNormalizedSupplyFields(currentTemplate, targetTemplate)) {
+      return `目标版本修改了仍被店铺供给引用的商品模板定义：${templateId}`;
+    }
+  }
+  return null;
+}
+
+function sameNormalizedSupplyFields(
+  current: ProductTemplateConfig,
+  target: ProductTemplateConfig,
+): boolean {
+  return (
+    current.supplyFields.length === target.supplyFields.length &&
+    current.supplyFields.every((field, index) => {
+      const targetField = target.supplyFields[index];
+      return (
+        targetField !== undefined &&
+        field.key === targetField.key &&
+        supplyFieldDefinitionsEqual(field, targetField)
+      );
+    })
+  );
 }
 
 async function enqueueRegistrationCatalogProjections(

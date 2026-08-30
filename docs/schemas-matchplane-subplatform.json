@@ -5,12 +5,94 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["apiVersion", "id", "slug", "displayName", "rootApiVersion", "entry", "routes", "capabilities", "requiredScopes", "assets"],
+  "allOf": [
+    {
+      "if": { "required": ["defaultProductTemplateId"] },
+      "then": { "required": ["productTemplates"] }
+    },
+    {
+      "if": {
+        "required": ["productTemplates"],
+        "properties": { "productTemplates": { "minItems": 2 } }
+      },
+      "then": { "required": ["defaultProductTemplateId"] }
+    },
+    {
+      "if": { "required": ["productTemplates"] },
+      "then": {
+        "properties": {
+          "ui": { "not": { "required": ["supplyFields"] } }
+        }
+      }
+    }
+  ],
   "properties": {
     "apiVersion": { "const": "matchplane.subplatform/v1" },
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,127}$" },
     "slug": { "type": "string", "pattern": "^(?!root$)[a-z0-9][a-z0-9-]{1,62}$" },
     "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
     "description": { "type": "string", "maxLength": 2000 },
+    "productTemplates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "description": "Stable product templates owned by this package. Template ids must be unique; reused supply-field keys must have identical normalized definitions. Semantic validation also limits all templates to 256 field declarations and 128 distinct field keys.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "supplyFields"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "category": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "supplyFields": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key", "label"],
+              "properties": {
+                "key": { "type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$" },
+                "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "type": { "enum": ["text", "textarea", "number", "url", "date", "select"] },
+                "required": { "type": "boolean" },
+                "placeholder": { "type": "string", "maxLength": 500 },
+                "group": { "type": "string", "minLength": 1, "maxLength": 120 },
+                "help": { "type": "string", "minLength": 1, "maxLength": 500 },
+                "unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+                "min": { "type": "number", "minimum": -1000000000000000, "maximum": 1000000000000000 },
+                "max": { "type": "number", "minimum": -1000000000000000, "maximum": 1000000000000000 },
+                "step": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000000000000 },
+                "options": { "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 200 } }
+              },
+              "allOf": [
+                {
+                  "if": { "required": ["options"] },
+                  "then": { "properties": { "type": { "const": "select" } }, "required": ["type"] }
+                },
+                {
+                  "if": { "properties": { "type": { "const": "select" } }, "required": ["type"] },
+                  "then": { "required": ["options"] }
+                },
+                {
+                  "if": { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }, { "required": ["step"] }] },
+                  "then": { "properties": { "type": { "const": "number" } }, "required": ["type"] }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "defaultProductTemplateId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,63}$",
+      "description": "Id of the package default. Required when productTemplates has more than one item and must resolve to a declared template id."
+    },
     "marketplaceContract": {
       "enum": ["generic-v1", "legacy-v1"],
       "default": "generic-v1",

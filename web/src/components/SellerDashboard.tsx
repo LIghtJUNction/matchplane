@@ -18,6 +18,7 @@ import {
   getMarketplaceDemandMatches,
   getMarketplaceOffers,
   getSellerListingSubmissions,
+  getStoreProductTemplates,
   isLiveMarketplaceEnabled,
   uploadMarketplaceAttachment,
   retrieveMarketplaceContact,
@@ -25,6 +26,8 @@ import {
   type MarketplaceDemandCandidate,
   type MarketplaceContactResponse,
   type MarketplaceOffer,
+  type StoreProductTemplateCatalog,
+  type StoreSummary,
   submitSellerListing,
   updateMarketplaceOffer,
   withdrawMarketplaceOffer,
@@ -34,6 +37,7 @@ import {
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import type { InterfaceLocale } from "../lib/preferences";
 import { localizedSubplatformCopy } from "../lib/localized-copy";
+import type { ProductTemplateConfig } from "../product-templates";
 import {
   pricingFor,
   subplatformContactLabel,
@@ -44,13 +48,17 @@ import {
   supplyFieldValuesFromAttributes,
   withoutSupplyFieldAttributes,
 } from "../supply-fields";
+import { ProductTemplateSelector } from "./ProductTemplateSelector";
 import { SectionHeading, spring } from "./Primitives";
+import { StoreProductTemplateSettings } from "./StoreProductTemplateSettings";
 import { SupplyFieldEditor } from "./SupplyFieldEditor";
 
 interface SellerDashboardProps {
   locale: InterfaceLocale;
   onNotice: (message: string) => void;
   subplatform: SubplatformConfig;
+  store?: StoreSummary;
+  canManageStore?: boolean;
   agentDraft?: {
     narrative: string;
     intentId?: string;
@@ -124,6 +132,8 @@ export function SellerDashboard({
   locale,
   onNotice,
   subplatform,
+  store,
+  canManageStore = false,
   agentDraft = null,
 }: SellerDashboardProps) {
   const [externalKey, setExternalKey] = useState("");
@@ -138,8 +148,64 @@ export function SellerDashboard({
   const [supplyFieldValues, setSupplyFieldValues] = useState<
     Record<string, string>
   >({});
+  const [productTemplateCatalog, setProductTemplateCatalog] =
+    useState<StoreProductTemplateCatalog | null>(null);
+  const [productTemplatesLoading, setProductTemplatesLoading] = useState(
+    Boolean(store),
+  );
+  const [productTemplatesError, setProductTemplatesError] = useState<
+    string | null
+  >(null);
+  const [selectedProductTemplateId, setSelectedProductTemplateId] = useState<
+    string | null
+  >(null);
+  const [draftProductTemplate, setDraftProductTemplate] =
+    useState<ProductTemplateConfig | null>(null);
+  const [editingSourceProductTemplate, setEditingSourceProductTemplate] =
+    useState<ProductTemplateConfig | null>(null);
+  const [productTemplateModeStoreId, setProductTemplateModeStoreId] = useState<
+    string | null
+  >(null);
+  const productTemplateLoadRef = useRef(0);
+  const productTemplateDefaultInitializedStoreRef = useRef<string | null>(null);
+  const storeId = store?.id;
+  const activeProductTemplateCatalog =
+    productTemplateCatalog?.storeId === storeId
+      ? productTemplateCatalog
+      : null;
   const pricing = pricingFor(subplatform);
-  const supplyFields = subplatform.ui?.supplyFields ?? [];
+  const legacySupplyFields = subplatform.ui?.supplyFields ?? [];
+  const usesProductTemplates = Boolean(
+    activeProductTemplateCatalog?.templates.length ||
+      productTemplateModeStoreId === storeId ||
+      draftProductTemplate ||
+      selectedProductTemplateId,
+  );
+  const enabledProductTemplates = useMemo(
+    () =>
+      activeProductTemplateCatalog?.templates.filter((template) =>
+        activeProductTemplateCatalog.enabledTemplateIds.includes(template.id),
+      ) ?? [],
+    [activeProductTemplateCatalog],
+  );
+  const catalogSelectedProductTemplate =
+    activeProductTemplateCatalog?.templates.find(
+      (template) => template.id === selectedProductTemplateId,
+    );
+  const selectedProductTemplate =
+    draftProductTemplate?.id === selectedProductTemplateId
+      ? draftProductTemplate
+      : catalogSelectedProductTemplate;
+  const selectedProductTemplateIsEnabled = Boolean(
+    selectedProductTemplateId &&
+      activeProductTemplateCatalog?.enabledTemplateIds.includes(
+        selectedProductTemplateId,
+      ) &&
+      catalogSelectedProductTemplate,
+  );
+  const supplyFields = usesProductTemplates
+    ? (selectedProductTemplate?.supplyFields ?? [])
+    : legacySupplyFields;
   const copy = (
     key: string,
     fallbackZh: string,
@@ -193,6 +259,26 @@ export function SellerDashboard({
     null,
   );
   const [activePanel, setActivePanel] = useState<SellerPanel>("history");
+
+  const loadProductTemplates = useCallback(async () => {
+    const loadId = ++productTemplateLoadRef.current;
+    setProductTemplatesError(null);
+    setProductTemplatesLoading(Boolean(storeId));
+    if (!storeId) return;
+    try {
+      const catalog = await getStoreProductTemplates(storeId);
+      if (productTemplateLoadRef.current !== loadId) return;
+      setProductTemplateCatalog(catalog);
+    } catch (error) {
+      if (productTemplateLoadRef.current !== loadId) return;
+      setProductTemplatesError(
+        error instanceof Error ? error.message : "商品模板设置读取失败",
+      );
+    } finally {
+      if (productTemplateLoadRef.current === loadId)
+        setProductTemplatesLoading(false);
+    }
+  }, [storeId]);
 
   const loadSubmissions = useCallback(async () => {
     setSubmissions([]);
@@ -447,6 +533,98 @@ export function SellerDashboard({
   };
 
   useEffect(() => {
+    void loadProductTemplates();
+    return () => {
+      productTemplateLoadRef.current += 1;
+    };
+  }, [loadProductTemplates]);
+
+  useEffect(() => {
+    setProductTemplateCatalog((current) =>
+      current?.storeId === storeId ? current : null,
+    );
+    productTemplateDefaultInitializedStoreRef.current = null;
+    setEditingOffer(null);
+    setSelectedProductTemplateId(null);
+    setDraftProductTemplate(null);
+    setEditingSourceProductTemplate(null);
+    setProductTemplateModeStoreId(null);
+    setExternalKey("");
+    setDisplayName("");
+    setCategory("");
+    setDeliveryMode("");
+    setStockQuantity("1");
+    setProductDescription("");
+    setAskingAmount("");
+    setSupplyFieldValues({});
+    setDraftImported(false);
+    setAttachments([]);
+  }, [storeId]);
+
+  useEffect(() => {
+    if (!storeId || !activeProductTemplateCatalog) return;
+    if (activeProductTemplateCatalog.templates.length) {
+      setProductTemplateModeStoreId(storeId);
+    }
+    if (productTemplateDefaultInitializedStoreRef.current === storeId) return;
+    productTemplateDefaultInitializedStoreRef.current = storeId;
+    if (editingOffer || selectedProductTemplateId !== null) return;
+    const nextTemplate = activeProductTemplateCatalog.templates.find(
+      (template) =>
+        template.id === activeProductTemplateCatalog.defaultTemplateId &&
+        activeProductTemplateCatalog.enabledTemplateIds.includes(template.id),
+    );
+    if (!nextTemplate) return;
+    setSelectedProductTemplateId(nextTemplate.id);
+    setDraftProductTemplate(nextTemplate);
+    setCategory((current) => current || nextTemplate.category || "");
+    setSupplyFieldValues((current) => ({
+      ...supplyFieldValuesFromAttributes(
+        nextTemplate.supplyFields,
+        draftImported ? agentDraft?.attributes : undefined,
+      ),
+      ...current,
+    }));
+  }, [
+    activeProductTemplateCatalog,
+    agentDraft,
+    draftImported,
+    editingOffer,
+    selectedProductTemplateId,
+    storeId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !selectedProductTemplateId ||
+      draftProductTemplate?.id === selectedProductTemplateId ||
+      !catalogSelectedProductTemplate
+    ) {
+      return;
+    }
+    setDraftProductTemplate(catalogSelectedProductTemplate);
+    setSupplyFieldValues((current) => ({
+      ...supplyFieldValuesFromAttributes(
+        catalogSelectedProductTemplate.supplyFields,
+        editingOffer?.attributes,
+      ),
+      ...current,
+    }));
+    if (
+      editingOffer?.productTemplateId === selectedProductTemplateId &&
+      !editingSourceProductTemplate
+    ) {
+      setEditingSourceProductTemplate(catalogSelectedProductTemplate);
+    }
+  }, [
+    catalogSelectedProductTemplate,
+    draftProductTemplate,
+    editingOffer,
+    editingSourceProductTemplate,
+    selectedProductTemplateId,
+  ]);
+
+  useEffect(() => {
     void loadSubmissions();
   }, [loadSubmissions]);
 
@@ -481,16 +659,27 @@ export function SellerDashboard({
   };
 
   const resetOfferForm = () => {
+    const defaultTemplate = activeProductTemplateCatalog?.templates.find(
+      (template) =>
+        template.id === activeProductTemplateCatalog.defaultTemplateId &&
+        activeProductTemplateCatalog.enabledTemplateIds.includes(template.id),
+    );
+    const resetFields = activeProductTemplateCatalog?.templates.length
+      ? (defaultTemplate?.supplyFields ?? [])
+      : legacySupplyFields;
     setEditingOffer(null);
+    setEditingSourceProductTemplate(null);
+    setSelectedProductTemplateId(defaultTemplate?.id ?? null);
+    setDraftProductTemplate(defaultTemplate ?? null);
     setExternalKey("");
     setDisplayName("");
-    setCategory("");
+    setCategory(defaultTemplate?.category ?? "");
     setDeliveryMode("");
     setStockQuantity("1");
     setProductDescription("");
     setAskingAmount("");
     setCurrency(pricingCurrency ?? "");
-    setSupplyFieldValues(supplyFieldValuesFromAttributes(supplyFields, {}));
+    setSupplyFieldValues(supplyFieldValuesFromAttributes(resetFields, {}));
     setDraftImported(false);
     setAttachments([]);
   };
@@ -499,10 +688,19 @@ export function SellerDashboard({
     const nextDeliveryMode = stringAttribute(offer.attributes, [
       "delivery_mode",
     ]);
+    const offerTemplate = activeProductTemplateCatalog?.templates.find(
+      (template) => template.id === offer.productTemplateId,
+    );
+    const offerSupplyFields = activeProductTemplateCatalog?.templates.length
+      ? (offerTemplate?.supplyFields ?? [])
+      : legacySupplyFields;
     const nextScale = Number.isInteger(offer.terms.currency_scale)
       ? Number(offer.terms.currency_scale)
       : pricingScale;
     setEditingOffer(offer);
+    setEditingSourceProductTemplate(offerTemplate ?? null);
+    setSelectedProductTemplateId(offer.productTemplateId ?? null);
+    setDraftProductTemplate(offerTemplate ?? null);
     setExternalKey(offer.external_key);
     setDisplayName(offer.display_name);
     setCategory(stringAttribute(offer.attributes, ["category"]) ?? "");
@@ -523,7 +721,9 @@ export function SellerDashboard({
       stringAttribute(offer.attributes, ["description"]) ?? "",
     );
     setSupplyFieldValues(
-      supplyFieldValuesFromAttributes(supplyFields, offer.attributes),
+      activeProductTemplateCatalog?.templates.length && !offerTemplate
+        ? unresolvedProductTemplateFieldValues(offer.attributes)
+        : supplyFieldValuesFromAttributes(offerSupplyFields, offer.attributes),
     );
     setAskingAmount(
       typeof offer.terms.amount_minor === "string"
@@ -703,9 +903,57 @@ export function SellerDashboard({
         .filter((offer) => offer.status === "active"),
     [submissions],
   );
+  const productTemplateInvalidReason = (() => {
+    if (!store || !usesProductTemplates) return null;
+    if (!activeProductTemplateCatalog)
+      return locale === "en"
+        ? "The product-template policy is unresolved. Refresh it before continuing."
+        : "商品模板设置尚未解析完成，请刷新后再继续。";
+    if (!enabledProductTemplates.length)
+      return locale === "en"
+        ? "No product template is enabled. A store manager must enable one before new products can be published."
+        : "本店未启用任何商品模板，店主启用模板前不能发布新商品。";
+    if (!selectedProductTemplateId)
+      return editingOffer
+        ? locale === "en"
+          ? "This legacy offer is not bound to a product template. Choose an enabled replacement explicitly."
+          : "该旧版商品未绑定商品模板，请显式选择一个当前启用的模板。"
+        : locale === "en"
+          ? "No default product template is available. Choose an enabled template explicitly."
+          : "当前没有可用的默认商品模板，请显式选择一个当前启用的模板。";
+    if (
+      !activeProductTemplateCatalog.templates.some(
+        (template) => template.id === selectedProductTemplateId,
+      )
+    )
+      return locale === "en"
+        ? "This offer references an unknown product template. Choose an enabled replacement explicitly."
+        : "该商品绑定了当前目录中不存在的模板，请显式选择一个当前启用的模板。";
+    if (!selectedProductTemplateIsEnabled)
+      return locale === "en"
+        ? "This offer's product template is disabled for the store. Choose an enabled replacement explicitly."
+        : "该商品绑定的模板已被本店停用，请显式选择一个当前启用的模板。";
+    return null;
+  })();
+  const productTemplateSubmitBlocked = Boolean(
+    store &&
+      (productTemplatesLoading ||
+        productTemplatesError ||
+        productTemplateInvalidReason),
+  );
 
   const submit = async (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (productTemplateSubmitBlocked) {
+      onNotice(
+        productTemplatesError ||
+          productTemplateInvalidReason ||
+          (locale === "en"
+            ? "Wait for product templates to finish loading."
+            : "请等待商品模板加载完成。"),
+      );
+      return;
+    }
     const serializedSupplyFields = serializeSupplyFieldValues(
       supplyFields,
       supplyFieldValues,
@@ -879,10 +1127,25 @@ export function SellerDashboard({
       delivery_mode: deliveryMode,
       stock_quantity: normalizedStock,
     };
+    const replacingUnresolvedTemplate = Boolean(
+      usesProductTemplates &&
+        editingOffer &&
+        selectedProductTemplateId !==
+          (editingOffer.productTemplateId ?? null) &&
+        !editingSourceProductTemplate,
+    );
+    const knownTemplateFields = usesProductTemplates
+      ? [
+          ...(activeProductTemplateCatalog?.templates.flatMap(
+            (template) => template.supplyFields,
+          ) ?? []),
+          ...(editingSourceProductTemplate?.supplyFields ?? []),
+        ]
+      : supplyFields;
     const attributesWithAttachments = {
       ...withoutSupplyFieldAttributes(
-        supplyFields,
-        editingOffer?.attributes ?? {},
+        knownTemplateFields,
+        replacingUnresolvedTemplate ? {} : editingOffer?.attributes,
       ),
       ...parsedAttributes,
       ...serializedSupplyFields.attributes,
@@ -944,6 +1207,9 @@ export function SellerDashboard({
             currency: normalizedCurrency,
             currency_scale: pricingScale,
           },
+          productTemplateId: usesProductTemplates
+            ? selectedProductTemplateId
+            : null,
           expectedVersion: editingOffer.version,
         });
       } else {
@@ -959,6 +1225,9 @@ export function SellerDashboard({
             currency: normalizedCurrency,
             currency_scale: pricingScale,
           },
+          productTemplateId: usesProductTemplates
+            ? selectedProductTemplateId
+            : null,
         });
         record = offer;
       }
@@ -1005,6 +1274,19 @@ export function SellerDashboard({
 
   return (
     <div className="dashboard seller-dashboard">
+      {store ? (
+        <StoreProductTemplateSettings
+          storeId={store.id}
+          canManageStore={canManageStore}
+          catalog={activeProductTemplateCatalog}
+          loading={productTemplatesLoading}
+          error={productTemplatesError}
+          onReload={() => void loadProductTemplates()}
+          onCatalogChange={setProductTemplateCatalog}
+          onNotice={onNotice}
+          locale={locale}
+        />
+      ) : null}
       <div className="seller-settings-summary">
         <div>
           <strong>
@@ -1031,7 +1313,9 @@ export function SellerDashboard({
               resetOfferForm();
               setActivePanel("details");
             }}
-            disabled={mediaUploading || submitting}
+            disabled={
+              mediaUploading || submitting || productTemplateSubmitBlocked
+            }
           >
             {copy("publishOfferAction", "发布商品", "Publish offer")}
             <ArrowRight size={16} aria-hidden="true" />
@@ -1186,6 +1470,40 @@ export function SellerDashboard({
             </div>
           ) : null}
           <form className="seller-upload-form" onSubmit={submit} noValidate>
+            {store &&
+            (productTemplatesLoading ||
+              productTemplatesError ||
+              usesProductTemplates) ? (
+              <ProductTemplateSelector
+                templates={enabledProductTemplates}
+                selectedTemplateId={selectedProductTemplateId}
+                sourceTemplate={selectedProductTemplate ?? null}
+                values={supplyFieldValues}
+                onConfirm={(selection) => {
+                  const nextTemplate = enabledProductTemplates.find(
+                    (template) => template.id === selection.templateId,
+                  );
+                  if (!nextTemplate) {
+                    onNotice(
+                      locale === "en"
+                        ? "That product template is no longer enabled. Refresh the policy and choose again."
+                        : "该商品模板已不再启用，请刷新设置后重新选择。",
+                    );
+                    return;
+                  }
+                  setSelectedProductTemplateId(nextTemplate.id);
+                  setDraftProductTemplate(nextTemplate);
+                  setCategory(nextTemplate.category ?? "");
+                  setSupplyFieldValues(selection.values);
+                }}
+                onRefresh={() => void loadProductTemplates()}
+                locale={locale}
+                loading={productTemplatesLoading}
+                error={productTemplatesError}
+                invalidReason={productTemplateInvalidReason}
+                disabled={mediaUploading || submitting}
+              />
+            ) : null}
             <div className="seller-media-uploader seller-upload-wide">
               <div className="seller-media-uploader-heading">
                 <div>
@@ -1465,6 +1783,7 @@ export function SellerDashboard({
                 disabled={
                   submitting ||
                   mediaUploading ||
+                  productTemplateSubmitBlocked ||
                   !isLiveMarketplaceEnabled() ||
                   !subplatform.domainId ||
                   (usesLegacyMarketplace &&
@@ -1571,7 +1890,15 @@ export function SellerDashboard({
                           className="text-action seller-record-action"
                           type="button"
                           onClick={() => beginOfferEdit(offer)}
-                          disabled={submitting || withdrawing}
+                          disabled={
+                            submitting ||
+                            withdrawing ||
+                            Boolean(
+                              store &&
+                                (productTemplatesLoading ||
+                                  productTemplatesError),
+                            )
+                          }
                         >
                           <Pencil size={14} aria-hidden="true" />
                           {copy("editOfferAction", "编辑", "Edit")}
@@ -1914,6 +2241,39 @@ function amountPlaceholder(
     : scale > 0
       ? `例如 1000.${"0".repeat(Math.min(scale, 2))}`
       : "例如 1000";
+}
+
+function unresolvedProductTemplateFieldValues(
+  attributes: Record<string, unknown>,
+): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    if (
+      [
+        "attachments",
+        "category",
+        "delivery_mode",
+        "description",
+        "images",
+        "image_url",
+        "media",
+        "photo_url",
+        "stock_quantity",
+        "video_url",
+      ].includes(key) ||
+      value === null ||
+      value === undefined
+    ) {
+      continue;
+    }
+    values[key] =
+      typeof value === "string" ||
+      typeof value === "boolean" ||
+      (typeof value === "number" && Number.isFinite(value))
+        ? String(value)
+        : "[value]";
+  }
+  return values;
 }
 
 function marketplaceOfferAttachments(

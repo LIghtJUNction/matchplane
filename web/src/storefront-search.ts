@@ -2,6 +2,11 @@ import { authDatabase } from "./lib/auth";
 import type { RecommendedBackendListing } from "./api";
 import { MAX_PUBLIC_STORES, type PublicStore } from "./store-directory";
 import {
+  parseProductTemplates,
+  PRODUCT_TEMPLATE_ID_PATTERN,
+  supplyFieldsForProductTemplate,
+} from "./product-templates";
+import {
   boundedMatchReasons,
   comparePublicStorefrontOffers,
   rankPublicStorefrontCandidates,
@@ -22,6 +27,8 @@ interface PublicOfferRow {
   storeSlug: string;
   storePath: string;
   integrationKind: string;
+  productTemplateId?: string | null;
+  productTemplates?: unknown;
   supplyFields: unknown;
   publishedAt: string | null;
   likeTotal?: string;
@@ -152,6 +159,8 @@ async function searchPublicStoreOfferPageFromDatabase(
             store.slug AS "storeSlug",
             alias.path AS "storePath",
             store.integration_kind AS "integrationKind",
+            offer.product_template_id::text AS "productTemplateId",
+            registration.manifest -> 'productTemplates' AS "productTemplates",
             COALESCE(registration.manifest -> 'ui' -> 'supplyFields', '[]'::jsonb) AS "supplyFields",
             offer.published_at::text AS "publishedAt",
             COALESCE(
@@ -206,8 +215,8 @@ async function searchPublicStoreOfferPageFromDatabase(
         )
     )
      SELECT id, "tenantId", "domainId", "displayName", attributes, terms,
-            "storeName", "storeSlug", "storePath", "integrationKind", "supplyFields",
-            "publishedAt", "likeTotal"
+            "storeName", "storeSlug", "storePath", "integrationKind",
+            "productTemplateId", "productTemplates", "supplyFields", "publishedAt", "likeTotal"
        FROM ranked_offers
       ORDER BY "publishedAt" DESC NULLS LAST, id
       LIMIT ${PUBLIC_OFFER_SEARCH_CANDIDATE_SENTINEL}`,
@@ -228,7 +237,11 @@ async function searchPublicStoreOfferPageFromDatabase(
       attributes: publicAttributes(
         row.attributes,
         row.integrationKind,
-        row.supplyFields,
+        publicSupplyFields(
+          row.productTemplateId,
+          row.productTemplates,
+          row.supplyFields,
+        ),
       ),
       terms: publicTerms(row.terms),
     })),
@@ -270,6 +283,10 @@ async function searchPublicStoreOfferPageFromDatabase(
           subplatform: row.storeSlug,
           store_name: row.storeName,
           like_total: row.likeTotal ?? "0",
+          ...(typeof row.productTemplateId === "string" &&
+          PRODUCT_TEMPLATE_ID_PATTERN.test(row.productTemplateId)
+            ? { productTemplateId: row.productTemplateId }
+            : {}),
           ...(imageUrl ? { image_url: imageUrl } : {}),
           ...(score === undefined
             ? {}
@@ -309,6 +326,25 @@ function assertPublicOfferSearchBudget(
   }
 }
 
+function publicSupplyFields(
+  productTemplateId: string | null | undefined,
+  productTemplates: unknown,
+  legacySupplyFields: unknown,
+): unknown[] {
+  if (productTemplateId === null || productTemplateId === undefined) {
+    return Array.isArray(legacySupplyFields) ? legacySupplyFields : [];
+  }
+  if (!PRODUCT_TEMPLATE_ID_PATTERN.test(productTemplateId)) return [];
+  const templates = parseProductTemplates(productTemplates);
+  if (!templates) return [];
+  return (
+    supplyFieldsForProductTemplate(
+      { productTemplates: templates },
+      productTemplateId,
+    ) ?? []
+  );
+}
+
 function publicAttributes(
   value: unknown,
   integrationKind: string,
@@ -322,24 +358,14 @@ function publicAttributes(
     ? supplyFields.flatMap((field): string[] => {
         const item = record(field);
         return typeof item.key === "string" &&
-          /^[A-Za-z0-9_.-]{1,128}$/.test(item.key) &&
           isSafePublicAttributeKey(item.key)
           ? [item.key]
           : [];
       })
     : [];
   const publicKeys = [
-    ...new Set([
-      "brand",
-      "model",
-      "category",
-      "condition",
-      "location",
-      "delivery_mode",
-      "stock_quantity",
-      ...declaredKeys,
-    ]),
-  ].slice(0, 32);
+    ...new Set(["stock_quantity", ...declaredKeys]),
+  ].slice(0, 129);
   for (const key of publicKeys) {
     const candidate = source[key];
     if (typeof candidate === "string" && candidate.trim())

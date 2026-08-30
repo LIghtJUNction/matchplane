@@ -7,6 +7,7 @@
  * being copied into paths or capability headers.
  */
 
+import { PRODUCT_TEMPLATE_ID_PATTERN } from "./product-templates";
 import { parseRetrievalQuery } from "./retrieval-protocol";
 
 const UUID_PATTERN =
@@ -292,6 +293,8 @@ function validateOffer(args: Record<string, unknown>): string | null {
   if (displayName) return displayName;
   const objects = validateOptionalObjects(args, ["attributes", "terms"]);
   if (objects) return objects;
+  const productTemplateId = optionalProductTemplateId(args);
+  if (productTemplateId) return productTemplateId;
   const offerId = optionalUuid(args, "offer_id");
   if (offerId) return offerId;
   return optionalUuid(args, "asset_id", true);
@@ -316,7 +319,8 @@ function validateOfferUpdate(args: Record<string, unknown>): string | null {
   const attributes = recordArgument(args, "attributes");
   if (typeof attributes === "string") return attributes;
   const terms = recordArgument(args, "terms");
-  return typeof terms === "string" ? terms : null;
+  if (typeof terms === "string") return terms;
+  return optionalProductTemplateId(args);
 }
 
 function validateOfferWithdraw(args: Record<string, unknown>): string | null {
@@ -479,6 +483,17 @@ function optionalString(
 ): string | null {
   if (args[key] === undefined) return null;
   return requiredString(args, key, maximum);
+}
+
+function optionalProductTemplateId(
+  args: Record<string, unknown>,
+): string | null {
+  const value = args.productTemplateId;
+  if (value === undefined) return null;
+  if (typeof value !== "string" || !PRODUCT_TEMPLATE_ID_PATTERN.test(value)) {
+    return "productTemplateId must be a valid product template identifier";
+  }
+  return null;
 }
 
 function recordArgument(

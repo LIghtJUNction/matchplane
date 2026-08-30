@@ -10,7 +10,11 @@ import {
 } from "../../../../src/lib/body-limit";
 import { hasTrustedBrowserOrigin } from "../../../../src/lib/request-origin";
 import { isUuid } from "../../../../src/lib/uuid";
-import { validateManifestUi } from "../../../../src/manifest-ui-validation";
+import {
+  validateManifestProductTemplates,
+  validateManifestUi,
+} from "../../../../src/manifest-ui-validation";
+import type { ProductTemplateConfig } from "../../../../src/product-templates";
 
 export const runtime = "nodejs";
 
@@ -561,6 +565,8 @@ function validateManifest(
     return { ok: false, error: "manifest.email 无效" };
   if (manifest.ui !== undefined && !validateManifestUi(manifest.ui))
     return { ok: false, error: "manifest.ui 无效" };
+  if (!validateManifestProductTemplates(manifest))
+    return { ok: false, error: "manifest.productTemplates 无效" };
   if (
     !Array.isArray(manifest.routes) ||
     manifest.routes.length === 0 ||
@@ -783,6 +789,8 @@ interface Manifest {
     label?: string;
   };
   email?: { providerKey?: string; fromAddress?: string };
+  productTemplates?: ProductTemplateConfig[];
+  defaultProductTemplateId?: string;
   ui?: {
     chat?: Record<string, string>;
     copy?: Record<string, string>;
@@ -840,6 +848,8 @@ const manifestKeys = new Set([
   "pricing",
   "email",
   "ui",
+  "productTemplates",
+  "defaultProductTemplateId",
   "rootApiVersion",
   "entry",
   "routes",

@@ -74,11 +74,14 @@ describe("public storefront search", () => {
   it("matches a canonical public attribute without prose duplication", async () => {
     query.mockResolvedValue({
       rows: [
-        completeProductRow({
-          displayName: "标准商品",
-          description: "常规公开说明",
-          attributes: { brand: "Aurora" },
-        }),
+        {
+          ...completeProductRow({
+            displayName: "标准商品",
+            description: "常规公开说明",
+            attributes: { brand: "Aurora" },
+          }),
+          supplyFields: [{ key: "brand", label: "Brand" }],
+        },
       ],
     });
 
@@ -320,6 +323,74 @@ describe("public storefront search", () => {
     ]);
   });
 
+  it("filters personal data in the real database page projection while keeping safe product fields", async () => {
+    const privateAttributes = {
+      id_card: "private-id-card-value",
+      identity_card: "private-identity-card-value",
+      national_id: "private-national-id-value",
+      passport_number: "private-passport-value",
+      driver_license: "private-driver-license-value",
+      owner_name: "private-owner-name-value",
+      customer_name: "private-customer-name-value",
+      buyer_full_name: "private-buyer-name-value",
+      real_name: "private-real-name-value",
+      legal_person_name: "private-legal-name-value",
+      full_name: "private-full-name-value",
+      date_of_birth: "private-birth-date-value",
+      residential_address: "private-address-value",
+      bank_account_number: "private-bank-account-value",
+      identity_document_url: "https://private.example/identity-document",
+      personal_document_file: "private-personal-document-value",
+      身份证号码: "private-chinese-id-card-value",
+      证件号码: "private-chinese-identity-document-value",
+      客户姓名: "private-chinese-customer-name-value",
+      出生日期: "private-chinese-birth-date-value",
+      家庭住址: "private-chinese-address-value",
+      银行账号: "private-chinese-bank-account-value",
+    };
+    const safeAttributes = {
+      model_id: "model-public-42",
+      brand_name: "Public Brand",
+      certification_document_url:
+        "https://public.example/certification-document",
+      公开认证文档链接: "https://public.example/certification-document-zh",
+    };
+    query.mockResolvedValue({
+      rows: [
+        {
+          ...completeProductRow({
+            attributes: { ...privateAttributes, ...safeAttributes },
+          }),
+          productTemplateId: null,
+          supplyFields: Object.keys({
+            ...privateAttributes,
+            ...safeAttributes,
+          }).map((key) => ({ key })),
+        },
+      ],
+    });
+
+    // The exported page API delegates to the real database projection; only
+    // its database query is mocked here.
+    const page = await searchPublicStoreOfferPage({
+      stores: [store],
+      narrative: "",
+    });
+    const attributes = page.items[0]?.attributes ?? {};
+
+    expect(page).toEqual(
+      expect.objectContaining({ total: 1, offset: 0, hasMore: false }),
+    );
+    expect(attributes).toEqual(expect.objectContaining(safeAttributes));
+    for (const key of Object.keys(privateAttributes)) {
+      expect(Object.prototype.hasOwnProperty.call(attributes, key)).toBe(false);
+    }
+    const serialized = JSON.stringify(page);
+    for (const value of Object.values(privateAttributes)) {
+      expect(serialized).not.toContain(value);
+    }
+  });
+
   it("indexes multiple products and keeps only exact budget and attribute matches", async () => {
     const row = (
       id: string,
@@ -457,6 +528,126 @@ describe("public storefront search", () => {
       [store.tenantId],
       [store.domainId],
     ]);
+  });
+
+  it("projects only the explicitly bound product template fields", async () => {
+    query.mockResolvedValue({
+      rows: [
+        {
+          ...completeProductRow({
+            attributes: {
+              sensor_size: "full-frame",
+              mount: "L",
+              brand: "Undeclared brand",
+              internal_notes: "do not expose",
+            },
+          }),
+          productTemplateId: "camera",
+          productTemplates: [
+            {
+              id: "camera",
+              label: "Camera",
+              supplyFields: [{ key: "sensor_size", label: "Sensor" }],
+            },
+            {
+              id: "lens",
+              label: "Lens",
+              supplyFields: [{ key: "mount", label: "Mount" }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const products = await searchPublicStoreOffers({
+      stores: [store],
+      narrative: "",
+    });
+
+    expect(products[0]).toEqual(
+      expect.objectContaining({
+        productTemplateId: "camera",
+        attributes: expect.objectContaining({ sensor_size: "full-frame" }),
+      }),
+    );
+    expect(products[0]?.attributes).not.toHaveProperty("mount");
+    expect(products[0]?.attributes).not.toHaveProperty("brand");
+    expect(products[0]?.attributes).not.toHaveProperty("internal_notes");
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("offer.product_template_id");
+    expect(sql).toContain("manifest -> 'productTemplates'");
+  });
+
+  it("fails closed for an unknown template without falling back to a default", async () => {
+    query.mockResolvedValue({
+      rows: [
+        {
+          ...completeProductRow({
+            attributes: {
+              sensor_size: "secretly undeclared",
+              brand: "must not use default",
+            },
+          }),
+          productTemplateId: "retired",
+          productTemplates: [
+            {
+              id: "camera",
+              label: "Camera",
+              supplyFields: [
+                { key: "sensor_size", label: "Sensor" },
+                { key: "brand", label: "Brand" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const products = await searchPublicStoreOffers({
+      stores: [store],
+      narrative: "",
+    });
+
+    expect(products[0]?.productTemplateId).toBe("retired");
+    expect(products[0]?.attributes).toEqual({
+      description: "适合旅行拍摄",
+      stock_quantity: 2,
+      attachments: expect.any(Array),
+    });
+    expect(JSON.stringify(products)).not.toContain("secretly undeclared");
+    expect(JSON.stringify(products)).not.toContain("must not use default");
+  });
+
+  it("keeps null template IDs on the validated legacy supply-field path", async () => {
+    query.mockResolvedValue({
+      rows: [
+        {
+          ...completeProductRow({
+            attributes: { material: "linen", brand: "undeclared" },
+          }),
+          productTemplateId: null,
+          productTemplates: [
+            {
+              id: "default",
+              label: "Default",
+              supplyFields: [{ key: "brand", label: "Brand" }],
+            },
+          ],
+          supplyFields: [{ key: "material", label: "Material" }],
+        },
+      ],
+    });
+
+    const products = await searchPublicStoreOffers({
+      stores: [store],
+      narrative: "linen",
+    });
+
+    expect(products[0]?.attributes).toEqual(
+      expect.objectContaining({ material: "linen" }),
+    );
+    expect(products[0]?.attributes).not.toHaveProperty("brand");
+    expect(products[0]).not.toHaveProperty("productTemplateId");
   });
 
   it("rejects unsafe image URLs instead of presenting a fabricated product card", async () => {

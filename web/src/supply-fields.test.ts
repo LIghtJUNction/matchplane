@@ -38,17 +38,21 @@ describe("supply-field attribute helpers", () => {
     });
   });
 
-  it("preserves safe opaque attributes while removing declared and sensitive keys", () => {
+  it("preserves domain-neutral opaque attributes while removing declared and authority keys", () => {
     expect(
       withoutSupplyFieldAttributes(fields, {
         brand: "雪佛兰",
         mileage_km: 42000,
         opaque: { retained: true },
         legacy_rank: 7,
-        vin: "SHOULD-NOT-SURVIVE",
+        vin: "domain-owned-value",
         supplier_id: "private-supplier",
       }),
-    ).toEqual({ opaque: { retained: true }, legacy_rank: 7 });
+    ).toEqual({
+      opaque: { retained: true },
+      legacy_rank: 7,
+      vin: "domain-owned-value",
+    });
   });
 
   it("serializes trimmed strings and finite numbers", () => {

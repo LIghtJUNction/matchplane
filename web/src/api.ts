@@ -6,6 +6,7 @@ import {
   parseMediaUploadResponse,
   type MarketplaceAttachment,
 } from "./media-attachment";
+import type { ProductTemplateConfig } from "./product-templates";
 import type { RetrievalResult } from "./retrieval-protocol";
 import type { StoreFinanceReport } from "./store-finance";
 import type {
@@ -968,6 +969,117 @@ export interface StoreSummary {
   };
 }
 
+export interface StoreProductTemplateCatalog {
+  storeId: string;
+  storeVersion: number;
+  catalogRevision: string;
+  templates: ProductTemplateConfig[];
+  enabledTemplateIds: string[];
+  defaultTemplateId: string | null;
+}
+
+/** Read the private enabled/default product-template policy for one managed store. */
+export async function getStoreProductTemplates(
+  storeId: string,
+): Promise<StoreProductTemplateCatalog> {
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(storeId)}/product-templates`,
+    {
+      credentials: "include",
+      headers: { accept: "application/json" },
+      cache: "no-store",
+    },
+  );
+  const body = (await response.json().catch(() => null)) as
+    | StoreProductTemplateRouteResponse
+    | { error?: string }
+    | null;
+  if (!response.ok || !isStoreProductTemplateRouteResponse(body)) {
+    throw new MarketplaceApiError(
+      response.status,
+      body && "error" in body ? body.error || "商品模板设置读取失败" : "商品模板设置读取失败",
+    );
+  }
+  return storeProductTemplateCatalog(storeId, body);
+}
+
+/** Atomically save a store policy against both store and catalog versions. */
+export async function saveStoreProductTemplates(input: {
+  storeId: string;
+  enabledTemplateIds: string[];
+  defaultTemplateId: string | null;
+  expectedStoreVersion: number;
+  expectedCatalogRevision: string;
+}): Promise<StoreProductTemplateCatalog> {
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(input.storeId)}/product-templates`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        enabledTemplateIds: input.enabledTemplateIds,
+        defaultTemplateId: input.defaultTemplateId,
+        expectedStoreVersion: input.expectedStoreVersion,
+        expectedCatalogRevision: input.expectedCatalogRevision,
+      }),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as
+    | StoreProductTemplateRouteResponse
+    | { error?: string }
+    | null;
+  if (!response.ok || !isStoreProductTemplateRouteResponse(body)) {
+    throw new MarketplaceApiError(
+      response.status,
+      body && "error" in body ? body.error || "商品模板设置保存失败" : "商品模板设置保存失败",
+    );
+  }
+  return storeProductTemplateCatalog(input.storeId, body);
+}
+
+interface StoreProductTemplateRouteResponse {
+  catalog: {
+    revision: string;
+    templates: ProductTemplateConfig[];
+    defaultTemplateId: string | null;
+  };
+  settings: {
+    enabledTemplateIds: string[];
+    defaultTemplateId: string | null;
+  };
+  storeVersion: number;
+}
+
+function isStoreProductTemplateRouteResponse(
+  value: unknown,
+): value is StoreProductTemplateRouteResponse {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<StoreProductTemplateRouteResponse>;
+  return Boolean(
+    candidate.catalog &&
+      typeof candidate.catalog.revision === "string" &&
+      Array.isArray(candidate.catalog.templates) &&
+      candidate.settings &&
+      Array.isArray(candidate.settings.enabledTemplateIds) &&
+      Number.isSafeInteger(candidate.storeVersion),
+  );
+}
+
+function storeProductTemplateCatalog(
+  storeId: string,
+  response: StoreProductTemplateRouteResponse,
+): StoreProductTemplateCatalog {
+  return {
+    storeId,
+    storeVersion: response.storeVersion,
+    catalogRevision: response.catalog.revision,
+    templates: response.catalog.templates,
+    enabledTemplateIds: response.settings.enabledTemplateIds,
+    defaultTemplateId: response.settings.defaultTemplateId,
+  };
+}
+
 export interface StoreCollaboratorInvite {
   storeId: string;
   registrationUrl: string;
@@ -1711,6 +1823,7 @@ export interface MarketplaceOffer {
   display_name: string;
   attributes: Record<string, unknown>;
   terms: Record<string, unknown>;
+  productTemplateId?: string | null;
   status:
     | "draft"
     | "active"
@@ -1760,6 +1873,21 @@ export interface MarketplaceDemandCandidate {
 }
 
 export type MarketplaceOfferOutcome = MarketplaceOffer & { duplicate: boolean };
+
+type MarketplaceOfferWire = Omit<MarketplaceOffer, "productTemplateId"> & {
+  productTemplateId?: string | null;
+  product_template_id?: string | null;
+};
+
+function normalizeMarketplaceOffer<T extends MarketplaceOfferWire>(
+  offer: T,
+): Omit<T, "product_template_id"> & MarketplaceOffer {
+  const { product_template_id: wireTemplateId, ...rest } = offer;
+  return {
+    ...rest,
+    productTemplateId: offer.productTemplateId ?? wireTemplateId ?? null,
+  };
+}
 
 /** Root-control-plane projection; package-owned attributes and terms are intentionally absent. */
 export interface MarketplaceOfferAdminRecord {
@@ -2912,15 +3040,15 @@ export async function testPlatformAi(
     (body.committed !== true ||
       typeof body.generationId !== "string" ||
       !body.generationId.trim() ||
-      !Object.prototype.hasOwnProperty.call(body, "config") ||
+      !Object.hasOwn(body, "config") ||
       (body.config !== null &&
         (typeof body.config !== "object" || Array.isArray(body.config))) ||
-      !Object.prototype.hasOwnProperty.call(body, "draft") ||
+      !Object.hasOwn(body, "draft") ||
       !body.draft ||
       typeof body.draft !== "object" ||
       Array.isArray(body.draft) ||
       body.draft.testedReady !== true ||
-      !Object.prototype.hasOwnProperty.call(body, "effective") ||
+      !Object.hasOwn(body, "effective") ||
       !body.effective ||
       typeof body.effective !== "object" ||
       Array.isArray(body.effective))
@@ -4320,15 +4448,16 @@ export function retrieveMarketplaceContact(input: {
   );
 }
 
-export function createMarketplaceOffer(input: {
+export async function createMarketplaceOffer(input: {
   session: PartySession;
   domainId: string;
   externalKey: string;
   displayName: string;
   attributes: Record<string, unknown>;
   terms?: Record<string, unknown>;
+  productTemplateId?: string | null;
 }): Promise<MarketplaceOfferOutcome> {
-  return request<MarketplaceOfferOutcome>(
+  const offer = await request<MarketplaceOfferWire & { duplicate: boolean }>(
     "/v1/marketplace/offers",
     {
       method: "POST",
@@ -4340,23 +4469,28 @@ export function createMarketplaceOffer(input: {
         display_name: input.displayName,
         attributes: input.attributes,
         terms: input.terms ?? {},
+        ...(Object.hasOwn(input, "productTemplateId")
+          ? { product_template_id: input.productTemplateId ?? null }
+          : {}),
       }),
     },
     input.session,
   );
+  return normalizeMarketplaceOffer(offer);
 }
 
 /** Replace editable offer fields using the caller's latest optimistic version. */
-export function updateMarketplaceOffer(input: {
+export async function updateMarketplaceOffer(input: {
   session: PartySession;
   domainId: string;
   offerId: string;
   displayName: string;
   attributes: Record<string, unknown>;
   terms: Record<string, unknown>;
+  productTemplateId?: string | null;
   expectedVersion: number;
 }): Promise<MarketplaceOffer> {
-  return request<MarketplaceOffer>(
+  const offer = await request<MarketplaceOfferWire>(
     `/v1/marketplace/offers/${encodeURIComponent(input.offerId)}`,
     {
       method: "PATCH",
@@ -4367,21 +4501,25 @@ export function updateMarketplaceOffer(input: {
         display_name: input.displayName,
         attributes: input.attributes,
         terms: input.terms,
+        ...(Object.hasOwn(input, "productTemplateId")
+          ? { product_template_id: input.productTemplateId ?? null }
+          : {}),
         expected_version: input.expectedVersion,
       }),
     },
     input.session,
   );
+  return normalizeMarketplaceOffer(offer);
 }
 
 /** Withdraw a draft or active offer without deleting its history. */
-export function withdrawMarketplaceOffer(input: {
+export async function withdrawMarketplaceOffer(input: {
   session: PartySession;
   domainId: string;
   offerId: string;
   expectedVersion: number;
 }): Promise<MarketplaceOffer> {
-  return request<MarketplaceOffer>(
+  const offer = await request<MarketplaceOfferWire>(
     `/v1/marketplace/offers/${encodeURIComponent(input.offerId)}/withdraw`,
     {
       method: "POST",
@@ -4394,6 +4532,7 @@ export function withdrawMarketplaceOffer(input: {
     },
     input.session,
   );
+  return normalizeMarketplaceOffer(offer);
 }
 
 /** Read the root-scoped generic offer queue for the administrator workspace. */
@@ -4566,7 +4705,7 @@ export async function uploadMarketplaceAttachment(input: {
   return parsed.value.attachment;
 }
 
-export function getMarketplaceOffers(input: {
+export async function getMarketplaceOffers(input: {
   session: PartySession;
   domainId: string;
   domainWide?: boolean;
@@ -4581,11 +4720,12 @@ export function getMarketplaceOffers(input: {
     offset: String(input.offset ?? 0),
   });
   if (input.domainWide) params.set("domain_wide", "true");
-  return request<MarketplaceOffer[]>(
+  const offers = await request<MarketplaceOfferWire[]>(
     `/v1/marketplace/offers?${params.toString()}`,
     { cache: "no-store" },
     input.session,
   );
+  return offers.map(normalizeMarketplaceOffer);
 }
 
 export function getBuyerRecommendations(input: {

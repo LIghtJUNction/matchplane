@@ -161,6 +161,8 @@ export function SubplatformAdminDashboard({
               locale={locale}
               onNotice={onNotice}
               subplatform={subplatform}
+              store={store}
+              canManageStore={canManageStore}
             />
           </div>
         ) : null}

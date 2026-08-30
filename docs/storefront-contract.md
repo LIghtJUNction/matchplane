@@ -40,6 +40,16 @@
 
 商城不为新店铺预置商品，也不复制第三方商品页。使用共享编辑器的店主登录“商家中心”，填写商品资料、上传图片并提交审核；平台审核通过后才生成公共商品投影。外部目录只有在商家明确配置并拥有该数据源时才可同步，不能用开发夹具或抓取快照替代商家提交。
 
+## Product template boundary
+
+A store package may declare up to 16 stable top-level `productTemplates` and an optional/required `defaultProductTemplateId`. Each template is `{ id, label, description?, category?, supplyFields }`. IDs are unique and immutable in meaning. One template may be its implicit default; multiple templates require an explicit declared default. Each template has at most 64 fields, with at most 256 field declarations and 128 distinct keys across the manifest. A key shared by templates must have the same normalized definition everywhere. A release must not delete an ID while any canonical offer uses it.
+
+The legacy `ui.supplyFields` form remains readable for single-schema packages, but it cannot coexist with `productTemplates`. Legacy offers keep a null `product_template_id`. Template-aware offers atomically persist the selected stable ID in canonical `product_template_id`; unknown, disabled, deleted, or cross-store IDs fail closed for writes and activation. Public reads do not guess a template.
+
+Per-store enabled/default choices live only in private store settings such as `stores.metadata.product_templates`. Store metadata, settings versions, registration data, credentials, contacts, and drafts are not part of the public contract. A public offer projection is an explicit allow-list of canonical public fields plus only attributes declared by its resolved template (or the legacy allow-list). If resolution fails, expose canonical safe fields only; the presence of an attribute in JSON never makes it public.
+
+Domain-specific production templates—for example a used-vehicle schema and its private-record model—belong in an independently versioned store package. Root contracts and examples stay domain-neutral, such as `book` and `generic-service`, and never embed a real merchant instance, brand, proprietary vocabulary, or private rule set.
+
 ## 公共导购与安全边界
 
 匿名访客可以读取店铺目录并提交商品需求。商城先从数据库取得 active/public 店铺白名单，

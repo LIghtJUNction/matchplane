@@ -9,6 +9,8 @@ const CURRENCY_SETTINGS_V1: &str =
     include_str!("../../../migrations/202608280001_mall_currency_exchange_rate.sql");
 const CURRENCY_SETTINGS_V2: &str =
     include_str!("../../../migrations/202608280002_upgrade_mall_currency_exchange_rate.sql");
+const OFFER_PRODUCT_TEMPLATES: &str =
+    include_str!("../../../migrations/202608300001_marketplace_offer_product_templates.sql");
 const CURRENCY_SETTINGS_V1_SQLX_CHECKSUM: &str = "5cfd4a04c6f2f0ea139d8fd0c073c98e5535df7fc961c674ce32b12abb5826245e794f67f67d723d577e34c11b2c0dc0";
 const CURRENCY_SETTINGS_V2_SQLX_CHECKSUM: &str = "e1e63455ab259a79d88faf5e317ffec2ccc8013ec3d3abb07abcf73e6bff2a48590b69acad0335b01a95b10076fd8ae3";
 
@@ -43,12 +45,50 @@ async fn fresh_install_should_apply_every_embedded_migration(
     let latest_applied: bool = sqlx::query_scalar(
         "SELECT EXISTS (\
            SELECT 1 FROM _sqlx_migrations \
-            WHERE version = 202608280002 AND success\
+            WHERE version = 202608300001 AND success\
          )",
     )
     .fetch_one(&pool)
     .await?;
     assert!(latest_applied, "latest migration was not applied");
+
+    // This migration deliberately owns idempotent DDL boundaries so recovery tooling may replay
+    // the file without changing or weakening the nullable legacy contract.
+    sqlx::raw_sql(OFFER_PRODUCT_TEMPLATES)
+        .execute(&pool)
+        .await?;
+    let product_template_column: (String, String) = sqlx::query_as(
+        "SELECT data_type, is_nullable
+           FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'marketplace_offers'
+            AND column_name = 'product_template_id'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        product_template_column,
+        ("text".to_owned(), "YES".to_owned())
+    );
+    let product_template_check: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid)
+           FROM pg_constraint
+          WHERE conrelid = 'marketplace_offers'::regclass
+            AND conname = 'marketplace_offers_product_template_id_format'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert!(product_template_check.contains("^[a-z][a-z0-9._-]{0,63}$"));
+    let product_template_index: String = sqlx::query_scalar(
+        "SELECT indexdef
+           FROM pg_indexes
+          WHERE schemaname = current_schema()
+            AND tablename = 'marketplace_offers'
+            AND indexname = 'idx_marketplace_offers_tenant_store_template_status'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert!(product_template_index.contains("(tenant_id, store_id, product_template_id, status)"));
 
     let columns: Vec<ColumnMetadata> = sqlx::query_as(
         "SELECT column_name AS name, data_type, is_nullable AS nullable, \

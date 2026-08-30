@@ -1,11 +1,36 @@
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { isIP } from "node:net";
 import { isUuid } from "./lib/uuid";
+import {
+  validateManifestProductTemplates,
+  validateManifestUi,
+} from "./manifest-ui-validation";
 
 const FEDERATION_PROTOCOL = "matchplane.federation/v1";
 const SERVER_KEY_PATTERN = /^[a-z0-9][a-z0-9._:-]{1,127}$/;
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}$/;
 const ENV_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
+const FEDERATION_MANIFEST_KEYS = new Set([
+  "apiVersion",
+  "id",
+  "slug",
+  "displayName",
+  "description",
+  "marketplaceContract",
+  "pricing",
+  "email",
+  "ui",
+  "productTemplates",
+  "defaultProductTemplateId",
+  "rootApiVersion",
+  "entry",
+  "routes",
+  "capabilities",
+  "requiredScopes",
+  "assets",
+  "agent",
+  "retrieval",
+]);
 
 export interface VerifiedFederationEnrollment {
   protocol: typeof FEDERATION_PROTOCOL;
@@ -155,6 +180,10 @@ function validateManifest(
 ): string | null {
   const serialized = canonicalJson(manifest);
   if (serialized.length > 64 * 1024) return "manifest 不能超过 64 KiB";
+  const unknownKey = Object.keys(manifest).find(
+    (key) => !FEDERATION_MANIFEST_KEYS.has(key),
+  );
+  if (unknownKey) return `manifest 包含未声明字段: ${unknownKey}`;
   if (
     manifest.apiVersion !== "matchplane.subplatform/v1" ||
     manifest.rootApiVersion !== "v1"
@@ -172,6 +201,10 @@ function validateManifest(
   ) {
     return "manifest.slug 与入驻 slug 不一致";
   }
+  if (manifest.ui !== undefined && !validateManifestUi(manifest.ui))
+    return "manifest.ui 无效";
+  if (!validateManifestProductTemplates(manifest))
+    return "manifest.productTemplates 无效";
   const requiredScopes = manifest.requiredScopes;
   if (
     requiredScopes !== undefined &&

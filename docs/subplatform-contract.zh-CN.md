@@ -44,60 +44,87 @@ await auth.api.verifyApiKey({
 ```json
 {
   "apiVersion": "matchplane.subplatform/v1",
-  "id": "com.example.auto",
-  "slug": "auto",
-  "displayName": "Example Auto",
+  "id": "com.example.catalog",
+  "slug": "catalog",
+  "displayName": "示例目录",
   "description": "...",
   "marketplaceContract": "generic-v1",
   "pricing": { "mode": "fixed", "currency": "XXX", "currencyScale": 2, "label": "Price" },
-  "email": { "providerKey": "example-auto", "fromAddress": "no-reply@example.com" },
+  "productTemplates": [
+    {
+      "id": "book",
+      "label": "图书",
+      "category": "books",
+      "supplyFields": [
+        { "key": "book.author", "label": "作者", "type": "text", "required": true },
+        { "key": "book.isbn", "label": "ISBN", "type": "text" }
+      ]
+    }
+  ],
+  "email": { "providerKey": "example-catalog", "fromAddress": "no-reply@example.com" },
   "rootApiVersion": "v1",
   "entry": "src/index.ts",
-  "routes": ["/auto"],
+  "routes": ["/catalog"],
   "capabilities": ["demand", "supply", "explainable_matching"],
   "requiredScopes": ["marketplace:read", "marketplace:write"],
   "agent": {
     "protocol": "matchplane.agent/v1",
-    "stages": ["merchant", "inventory"],
+    "stages": ["catalog", "fulfillment"],
     "skills": ["matchplane.matching.v1"],
     "mcpTools": ["catalog.search", "merchant.search", "media.upload"],
-    "mcpServerKey": "example-auto"
+    "mcpServerKey": "example-catalog"
   },
   "assets": { "staticDirectory": "dist", "buildCommand": "bun run build" }
 }
 ```
 
-根服务在注册前会按模式验证清单。`id`在全局稳定；`slug`在根机场内部唯一，并作为URL路径。`rootApiVersion`与能力在启用前协商。任选`agent`块仅声明协议、工作流阶段与MCP工具名，不包含端点、预警或库维护配置。`agent.stages`是子平台自有的分类法key，根只校验长度/字符边界；`merchant`、`inventory`只是二手车示例，不是全局枚举。`mcpServerKey`只是稳定的替换键。配置管理员可通过 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 和 key 绑定到 HTTPS MCP 端点；面板本身不能指定 URL 或提供不记名令牌。带有 `agent:tool` 权限的已认证代理可调用通用 HTTP MCP 工具`platform.child.tool`，形成当前`platform_path`、白名单内`tool_name`和构建JSON`arguments`。根服务会在前方再次检查路径可见性与主动注册，终止调用方API密钥，仅添加确定路由头、请求超时和响应体限制，并子平台MCP结果作为可审计工具响应返回。终端未配置时返回明显的降级错误，不会退回到根决策或任何URL。
+根服务在注册前会按模式验证清单。`id`在全局稳定；`slug`在根机场内部唯一，并作为URL路径。`rootApiVersion`与能力在启用前协商。任选`agent`块仅声明协议、工作流阶段与MCP工具名，不包含端点、预警或库维护配置。`agent.stages`是子平台自有的分类法key，根只校验长度/字符边界；`catalog`、`fulfillment` 只是领域中立示例，不是全局枚举。`mcpServerKey`只是稳定的替换键。配置管理员可通过 `MATCHPLANE_SUBPLATFORM_MCP_ENDPOINTS_JSON` 和 key 绑定到 HTTPS MCP 端点；面板本身不能指定 URL 或提供不记名令牌。带有 `agent:tool` 权限的已认证代理可调用通用 HTTP MCP 工具`platform.child.tool`，形成当前`platform_path`、白名单内`tool_name`和构建JSON`arguments`。根服务会在前方再次检查路径可见性与主动注册，终止调用方API密钥，仅添加确定路由头、请求超时和响应体限制，并子平台MCP结果作为可审计工具响应返回。终端未配置时返回明显的降级错误，不会退回到根决策或任何URL。
 
-领域文案、定价能力、筛选器与商品字段不属于根实现。包可在清单中声明 `pricing`、`ui.chat`、`ui.copy`、`ui.filters` 与 `ui.supplyFields`；根服务会校验并传递给通用外壳/插件。联系方式是例外：包不能声明手填字段，交换只使用根 Better Auth 账号中已验证的邮箱或手机，并要求双方明确同意。默认走领域中立市场合约。仍需使用旧仓储的帐篷必须显式声明`marketplaceContract: "legacy-v1"`；仅定价或存在架构并不隐式选择该适配。网关的旧版 HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明默认或业务货币。卖家提交由激活包架构定义的值，根服务仅保存并转发其配置属性。
+领域文案、定价能力、筛选器与商品字段归软件包所有，不属于根实现。包可声明 `pricing`、顶层 `productTemplates` 与 `defaultProductTemplateId`，或使用旧版 `ui.supplyFields`，也可声明 `ui.chat`、`ui.copy` 和 `ui.filters`。`productTemplates` 与 `ui.supplyFields` 不得同时出现；注册必须拒绝这种含混清单。联系方式是例外：包不能声明手填字段，交换只使用根 Better Auth 账号中已验证的邮箱或手机，并要求双方明确同意。默认走领域中立市场合约。仍需使用旧仓储的帐篷必须显式声明`marketplaceContract: "legacy-v1"`；仅定价或存在架构并不隐式选择该适配。网关的旧版 HTTP 路由默认关闭，需要运营侧 `MATCHPLANE_ENABLE_LEGACY_MARKETPLACE_ADAPTER=true` 迁移开关打开。根服务不会附带示例清单、垂直营销声明默认或业务货币。卖家提交由激活包架构定义的值，根服务仅保存并转发其配置属性。
 
-### 公开供给字段
+### 商品模板与公开供给字段
 
-`ui.supplyFields` 永远声明可写入公开 offer attributes，并可投影到公开目录、检索和公开 AI 上下文的字段；它不是私密档案设施。根按清单顺序渲染通用编辑器，并按 `group` 生成分组；没有分组的字段归入通用“补充资料”组。根只理解声明的展示元数据（`type`、`required`、`placeholder`、`group`、`help`、`unit`、`min`、`max`、`step` 和 `options`）。具体字段键、标签、分组、选项和校验边界归当前激活的 store package 所有；根不得硬编码车辆或其他垂直领域字段。
+清单可在顶层声明不超过 16 个 `productTemplates`。每个模板形如 `{ id, label, description?, category?, supplyFields }`。`id` 是稳定的软件包契约：同一清单内必须唯一，不得改名，也不得复用于不同含义。只有一个模板时可省略 `defaultProductTemplateId`；两个及以上模板必须声明默认 ID，且该值必须指向已声明模板。默认 ID 或商品引用的模板未知时必须 fail closed，不得回退到第一个模板。
 
-公开长文本使用 `textarea`；`select` 必须提供非空且不重复的 `options`；声明 `min`、`max` 或正数 `step` 的字段必须使用 `number`。同时声明 `min` 与 `max` 时，包必须保证 `min <= max`。价格、库存和媒体继续使用 canonical offer fields；不得在 `supplyFields` 中重复声明，也不得把它们编码为领域 attributes。
+每个模板最多声明 64 个 `supplyFields`；整个清单最多 256 条字段声明、128 个不同字段 key。模板内 key 必须唯一。多个模板复用同一 key 时，其规范化定义必须完全一致，包括标签、类型、必填标记、展示元数据、数值约束和选项。这样只有含义未变化的共享值才能在用户明确切换模板后保留。软件包新版本不得删除仍被 canonical offer 引用的模板 ID；必须先提供迁移，并保留旧定义直到没有商品使用它。
 
-包不得在 `supplyFields` 中声明 VIN/车辆识别代码或车架号、车牌、身份证明/行驶证/登记证/发票等证件、车主/供应方/联系人资料、采购价或收购价、整备成本、利润、精确库位或内部备注。这些值即使由卖家录入也属于私密资料。未来的私密车辆档案必须使用独立的存储与媒体域，具备明确的 ACL、审计轨迹、保留规则和受控投影；不得复用公开 attributes 或公开目录。
+`ui.supplyFields` 是旧版单模板形式。清单只能选择 legacy 字段或 `productTemplates`，不得同时声明。旧商品继续使用 `product_template_id: null` 和原有字段流程；legacy 字段不会产生隐式模板 ID。支持模板的新商品必须把所选 ID 作为 canonical `product_template_id`，与 attributes 原子写入。未知、未启用、已删除或属于其他店铺的模板 ID 必须阻止创建、更新和激活；公开读取只保留 canonical 安全字段。
 
-以下示例借鉴大风车式公开信息架构，但不复制大风车品牌、视觉、专有文案或未公开规则。示例字段归 store package 所有；根只负责分组和渲染：
+店铺选择属于私有运行时设置，不是 manifest 模板结构：`stores.metadata.product_templates` 可记录该店启用的 ID 和默认 ID。完整 metadata、启用/默认选择、店铺版本、注册内部信息、凭据、联系方式和草稿都不得公开。公开店铺页、检索和 AI 投影采用显式 allow-list：canonical 公开商品字段，加上该商品已解析模板声明的 attributes；legacy 商品使用 legacy allow-list。某属性仅仅存在于 JSON 中，不代表它可以公开。
+
+公开长文本使用 `textarea`；`select` 必须提供非空且不重复的 `options`；声明 `min`、`max` 或正数 `step` 的字段必须使用 `number`，且包必须保证 `min <= max`。价格、库存、媒体等 canonical 字段，以及身份/联系方式、凭据、采购成本、利润、精确库位和内部备注，不得在 `supplyFields` 中重复声明。
+
+领域中立示例：
 
 ```json
 {
-  "ui": {
-    "supplyFields": [
-      { "key": "vehicle.brand", "label": "品牌", "type": "text", "required": true, "group": "车辆识别", "help": "向买家公开的制造商或品牌。" },
-      { "key": "vehicle.model", "label": "车型", "type": "text", "required": true, "group": "车辆识别", "help": "向买家公开的车型与款型名称。" },
-      { "key": "vehicle.year", "label": "年款", "type": "number", "group": "车辆识别", "help": "四位数年款。", "min": 1900, "max": 2100, "step": 1 },
-      { "key": "vehicle.registration_date", "label": "首次上牌日期", "type": "date", "group": "车辆识别", "help": "公开的首次登记月份或日期。" },
-      { "key": "vehicle.mileage_km", "label": "表显里程", "type": "number", "required": true, "group": "车况", "help": "向买家展示的当前里程表读数。", "unit": "km", "min": 0, "max": 2000000, "step": 1000 },
-      { "key": "vehicle.energy", "label": "能源类型", "type": "select", "group": "参数配置", "help": "公开的动力类别。", "options": ["汽油", "柴油", "混合动力", "纯电", "其他"] },
-      { "key": "vehicle.transmission", "label": "变速箱", "type": "select", "group": "参数配置", "help": "公开的变速箱类别。", "options": ["自动", "手动", "其他"] },
-      { "key": "vehicle.exterior_color", "label": "外观颜色", "type": "text", "group": "参数配置", "help": "买家可见的车身外观颜色。" },
-      { "key": "vehicle.condition_summary", "label": "车况摘要", "type": "textarea", "group": "车况", "help": "描述买家可见的车况事实；不要填写私密标识或内部备注。" }
-    ]
-  }
+  "productTemplates": [
+    {
+      "id": "book",
+      "label": "图书",
+      "description": "店铺提供的纸质或数字图书。",
+      "category": "books",
+      "supplyFields": [
+        { "key": "book.author", "label": "作者", "type": "text", "required": true, "group": "出版信息" },
+        { "key": "book.isbn", "label": "ISBN", "type": "text", "group": "出版信息" },
+        { "key": "delivery.format", "label": "形式", "type": "select", "options": ["精装", "平装", "数字版"] }
+      ]
+    },
+    {
+      "id": "generic-service",
+      "label": "通用服务",
+      "category": "services",
+      "supplyFields": [
+        { "key": "service.duration_minutes", "label": "时长", "type": "number", "unit": "分钟", "min": 1, "step": 1 },
+        { "key": "service.delivery_mode", "label": "交付方式", "type": "select", "options": ["远程", "上门"] }
+      ]
+    }
+  ],
+  "defaultProductTemplateId": "book"
 }
 ```
+
+二手车等真实垂直模板及其私密档案模型必须放在独立、可版本化的店铺 package 中。根仓库和本文只提供领域中立示例，不复制真实店铺实例、品牌、专有术语或未公开业务规则。
 
 ### 代理资料上传
 

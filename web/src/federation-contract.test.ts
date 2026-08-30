@@ -13,7 +13,9 @@ const manifest = {
   agent: { protocol: "matchplane.agent/v1", mcpTools: ["catalog.search"] },
 };
 
-function signedEnrollment() {
+function signedEnrollment(
+  signedManifest: Record<string, unknown> = manifest,
+) {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const input = {
     protocol: "matchplane.federation/v1",
@@ -23,7 +25,7 @@ function signedEnrollment() {
     endpoint: "http://localhost:9191/mcp",
     mcpServerKey: "remote-market",
     publicKey: publicKey.export({ format: "der", type: "spki" }).toString("base64"),
-    manifest,
+    manifest: signedManifest,
   };
   const signedPayload = canonicalJson({
     displayName: input.displayName,
@@ -66,6 +68,66 @@ describe("federation enrollment contract", () => {
     expect(verifyFederationEnrollment(changed, "production")).toEqual({
       ok: false,
       error: "联邦清单签名校验失败",
+    });
+  });
+
+  it("accepts the same product-template contract as local registration", () => {
+    const result = verifyFederationEnrollment(
+      signedEnrollment({
+        ...manifest,
+        productTemplates: [
+          {
+            id: "camera",
+            label: "Camera",
+            supplyFields: [{ key: "sensor", label: "Sensor" }],
+          },
+          {
+            id: "lens",
+            label: "Lens",
+            supplyFields: [{ key: "mount", label: "Mount" }],
+          },
+        ],
+        defaultProductTemplateId: "camera",
+      }),
+      "test",
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects ambiguous legacy fields, missing defaults, and unknown keys", () => {
+    expect(
+      verifyFederationEnrollment(
+        signedEnrollment({
+          ...manifest,
+          ui: { supplyFields: [{ key: "brand", label: "Brand" }] },
+          productTemplates: [
+            { id: "camera", label: "Camera", supplyFields: [] },
+          ],
+        }),
+        "test",
+      ),
+    ).toEqual({ ok: false, error: "manifest.productTemplates 无效" });
+    expect(
+      verifyFederationEnrollment(
+        signedEnrollment({
+          ...manifest,
+          productTemplates: [
+            { id: "camera", label: "Camera", supplyFields: [] },
+            { id: "lens", label: "Lens", supplyFields: [] },
+          ],
+        }),
+        "test",
+      ),
+    ).toEqual({ ok: false, error: "manifest.productTemplates 无效" });
+    expect(
+      verifyFederationEnrollment(
+        signedEnrollment({ ...manifest, privateSettings: true }),
+        "test",
+      ),
+    ).toEqual({
+      ok: false,
+      error: "manifest 包含未声明字段: privateSettings",
     });
   });
 });

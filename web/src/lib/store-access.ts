@@ -15,6 +15,8 @@ export interface StoreAccessRow {
   version: number;
   domainId: string;
   organizationId: string;
+  metadata: Record<string, unknown>;
+  currentRegistrationId: string | null;
 }
 
 export interface StoreAccess {
@@ -45,6 +47,8 @@ export async function readStoreAccess(
             store.version,
             store.domain_id::text AS "domainId",
             store.organization_id::text AS "organizationId",
+            store.metadata,
+            store.current_registration_id::text AS "currentRegistrationId",
             membership.role AS "membershipRole"
        FROM stores store
        LEFT JOIN "member" membership

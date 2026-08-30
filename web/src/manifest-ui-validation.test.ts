@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { validateManifestUi } from "./manifest-ui-validation";
+import {
+  validateManifestProductTemplates,
+  validateManifestUi,
+} from "./manifest-ui-validation";
 
 const validUi = {
   chat: { buyerPlaceholder: "描述需求" },
@@ -137,18 +140,16 @@ describe("validateManifestUi", () => {
     ).toBe(false);
   });
 
-  it("rejects private vehicle attributes in the public supply contract", () => {
+  it("rejects domain-neutral private attributes in the public supply contract", () => {
     for (const key of [
-      "vin",
-      "vehicle_identification_number",
-      "license_plate",
-      "registration_document_url",
-      "owner_name",
       "supplier_phone",
+      "contact_email",
+      "api_credential",
       "purchase_price",
-      "reconditioning_cost",
+      "operating_cost",
       "profit_margin",
-      "warehouse_location",
+      "exact_location",
+      "warehouse_slot",
       "internal_notes",
     ]) {
       expect(
@@ -156,6 +157,9 @@ describe("validateManifestUi", () => {
         key,
       ).toBe(false);
     }
+    expect(
+      validateManifestUi({ supplyFields: [{ key: "vin", label: "VIN" }] }),
+    ).toBe(true);
   });
 
   it("rejects invalid supply-field options and scalar types", () => {
@@ -230,6 +234,59 @@ describe("validateManifestUi", () => {
     expect(
       validateManifestUi({
         contactFields: [{ key: "phone", label: "电话", type: "tel" }],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("validateManifestProductTemplates", () => {
+  const template = (id: string, key = `${id}_field`) => ({
+    id,
+    label: id,
+    supplyFields: [{ key, label: key }],
+  });
+
+  it("accepts absent templates, one implicit default, and a declared default", () => {
+    expect(validateManifestProductTemplates({})).toBe(true);
+    expect(
+      validateManifestProductTemplates({ productTemplates: [template("one")] }),
+    ).toBe(true);
+    expect(
+      validateManifestProductTemplates({
+        productTemplates: [template("one"), template("two")],
+        defaultProductTemplateId: "two",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects missing defaults, duplicates, ambiguous legacy, and conflicting shared fields", () => {
+    expect(
+      validateManifestProductTemplates({
+        productTemplates: [template("one"), template("two")],
+      }),
+    ).toBe(false);
+    expect(
+      validateManifestProductTemplates({
+        productTemplates: [template("one"), template("one")],
+      }),
+    ).toBe(false);
+    expect(
+      validateManifestProductTemplates({
+        ui: { supplyFields: [] },
+        productTemplates: [template("one")],
+      }),
+    ).toBe(false);
+    expect(
+      validateManifestProductTemplates({
+        productTemplates: [
+          template("one", "shared"),
+          {
+            id: "two",
+            label: "two",
+            supplyFields: [{ key: "shared", label: "Different" }],
+          },
+        ],
+        defaultProductTemplateId: "one",
       }),
     ).toBe(false);
   });

@@ -5,6 +5,8 @@
 //! vertical owns the JSON schema and any retrieval/Agent implementation; the kernel owns scope,
 //! idempotency, lifecycle and introduction invariants.
 
+use std::collections::HashSet;
+
 use matchplane_domain::{
     AssetId, DomainId, MarketplaceBehaviorEventId, MarketplaceIntentId, MarketplaceOfferId,
     MarketplacePartyId, MarketplaceSalesHandoffId, MatchIntroductionId, TenantId,
@@ -24,6 +26,7 @@ const MAX_NARRATIVE_BYTES: usize = 10_000;
 const MAX_IDEMPOTENCY_KEY_BYTES: usize = 240;
 const MAX_EXTERNAL_KEY_BYTES: usize = 256;
 const MAX_DISPLAY_NAME_BYTES: usize = 500;
+const MAX_PRODUCT_TEMPLATES: usize = 16;
 // The storage adapter refuses unbounded rank work: SQL admits at most 500 rows per side and the
 // public API returns at most 100 after deterministic scoring.
 const MARKETPLACE_MATCH_MAX_INPUT_CANDIDATES: i64 = 500;
@@ -242,6 +245,8 @@ pub struct CreateMarketplaceOffer {
     pub supply_party_id: MarketplacePartyId,
     /// Optional root-catalogue asset reference.
     pub asset_id: Option<AssetId>,
+    /// Product template declared by the canonical store registration.
+    pub product_template_id: Option<String>,
     /// Seller-owned idempotency/catalogue key.
     pub external_key: String,
     /// Public name supplied by the vertical/supply participant.
@@ -266,6 +271,7 @@ pub struct UpdateMarketplaceOffer {
     pub platform_path: String,
     pub request_id: Option<String>,
     pub offer_id: MarketplaceOfferId,
+    pub product_template_id: Option<String>,
     pub display_name: String,
     pub attributes: Value,
     pub terms: Value,
@@ -308,6 +314,8 @@ pub struct MarketplaceOffer {
     pub supply_party_id: MarketplacePartyId,
     /// Optional catalogue asset.
     pub asset_id: Option<AssetId>,
+    /// Product template resolved against the offer's canonical store.
+    pub product_template_id: Option<String>,
     /// Supply-participant-owned key.
     pub external_key: String,
     /// Public name.
@@ -622,21 +630,40 @@ impl PgStore {
         command: &CreateMarketplaceOffer,
     ) -> Result<MarketplaceOfferOutcome, StorageError> {
         validate_offer(command)?;
+        let mut transaction = self.pool().begin().await?;
+        lock_marketplace_offer_create_key(
+            &mut transaction,
+            command.tenant_id,
+            command.domain_id,
+            command.supply_party_id,
+            &command.external_key,
+        )
+        .await?;
         if let Some(row) = sqlx::query(OFFER_SELECT)
             .bind(command.tenant_id.into_uuid())
             .bind(command.domain_id.into_uuid())
             .bind(command.supply_party_id.into_uuid())
             .bind(&command.external_key)
-            .fetch_optional(self.pool())
+            .fetch_optional(&mut *transaction)
             .await?
         {
             let offer = offer_from_row(&row)?;
             ensure_same_offer(&offer, command)?;
+            transaction.commit().await?;
             return Ok(MarketplaceOfferOutcome {
                 offer,
                 duplicate: true,
             });
         }
+
+        validate_product_template_binding(
+            &mut transaction,
+            command.tenant_id,
+            command.domain_id,
+            command.supply_party_id,
+            command.product_template_id.as_deref(),
+        )
+        .await?;
 
         if let Some(asset_id) = command.asset_id {
             let authorized: bool = sqlx::query_scalar(
@@ -650,7 +677,7 @@ impl PgStore {
             .bind(command.domain_id.into_uuid())
             .bind(asset_id.into_uuid())
             .bind(command.supply_party_id.into_uuid())
-            .fetch_one(self.pool())
+            .fetch_one(&mut *transaction)
             .await?;
             if !authorized {
                 return Err(StorageError::Forbidden(
@@ -661,27 +688,30 @@ impl PgStore {
 
         let row = sqlx::query(
             "INSERT INTO marketplace_offers
-             (id, tenant_id, domain_id, supply_party_id, asset_id, external_key, display_name,
-              attributes, terms, status, published_at, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', NULL, $10)
-             RETURNING id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
-                       display_name, attributes, terms, status, published_at, expires_at,
-                       version, created_at, updated_at",
+             (id, tenant_id, domain_id, supply_party_id, asset_id, product_template_id,
+              external_key, display_name, attributes, terms, status, published_at, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft', NULL, $11)
+             RETURNING id, tenant_id, domain_id, supply_party_id, asset_id,
+                       product_template_id, external_key, display_name, attributes, terms,
+                       status, published_at, expires_at, version, created_at, updated_at",
         )
         .bind(command.offer_id.into_uuid())
         .bind(command.tenant_id.into_uuid())
         .bind(command.domain_id.into_uuid())
         .bind(command.supply_party_id.into_uuid())
         .bind(command.asset_id.map(AssetId::into_uuid))
+        .bind(command.product_template_id.as_deref())
         .bind(&command.external_key)
         .bind(&command.display_name)
         .bind(&command.attributes)
         .bind(&command.terms)
         .bind(command.expires_at)
-        .fetch_one(self.pool())
+        .fetch_one(&mut *transaction)
         .await?;
+        let offer = offer_from_row(&row)?;
+        transaction.commit().await?;
         Ok(MarketplaceOfferOutcome {
-            offer: offer_from_row(&row)?,
+            offer,
             duplicate: false,
         })
     }
@@ -705,9 +735,9 @@ impl PgStore {
             ));
         }
         let rows = sqlx::query(
-            "SELECT id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
-                    display_name, attributes, terms, status, published_at, expires_at,
-                    version, created_at, updated_at
+            "SELECT id, tenant_id, domain_id, supply_party_id, asset_id, product_template_id,
+                    external_key, display_name, attributes, terms, status, published_at,
+                    expires_at, version, created_at, updated_at
              FROM marketplace_offers
              WHERE tenant_id = $1 AND domain_id = $2 AND supply_party_id = $3
              ORDER BY updated_at DESC, id DESC LIMIT $4 OFFSET $5",
@@ -736,9 +766,9 @@ impl PgStore {
             ));
         }
         let rows = sqlx::query(
-            "SELECT id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
-                    display_name, attributes, terms, status, published_at, expires_at,
-                    version, created_at, updated_at
+            "SELECT id, tenant_id, domain_id, supply_party_id, asset_id, product_template_id,
+                    external_key, display_name, attributes, terms, status, published_at,
+                    expires_at, version, created_at, updated_at
              FROM marketplace_offers
              WHERE tenant_id = $1 AND domain_id = $2
              ORDER BY updated_at DESC, id DESC LIMIT $3 OFFSET $4",
@@ -774,20 +804,29 @@ impl PgStore {
                 "marketplace offer cannot be edited in its current status".to_owned(),
             ));
         }
+        validate_product_template_binding(
+            &mut transaction,
+            command.tenant_id,
+            command.domain_id,
+            current.supply_party_id,
+            command.product_template_id.as_deref(),
+        )
+        .await?;
 
         let row = sqlx::query(
             "UPDATE marketplace_offers
-                SET display_name = $4, attributes = $5, terms = $6, status = 'draft',
-                    published_at = NULL, version = version + 1,
+                SET product_template_id = $4, display_name = $5, attributes = $6, terms = $7,
+                    status = 'draft', published_at = NULL, version = version + 1,
                     updated_at = clock_timestamp()
               WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
-              RETURNING id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
-                        display_name, attributes, terms, status, published_at, expires_at,
-                        version, created_at, updated_at",
+              RETURNING id, tenant_id, domain_id, supply_party_id, asset_id,
+                        product_template_id, external_key, display_name, attributes, terms,
+                        status, published_at, expires_at, version, created_at, updated_at",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(command.domain_id.into_uuid())
         .bind(command.offer_id.into_uuid())
+        .bind(command.product_template_id.as_deref())
         .bind(&command.display_name)
         .bind(&command.attributes)
         .bind(&command.terms)
@@ -844,9 +883,9 @@ impl PgStore {
                 SET status = 'withdrawn', version = version + 1,
                     updated_at = clock_timestamp()
               WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
-              RETURNING id, tenant_id, domain_id, supply_party_id, asset_id, external_key,
-                        display_name, attributes, terms, status, published_at, expires_at,
-                        version, created_at, updated_at",
+              RETURNING id, tenant_id, domain_id, supply_party_id, asset_id,
+                        product_template_id, external_key, display_name, attributes, terms,
+                        status, published_at, expires_at, version, created_at, updated_at",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(command.domain_id.into_uuid())
@@ -891,6 +930,22 @@ impl PgStore {
             ));
         }
         let mut transaction = self.pool().begin().await?;
+        let current =
+            lock_marketplace_offer_by_tenant(&mut transaction, tenant_id, offer_id).await?;
+        ensure_offer_version(&current, expected_version)?;
+        if !matches!(current.status.as_str(), "draft" | "withdrawn") {
+            return Err(StorageError::Conflict(
+                "marketplace offer is not awaiting activation".to_owned(),
+            ));
+        }
+        validate_product_template_binding(
+            &mut transaction,
+            tenant_id,
+            current.domain_id,
+            current.supply_party_id,
+            current.product_template_id.as_deref(),
+        )
+        .await?;
         let row = sqlx::query(
             "UPDATE marketplace_offers offer
              SET status = 'active', published_at = coalesce(published_at, clock_timestamp()),
@@ -944,9 +999,10 @@ impl PgStore {
                  )
                )
              RETURNING offer.id, offer.tenant_id, offer.domain_id, offer.supply_party_id,
-                       offer.asset_id, offer.external_key, offer.display_name, offer.attributes,
-                       offer.terms, offer.status, offer.published_at, offer.expires_at,
-                       offer.version, offer.created_at, offer.updated_at",
+                       offer.asset_id, offer.product_template_id, offer.external_key,
+                       offer.display_name, offer.attributes, offer.terms, offer.status,
+                       offer.published_at, offer.expires_at, offer.version, offer.created_at,
+                       offer.updated_at",
         )
         .bind(tenant_id.into_uuid())
         .bind(offer_id.into_uuid())
@@ -992,9 +1048,10 @@ impl PgStore {
                AND offer.version = $3
                AND offer.status = 'draft'
              RETURNING offer.id, offer.tenant_id, offer.domain_id, offer.supply_party_id,
-                       offer.asset_id, offer.external_key, offer.display_name, offer.attributes,
-                       offer.terms, offer.status, offer.published_at, offer.expires_at,
-                       offer.version, offer.created_at, offer.updated_at",
+                       offer.asset_id, offer.product_template_id, offer.external_key,
+                       offer.display_name, offer.attributes, offer.terms, offer.status,
+                       offer.published_at, offer.expires_at, offer.version, offer.created_at,
+                       offer.updated_at",
         )
         .bind(tenant_id.into_uuid())
         .bind(offer_id.into_uuid())
@@ -1053,31 +1110,36 @@ impl PgStore {
 
         let rows = sqlx::query(
             "SELECT offer.id, offer.tenant_id, offer.domain_id, offer.supply_party_id,
-                    offer.asset_id, offer.external_key, offer.display_name, offer.attributes,
-                    offer.terms, offer.status, offer.published_at, offer.expires_at,
-                    offer.version, offer.created_at, offer.updated_at
-             FROM marketplace_offers offer
-             WHERE offer.tenant_id = $1 AND offer.domain_id = $2 AND offer.status = 'active'
-               AND offer.supply_party_id <> $3
-               AND (offer.expires_at IS NULL OR offer.expires_at > clock_timestamp())
-               AND (
-                 offer.store_id IS NULL
-                 OR EXISTS (
-                   SELECT 1
-                     FROM stores store
-                     JOIN domains domain
-                       ON domain.tenant_id = store.tenant_id
-                      AND domain.id = store.domain_id
-                      AND domain.status = 'active'
-                    WHERE store.tenant_id = offer.tenant_id
-                      AND store.id = offer.store_id
-                      AND store.domain_id = offer.domain_id
-                      AND store.status = 'active'
-                      AND store.visibility = 'public'
-                 )
-               )
-             ORDER BY offer.published_at DESC NULLS LAST, offer.id
-             LIMIT $4",
+                     offer.asset_id, offer.product_template_id, offer.external_key,
+                     offer.display_name, offer.attributes, offer.terms, offer.status,
+                     offer.published_at, offer.expires_at, offer.version, offer.created_at,
+                     offer.updated_at, active_registration.manifest AS active_manifest
+               FROM marketplace_offers offer
+               LEFT JOIN stores canonical_store
+                 ON canonical_store.tenant_id = offer.tenant_id
+                AND canonical_store.domain_id = offer.domain_id
+                AND canonical_store.id = offer.store_id
+               LEFT JOIN domains canonical_domain
+                 ON canonical_domain.tenant_id = canonical_store.tenant_id
+                AND canonical_domain.id = canonical_store.domain_id
+               LEFT JOIN subplatform_registrations active_registration
+                 ON active_registration.tenant_id = canonical_store.tenant_id
+                AND active_registration.domain_id = canonical_store.domain_id
+                AND active_registration.id = canonical_store.current_registration_id
+                AND active_registration.state = 'active'
+              WHERE offer.tenant_id = $1 AND offer.domain_id = $2 AND offer.status = 'active'
+                AND offer.supply_party_id <> $3
+                AND (offer.expires_at IS NULL OR offer.expires_at > clock_timestamp())
+                AND (
+                  offer.store_id IS NULL
+                  OR (
+                    canonical_store.status = 'active'
+                    AND canonical_store.visibility = 'public'
+                    AND canonical_domain.status = 'active'
+                  )
+                )
+              ORDER BY offer.published_at DESC NULLS LAST, offer.id
+              LIMIT $4",
         )
         .bind(command.tenant_id.into_uuid())
         .bind(intent.domain_id.into_uuid())
@@ -1089,7 +1151,13 @@ impl PgStore {
         let mut candidates: Vec<MarketplaceOfferCandidate> = rows
             .iter()
             .map(|row| {
-                let offer = offer_from_row(row)?;
+                let mut offer = offer_from_row(row)?;
+                let active_manifest: Option<Value> = row.try_get("active_manifest")?;
+                offer.attributes = project_marketplace_offer_attributes(
+                    active_manifest.as_ref(),
+                    offer.product_template_id.as_deref(),
+                    &offer.attributes,
+                );
                 let recommendation = score_structured(
                     &intent.narrative,
                     &intent.attributes,
@@ -2077,7 +2145,9 @@ fn validate_intent(command: &CreateMarketplaceIntent) -> Result<(), StorageError
 }
 
 struct LockedMarketplaceOffer {
+    domain_id: DomainId,
     supply_party_id: MarketplacePartyId,
+    product_template_id: Option<String>,
     status: String,
     version: i64,
 }
@@ -2089,7 +2159,7 @@ async fn lock_marketplace_offer(
     offer_id: MarketplaceOfferId,
 ) -> Result<LockedMarketplaceOffer, StorageError> {
     let row = sqlx::query(
-        "SELECT supply_party_id, status, version
+        "SELECT domain_id, supply_party_id, product_template_id, status, version
            FROM marketplace_offers
           WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
           FOR UPDATE",
@@ -2101,10 +2171,287 @@ async fn lock_marketplace_offer(
     .await?
     .ok_or(StorageError::NotFound("marketplace offer"))?;
     Ok(LockedMarketplaceOffer {
+        domain_id: DomainId::from_uuid(row.try_get("domain_id")?),
         supply_party_id: MarketplacePartyId::from_uuid(row.try_get("supply_party_id")?),
+        product_template_id: row.try_get("product_template_id")?,
         status: row.try_get("status")?,
         version: row.try_get("version")?,
     })
+}
+
+async fn lock_marketplace_offer_by_tenant(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: TenantId,
+    offer_id: MarketplaceOfferId,
+) -> Result<LockedMarketplaceOffer, StorageError> {
+    let row = sqlx::query(
+        "SELECT domain_id, supply_party_id, product_template_id, status, version
+           FROM marketplace_offers
+          WHERE tenant_id = $1 AND id = $2
+          FOR UPDATE",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(offer_id.into_uuid())
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(StorageError::NotFound("marketplace offer"))?;
+    Ok(LockedMarketplaceOffer {
+        domain_id: DomainId::from_uuid(row.try_get("domain_id")?),
+        supply_party_id: MarketplacePartyId::from_uuid(row.try_get("supply_party_id")?),
+        product_template_id: row.try_get("product_template_id")?,
+        status: row.try_get("status")?,
+        version: row.try_get("version")?,
+    })
+}
+
+async fn lock_marketplace_offer_create_key(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: TenantId,
+    domain_id: DomainId,
+    supply_party_id: MarketplacePartyId,
+    external_key: &str,
+) -> Result<(), StorageError> {
+    let idempotency_scope_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT COALESCE(store_id, id)
+           FROM marketplace_parties
+          WHERE tenant_id = $1 AND scope_domain_id = $2 AND id = $3
+          FOR SHARE",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(domain_id.into_uuid())
+    .bind(supply_party_id.into_uuid())
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(StorageError::NotFound("marketplace party"))?;
+
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!(
+            "marketplace_offer:{tenant_id}:{idempotency_scope_id}:{external_key}"
+        ))
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
+async fn validate_product_template_binding(
+    transaction: &mut Transaction<'_, Postgres>,
+    tenant_id: TenantId,
+    domain_id: DomainId,
+    supply_party_id: MarketplacePartyId,
+    product_template_id: Option<&str>,
+) -> Result<(), StorageError> {
+    validate_product_template_id(product_template_id)?;
+    let party = sqlx::query(
+        "SELECT store_id
+           FROM marketplace_parties
+          WHERE tenant_id = $1 AND scope_domain_id = $2 AND id = $3
+          FOR SHARE",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(domain_id.into_uuid())
+    .bind(supply_party_id.into_uuid())
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(StorageError::NotFound("marketplace party"))?;
+    let store_id: Option<Uuid> = party.try_get("store_id")?;
+    let Some(store_id) = store_id else {
+        return require_legacy_template_binding(product_template_id);
+    };
+
+    let store = sqlx::query(
+        "SELECT metadata, current_registration_id
+           FROM stores
+          WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
+          FOR SHARE",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(domain_id.into_uuid())
+    .bind(store_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .ok_or(StorageError::NotFound("canonical store"))?;
+    let metadata: Value = store.try_get("metadata")?;
+    let current_registration_id: Option<Uuid> = store.try_get("current_registration_id")?;
+    let manifest = if let Some(registration_id) = current_registration_id {
+        sqlx::query_scalar::<_, Value>(
+            "SELECT manifest
+               FROM subplatform_registrations
+              WHERE tenant_id = $1 AND domain_id = $2 AND id = $3 AND state = 'active'",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(domain_id.into_uuid())
+        .bind(registration_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+    } else {
+        None
+    };
+    let Some(manifest) = manifest else {
+        return require_legacy_template_binding(product_template_id);
+    };
+    let Some(templates) = manifest.get("productTemplates") else {
+        return require_legacy_template_binding(product_template_id);
+    };
+    let templates = templates.as_array().ok_or_else(|| {
+        StorageError::Conflict("active product template catalog is invalid".to_owned())
+    })?;
+    if templates.is_empty() {
+        return require_legacy_template_binding(product_template_id);
+    }
+    let product_template_id = product_template_id.ok_or_else(|| {
+        StorageError::Conflict(
+            "product_template_id is required by the active product template catalog".to_owned(),
+        )
+    })?;
+    let catalog_ids = templates
+        .iter()
+        .filter_map(|template| template.get("id").and_then(Value::as_str))
+        .collect::<HashSet<_>>();
+    if !catalog_ids.contains(product_template_id) {
+        return Err(StorageError::Conflict(
+            "product_template_id is not declared by the canonical store".to_owned(),
+        ));
+    }
+
+    let Some(settings) = metadata.get("product_templates") else {
+        return Ok(());
+    };
+    let settings = settings
+        .as_object()
+        .ok_or_else(invalid_product_template_settings)?;
+    if settings.get("schema_version").and_then(Value::as_i64) != Some(1) {
+        return Err(invalid_product_template_settings());
+    }
+    let enabled = settings
+        .get("enabled_template_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(invalid_product_template_settings)?;
+    let enabled_ids = enabled
+        .iter()
+        .map(Value::as_str)
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(invalid_product_template_settings)?;
+    let unique_ids = enabled_ids.iter().copied().collect::<HashSet<_>>();
+    if enabled_ids.len() > MAX_PRODUCT_TEMPLATES
+        || unique_ids.len() != enabled_ids.len()
+        || enabled_ids
+            .iter()
+            .any(|template_id| validate_product_template_id(Some(template_id)).is_err())
+    {
+        return Err(invalid_product_template_settings());
+    }
+    let default_template_id = settings
+        .get("default_template_id")
+        .ok_or_else(invalid_product_template_settings)?;
+    if !default_template_id.is_null() && !default_template_id.is_string() {
+        return Err(invalid_product_template_settings());
+    }
+
+    let enabled_catalog_ids = enabled_ids
+        .iter()
+        .copied()
+        .filter(|template_id| catalog_ids.contains(template_id))
+        .collect::<Vec<_>>();
+    if enabled_catalog_ids.is_empty() {
+        return Err(disabled_product_template_binding());
+    }
+    let Some(default_template_id) = default_template_id.as_str() else {
+        return Err(disabled_product_template_binding());
+    };
+    if !enabled_catalog_ids.contains(&default_template_id) {
+        return Err(disabled_product_template_binding());
+    }
+    if enabled_catalog_ids.contains(&product_template_id) {
+        Ok(())
+    } else {
+        Err(disabled_product_template_binding())
+    }
+}
+
+fn project_marketplace_offer_attributes(
+    active_manifest: Option<&Value>,
+    product_template_id: Option<&str>,
+    attributes: &Value,
+) -> Value {
+    let Some(active_manifest) = active_manifest else {
+        return if product_template_id.is_none() {
+            attributes.clone()
+        } else {
+            Value::Object(serde_json::Map::new())
+        };
+    };
+    let Some(raw_templates) = active_manifest.get("productTemplates") else {
+        return if product_template_id.is_none() {
+            attributes.clone()
+        } else {
+            Value::Object(serde_json::Map::new())
+        };
+    };
+    let (Some(templates), Some(product_template_id), Some(attributes)) = (
+        raw_templates.as_array(),
+        product_template_id,
+        attributes.as_object(),
+    ) else {
+        return Value::Object(serde_json::Map::new());
+    };
+    let Some(template) = templates
+        .iter()
+        .find(|template| template.get("id").and_then(Value::as_str) == Some(product_template_id))
+    else {
+        return Value::Object(serde_json::Map::new());
+    };
+    let Some(fields) = template.get("supplyFields").and_then(Value::as_array) else {
+        return Value::Object(serde_json::Map::new());
+    };
+
+    let mut projected = serde_json::Map::new();
+    for key in fields
+        .iter()
+        .filter_map(|field| field.get("key").and_then(Value::as_str))
+    {
+        if let Some(value) = attributes.get(key) {
+            projected.insert(key.to_owned(), value.clone());
+        }
+    }
+    Value::Object(projected)
+}
+
+fn disabled_product_template_binding() -> StorageError {
+    StorageError::Conflict("product_template_id is disabled for the canonical store".to_owned())
+}
+
+fn invalid_product_template_settings() -> StorageError {
+    StorageError::Conflict("canonical store product template settings are invalid".to_owned())
+}
+
+fn require_legacy_template_binding(product_template_id: Option<&str>) -> Result<(), StorageError> {
+    if product_template_id.is_none() {
+        Ok(())
+    } else {
+        Err(StorageError::Conflict(
+            "product_template_id is not allowed without an active product template catalog"
+                .to_owned(),
+        ))
+    }
+}
+
+fn validate_product_template_id(product_template_id: Option<&str>) -> Result<(), StorageError> {
+    let Some(product_template_id) = product_template_id else {
+        return Ok(());
+    };
+    let bytes = product_template_id.as_bytes();
+    let valid = (1..=64).contains(&bytes.len())
+        && bytes[0].is_ascii_lowercase()
+        && bytes[1..].iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(StorageError::InvalidData(
+            "product_template_id must match ^[a-z][a-z0-9._-]{0,63}$".to_owned(),
+        ))
+    }
 }
 
 fn authorize_offer_management(
@@ -2252,6 +2599,8 @@ async fn record_offer_audit(
         "offer_id": offer.offer_id.to_string(),
         "previous_status": previous.status,
         "status": offer.status,
+        "previous_product_template_id": previous.product_template_id,
+        "product_template_id": offer.product_template_id,
         "previous_version": previous.version,
         "version": offer.version,
     }))
@@ -2271,6 +2620,7 @@ fn validate_offer(command: &CreateMarketplaceOffer) -> Result<(), StorageError> 
         MAX_DISPLAY_NAME_BYTES,
         "offer display name",
     )?;
+    validate_product_template_id(command.product_template_id.as_deref())?;
     validate_object(&command.attributes, "offer attributes")?;
     validate_object(&command.terms, "offer terms")?;
     if command
@@ -2290,6 +2640,7 @@ fn validate_offer_update(command: &UpdateMarketplaceOffer) -> Result<(), Storage
         MAX_DISPLAY_NAME_BYTES,
         "offer display name",
     )?;
+    validate_product_template_id(command.product_template_id.as_deref())?;
     validate_object(&command.attributes, "offer attributes")?;
     validate_object(&command.terms, "offer terms")?;
     if command.expected_version < 1 {
@@ -2408,6 +2759,7 @@ fn ensure_same_offer(
     if existing.offer_id != command.offer_id
         || existing.supply_party_id != command.supply_party_id
         || existing.asset_id != command.asset_id
+        || existing.product_template_id != command.product_template_id
         || existing.display_name != command.display_name
         || existing.attributes != command.attributes
         || existing.terms != command.terms
@@ -2444,7 +2796,8 @@ const INTENT_SELECT_DISCOVERABLE_DEMANDS: &str =
     LIMIT $4";
 
 const OFFER_SELECT: &str = "SELECT id, tenant_id, domain_id, supply_party_id, asset_id,
-    external_key, display_name, attributes, terms, status, published_at, expires_at, version,
+    product_template_id, external_key, display_name, attributes, terms, status, published_at,
+    expires_at, version,
     created_at, updated_at FROM marketplace_offers
     WHERE tenant_id = $1 AND domain_id = $2 AND external_key = $4
       AND store_id IS NOT DISTINCT FROM (
@@ -2453,8 +2806,9 @@ const OFFER_SELECT: &str = "SELECT id, tenant_id, domain_id, supply_party_id, as
       )";
 
 const OFFER_SELECT_BY_ID: &str = "SELECT offer.id, offer.tenant_id, offer.domain_id,
-    offer.supply_party_id, offer.asset_id, offer.external_key, offer.display_name,
-    offer.attributes, offer.terms, offer.status, offer.published_at, offer.expires_at,
+    offer.supply_party_id, offer.asset_id, offer.product_template_id, offer.external_key,
+    offer.display_name, offer.attributes, offer.terms, offer.status, offer.published_at,
+    offer.expires_at,
     offer.version, offer.created_at, offer.updated_at,
     (offer.store_id IS NULL OR EXISTS (
         SELECT 1
@@ -2537,6 +2891,7 @@ fn offer_from_row(row: &PgRow) -> Result<MarketplaceOffer, StorageError> {
         asset_id: row
             .try_get::<Option<Uuid>, _>("asset_id")?
             .map(AssetId::from_uuid),
+        product_template_id: row.try_get("product_template_id")?,
         external_key: row.try_get("external_key")?,
         display_name: row.try_get("display_name")?,
         attributes: row.try_get("attributes")?,
@@ -2670,10 +3025,10 @@ async fn serializable(transaction: &mut Transaction<'_, Postgres>) -> Result<(),
 mod tests {
     use super::{
         LockedMarketplaceOffer, MARKETPLACE_MATCH_POLICY, authorize_offer_management,
-        ensure_offer_version,
+        ensure_offer_version, project_marketplace_offer_attributes,
     };
     use crate::StorageError;
-    use matchplane_domain::MarketplacePartyId;
+    use matchplane_domain::{DomainId, MarketplacePartyId};
     use matchplane_matching::score_structured;
     use serde_json::json;
     use uuid::Uuid;
@@ -2697,6 +3052,54 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
             vec!["shared attribute: kind", "shared attribute: region"]
+        );
+    }
+
+    #[test]
+    fn template_projection_filters_attributes_before_scoring_and_fails_closed() {
+        let manifest = json!({
+            "productTemplates": [{
+                "id": "camera",
+                "label": "Camera",
+                "supplyFields": [{"key": "public_model", "label": "Public model"}]
+            }]
+        });
+        let attributes = json!({
+            "public_model": "visible-model",
+            "internal_secret": "secret-token"
+        });
+
+        let projected =
+            project_marketplace_offer_attributes(Some(&manifest), Some("camera"), &attributes);
+        assert_eq!(projected, json!({"public_model": "visible-model"}));
+        let recommendation = score_structured(
+            "visible-model secret-token",
+            &json!({
+                "public_model": "visible-model",
+                "internal_secret": "secret-token"
+            }),
+            "camera",
+            &projected,
+            MARKETPLACE_MATCH_POLICY,
+        );
+        assert!(
+            recommendation
+                .reasons
+                .iter()
+                .all(|reason| !reason.contains("internal_secret")
+                    && !reason.contains("secret-token"))
+        );
+        assert_eq!(
+            project_marketplace_offer_attributes(
+                Some(&manifest),
+                Some("removed-template"),
+                &attributes,
+            ),
+            json!({})
+        );
+        assert_eq!(
+            project_marketplace_offer_attributes(Some(&json!({})), None, &attributes),
+            attributes
         );
     }
 
@@ -2738,7 +3141,9 @@ mod tests {
         let owner = party_id(0x11111111_1111_4111_8111_111111111111);
         let collaborator = party_id(0x22222222_2222_4222_8222_222222222222);
         let offer = LockedMarketplaceOffer {
+            domain_id: DomainId::from_uuid(Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa)),
             supply_party_id: owner,
+            product_template_id: Some("camera".to_owned()),
             status: "active".to_owned(),
             version: 4,
         };
@@ -2754,7 +3159,9 @@ mod tests {
     #[test]
     fn offer_management_rejects_stale_versions() {
         let offer = LockedMarketplaceOffer {
+            domain_id: DomainId::from_uuid(Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa)),
             supply_party_id: party_id(0x11111111_1111_4111_8111_111111111111),
+            product_template_id: None,
             status: "draft".to_owned(),
             version: 5,
         };

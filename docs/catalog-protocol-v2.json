@@ -39,6 +39,7 @@
         "offer_id",
         "external_key",
         "display_name",
+        "product_template_id",
         "attributes",
         "terms",
         "status",
@@ -48,6 +49,11 @@
         "offer_id": { "type": "string", "format": "uuid" },
         "external_key": { "type": "string", "minLength": 1, "maxLength": 256 },
         "display_name": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "product_template_id": {
+          "description": "Manifest-declared product template binding; legacy offers without a template catalog send null.",
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+        },
         "attributes": { "type": "object", "maxProperties": 256 },
         "terms": { "type": "object", "maxProperties": 256 },
         "status": {

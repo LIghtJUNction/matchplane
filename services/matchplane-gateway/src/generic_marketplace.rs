@@ -162,6 +162,7 @@ pub(super) struct CreateOfferRequest {
     domain_id: String,
     supply_party_id: String,
     asset_id: Option<String>,
+    product_template_id: Option<String>,
     external_key: String,
     display_name: String,
     #[serde(default = "empty_object")]
@@ -177,6 +178,7 @@ pub(super) struct UpdateOfferRequest {
     tenant_id: String,
     domain_id: String,
     supply_party_id: String,
+    product_template_id: Option<String>,
     display_name: String,
     attributes: Value,
     terms: Value,
@@ -618,6 +620,7 @@ pub(super) async fn create_offer(
             .as_deref()
             .map(parse_id::<AssetId>)
             .transpose()?,
+        product_template_id: request.product_template_id,
         external_key: request.external_key,
         display_name: request.display_name,
         attributes: request.attributes,
@@ -648,6 +651,7 @@ pub(super) async fn update_offer(
                 domain_id: parse_id::<DomainId>(&request.domain_id)?,
                 actor_party_id: parse_id::<MarketplacePartyId>(&request.supply_party_id)?,
                 offer_id: parse_id::<MarketplaceOfferId>(&offer_id)?,
+                product_template_id: request.product_template_id,
                 display_name: request.display_name,
                 attributes: request.attributes,
                 terms: request.terms,

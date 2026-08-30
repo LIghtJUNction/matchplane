@@ -35,6 +35,8 @@ pub struct UpdateOfferCommand {
     pub actor_party_id: MarketplacePartyId,
     /// Offer being updated.
     pub offer_id: MarketplaceOfferId,
+    /// Product template selected from the canonical store catalog.
+    pub product_template_id: Option<String>,
     /// Public offer name.
     pub display_name: String,
     /// Domain-defined public attributes.
@@ -427,6 +429,7 @@ impl<W: MarketplaceWriter> MarketplaceService<W> {
                 platform_path: party.platform_path.clone(),
                 request_id: request_id_from_headers(headers),
                 offer_id: command.offer_id,
+                product_template_id: command.product_template_id,
                 display_name: command.display_name,
                 attributes: command.attributes,
                 terms: command.terms,

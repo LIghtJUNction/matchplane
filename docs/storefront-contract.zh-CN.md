@@ -40,6 +40,16 @@
 
 商城不为新店铺预置商品，也不复制第三方商品页。使用共享编辑器的店主登录"商家中心"，填写商品资料、上传图片并提交审核；平台审核通过后才生成公共商品投影。外部目录只有在商家明确配置并拥有该数据源时才可同步，不能用开发夹具或抓取快照替代商家提交。
 
+## 商品模板边界
+
+店铺 package 可在 manifest 顶层声明不超过 16 个稳定的 `productTemplates`，以及按条件可选或必填的 `defaultProductTemplateId`。每个模板形如 `{ id, label, description?, category?, supplyFields }`。ID 在清单内唯一，且含义不可变。只有一个模板时可作为隐式默认；多个模板必须显式指定已声明的默认 ID。每个模板最多 64 个字段；整个清单最多 256 条字段声明和 128 个不同 key。多个模板复用 key 时，其规范化定义必须处处完全一致。仍有 canonical offer 使用某 ID 时，新版本不得删除该 ID。
+
+旧版 `ui.supplyFields` 单 schema 形式继续可读，但不得与 `productTemplates` 同时出现。旧商品的 `product_template_id` 保持 null。支持模板的商品必须把选中的稳定 ID 原子写入 canonical `product_template_id`；未知、未启用、已删除或跨店的 ID 必须让写入和激活 fail closed。公开读取不得猜测模板。
+
+每个店铺的启用/默认选择只保存在私有店铺设置中，例如 `stores.metadata.product_templates`。店铺 metadata、设置版本、注册数据、凭据、联系方式和草稿都不属于公开契约。公开商品投影采用显式 allow-list：canonical 公开字段，加上已解析模板声明的 attributes（旧商品则使用 legacy allow-list）。解析失败时只公开 canonical 安全字段；某属性存在于 JSON 中绝不等于它可以公开。
+
+二手车模板及其私密档案模型等领域专用生产模板，应位于独立版本化的店铺 package。根契约与示例保持领域中立，例如 `book` 和 `generic-service`，不得嵌入真实店铺实例、品牌、专有术语或私有规则。
+
 ## 公共导购与安全边界
 
 底层访客可以读取店铺目录并提交商品需求。商城先从数据库获取活跃/公开的店铺白名单，

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveSubplatform } from "./subplatform";
+import { loadSubplatform, resolveSubplatform } from "./subplatform";
 import { hasValidSubplatformBuilderToken } from "./subplatform-builder";
 
 describe("nested subplatform paths", () => {
@@ -9,7 +9,9 @@ describe("nested subplatform paths", () => {
 
     expect(config.slug).toBe("auto");
     expect(config.path).toBe("/market/auto");
-    expect(config.manifestUrl).toBe("/api/platform/manifest?path=%2Fmarket%2Fauto");
+    expect(config.manifestUrl).toBe(
+      "/api/platform/manifest?path=%2Fmarket%2Fauto",
+    );
   });
 
   it("keeps the deployment root as the shared root chat", () => {
@@ -41,8 +43,73 @@ describe("nested subplatform paths", () => {
   });
 
   it("requires the dedicated builder token for digest callbacks", () => {
-    expect(hasValidSubplatformBuilderToken("builder-secret", "builder-secret")).toBe(true);
-    expect(hasValidSubplatformBuilderToken("builder-secret", "wrong-secret")).toBe(false);
+    expect(
+      hasValidSubplatformBuilderToken("builder-secret", "builder-secret"),
+    ).toBe(true);
+    expect(
+      hasValidSubplatformBuilderToken("builder-secret", "wrong-secret"),
+    ).toBe(false);
     expect(hasValidSubplatformBuilderToken("builder-secret", null)).toBe(false);
+  });
+});
+
+describe("subplatform product-template loading", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("loads a valid top-level template catalog without inventing a default ID", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            displayName: "Camera house",
+            productTemplates: [
+              {
+                id: "camera",
+                label: "Camera",
+                supplyFields: [{ key: "sensor", label: "Sensor" }],
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const loaded = await loadSubplatform("/camera-house");
+
+    expect(loaded.productTemplates).toEqual([
+      expect.objectContaining({ id: "camera" }),
+    ]);
+    expect(loaded.defaultProductTemplateId).toBeUndefined();
+    expect(loaded.ui?.supplyFields).toBeUndefined();
+  });
+
+  it("fails closed on ambiguous legacy and template declarations", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            displayName: "Ambiguous",
+            ui: { supplyFields: [{ key: "brand", label: "Brand" }] },
+            productTemplates: [
+              {
+                id: "camera",
+                label: "Camera",
+                supplyFields: [{ key: "sensor", label: "Sensor" }],
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const loaded = await loadSubplatform("/camera-house");
+
+    expect(loaded.brandName).toBe("camera-house");
+    expect(loaded.productTemplates).toBeUndefined();
+    expect(loaded.ui).toBeUndefined();
   });
 });

@@ -14,6 +14,7 @@ export interface CanonicalCatalogOffer {
   offerId: string;
   externalKey: string;
   displayName: string;
+  productTemplateId: string | null;
   attributes: Record<string, unknown>;
   terms: Record<string, unknown>;
   status: CatalogOfferStatus;
@@ -34,6 +35,7 @@ export interface CatalogProjectionArguments extends Record<string, unknown> {
     offer_id: string;
     external_key: string;
     display_name: string;
+    product_template_id: string | null;
     attributes: Record<string, unknown>;
     terms: Record<string, unknown>;
     status: CatalogOfferStatus;
@@ -73,6 +75,7 @@ export function buildCatalogProjectionArguments(input: {
     offer_id: input.offer.offerId,
     external_key: input.offer.externalKey,
     display_name: input.offer.displayName,
+    product_template_id: input.offer.productTemplateId,
     attributes: input.offer.attributes,
     terms: input.offer.terms,
     status: input.offer.status,

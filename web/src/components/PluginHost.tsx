@@ -12,6 +12,7 @@ import {
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
 import type { InterfaceLocale, InterfaceTheme } from "../lib/preferences";
+import { PRODUCT_TEMPLATE_ID_PATTERN } from "../product-templates";
 import {
   pricingFor,
   subplatformCopy,
@@ -456,6 +457,9 @@ async function submitPluginListing(
     const attributes = supply.attributes;
     if (!isRecord(attributes))
       throw new Error("供给 attributes 必须是 JSON 对象");
+    const productTemplateId = optionalProductTemplateId(
+      supply.productTemplateId,
+    );
     const externalKey =
       typeof supply.externalKey === "string" && supply.externalKey.trim()
         ? boundedText(supply.externalKey, 256, "内部编号")
@@ -517,11 +521,12 @@ async function submitPluginListing(
           pricing.currencyScale ?? input.subplatform.currencyScale ?? 0,
       });
     } else {
-      await createMarketplaceOffer({
+      const offerInput = {
         session,
         domainId: input.subplatform.domainId,
         externalKey,
         displayName,
+        productTemplateId,
         attributes,
         terms: {
           pricing_mode: pricing.mode,
@@ -532,7 +537,8 @@ async function submitPluginListing(
             : { currency_scale: pricing.currencyScale }),
           ...(pricing.label ? { pricing_label: pricing.label } : {}),
         },
-      });
+      };
+      await createMarketplaceOffer(offerInput);
     }
     input.onNotice(
       subplatformCopy(
@@ -586,6 +592,14 @@ function boundedText(value: unknown, maximum: number, label: string): string {
     throw new Error(`${label}必须是长度 1..${maximum} 的文本`);
   }
   return value.trim();
+}
+
+function optionalProductTemplateId(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !PRODUCT_TEMPLATE_ID_PATTERN.test(value)) {
+    throw new Error("商品模板编号格式无效");
+  }
+  return value;
 }
 
 function createContextToken(): string {

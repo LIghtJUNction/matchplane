@@ -226,6 +226,36 @@ describe("HTTP MCP argument contract", () => {
     ).toContain("offer_id");
   });
 
+  it("accepts explicit product template identifiers without defaulting legacy offers", () => {
+    const create = {
+      tenant_id: tenantId,
+      domain_id: domainId,
+      platform_path: "/store-a",
+      supply_party_id: partyId,
+      external_key: "inventory-1",
+      display_name: "城市通勤方案",
+      attributes: { category: "transport" },
+      terms: {},
+    };
+    expect(
+      validateMcpToolArguments("marketplace.offer.create", create),
+    ).toBeNull();
+    expect(
+      validateMcpToolArguments("marketplace.offer.create", {
+        ...create,
+        productTemplateId: "book.v2",
+      }),
+    ).toBeNull();
+    for (const productTemplateId of ["Book", "first/template"]) {
+      expect(
+        validateMcpToolArguments("marketplace.offer.create", {
+          ...create,
+          productTemplateId,
+        }),
+      ).toContain("productTemplateId");
+    }
+  });
+
   it("requires optimistic versions for offer updates and withdrawals", () => {
     const common = {
       tenant_id: tenantId,
@@ -239,6 +269,7 @@ describe("HTTP MCP argument contract", () => {
       validateMcpToolArguments("marketplace.offer.update", {
         ...common,
         display_name: "城市通勤方案",
+        productTemplateId: "city_transport-v2",
         attributes: { category: "transport" },
         terms: { amount_minor: "1234", currency: "CNY" },
       }),
