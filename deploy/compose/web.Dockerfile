@@ -31,6 +31,7 @@ FROM node:22-trixie-slim@sha256:f4c1b09232a0ae8f765093968ec82107a1be65cb0bfb36fc
 
 WORKDIR /app
 COPY --from=web-deps /app ./
+COPY docs/catalog-protocol-v2.json /docs/catalog-protocol-v2.json
 RUN node node_modules/next/dist/bin/next build
 # Next 16 preserves the path relative to outputFileTracingRoot in the
 # standalone bundle. Normalize both the monorepo (`standalone/web`) and the
