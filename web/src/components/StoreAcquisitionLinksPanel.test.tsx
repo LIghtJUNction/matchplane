@@ -405,7 +405,6 @@ describe("StoreAcquisitionLinksPanel", () => {
   });
 
   it("keeps one refresh button DOM node and focus while suppressing duplicate refreshes", async () => {
-    const user = userEvent.setup();
     renderPanel();
     await waitForLoadedList();
 
