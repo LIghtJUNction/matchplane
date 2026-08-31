@@ -30,6 +30,7 @@ import {
   type MallAssistantSearchTrace,
 } from "./api";
 import { useInterfacePreferences } from "./lib/preferences";
+import { isUuid } from "./lib/uuid";
 import { useMarketplaceCatalog } from "./hooks/useMarketplaceCatalog";
 import { useAuthSession } from "./hooks/useAuthSession";
 import {
@@ -106,6 +107,10 @@ export function App({
   const [rootSearchTrace, setRootSearchTrace] =
     useState<MallAssistantSearchTrace | null>(null);
   const [webMcpDraftMessage, setWebMcpDraftMessage] = useState<string>();
+  const routedListingRef = useRef<{
+    offerId: string;
+    platformPath: string;
+  } | null>(null);
 
   // Subplatform routing and URL sync
   const {
@@ -113,6 +118,9 @@ export function App({
     setRole,
     subplatform,
     setSubplatform,
+    subplatformResolved,
+    requestedOfferId,
+    replaceOfferInUrl,
     hydrated,
     accountSettingsSection,
     setAccountSettingsSection,
@@ -191,6 +199,7 @@ export function App({
   const {
     listings,
     catalogResolved,
+    catalogResolvedPath,
     catalogError,
     retryCatalog,
     listing,
@@ -207,6 +216,86 @@ export function App({
     onNotice: setNotice,
   });
 
+  useEffect(() => {
+    const routedListing = routedListingRef.current;
+    if (!requestedOfferId) {
+      if (routedListing) {
+        routedListingRef.current = null;
+        closeListing();
+      }
+      return;
+    }
+
+    if (routedListing && routedListing.platformPath !== subplatform.path) {
+      routedListingRef.current = null;
+      closeListing();
+    }
+
+    if (
+      !subplatformResolved ||
+      !catalogResolved ||
+      catalogResolvedPath !== subplatform.path
+    ) {
+      return;
+    }
+
+    const selected = listings.find((candidate) => {
+      if (
+        !candidate.offerId ||
+        !isUuid(candidate.offerId) ||
+        candidate.offerId.toLowerCase() !== requestedOfferId
+      ) {
+        return false;
+      }
+      if (subplatform.slug === "root") return true;
+      if (candidate.platformPath !== subplatform.path) return false;
+      if (
+        subplatform.domainId &&
+        candidate.domainId &&
+        candidate.domainId !== subplatform.domainId
+      ) {
+        return false;
+      }
+      return !(
+        subplatform.tenantId &&
+        candidate.tenantId &&
+        candidate.tenantId !== subplatform.tenantId
+      );
+    });
+
+    if (
+      role !== "buyer" ||
+      (subplatform.status ?? "active") !== "active" ||
+      !selected
+    ) {
+      routedListingRef.current = null;
+      closeListing();
+      replaceOfferInUrl(null);
+      return;
+    }
+
+    routedListingRef.current = {
+      offerId: requestedOfferId,
+      platformPath: subplatform.path,
+    };
+    setListing(selected);
+  }, [
+    catalogResolved,
+    catalogResolvedPath,
+    closeListing,
+    listings,
+    replaceOfferInUrl,
+    requestedOfferId,
+    role,
+    setListing,
+    subplatform.domainId,
+    subplatform.path,
+    subplatform.slug,
+    subplatform.status,
+    subplatform.tenantId,
+    subplatformResolved,
+  ]);
+
   // Store AI handoff & contact consent
   const {
     requestStoreContactConsent,
@@ -221,7 +310,14 @@ export function App({
   });
 
   useEffect(() => {
-    if (!authResolved || !authUser || !catalogResolved || listing) return;
+    if (
+      requestedOfferId ||
+      !authResolved ||
+      !authUser ||
+      !catalogResolved ||
+      listing
+    )
+      return;
     const pending = readPendingConversion();
     if (!pending || pending.storePath !== subplatform.path) return;
     const selected = listings.find(
@@ -255,14 +351,17 @@ export function App({
     listing,
     listings,
     locale,
+    requestedOfferId,
     setListing,
     subplatform.path,
   ]);
 
   const closeListingAndCancelPending = useCallback(() => {
     clearPendingConversion(listing?.offerId ?? listing?.id);
+    routedListingRef.current = null;
+    replaceOfferInUrl(null);
     closeListing();
-  }, [closeListing, listing]);
+  }, [closeListing, listing, replaceOfferInUrl]);
 
   // Auto-dismiss notice
   useEffect(() => {
@@ -392,20 +491,29 @@ export function App({
 
   const openMarketplaceListing = useCallback(
     (selected: (typeof listings)[number]) => {
+      const openSelected = () => {
+        replaceOfferInUrl(
+          selected.offerId && isUuid(selected.offerId)
+            ? selected.offerId
+            : null,
+        );
+        setListing(selected);
+      };
       const targetPath = selected.platformPath;
       if (
         subplatform.slug === "root" &&
         targetPath &&
         targetPath !== subplatform.path
       ) {
-        void navigateToSubplatform(targetPath).then(() => setListing(selected));
+        void navigateToSubplatform(targetPath).then(openSelected);
         return;
       }
-      setListing(selected);
+      openSelected();
     },
     [
       listings,
       navigateToSubplatform,
+      replaceOfferInUrl,
       setListing,
       subplatform.path,
       subplatform.slug,
@@ -452,7 +560,7 @@ export function App({
         listings={listings}
         onRetryCatalog={retryCatalog}
         locale={locale}
-        onOpenListing={setListing}
+        onOpenListing={openMarketplaceListing}
         onLikeListing={likeListing}
         onNotice={setNotice}
         onHumanHandoff={requestStoreAiHandoff}

@@ -11,7 +11,7 @@ import {
 } from "@appica/ui-react/drawer";
 import { useMediaQuery } from "@appica/ui-react/hooks/use-media-query";
 import { Check, ChevronLeft, ChevronRight, LockKeyhole, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { localizedSubplatformCopy } from "../lib/localized-copy";
 import type { InterfaceLocale } from "../lib/preferences";
@@ -40,6 +40,19 @@ export function ListingSheet({
   contactDisabled = false,
 }: ListingSheetProps) {
   const desktop = useMediaQuery("(min-width: 56rem)");
+  const initialFocusRef = useRef<HTMLButtonElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  if (
+    listing &&
+    returnFocusRef.current === null &&
+    typeof document !== "undefined"
+  ) {
+    const activeElement = document.activeElement;
+    returnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : document.getElementById("main-content");
+  }
   const [contactSubmitting, setContactSubmitting] = useState(false);
   const [contactSubmitted, setContactSubmitted] = useState(false);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
@@ -91,6 +104,16 @@ export function ListingSheet({
         <DrawerContent
           className="listing-sheet"
           closeButton={false}
+          initialFocus={initialFocusRef}
+          finalFocus={() => {
+            const target = returnFocusRef.current?.isConnected
+              ? returnFocusRef.current
+              : typeof document === "undefined"
+                ? false
+                : document.getElementById("main-content");
+            returnFocusRef.current = null;
+            return target;
+          }}
           closeLabel={copy(
             "closeOfferDetailLabel",
             "关闭供给详情",
@@ -115,6 +138,7 @@ export function ListingSheet({
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  ref={initialFocusRef}
                   className="sheet-close"
                   type="button"
                   aria-label={copy(

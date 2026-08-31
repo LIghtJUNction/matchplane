@@ -96,6 +96,9 @@ export function useMarketplaceCatalog({
 }: UseMarketplaceCatalogOptions) {
   const [listings, setListings] = useState<AssetListing[]>([]);
   const [catalogResolved, setCatalogResolved] = useState(false);
+  const [catalogResolvedPath, setCatalogResolvedPath] = useState<string | null>(
+    null,
+  );
   const [catalogError, setCatalogError] = useState(false);
   const [catalogRequestVersion, setCatalogRequestVersion] = useState(0);
   const [listing, setListing] = useState<AssetListing | null>(null);
@@ -115,6 +118,7 @@ export function useMarketplaceCatalog({
       catalogInteractionRef.current = false;
     }
     setCatalogResolved(false);
+    setCatalogResolvedPath(null);
     setCatalogError(false);
     const timeout = new Promise<never>((_, reject) => {
       timeoutId = window.setTimeout(
@@ -143,7 +147,10 @@ export function useMarketplaceCatalog({
       })
       .finally(() => {
         if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-        if (!cancelled) setCatalogResolved(true);
+        if (!cancelled) {
+          setCatalogResolved(true);
+          setCatalogResolvedPath(subplatform.path);
+        }
       });
     return () => {
       cancelled = true;
@@ -318,6 +325,7 @@ export function useMarketplaceCatalog({
     listings,
     setListings,
     catalogResolved,
+    catalogResolvedPath,
     catalogError,
     retryCatalog,
     listing,

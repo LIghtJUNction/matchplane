@@ -6,6 +6,7 @@ import {
   resolveSubplatform,
   type SubplatformConfig,
 } from "../subplatform";
+import { isUuid } from "../lib/uuid";
 import type { WorkspaceRole } from "../types";
 import { requiresAuthenticatedWorkspace } from "./useAuthSession";
 
@@ -21,6 +22,18 @@ function roleFromLocation(): WorkspaceRole {
 function relativeBrowserLocation(searchParams: URLSearchParams): string {
   const query = searchParams.toString();
   return `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+}
+
+function offerQueryState(searchParams: URLSearchParams): {
+  offerId: string | null;
+  invalid: boolean;
+} {
+  const values = searchParams.getAll("offer");
+  if (values.length === 0) return { offerId: null, invalid: false };
+  if (values.length !== 1 || !isUuid(values[0])) {
+    return { offerId: null, invalid: true };
+  }
+  return { offerId: values[0].toLowerCase(), invalid: false };
 }
 
 export function parentPlatformHref(path: string, role: WorkspaceRole): string {
@@ -177,6 +190,8 @@ export function useSubplatformRoute({
   const [subplatform, setSubplatform] = useState<SubplatformConfig>(() =>
     seedInitialStoreIdentity(resolveSubplatform(initialPath)),
   );
+  const [subplatformResolved, setSubplatformResolved] = useState(false);
+  const [requestedOfferId, setRequestedOfferId] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [accountSettingsSection, setAccountSettingsSection] =
     useState<AccountSettingsSection | null>(null);
@@ -205,12 +220,20 @@ export function useSubplatformRoute({
       const fallback = seedInitialStoreIdentity(resolveSubplatform(path));
       window.history.pushState(null, "", path);
       setSubplatform(fallback);
+      setSubplatformResolved(false);
+      setRequestedOfferId(null);
 
       try {
         const loaded = seedInitialStoreIdentity(await loadSubplatform(path));
-        if (navigationRequestRef.current === request) setSubplatform(loaded);
+        if (navigationRequestRef.current === request) {
+          setSubplatform(loaded);
+          setSubplatformResolved(true);
+        }
         return loaded;
       } catch {
+        if (navigationRequestRef.current === request) {
+          setSubplatformResolved(true);
+        }
         return fallback;
       }
     },
@@ -222,6 +245,12 @@ export function useSubplatformRoute({
     const searchParams = new URLSearchParams(window.location.search);
     const accountTarget = searchParams.get("account");
     let cleanWorkspaceTarget = false;
+    const offerQuery = offerQueryState(searchParams);
+    setRequestedOfferId(offerQuery.offerId);
+    if (offerQuery.invalid) {
+      searchParams.delete("offer");
+      cleanWorkspaceTarget = true;
+    }
 
     if (accountTarget === "identity") {
       setAccountSettingsSection("account");
@@ -276,10 +305,21 @@ export function useSubplatformRoute({
         relativeBrowserLocation(searchParams),
       );
     }
+    const initialRequest = navigationRequestRef.current + 1;
+    navigationRequestRef.current = initialRequest;
     setSubplatform(seedInitialStoreIdentity(resolveSubplatform(requestedPath)));
-    void loadSubplatform(requestedPath).then((loaded) =>
-      setSubplatform(seedInitialStoreIdentity(loaded)),
-    );
+    setSubplatformResolved(false);
+    void loadSubplatform(requestedPath)
+      .then((loaded) => {
+        if (navigationRequestRef.current !== initialRequest) return;
+        setSubplatform(seedInitialStoreIdentity(loaded));
+        setSubplatformResolved(true);
+      })
+      .catch(() => {
+        if (navigationRequestRef.current === initialRequest) {
+          setSubplatformResolved(true);
+        }
+      });
     const requestedRole = roleFromLocation();
     requestedRoleRef.current = requestedRole;
     setRole(
@@ -289,13 +329,32 @@ export function useSubplatformRoute({
 
     const onPopState = () => {
       const path = window.location.pathname;
+      const searchParams = new URLSearchParams(window.location.search);
+      const offerQuery = offerQueryState(searchParams);
+      if (offerQuery.invalid) {
+        searchParams.delete("offer");
+        window.history.replaceState(
+          null,
+          "",
+          relativeBrowserLocation(searchParams),
+        );
+      }
+      setRequestedOfferId(offerQuery.offerId);
       const request = navigationRequestRef.current + 1;
       navigationRequestRef.current = request;
       setSubplatform(seedInitialStoreIdentity(resolveSubplatform(path)));
-      void loadSubplatform(path).then((loaded) => {
-        if (navigationRequestRef.current === request)
+      setSubplatformResolved(false);
+      void loadSubplatform(path)
+        .then((loaded) => {
+          if (navigationRequestRef.current !== request) return;
           setSubplatform(seedInitialStoreIdentity(loaded));
-      });
+          setSubplatformResolved(true);
+        })
+        .catch(() => {
+          if (navigationRequestRef.current === request) {
+            setSubplatformResolved(true);
+          }
+        });
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -312,6 +371,19 @@ export function useSubplatformRoute({
       relativeBrowserLocation(searchParams),
     );
   }, [authResolved, hydrated, role]);
+
+  const replaceOfferInUrl = useCallback((offerId: string | null) => {
+    const canonicalOfferId = isUuid(offerId) ? offerId.toLowerCase() : null;
+    const searchParams = new URLSearchParams(window.location.search);
+    searchParams.delete("offer");
+    if (canonicalOfferId) searchParams.set("offer", canonicalOfferId);
+    window.history.replaceState(
+      null,
+      "",
+      relativeBrowserLocation(searchParams),
+    );
+    setRequestedOfferId(canonicalOfferId);
+  }, []);
 
   // In-page requests (for example the contact consent card) open the account
   // bindings dialog without a full navigation, so an ongoing chat is not lost.
@@ -333,6 +405,9 @@ export function useSubplatformRoute({
     setRole,
     subplatform,
     setSubplatform,
+    subplatformResolved,
+    requestedOfferId,
+    replaceOfferInUrl,
     hydrated,
     accountSettingsSection,
     setAccountSettingsSection,
