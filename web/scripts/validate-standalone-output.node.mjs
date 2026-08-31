@@ -122,6 +122,23 @@ test("Dockerfile validates the normalized release tree in the builder", () => {
   assert.ok(runner > validation, "release validation must run in the builder");
 });
 
+test("Dockerfile provides the catalog schema to the isolated web build", () => {
+  const dockerfile = readFileSync(
+    new URL("../../deploy/compose/web.Dockerfile", import.meta.url),
+    "utf8",
+  );
+  const builderStage = dockerfile.slice(
+    dockerfile.indexOf(" AS builder"),
+    dockerfile.indexOf(" AS runner"),
+  );
+
+  assert.match(
+    builderStage,
+    /^COPY docs\/catalog-protocol-v2\.json \/docs\/catalog-protocol-v2\.json$/m,
+    "the flattened web build must include its repository-level schema import",
+  );
+});
+
 test("rejects missing and mixed server layouts", () => {
   assertRejected(
     { "package.json": "{}\n" },
