@@ -87,7 +87,14 @@ export async function GET(
                   OR offer.expires_at > statement_timestamp())
                 AND canonical_store.status = 'active'
                 AND canonical_store.visibility = 'public'
-                AND scoped_domain.status = 'active') AS "destinationAvailable",
+                AND scoped_domain.status = 'active'
+                AND (canonical_store.integration_kind = 'hosted'
+                  OR registration.id IS NOT NULL)
+                AND (canonical_store.integration_kind <> 'external'
+                  OR binding.id IS NOT NULL)
+                AND (canonical_store.integration_kind = 'hosted'
+                  OR registration.source_kind <> 'remote'
+                  OR binding.id IS NOT NULL)) AS "destinationAvailable",
               link.version::text,
               link.created_at::text AS "createdAt",
               link.updated_at::text AS "updatedAt"
@@ -106,6 +113,20 @@ export async function GET(
          JOIN domains scoped_domain
            ON scoped_domain.tenant_id = link.tenant_id
           AND scoped_domain.id = link.domain_id
+         LEFT JOIN subplatform_registrations registration
+           ON registration.id = canonical_store.current_registration_id
+          AND registration.tenant_id = canonical_store.tenant_id
+          AND registration.domain_id = canonical_store.domain_id
+          AND registration.slug = canonical_store.slug
+          AND registration.state = 'active'
+         LEFT JOIN platform_federation_bindings binding
+           ON binding.id = canonical_store.federation_binding_id
+          AND binding.tenant_id = canonical_store.tenant_id
+          AND binding.domain_id = canonical_store.domain_id
+          AND binding.slug = canonical_store.slug
+          AND binding.organization_id = canonical_store.organization_id
+          AND binding.registration_id = registration.id
+          AND binding.status = 'active'
         WHERE link.tenant_id = $1::uuid
           AND link.store_id = $2::uuid
         ORDER BY link.created_at DESC, link.id DESC
@@ -151,7 +172,14 @@ export async function POST(
                   OR offer.expires_at > clock_timestamp())
                 AND canonical_store.status = 'active'
                 AND canonical_store.visibility = 'public'
-                AND scoped_domain.status = 'active') AS "destinationAvailable"
+                AND scoped_domain.status = 'active'
+                AND (canonical_store.integration_kind = 'hosted'
+                  OR registration.id IS NOT NULL)
+                AND (canonical_store.integration_kind <> 'external'
+                  OR binding.id IS NOT NULL)
+                AND (canonical_store.integration_kind = 'hosted'
+                  OR registration.source_kind <> 'remote'
+                  OR binding.id IS NOT NULL)) AS "destinationAvailable"
          FROM marketplace_offers offer
          JOIN tenants tenant
            ON tenant.id = offer.tenant_id
@@ -162,6 +190,20 @@ export async function POST(
          JOIN domains scoped_domain
            ON scoped_domain.tenant_id = canonical_store.tenant_id
           AND scoped_domain.id = canonical_store.domain_id
+         LEFT JOIN subplatform_registrations registration
+           ON registration.id = canonical_store.current_registration_id
+          AND registration.tenant_id = canonical_store.tenant_id
+          AND registration.domain_id = canonical_store.domain_id
+          AND registration.slug = canonical_store.slug
+          AND registration.state = 'active'
+         LEFT JOIN platform_federation_bindings binding
+           ON binding.id = canonical_store.federation_binding_id
+          AND binding.tenant_id = canonical_store.tenant_id
+          AND binding.domain_id = canonical_store.domain_id
+          AND binding.slug = canonical_store.slug
+          AND binding.organization_id = canonical_store.organization_id
+          AND binding.registration_id = registration.id
+          AND binding.status = 'active'
         WHERE offer.tenant_id = $1::uuid
           AND offer.store_id = $2::uuid
           AND offer.domain_id = $3::uuid
@@ -296,7 +338,14 @@ export async function PATCH(
                   OR offer.expires_at > statement_timestamp())
                 AND canonical_store.status = 'active'
                 AND canonical_store.visibility = 'public'
-                AND scoped_domain.status = 'active') AS "destinationAvailable",
+                AND scoped_domain.status = 'active'
+                AND (canonical_store.integration_kind = 'hosted'
+                  OR registration.id IS NOT NULL)
+                AND (canonical_store.integration_kind <> 'external'
+                  OR binding.id IS NOT NULL)
+                AND (canonical_store.integration_kind = 'hosted'
+                  OR registration.source_kind <> 'remote'
+                  OR binding.id IS NOT NULL)) AS "destinationAvailable",
               link.version::text,
               link.created_at::text AS "createdAt",
               link.updated_at::text AS "updatedAt"
@@ -315,6 +364,20 @@ export async function PATCH(
          JOIN domains scoped_domain
            ON scoped_domain.tenant_id = link.tenant_id
           AND scoped_domain.id = link.domain_id
+         LEFT JOIN subplatform_registrations registration
+           ON registration.id = canonical_store.current_registration_id
+          AND registration.tenant_id = canonical_store.tenant_id
+          AND registration.domain_id = canonical_store.domain_id
+          AND registration.slug = canonical_store.slug
+          AND registration.state = 'active'
+         LEFT JOIN platform_federation_bindings binding
+           ON binding.id = canonical_store.federation_binding_id
+          AND binding.tenant_id = canonical_store.tenant_id
+          AND binding.domain_id = canonical_store.domain_id
+          AND binding.slug = canonical_store.slug
+          AND binding.organization_id = canonical_store.organization_id
+          AND binding.registration_id = registration.id
+          AND binding.status = 'active'
         WHERE link.tenant_id = $1::uuid
           AND link.store_id = $2::uuid
           AND link.id = $3::uuid

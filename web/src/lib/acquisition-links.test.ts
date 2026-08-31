@@ -129,6 +129,11 @@ describe("acquisition link privacy helpers", () => {
     expect(sql).toContain("store.visibility = 'public'");
     expect(sql).toContain("domain.status = 'active'");
     expect(sql).toContain("tenant.status = 'active'");
+    expect(sql).toContain("registration.state = 'active'");
+    expect(sql).toContain("store.integration_kind = 'hosted'");
+    expect(sql).toContain("store.integration_kind <> 'external'");
+    expect(sql).toContain("registration.source_kind <> 'remote'");
+    expect(sql).toContain("binding.status = 'active'");
     expect(parameters).toEqual([digestAcquisitionToken(rawToken)]);
     expect(JSON.stringify(parameters)).not.toContain(rawToken);
   });
@@ -141,6 +146,9 @@ describe("acquisition link privacy helpers", () => {
     "private store",
     "inactive store",
     "disabled domain",
+    "inactive package registration",
+    "unbound external store",
+    "unbound remote package",
   ])("fails closed when the active resolver finds no row: %s", async () => {
     const query = vi.fn().mockResolvedValue({ rowCount: 0, rows: [] });
 

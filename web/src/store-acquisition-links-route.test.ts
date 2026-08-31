@@ -278,6 +278,11 @@ describe("store acquisition links API", () => {
     expect(sql).toContain("canonical_store.status = 'active'");
     expect(sql).toContain("canonical_store.visibility = 'public'");
     expect(sql).toContain("scoped_domain.status = 'active'");
+    expect(sql).toContain("registration.state = 'active'");
+    expect(sql).toContain("canonical_store.integration_kind = 'hosted'");
+    expect(sql).toContain("canonical_store.integration_kind <> 'external'");
+    expect(sql).toContain("registration.source_kind <> 'remote'");
+    expect(sql).toContain("binding.status = 'active'");
   });
 
   it("requires an authenticated Better Auth session", async () => {

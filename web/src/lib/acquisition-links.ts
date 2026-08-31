@@ -147,9 +147,30 @@ export async function resolveActiveAcquisitionLink(
          ON domain.tenant_id = link.tenant_id
         AND domain.id = link.domain_id
         AND domain.status = 'active'
+       LEFT JOIN subplatform_registrations registration
+         ON registration.id = store.current_registration_id
+        AND registration.tenant_id = store.tenant_id
+        AND registration.domain_id = store.domain_id
+        AND registration.slug = store.slug
+        AND registration.state = 'active'
+       LEFT JOIN platform_federation_bindings binding
+         ON binding.id = store.federation_binding_id
+        AND binding.tenant_id = store.tenant_id
+        AND binding.domain_id = store.domain_id
+        AND binding.slug = store.slug
+        AND binding.organization_id = store.organization_id
+        AND binding.registration_id = registration.id
+        AND binding.status = 'active'
       WHERE link.token_digest = $1::bytea
         AND link.status = 'active'
         AND (link.expires_at IS NULL OR link.expires_at > clock_timestamp())
+        AND (store.integration_kind = 'hosted' OR registration.id IS NOT NULL)
+        AND (store.integration_kind <> 'external' OR binding.id IS NOT NULL)
+        AND (
+          store.integration_kind = 'hosted'
+          OR registration.source_kind <> 'remote'
+          OR binding.id IS NOT NULL
+        )
       LIMIT 1`,
     [digestAcquisitionToken(rawToken)],
   );
