@@ -2148,6 +2148,177 @@ export async function getVerifiedContactChannels(): Promise<
   return Array.isArray(body?.channels) ? body.channels : [];
 }
 
+export type StoreAcquisitionLinkConfiguredStatus = "active" | "disabled";
+export type StoreAcquisitionLinkEffectiveStatus =
+  | StoreAcquisitionLinkConfiguredStatus
+  | "expired";
+
+/** Token-free metadata returned after the one-time creation response. */
+export interface StoreAcquisitionLink {
+  id: string;
+  offerId: string;
+  channelKey: string;
+  sourceRef: string | null;
+  campaignRef: string | null;
+  status: StoreAcquisitionLinkEffectiveStatus;
+  active: boolean;
+  expiresAt: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateStoreAcquisitionLinkInput {
+  storeId: string;
+  offerId: string;
+  channelKey: string;
+  sourceRef?: string | null;
+  campaignRef?: string | null;
+  expiresAt?: string | null;
+}
+
+export interface CreatedStoreAcquisitionLink {
+  link: StoreAcquisitionLink;
+  shortPath: `/r/${string}`;
+}
+
+/** Read only token-free channel-link metadata for a managed store. */
+export async function getStoreAcquisitionLinks(
+  storeId: string,
+): Promise<StoreAcquisitionLink[]> {
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(storeId)}/acquisition-links`,
+    {
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json" },
+    },
+  );
+  const body = await readJson<unknown>(response);
+  if (!response.ok || !isStoreAcquisitionLinksResponse(body)) {
+    throw new MarketplaceApiError(
+      response.status,
+      acquisitionLinkError(body, "渠道链接暂时无法读取"),
+    );
+  }
+  return body.links;
+}
+
+/** Create one link; shortPath contains the raw token and must remain ephemeral. */
+export async function createStoreAcquisitionLink(
+  input: CreateStoreAcquisitionLinkInput,
+): Promise<CreatedStoreAcquisitionLink> {
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(input.storeId)}/acquisition-links`,
+    {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        offerId: input.offerId,
+        channelKey: input.channelKey,
+        sourceRef: input.sourceRef ?? null,
+        campaignRef: input.campaignRef ?? null,
+        expiresAt: input.expiresAt ?? null,
+      }),
+    },
+  );
+  const body = await readJson<unknown>(response);
+  if (!response.ok || !isCreatedStoreAcquisitionLink(body)) {
+    throw new MarketplaceApiError(
+      response.status,
+      acquisitionLinkError(body, "渠道链接创建失败"),
+    );
+  }
+  return body;
+}
+
+/** Save a configured status against the exact metadata version last read. */
+export async function updateStoreAcquisitionLinkStatus(input: {
+  storeId: string;
+  linkId: string;
+  status: StoreAcquisitionLinkConfiguredStatus;
+  expectedVersion: number;
+}): Promise<StoreAcquisitionLink> {
+  const response = await fetch(
+    `/api/stores/${encodeURIComponent(input.storeId)}/acquisition-links`,
+    {
+      method: "PATCH",
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({
+        linkId: input.linkId,
+        status: input.status,
+        expectedVersion: input.expectedVersion,
+      }),
+    },
+  );
+  const body = await readJson<unknown>(response);
+  if (
+    !response.ok ||
+    !isRecord(body) ||
+    !isStoreAcquisitionLink(body.link)
+  ) {
+    throw new MarketplaceApiError(
+      response.status,
+      acquisitionLinkError(body, "渠道链接状态保存失败"),
+    );
+  }
+  return body.link;
+}
+
+function isStoreAcquisitionLinksResponse(
+  value: unknown,
+): value is { links: StoreAcquisitionLink[] } {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.links) &&
+    value.links.every(isStoreAcquisitionLink)
+  );
+}
+
+function isCreatedStoreAcquisitionLink(
+  value: unknown,
+): value is CreatedStoreAcquisitionLink {
+  return (
+    isRecord(value) &&
+    isStoreAcquisitionLink(value.link) &&
+    typeof value.shortPath === "string" &&
+    /^\/r\/[A-Za-z0-9_-]{22}$/.test(value.shortPath)
+  );
+}
+
+function isStoreAcquisitionLink(value: unknown): value is StoreAcquisitionLink {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.offerId === "string" &&
+    typeof value.channelKey === "string" &&
+    (value.sourceRef === null || typeof value.sourceRef === "string") &&
+    (value.campaignRef === null || typeof value.campaignRef === "string") &&
+    (value.status === "active" ||
+      value.status === "disabled" ||
+      value.status === "expired") &&
+    typeof value.active === "boolean" &&
+    (value.expiresAt === null || typeof value.expiresAt === "string") &&
+    Number.isSafeInteger(value.version) &&
+    typeof value.createdAt === "string" &&
+    typeof value.updatedAt === "string"
+  );
+}
+
+function acquisitionLinkError(value: unknown, fallback: string): string {
+  return isRecord(value) && typeof value.error === "string" && value.error
+    ? value.error
+    : fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export interface StoreCustomerRecord {
   id: string;
   participantId: string;

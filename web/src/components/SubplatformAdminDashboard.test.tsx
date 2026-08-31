@@ -26,6 +26,19 @@ vi.mock("./StoreTodayPanel", () => ({
     </div>
   ),
 }));
+vi.mock("./StoreAcquisitionLinksPanel", async () => {
+  const { useEffect } = await import("react");
+
+  return {
+    StoreAcquisitionLinksPanel: () => {
+      useEffect(() => {
+        void fetch("/test/acquisition");
+      }, []);
+
+      return <div>acquisition-panel</div>;
+    },
+  };
+});
 vi.mock("./StoreCustomersPanel", async () => {
   const { useEffect } = await import("react");
 
@@ -181,6 +194,7 @@ describe("SubplatformAdminDashboard", () => {
 
     expect(screen.getByRole("tab", { name: "今日待办" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "商品" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "渠道链接" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "财务" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "店铺资料" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "店员" })).toBeInTheDocument();
@@ -199,6 +213,7 @@ describe("SubplatformAdminDashboard", () => {
     expect(screen.getByText(/today-panel/)).toBeVisible();
     expect(screen.queryByText(/products-panel/)).not.toBeInTheDocument();
     expect(screen.queryByText(/customers-panel/)).not.toBeInTheDocument();
+    expect(screen.queryByText("acquisition-panel")).not.toBeInTheDocument();
     expect(screen.queryByText("finance-panel")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("store-state")).not.toBeInTheDocument();
     expect(screen.queryByText("team-panel")).not.toBeInTheDocument();
@@ -262,6 +277,9 @@ describe("SubplatformAdminDashboard", () => {
     await user.click(screen.getByRole("tab", { name: "店员" }));
     expect(requestCount("/test/access")).toBe(1);
 
+    await user.click(screen.getByRole("tab", { name: "渠道链接" }));
+    expect(requestCount("/test/acquisition")).toBe(1);
+
     await user.click(screen.getByRole("tab", { name: "财务" }));
     expect(requestCount("/test/finance")).toBe(1);
 
@@ -269,9 +287,11 @@ describe("SubplatformAdminDashboard", () => {
     await user.click(screen.getByRole("tab", { name: "店铺资料" }));
     expect(screen.getByLabelText("store-state")).toHaveValue("draft survives");
     await user.click(screen.getByRole("tab", { name: "店员" }));
+    await user.click(screen.getByRole("tab", { name: "渠道链接" }));
     await user.click(screen.getByRole("tab", { name: "财务" }));
 
     expect(requestCount("/test/customers")).toBe(1);
+    expect(requestCount("/test/acquisition")).toBe(1);
     expect(requestCount("/test/management")).toBe(1);
     expect(requestCount("/test/access")).toBe(1);
     expect(requestCount("/test/finance")).toBe(1);
@@ -280,11 +300,15 @@ describe("SubplatformAdminDashboard", () => {
   it("does not mount management-only panels without management permission", () => {
     renderDashboard(false);
 
+    expect(
+      screen.queryByRole("tab", { name: "渠道链接" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "财务" })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("tab", { name: "店铺资料" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "店员" })).not.toBeInTheDocument();
+    expect(requestCount("/test/acquisition")).toBe(0);
     expect(requestCount("/test/finance")).toBe(0);
     expect(requestCount("/test/management")).toBe(0);
     expect(requestCount("/test/access")).toBe(0);

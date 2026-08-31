@@ -404,10 +404,13 @@ describe("MatchPlane workspaces", () => {
     expect(
       screen.getByRole("heading", { name: "Store A" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "商品" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(
+      await screen.findByRole(
+        "tab",
+        { name: "商品" },
+        { timeout: 10_000 },
+      ),
+    ).toHaveAttribute("aria-selected", "true");
     expect(window.location.search).not.toContain("console");
   });
 

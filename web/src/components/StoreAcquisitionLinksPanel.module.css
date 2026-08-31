@@ -1,0 +1,606 @@
+.panel {
+  width: min(100%, 68rem);
+  min-width: 0;
+  margin: 0 auto;
+  display: grid;
+  gap: 1rem;
+  color: var(--ink);
+}
+
+.heading {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.heading > div,
+.sectionHeading > div,
+.oneTimeHeading > div,
+.cardHeading > div {
+  min-width: 0;
+}
+
+.heading h2,
+.heading p,
+.sectionHeading h3,
+.sectionHeading p,
+.oneTimeHeading h3,
+.oneTimeHeading p,
+.cardHeading h4,
+.cardHeading p {
+  margin: 0;
+}
+
+.heading h2 {
+  margin-top: 0.16rem;
+  font-family: var(--serif);
+  font-size: clamp(1.35rem, 3vw, 1.85rem);
+  font-weight: 520;
+  letter-spacing: -0.025em;
+}
+
+.eyebrow {
+  color: var(--cactus-strong);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 760;
+  letter-spacing: 0.09em;
+}
+
+.description {
+  max-width: 47rem;
+  margin-top: 0.38rem !important;
+  color: var(--muted);
+  font-size: 0.73rem;
+  line-height: 1.6;
+}
+
+.refreshButton {
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+}
+
+.spinning {
+  animation: acquisition-spin 0.9s linear infinite;
+}
+
+@keyframes acquisition-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.createForm,
+.listSection,
+.oneTimeResult {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.88rem;
+  background: var(--paper);
+}
+
+.createForm,
+.oneTimeResult {
+  padding: clamp(0.85rem, 2vw, 1.1rem);
+}
+
+.sectionHeading,
+.oneTimeHeading,
+.cardHeading {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.sectionHeading h3,
+.oneTimeHeading h3 {
+  color: var(--ink);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.sectionHeading p,
+.oneTimeHeading + p {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.formGrid {
+  min-width: 0;
+  margin-top: 0.9rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.72rem;
+}
+
+.formGrid label {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 0.32rem;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 680;
+}
+
+.formGrid input,
+.formGrid select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0 0.72rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.62rem;
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 500;
+}
+
+.formGrid input::placeholder {
+  color: var(--muted);
+  opacity: 0.72;
+}
+
+.formGrid input:focus-visible,
+.formGrid select:focus-visible,
+.secretPath:focus-visible,
+.iconButton:focus-visible,
+.switch:focus-visible,
+.actionError button:focus-visible,
+.inlineError button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0.12rem;
+}
+
+.formGrid input:disabled,
+.formGrid select:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.formGrid small {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.fullField {
+  grid-column: 1 / -1;
+}
+
+.formActions {
+  min-width: 0;
+  margin-top: 0.85rem;
+  padding-top: 0.78rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.formActions > span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
+
+.formActions > button,
+.oneTimeActions > button {
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+}
+
+.formError,
+.inlineError,
+.actionError {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.52rem;
+  border-left: 0.2rem solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, var(--paper));
+  color: var(--ink-soft);
+  font-size: 0.69rem;
+  line-height: 1.5;
+}
+
+.formError {
+  margin-top: 0.8rem;
+  padding: 0.62rem 0.7rem;
+}
+
+.formError svg,
+.inlineError svg {
+  flex: 0 0 auto;
+  color: var(--danger);
+}
+
+.oneTimeResult {
+  border-color: color-mix(in srgb, var(--cactus) 44%, var(--line));
+  border-left: 0.24rem solid var(--cactus-strong);
+  background: color-mix(in srgb, var(--cactus) 7%, var(--paper));
+}
+
+.iconButton {
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0.62rem;
+  background: var(--paper);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.warning {
+  margin: 0.7rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.secretPath {
+  width: 100%;
+  min-width: 0;
+  margin-top: 0.68rem;
+  padding: 0.75rem 0.8rem;
+  display: block;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.62rem;
+  background: var(--paper-deep);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: clamp(0.72rem, 2.7vw, 0.82rem);
+  line-height: 1.5;
+  user-select: all;
+}
+
+.oneTimeActions {
+  margin-top: 0.72rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.copyFeedback {
+  margin: 0.65rem 0 0;
+  color: var(--danger);
+  font-size: 0.67rem;
+  line-height: 1.5;
+}
+
+.listSection {
+  overflow: hidden;
+}
+
+.listSection > .sectionHeading {
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.count {
+  min-width: 1.7rem;
+  min-height: 1.45rem;
+  padding: 0 0.42rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 740;
+}
+
+.state {
+  min-height: 9rem;
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.62rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.state > div {
+  max-width: 31rem;
+}
+
+.state strong,
+.state p {
+  margin: 0;
+}
+
+.state strong {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+}
+
+.state p {
+  margin-top: 0.18rem;
+  line-height: 1.5;
+}
+
+.errorState {
+  justify-content: space-between;
+  text-align: left;
+}
+
+.errorState > button {
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+}
+
+.linkList {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  list-style: none;
+}
+
+.linkCard + .linkCard {
+  border-top: 1px solid var(--line);
+}
+
+.linkCard article {
+  min-width: 0;
+  padding: clamp(0.85rem, 2vw, 1rem);
+  display: grid;
+  gap: 0.8rem;
+}
+
+.cardHeading p {
+  color: var(--cactus-strong);
+  font-family: var(--font-mono);
+  font-size: 0.59rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+}
+
+.cardHeading h4 {
+  margin-top: 0.14rem;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.cardHeading > div > span {
+  margin-top: 0.14rem;
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+.switch {
+  position: relative;
+  width: 2.8rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0.62rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.switch::before {
+  content: "";
+  position: absolute;
+  inset: 0.77rem 0.25rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--paper-deep);
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.switch > span {
+  position: absolute;
+  top: 0.96rem;
+  left: 0.45rem;
+  width: 0.83rem;
+  height: 0.83rem;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 1px 2px rgba(20, 20, 19, 0.18);
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.switch[aria-checked="true"]::before {
+  border-color: color-mix(in srgb, var(--cactus-strong) 62%, var(--line));
+  background: color-mix(in srgb, var(--cactus) 58%, var(--paper));
+}
+
+.switch[aria-checked="true"] > span {
+  transform: translateX(1.05rem);
+  background: var(--cactus-strong);
+}
+
+.switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.metadata {
+  min-width: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.62rem;
+}
+
+.metadata > div {
+  min-width: 0;
+  padding-top: 0.58rem;
+  border-top: 1px solid var(--line);
+}
+
+.metadata dt {
+  color: var(--muted);
+  font-size: 0.59rem;
+  font-weight: 680;
+  letter-spacing: 0.025em;
+}
+
+.metadata dd {
+  min-width: 0;
+  margin: 0.22rem 0 0;
+  display: grid;
+  gap: 0.1rem;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  line-height: 1.42;
+}
+
+.metadata strong {
+  color: var(--ink-soft);
+  font-size: inherit;
+}
+
+.metadata small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.59rem;
+  line-height: 1.45;
+}
+
+.statusAction {
+  min-height: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--muted);
+  font-size: 0.62rem;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.actionError {
+  padding: 0.58rem 0.68rem;
+  justify-content: space-between;
+}
+
+.actionError span,
+.inlineError span {
+  min-width: 0;
+  flex: 1;
+}
+
+.actionError button,
+.inlineError button {
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+  padding: 0 0.4rem;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 720;
+  text-decoration: underline;
+  text-underline-offset: 0.16rem;
+}
+
+.inlineError {
+  margin: 0 0.8rem 0.8rem;
+  padding: 0.58rem 0.68rem;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 42rem) {
+  .panel {
+    gap: 0.8rem;
+  }
+
+  .heading,
+  .formActions,
+  .errorState {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .refreshButton,
+  .formActions > button,
+  .errorState > button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .formGrid,
+  .metadata {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fullField {
+    grid-column: auto;
+  }
+
+  .oneTimeActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .oneTimeActions > button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .statusAction {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .actionError,
+  .inlineError {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning {
+    animation: none;
+  }
+
+  .switch::before,
+  .switch > span {
+    transition: none;
+  }
+}

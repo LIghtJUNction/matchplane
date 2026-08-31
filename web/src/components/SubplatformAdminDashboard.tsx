@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@appica/ui-react/tabs";
 import {
   CalendarDays,
+  Link2,
   Moon,
   Package,
   ReceiptText,
@@ -19,6 +20,7 @@ import type { SubplatformConfig } from "../subplatform";
 import { HorizontalTabScroller } from "./HorizontalTabScroller";
 import { PlatformAccessPanel } from "./PlatformAccessPanel";
 import { SellerDashboard } from "./SellerDashboard";
+import { StoreAcquisitionLinksPanel } from "./StoreAcquisitionLinksPanel";
 import { StoreCustomersPanel } from "./StoreCustomersPanel";
 import { StoreFinancePanel } from "./StoreFinancePanel";
 import { StoreManagementPanel } from "./StoreManagementPanel";
@@ -28,6 +30,7 @@ type StoreConsoleSection =
   | "today"
   | "products"
   | "customers"
+  | "acquisition"
   | "finance"
   | "store"
   | "team";
@@ -62,6 +65,7 @@ export function SubplatformAdminDashboard({
 
   const activateSection = (nextSection: StoreConsoleSection) => {
     const requiresManagement =
+      nextSection === "acquisition" ||
       nextSection === "finance" ||
       nextSection === "store" ||
       nextSection === "team";
@@ -141,6 +145,12 @@ export function SubplatformAdminDashboard({
                 {english ? "Customer management" : "客户管理"}
               </TabsTrigger>
               {canManageStore ? (
+                <TabsTrigger value="acquisition" className="min-h-11">
+                  <Link2 size={16} aria-hidden="true" />
+                  {english ? "Channel links" : "渠道链接"}
+                </TabsTrigger>
+              ) : null}
+              {canManageStore ? (
                 <TabsTrigger value="finance" className="min-h-11">
                   <ReceiptText size={16} aria-hidden="true" />
                   {english ? "Finance" : "财务"}
@@ -203,6 +213,15 @@ export function SubplatformAdminDashboard({
               storeId={store.id}
               locale={locale}
               focusCustomerId={focusedCustomerId}
+            />
+          </div>
+        ) : null}
+        {canManageStore && visitedSections.has("acquisition") ? (
+          <div hidden={section !== "acquisition"}>
+            <StoreAcquisitionLinksPanel
+              locale={locale}
+              store={store}
+              subplatform={subplatform}
             />
           </div>
         ) : null}
