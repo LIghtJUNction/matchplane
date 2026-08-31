@@ -1,4 +1,5 @@
 import { authDatabase } from "./lib/auth";
+import { isUuid } from "./lib/uuid";
 import type { RecommendedBackendListing } from "./api";
 import { MAX_PUBLIC_STORES, type PublicStore } from "./store-directory";
 import {
@@ -87,6 +88,64 @@ export interface PublicOfferSearchPage {
   hasMore: boolean;
 }
 
+export interface PublicStoreOfferDetailLookup {
+  tenantId: string;
+  domainId: string;
+  storeId: string;
+  offerId: string;
+}
+
+export interface PublicStoreOfferDetailPrice {
+  amountMinor: string;
+  currency: string;
+  currencyScale: number;
+}
+
+export interface PublicStoreOfferDetailMedia {
+  url: string;
+}
+
+export interface PublicStoreOfferDetailField {
+  key: string;
+  label: string;
+  group: string | null;
+  unit: string | null;
+  value: string | number;
+}
+
+/** Bounded detail projection for a public landing page; raw offer JSON and internal IDs stay server-side. */
+export interface PublicStoreOfferDetail {
+  offerId: string;
+  displayName: string;
+  description: string | null;
+  status: "active";
+  updatedAt: string | null;
+  price: PublicStoreOfferDetailPrice | null;
+  media: PublicStoreOfferDetailMedia[];
+  fields: PublicStoreOfferDetailField[];
+  store: {
+    name: string;
+    description: string;
+    path: string;
+  };
+}
+
+interface PublicOfferDetailRow {
+  id: string;
+  displayName: string;
+  attributes: unknown;
+  terms: unknown;
+  updatedAt: string;
+  storeName: string;
+  storeDescription: string;
+  storeSlug: string;
+  storePath: string;
+  integrationKind: string;
+  productTemplateId?: string | null;
+  productTemplates?: unknown;
+  supplyFields: unknown;
+}
+
 /** Read only active, store-owned product projections; no party or contact field is selected. */
 export async function searchPublicStoreOffers(
   input: PublicOfferSearchInput,
@@ -107,6 +166,139 @@ export async function searchPublicStoreOfferPage(
   input: PublicOfferSearchInput,
 ): Promise<PublicOfferSearchPage> {
   return searchPublicStoreOfferPageFromDatabase(authDatabase, input);
+}
+
+/** Read one exact public offer through the same allowlist and PII-deny projection as search. */
+export async function readPublicStoreOfferDetail(
+  lookup: PublicStoreOfferDetailLookup,
+): Promise<PublicStoreOfferDetail | null> {
+  return readPublicStoreOfferDetailFromDatabase(authDatabase, lookup);
+}
+
+/** Database seam for acquisition landing and its projection contract tests. */
+export async function readPublicStoreOfferDetailFromDatabase(
+  database: Pick<typeof authDatabase, "query">,
+  lookup: PublicStoreOfferDetailLookup,
+): Promise<PublicStoreOfferDetail | null> {
+  if (
+    !isUuid(lookup.tenantId) ||
+    !isUuid(lookup.domainId) ||
+    !isUuid(lookup.storeId) ||
+    !isUuid(lookup.offerId)
+  ) {
+    return null;
+  }
+
+  const executeQuery = database.query.bind(database);
+  const result = (await executeQuery(
+    `SELECT offer.id::text,
+            offer.display_name AS "displayName",
+            offer.attributes,
+            offer.terms,
+            offer.updated_at::text AS "updatedAt",
+            offer.product_template_id::text AS "productTemplateId",
+            store.display_name AS "storeName",
+            store.description AS "storeDescription",
+            store.slug AS "storeSlug",
+            alias.path AS "storePath",
+            store.integration_kind AS "integrationKind",
+            registration.manifest -> 'productTemplates' AS "productTemplates",
+            COALESCE(registration.manifest -> 'ui' -> 'supplyFields', '[]'::jsonb) AS "supplyFields"
+       FROM marketplace_offers offer
+       JOIN tenants tenant
+         ON tenant.id = offer.tenant_id
+        AND tenant.status = 'active'
+       JOIN stores store
+         ON store.tenant_id = offer.tenant_id
+        AND store.domain_id = offer.domain_id
+        AND store.id = offer.store_id
+        AND store.status = 'active'
+        AND store.visibility = 'public'
+       JOIN domains domain
+         ON domain.tenant_id = store.tenant_id
+        AND domain.id = store.domain_id
+        AND domain.status = 'active'
+       LEFT JOIN subplatform_registrations registration
+         ON registration.id = store.current_registration_id
+        AND registration.tenant_id = store.tenant_id
+        AND registration.domain_id = store.domain_id
+        AND registration.slug = store.slug
+        AND registration.state = 'active'
+       LEFT JOIN platform_federation_bindings binding
+         ON binding.id = store.federation_binding_id
+        AND binding.tenant_id = store.tenant_id
+        AND binding.domain_id = store.domain_id
+        AND binding.slug = store.slug
+        AND binding.organization_id = store.organization_id
+        AND binding.registration_id = registration.id
+        AND binding.status = 'active'
+       JOIN store_path_aliases alias
+         ON alias.tenant_id = store.tenant_id
+        AND alias.store_id = store.id
+        AND alias.is_canonical = true
+      WHERE offer.tenant_id = $1::uuid
+        AND offer.domain_id = $2::uuid
+        AND offer.store_id = $3::uuid
+        AND offer.id = $4::uuid
+        AND offer.status = 'active'
+        AND (offer.expires_at IS NULL OR offer.expires_at > clock_timestamp())
+        AND (store.integration_kind = 'hosted' OR registration.id IS NOT NULL)
+        AND (store.integration_kind <> 'external' OR binding.id IS NOT NULL)
+        AND (
+          store.integration_kind = 'hosted'
+          OR registration.source_kind <> 'remote'
+          OR binding.id IS NOT NULL
+        )
+      LIMIT 1`,
+    [lookup.tenantId, lookup.domainId, lookup.storeId, lookup.offerId],
+  )) as { rows: PublicOfferDetailRow[] };
+  const row = result.rows[0];
+  if (!row) return null;
+
+  const id = text(row.id);
+  const displayName = text(row.displayName).slice(0, 500);
+  const storeName = text(row.storeName).slice(0, 500);
+  const storeSlug = text(row.storeSlug);
+  const storePath = text(row.storePath);
+  if (
+    id !== lookup.offerId ||
+    !displayName ||
+    !storeName ||
+    !/^[a-z0-9][a-z0-9-]{1,62}$/.test(storeSlug) ||
+    storePath !== `/${storeSlug}` ||
+    !["hosted", "package", "external"].includes(row.integrationKind)
+  ) {
+    return null;
+  }
+
+  const supplyFields = publicSupplyFields(
+    row.productTemplateId,
+    row.productTemplates,
+    row.supplyFields,
+  );
+  const attributes = publicAttributes(
+    row.attributes,
+    row.integrationKind,
+    supplyFields,
+  );
+  const terms = publicTerms(row.terms);
+  const description = text(attributes.description).slice(0, 4_000);
+
+  return {
+    offerId: id,
+    displayName,
+    description: description || null,
+    status: "active",
+    updatedAt: publicTimestamp(row.updatedAt),
+    price: publicFixedPrice(terms),
+    media: publicDetailMedia(attributes.attachments),
+    fields: publicDetailFields(supplyFields, attributes),
+    store: {
+      name: storeName,
+      description: text(row.storeDescription).slice(0, 2_000),
+      path: storePath,
+    },
+  };
 }
 
 /** Database reader seam for the bounded production offer page. */
@@ -440,6 +632,77 @@ function publicTerms(value: unknown): Record<string, unknown> {
     currency,
     currency_scale: currencyScale,
   };
+}
+
+function publicFixedPrice(
+  terms: Record<string, unknown>,
+): PublicStoreOfferDetailPrice | null {
+  if (!hasFixedPublicPrice(terms)) return null;
+  return {
+    amountMinor: terms.amount_minor as string,
+    currency: terms.currency as string,
+    currencyScale: terms.currency_scale as number,
+  };
+}
+
+function publicDetailMedia(value: unknown): PublicStoreOfferDetailMedia[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): PublicStoreOfferDetailMedia[] => {
+    const url = safePublicUrl(record(item).public_url);
+    return url ? [{ url }] : [];
+  });
+}
+
+function publicDetailFields(
+  supplyFields: unknown,
+  attributes: Record<string, unknown>,
+): PublicStoreOfferDetailField[] {
+  if (!Array.isArray(supplyFields)) return [];
+  const fields: PublicStoreOfferDetailField[] = [];
+  const seen = new Set<string>();
+  for (const value of supplyFields) {
+    const field = record(value);
+    const key = text(field.key);
+    const label = text(field.label).slice(0, 200);
+    if (
+      !key ||
+      key.length > 120 ||
+      !label ||
+      seen.has(key) ||
+      !isSafePublicAttributeKey(key)
+    ) {
+      continue;
+    }
+    const fieldValue = attributes[key];
+    if (
+      !(
+        (typeof fieldValue === "string" && fieldValue) ||
+        (typeof fieldValue === "number" && Number.isFinite(fieldValue))
+      )
+    ) {
+      continue;
+    }
+    seen.add(key);
+    const group = text(field.group).slice(0, 120);
+    const unit = text(field.unit).slice(0, 80);
+    fields.push({
+      key,
+      label,
+      group: group || null,
+      unit: unit || null,
+      value: fieldValue,
+    });
+    if (fields.length === 128) break;
+  }
+  return fields;
+}
+
+function publicTimestamp(value: unknown): string | null {
+  const candidate = text(value);
+  const timestamp = Date.parse(candidate);
+  return candidate && Number.isFinite(timestamp)
+    ? new Date(timestamp).toISOString()
+    : null;
 }
 
 function hasFixedPublicPrice(terms: Record<string, unknown>): boolean {
