@@ -2149,9 +2149,17 @@ export async function getVerifiedContactChannels(): Promise<
 }
 
 export type StoreAcquisitionLinkConfiguredStatus = "active" | "disabled";
-export type StoreAcquisitionLinkEffectiveStatus =
+export type StoreAcquisitionLinkStatus =
   | StoreAcquisitionLinkConfiguredStatus
   | "expired";
+export type StoreAcquisitionLinkEffectiveStatus =
+  | StoreAcquisitionLinkStatus
+  | "unavailable";
+export type StoreAcquisitionLinkUnavailableReason =
+  | "disabled"
+  | "expired"
+  | "destination_unavailable"
+  | null;
 
 /** Token-free metadata returned after the one-time creation response. */
 export interface StoreAcquisitionLink {
@@ -2160,8 +2168,11 @@ export interface StoreAcquisitionLink {
   channelKey: string;
   sourceRef: string | null;
   campaignRef: string | null;
-  status: StoreAcquisitionLinkEffectiveStatus;
+  status: StoreAcquisitionLinkStatus;
   active: boolean;
+  /** Optional only for compatibility with a rolling deployment of the older API. */
+  effectiveStatus?: StoreAcquisitionLinkEffectiveStatus;
+  unavailableReason?: StoreAcquisitionLinkUnavailableReason;
   expiresAt: string | null;
   version: number;
   createdAt: string;
@@ -2302,10 +2313,29 @@ function isStoreAcquisitionLink(value: unknown): value is StoreAcquisitionLink {
       value.status === "disabled" ||
       value.status === "expired") &&
     typeof value.active === "boolean" &&
+    isAcquisitionLinkEffectiveState(value) &&
     (value.expiresAt === null || typeof value.expiresAt === "string") &&
     Number.isSafeInteger(value.version) &&
     typeof value.createdAt === "string" &&
     typeof value.updatedAt === "string"
+  );
+}
+
+function isAcquisitionLinkEffectiveState(
+  value: Record<string, unknown>,
+): boolean {
+  const hasStatus = value.effectiveStatus !== undefined;
+  const hasReason = value.unavailableReason !== undefined;
+  if (!hasStatus && !hasReason) return true;
+  if (!hasStatus || !hasReason) return false;
+
+  const status = value.effectiveStatus;
+  const reason = value.unavailableReason;
+  return (
+    (status === "active" && reason === null) ||
+    (status === "disabled" && reason === "disabled") ||
+    (status === "expired" && reason === "expired") ||
+    (status === "unavailable" && reason === "destination_unavailable")
   );
 }
 

@@ -149,6 +149,28 @@ describe("StoreAcquisitionLinksPanel", () => {
     expect(api.getStoreAcquisitionLinks).toHaveBeenCalledWith(store.id);
   });
 
+  it("surfaces an unavailable destination without pretending the configured link is live", async () => {
+    api.getStoreAcquisitionLinks.mockResolvedValue([
+      {
+        ...activeLink,
+        active: false,
+        effectiveStatus: "unavailable",
+        unavailableReason: "destination_unavailable",
+      },
+    ]);
+
+    renderPanel();
+    await waitForLoadedList();
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText(/destination is unavailable/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "Disable link partner.editorial" }),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+
   it("reveals the full path only after one successful POST, copies it, and removes every UI/storage/URL trace after close", async () => {
     const user = userEvent.setup();
     const rawPath = "/r/AAAAAAAAAAAAAAAAAAAAAA" as const;

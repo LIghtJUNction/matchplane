@@ -27,6 +27,7 @@ import {
   type MarketplaceOffer,
   type StoreAcquisitionLink,
   type StoreAcquisitionLinkConfiguredStatus,
+  type StoreAcquisitionLinkEffectiveStatus,
   type StoreSummary,
 } from "../api";
 import { getMarketplaceSession } from "../lib/marketplace-session";
@@ -797,13 +798,17 @@ export function StoreAcquisitionLinksPanel({
                             ? english
                               ? "Expired links stay off. Create a new link to continue."
                               : "已过期链接保持关闭，如需继续请创建新链接。"
-                            : configured === "active"
+                            : effective === "unavailable"
                               ? english
-                                ? "Configured active"
-                                : "当前配置为启用"
-                              : english
-                                ? "Configured disabled"
-                                : "当前配置为停用"}
+                                ? "The destination is unavailable. The link remains configured but will not open until the product or store is public again."
+                                : "目标当前不可用。链接配置仍会保留，商品或店铺恢复公开后才可访问。"
+                              : configured === "active"
+                                ? english
+                                  ? "Configured active"
+                                  : "当前配置为启用"
+                                : english
+                                  ? "Configured disabled"
+                                  : "当前配置为停用"}
                       </span>
                     </div>
 
@@ -886,9 +891,9 @@ function configuredStatus(
 
 function effectiveStatus(
   link: StoreAcquisitionLink,
-): StoreAcquisitionLink["status"] {
+): StoreAcquisitionLinkEffectiveStatus {
   if (link.status === "expired" || hasExpired(link.expiresAt)) return "expired";
-  return configuredStatus(link);
+  return link.effectiveStatus ?? configuredStatus(link);
 }
 
 function hasExpired(value: string | null): boolean {
@@ -898,16 +903,18 @@ function hasExpired(value: string | null): boolean {
 }
 
 function statusLabel(
-  status: StoreAcquisitionLink["status"],
+  status: StoreAcquisitionLinkEffectiveStatus,
   locale: InterfaceLocale,
 ): string {
   if (locale === "en") {
     if (status === "active") return "Active";
     if (status === "disabled") return "Disabled";
+    if (status === "unavailable") return "Unavailable";
     return "Expired";
   }
   if (status === "active") return "启用";
   if (status === "disabled") return "停用";
+  if (status === "unavailable") return "目标不可用";
   return "已过期";
 }
 
