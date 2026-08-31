@@ -158,7 +158,7 @@ describe("anonymous acquisition redirect", () => {
   });
 
   it("still redirects after a transient analytics failure and logs no identifiers", async () => {
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => {});
     recordAcquisitionLanding.mockRejectedValue(
       new AcquisitionStorageError("storage unavailable"),
     );
@@ -168,10 +168,10 @@ describe("anonymous acquisition redirect", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(`/visit/${token}`);
     expect(response.headers.get("set-cookie")).toContain(subjectValue);
-    expect(warning).toHaveBeenCalledWith(
+    expect(failureLog).toHaveBeenCalledWith(
       "acquisition touchpoint storage unavailable",
     );
-    const logged = JSON.stringify(warning.mock.calls);
+    const logged = JSON.stringify(failureLog.mock.calls);
     expect(logged).not.toContain(token);
     expect(logged).not.toContain(subjectValue);
     expect(logged).not.toContain(link.id);

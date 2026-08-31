@@ -34,7 +34,7 @@ export async function GET(
   } catch (cause) {
     if (!(cause instanceof AcquisitionStorageError)) throw cause;
     // Keep this message free of tokens, cookies, request metadata, and internal identifiers.
-    console.warn("acquisition touchpoint storage unavailable");
+    console.error("acquisition touchpoint storage unavailable");
   }
 
   const response = new NextResponse(null, {

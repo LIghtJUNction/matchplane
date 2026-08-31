@@ -101,7 +101,7 @@ export interface PublicStoreOfferDetailPrice {
   currencyScale: number;
 }
 
-export interface PublicStoreOfferDetailMedia {
+interface PublicStoreOfferDetailMedia {
   url: string;
 }
 
