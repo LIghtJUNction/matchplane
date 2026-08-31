@@ -30,6 +30,12 @@ const CHANNEL_KEY_PATTERN = /^[a-z][a-z0-9._-]{0,63}$/;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
 
 type ConfiguredLinkStatus = "active" | "disabled";
+type EffectiveLinkStatus = ConfiguredLinkStatus | "expired" | "unavailable";
+type LinkUnavailableReason =
+  | "disabled"
+  | "expired"
+  | "destination_unavailable"
+  | null;
 
 interface LinkRow {
   id: string;
@@ -40,6 +46,7 @@ interface LinkRow {
   configuredStatus: ConfiguredLinkStatus;
   expiresAt: string | null;
   expired: boolean;
+  destinationAvailable?: boolean;
   version: string | number;
   createdAt: string;
   updatedAt: string;
@@ -73,11 +80,32 @@ export async function GET(
               link.status AS "configuredStatus",
               link.expires_at::text AS "expiresAt",
               (link.expires_at IS NOT NULL
-                AND link.expires_at <= clock_timestamp()) AS expired,
+                AND link.expires_at <= statement_timestamp()) AS expired,
+              (tenant.status = 'active'
+                AND offer.status = 'active'
+                AND (offer.expires_at IS NULL
+                  OR offer.expires_at > statement_timestamp())
+                AND canonical_store.status = 'active'
+                AND canonical_store.visibility = 'public'
+                AND scoped_domain.status = 'active') AS "destinationAvailable",
               link.version::text,
               link.created_at::text AS "createdAt",
               link.updated_at::text AS "updatedAt"
          FROM marketplace_acquisition_links link
+         JOIN tenants tenant
+           ON tenant.id = link.tenant_id
+         JOIN marketplace_offers offer
+           ON offer.tenant_id = link.tenant_id
+          AND offer.domain_id = link.domain_id
+          AND offer.store_id = link.store_id
+          AND offer.id = link.offer_id
+         JOIN stores canonical_store
+           ON canonical_store.tenant_id = link.tenant_id
+          AND canonical_store.domain_id = link.domain_id
+          AND canonical_store.id = link.store_id
+         JOIN domains scoped_domain
+           ON scoped_domain.tenant_id = link.tenant_id
+          AND scoped_domain.id = link.domain_id
         WHERE link.tenant_id = $1::uuid
           AND link.store_id = $2::uuid
         ORDER BY link.created_at DESC, link.id DESC
@@ -85,7 +113,7 @@ export async function GET(
       [guard.value.tenantId, storeId],
     );
     return NextResponse.json(
-      { links: result.rows.map(linkMetadata) },
+      { links: result.rows.map((row) => linkMetadata(row)) },
       { headers: privateHeaders() },
     );
   } catch {
@@ -112,9 +140,21 @@ export async function POST(
     client = await authDatabase.connect();
     await client.query("BEGIN");
 
-    const scopedOffer = await client.query<{ id: string }>(
-      `SELECT offer.id::text
+    const scopedOffer = await client.query<{
+      id: string;
+      destinationAvailable: boolean;
+    }>(
+      `SELECT offer.id::text,
+              (tenant.status = 'active'
+                AND offer.status = 'active'
+                AND (offer.expires_at IS NULL
+                  OR offer.expires_at > clock_timestamp())
+                AND canonical_store.status = 'active'
+                AND canonical_store.visibility = 'public'
+                AND scoped_domain.status = 'active') AS "destinationAvailable"
          FROM marketplace_offers offer
+         JOIN tenants tenant
+           ON tenant.id = offer.tenant_id
          JOIN stores canonical_store
            ON canonical_store.tenant_id = offer.tenant_id
           AND canonical_store.domain_id = offer.domain_id
@@ -126,7 +166,7 @@ export async function POST(
           AND offer.store_id = $2::uuid
           AND offer.domain_id = $3::uuid
           AND offer.id = $4::uuid
-        FOR KEY SHARE OF offer, canonical_store, scoped_domain`,
+        FOR KEY SHARE OF offer, tenant, canonical_store, scoped_domain`,
       [
         guard.value.tenantId,
         storeId,
@@ -134,7 +174,8 @@ export async function POST(
         parsed.value.offerId,
       ],
     );
-    if (!scopedOffer.rows[0]) {
+    const scopedTarget = scopedOffer.rows[0];
+    if (!scopedTarget) {
       await client.query("ROLLBACK");
       return error("商品不属于当前店铺", 400);
     }
@@ -202,7 +243,7 @@ export async function POST(
 
     return NextResponse.json(
       {
-        link: linkMetadata(link),
+        link: linkMetadata(link, scopedTarget.destinationAvailable),
         shortPath: `/r/${rawToken}`,
       },
       {
@@ -248,15 +289,36 @@ export async function PATCH(
               link.status AS "configuredStatus",
               link.expires_at::text AS "expiresAt",
               (link.expires_at IS NOT NULL
-                AND link.expires_at <= clock_timestamp()) AS expired,
+                AND link.expires_at <= statement_timestamp()) AS expired,
+              (tenant.status = 'active'
+                AND offer.status = 'active'
+                AND (offer.expires_at IS NULL
+                  OR offer.expires_at > statement_timestamp())
+                AND canonical_store.status = 'active'
+                AND canonical_store.visibility = 'public'
+                AND scoped_domain.status = 'active') AS "destinationAvailable",
               link.version::text,
               link.created_at::text AS "createdAt",
               link.updated_at::text AS "updatedAt"
          FROM marketplace_acquisition_links link
+         JOIN tenants tenant
+           ON tenant.id = link.tenant_id
+         JOIN marketplace_offers offer
+           ON offer.tenant_id = link.tenant_id
+          AND offer.domain_id = link.domain_id
+          AND offer.store_id = link.store_id
+          AND offer.id = link.offer_id
+         JOIN stores canonical_store
+           ON canonical_store.tenant_id = link.tenant_id
+          AND canonical_store.domain_id = link.domain_id
+          AND canonical_store.id = link.store_id
+         JOIN domains scoped_domain
+           ON scoped_domain.tenant_id = link.tenant_id
+          AND scoped_domain.id = link.domain_id
         WHERE link.tenant_id = $1::uuid
           AND link.store_id = $2::uuid
           AND link.id = $3::uuid
-        FOR UPDATE`,
+        FOR UPDATE OF link`,
       [guard.value.tenantId, storeId, parsed.value.linkId],
     );
     const current = locked.rows[0];
@@ -328,7 +390,7 @@ export async function PATCH(
     );
     await client.query("COMMIT");
     return NextResponse.json(
-      { link: linkMetadata(link) },
+      { link: linkMetadata(link, current.destinationAvailable) },
       { headers: privateHeaders() },
     );
   } catch {
@@ -557,10 +619,29 @@ function hasOnlyKeys(
   return Object.keys(value).every((key) => keys.has(key));
 }
 
-function linkMetadata(row: LinkRow) {
+function linkMetadata(
+  row: LinkRow,
+  destinationAvailable = row.destinationAvailable ?? false,
+) {
   let status: "active" | "disabled" | "expired" = "active";
   if (row.configuredStatus === "disabled") status = "disabled";
   else if (row.expired) status = "expired";
+
+  const effectiveStatus: EffectiveLinkStatus =
+    status === "disabled"
+      ? "disabled"
+      : status === "expired"
+        ? "expired"
+        : destinationAvailable
+          ? "active"
+          : "unavailable";
+  const unavailableReason: LinkUnavailableReason =
+    effectiveStatus === "active"
+      ? null
+      : effectiveStatus === "unavailable"
+        ? "destination_unavailable"
+        : effectiveStatus;
+
   return {
     id: row.id,
     offerId: row.offerId,
@@ -568,7 +649,9 @@ function linkMetadata(row: LinkRow) {
     sourceRef: row.sourceRef,
     campaignRef: row.campaignRef,
     status,
-    active: status === "active",
+    active: effectiveStatus === "active",
+    effectiveStatus,
+    unavailableReason,
     expiresAt: row.expiresAt,
     version: Number(row.version),
     createdAt: row.createdAt,

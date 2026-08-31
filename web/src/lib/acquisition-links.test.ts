@@ -7,6 +7,8 @@ vi.mock("./auth", () => ({ authDatabase: { query: vi.fn() } }));
 
 import {
   ACQUISITION_SUBJECT_COOKIE,
+  ACQUISITION_TOUCHPOINTS_PER_LINK_UTC_DAY_LIMIT,
+  AcquisitionStorageError,
   anonymousAcquisitionSubject,
   digestAcquisitionToken,
   generateAcquisitionToken,
@@ -100,6 +102,17 @@ describe("acquisition link privacy helpers", () => {
     expect(isCanonicalAcquisitionToken(duplicate.value)).toBe(true);
   });
 
+  it("wraps resolver database failures without putting the raw token in the error", async () => {
+    const query = vi.fn().mockRejectedValue(new Error("database unavailable"));
+
+    const failure = await resolveActiveAcquisitionLink(rawToken, {
+      query,
+    } as never).catch((cause: unknown) => cause);
+
+    expect(failure).toBeInstanceOf(AcquisitionStorageError);
+    expect(String(failure)).not.toContain(rawToken);
+  });
+
   it("resolves through every active/public/sellable scope and binds a digest", async () => {
     const query = vi.fn().mockResolvedValue({ rowCount: 1, rows: [link] });
 
@@ -136,19 +149,193 @@ describe("acquisition link privacy helpers", () => {
     ).resolves.toBeNull();
   });
 
-  it("records only the bounded landing event with an idempotent conflict target", async () => {
-    const query = vi.fn().mockResolvedValue({ rowCount: 1, rows: [] });
+  it("records only the bounded landing event after taking a transaction-scoped day lock", async () => {
     const digest = createHash("sha256").update("anonymous").digest();
+    const occurredAt = new Date("2026-08-31T12:00:00.000Z");
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rowCount: null, rows: [] })
+      .mockResolvedValueOnce({
+        rowCount: 1,
+        rows: [{ occurredAt, occurredOn: "2026-08-31" }],
+      })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{}] })
+      .mockResolvedValueOnce({ rowCount: 1, rows: [{ inserted: true }] })
+      .mockResolvedValueOnce({ rowCount: null, rows: [] });
+    const release = vi.fn();
 
-    await recordAcquisitionLanding(link, digest, { query } as never);
+    await expect(
+      recordAcquisitionLanding(link, digest, {
+        connect: vi.fn().mockResolvedValue({ query, release }),
+      } as never),
+    ).resolves.toBe("recorded");
 
-    const [sql, parameters] = query.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain("'landing_viewed'");
-    expect(sql).toContain(
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+      "BEGIN ISOLATION LEVEL READ COMMITTED",
+      expect.stringContaining("clock_timestamp"),
+      expect.stringContaining("pg_advisory_xact_lock"),
+      expect.stringContaining("WITH inserted AS"),
+      "COMMIT",
+    ]);
+    const [lockSql, lockParameters] = query.mock.calls[2] as [
+      string,
+      unknown[],
+    ];
+    expect(lockSql).toContain("hashtextextended");
+    expect(lockParameters).toEqual([link.id, "2026-08-31"]);
+
+    const [insertSql, insertParameters] = query.mock.calls[3] as [
+      string,
+      unknown[],
+    ];
+    expect(insertSql).toContain("'landing_viewed'");
+    expect(insertSql).toContain("existing.occurred_on = $6::date");
+    expect(insertSql).toContain("< $7::bigint");
+    expect(insertSql).toContain(
       "ON CONFLICT (tenant_id, link_id, anonymous_subject_digest, event_type)",
     );
-    expect(sql).toContain("DO NOTHING");
-    expect(parameters.slice(1)).toEqual([link.tenantId, link.id, digest]);
-    expect(sql).not.toMatch(/ip|user_agent|phone|wechat|metadata|payload/i);
+    expect(insertSql).toContain("DO NOTHING");
+    expect(insertParameters.slice(1)).toEqual([
+      link.tenantId,
+      link.id,
+      digest,
+      occurredAt,
+      "2026-08-31",
+      ACQUISITION_TOUCHPOINTS_PER_LINK_UTC_DAY_LIMIT,
+    ]);
+    expect(insertSql).not.toMatch(
+      /ip_address|user_agent|referer|user_id|phone|wechat|metadata|payload/i,
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("serializes concurrent writers so the per-link UTC-day cap cannot be exceeded", async () => {
+    const storage = cappedLandingDatabase(
+      ACQUISITION_TOUCHPOINTS_PER_LINK_UTC_DAY_LIMIT - 1,
+    );
+    const firstDigest = createHash("sha256").update("robot-one").digest();
+    const secondDigest = createHash("sha256").update("robot-two").digest();
+
+    const outcomes = await Promise.all([
+      recordAcquisitionLanding(link, firstDigest, storage.database as never),
+      recordAcquisitionLanding(link, secondDigest, storage.database as never),
+    ]);
+
+    expect(outcomes.sort()).toEqual(["daily_capacity_reached", "recorded"]);
+    expect(storage.count()).toBe(
+      ACQUISITION_TOUCHPOINTS_PER_LINK_UTC_DAY_LIMIT,
+    );
+  });
+
+  it("keeps a reused anonymous cookie idempotent at link+subject+event scope", async () => {
+    const storage = cappedLandingDatabase(0);
+    const cookieDigest = digestAcquisitionToken(rawToken);
+
+    await expect(
+      recordAcquisitionLanding(link, cookieDigest, storage.database as never),
+    ).resolves.toBe("recorded");
+    await expect(
+      recordAcquisitionLanding(link, cookieDigest, storage.database as never),
+    ).resolves.toBe("duplicate");
+    expect(storage.count()).toBe(1);
+  });
+
+  it("wraps query failures in a bounded token-free storage error", async () => {
+    const digest = digestAcquisitionToken(rawToken);
+    const query = vi
+      .fn()
+      .mockResolvedValue({ rowCount: null, rows: [] })
+      .mockResolvedValueOnce({ rowCount: null, rows: [] })
+      .mockRejectedValueOnce(new Error("database unavailable"));
+
+    const result = recordAcquisitionLanding(link, digest, {
+      connect: vi.fn().mockResolvedValue({ query, release: vi.fn() }),
+    } as never);
+
+    await expect(result).rejects.toBeInstanceOf(AcquisitionStorageError);
+    await expect(result).rejects.not.toThrow(rawToken);
   });
 });
+
+function cappedLandingDatabase(initialCount: number) {
+  let persistedCount = initialCount;
+  const persistedSubjects = new Set<string>();
+  let lockTail = Promise.resolve();
+
+  const database = {
+    async connect() {
+      let stagedSubject: string | null = null;
+      let releaseDayLock: (() => void) | null = null;
+
+      return {
+        async query(sql: string, parameters: unknown[] = []) {
+          if (sql === "BEGIN ISOLATION LEVEL READ COMMITTED") {
+            return { rowCount: null, rows: [] };
+          }
+          if (sql.includes("event_clock.occurred_at")) {
+            return {
+              rowCount: 1,
+              rows: [
+                {
+                  occurredAt: new Date("2026-08-31T12:00:00.000Z"),
+                  occurredOn: "2026-08-31",
+                },
+              ],
+            };
+          }
+          if (sql.includes("pg_advisory_xact_lock")) {
+            const previous = lockTail;
+            let release!: () => void;
+            lockTail = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            await previous;
+            releaseDayLock = release;
+            return { rowCount: 1, rows: [{}] };
+          }
+          if (sql.includes("WITH inserted AS")) {
+            const digest = parameters[3];
+            if (!Buffer.isBuffer(digest)) {
+              throw new TypeError("test storage expected a digest buffer");
+            }
+            const subject = digest.toString("hex");
+            const inserted =
+              !persistedSubjects.has(subject) &&
+              persistedCount <
+                ACQUISITION_TOUCHPOINTS_PER_LINK_UTC_DAY_LIMIT;
+            if (inserted) stagedSubject = subject;
+            return { rowCount: 1, rows: [{ inserted }] };
+          }
+          if (sql.includes(") AS duplicate")) {
+            const digest = parameters[2];
+            if (!Buffer.isBuffer(digest)) {
+              throw new TypeError("test storage expected a digest buffer");
+            }
+            return {
+              rowCount: 1,
+              rows: [{ duplicate: persistedSubjects.has(digest.toString("hex")) }],
+            };
+          }
+          if (sql === "COMMIT") {
+            if (stagedSubject !== null) {
+              persistedSubjects.add(stagedSubject);
+              persistedCount += 1;
+            }
+            releaseDayLock?.();
+            releaseDayLock = null;
+            return { rowCount: null, rows: [] };
+          }
+          if (sql === "ROLLBACK") {
+            releaseDayLock?.();
+            releaseDayLock = null;
+            return { rowCount: null, rows: [] };
+          }
+          throw new TypeError(`unexpected test query: ${sql}`);
+        },
+        release() {},
+      };
+    },
+  };
+
+  return { database, count: () => persistedCount };
+}

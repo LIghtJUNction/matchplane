@@ -11,8 +11,13 @@ const CURRENCY_SETTINGS_V2: &str =
     include_str!("../../../migrations/202608280002_upgrade_mall_currency_exchange_rate.sql");
 const OFFER_PRODUCT_TEMPLATES: &str =
     include_str!("../../../migrations/202608300001_marketplace_offer_product_templates.sql");
+const ACQUISITION_LINKS_V1: &str =
+    include_str!("../../../migrations/202608300002_marketplace_acquisition_links.sql");
+const ACQUISITION_TOUCHPOINT_BOUNDS: &str =
+    include_str!("../../../migrations/202608310001_acquisition_touchpoint_bounds.sql");
 const CURRENCY_SETTINGS_V1_SQLX_CHECKSUM: &str = "5cfd4a04c6f2f0ea139d8fd0c073c98e5535df7fc961c674ce32b12abb5826245e794f67f67d723d577e34c11b2c0dc0";
 const CURRENCY_SETTINGS_V2_SQLX_CHECKSUM: &str = "e1e63455ab259a79d88faf5e317ffec2ccc8013ec3d3abb07abcf73e6bff2a48590b69acad0335b01a95b10076fd8ae3";
+const ACQUISITION_LINKS_V1_SQLX_CHECKSUM: &str = "98ee731d315ccea6a39ad575dc489f70763beac0ee3f1e367576d6dbcf3074a0ea1d7686a45c4d07efecd12a68823a0b";
 
 fn currency_settings_migration(
     version: i64,
@@ -45,7 +50,7 @@ async fn fresh_install_should_apply_every_embedded_migration(
     let latest_applied: bool = sqlx::query_scalar(
         "SELECT EXISTS (\
            SELECT 1 FROM _sqlx_migrations \
-            WHERE version = 202608300002 AND success\
+            WHERE version = 202608310001 AND success\
          )",
     )
     .fetch_one(&pool)
@@ -206,6 +211,7 @@ async fn fresh_install_should_apply_every_embedded_migration(
             "anonymous_subject_digest",
             "event_type",
             "occurred_at",
+            "occurred_on",
         ],
         "touchpoints must not acquire identity, request-header, or free-form payload columns",
     );
@@ -240,6 +246,30 @@ async fn fresh_install_should_apply_every_embedded_migration(
             .contains("UNIQUE (tenant_id, link_id, anonymous_subject_digest, event_type)"),
         "landing attribution must be idempotent per link and anonymous subject",
     );
+    assert!(
+        touchpoint_constraints
+            .get("marketplace_acquisition_touchpoints_occurred_on_utc_check")
+            .is_some_and(|definition| {
+                definition.contains("occurred_on")
+                    && definition.contains("occurred_at")
+                    && definition.contains("UTC")
+            }),
+        "the stored capacity day must remain bound to occurred_at in UTC",
+    );
+    let occurred_on_column: (String, String, Option<String>) = sqlx::query_as(
+        "SELECT data_type, is_nullable, column_default
+           FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'marketplace_acquisition_touchpoints'
+            AND column_name = 'occurred_on'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        occurred_on_column,
+        ("date".to_owned(), "NO".to_owned(), None),
+        "occurred_on must be an explicitly supplied stable UTC date",
+    );
     let touchpoint_index_present: bool = sqlx::query_scalar(
         "SELECT to_regclass(
              'public.marketplace_acquisition_touchpoints_link_time_idx'
@@ -250,6 +280,19 @@ async fn fresh_install_should_apply_every_embedded_migration(
     assert!(
         touchpoint_index_present,
         "acquisition touchpoint reporting index was not installed",
+    );
+    let touchpoint_day_index: String = sqlx::query_scalar(
+        "SELECT indexdef
+           FROM pg_indexes
+          WHERE schemaname = current_schema()
+            AND tablename = 'marketplace_acquisition_touchpoints'
+            AND indexname = 'marketplace_acquisition_touchpoints_link_day_idx'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert!(
+        touchpoint_day_index.contains("(tenant_id, link_id, occurred_on)"),
+        "the capacity count must have a usable link/day index",
     );
 
     let columns: Vec<ColumnMetadata> = sqlx::query_as(
@@ -602,6 +645,217 @@ async fn currency_settings_upgrade_should_migrate_the_original_snapshot_without_
     .fetch_one(&pool)
     .await?;
     assert_eq!(exact_rate, "146.123456789012345678901234567891");
+
+    Ok(())
+}
+
+#[sqlx::test]
+#[ignore = "requires PostgreSQL; CI runs this target explicitly"]
+async fn acquisition_touchpoint_bounds_upgrade_should_preserve_v1_and_backfill_utc_day(
+    pool: PgPool,
+) -> Result<(), sqlx::Error> {
+    let mut connection = pool.acquire().await?;
+    sqlx::raw_sql(
+        r#"
+        CREATE TABLE tenants (
+            id uuid PRIMARY KEY,
+            status text NOT NULL DEFAULT 'active'
+        );
+        CREATE TABLE domains (
+            id uuid PRIMARY KEY,
+            tenant_id uuid NOT NULL REFERENCES tenants(id),
+            status text NOT NULL DEFAULT 'active',
+            UNIQUE (tenant_id, id)
+        );
+        CREATE TABLE stores (
+            id uuid PRIMARY KEY,
+            tenant_id uuid NOT NULL REFERENCES tenants(id),
+            domain_id uuid NOT NULL,
+            status text NOT NULL DEFAULT 'active',
+            visibility text NOT NULL DEFAULT 'public',
+            UNIQUE (tenant_id, domain_id, id)
+        );
+        CREATE TABLE marketplace_offers (
+            id uuid PRIMARY KEY,
+            tenant_id uuid NOT NULL REFERENCES tenants(id),
+            domain_id uuid NOT NULL,
+            store_id uuid NOT NULL,
+            status text NOT NULL DEFAULT 'active',
+            expires_at timestamptz
+        );
+        CREATE FUNCTION matchplane_set_updated_at()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            NEW.updated_at = clock_timestamp();
+            RETURN NEW;
+        END;
+        $$;
+        "#,
+    )
+    .execute(&mut *connection)
+    .await?;
+
+    let v1 = currency_settings_migration(
+        202608300002,
+        "marketplace acquisition links",
+        ACQUISITION_LINKS_V1,
+    );
+    assert_eq!(
+        hex::encode(v1.checksum.as_ref()),
+        ACQUISITION_LINKS_V1_SQLX_CHECKSUM,
+        "the production-applied acquisition migration must remain byte-for-byte immutable",
+    );
+    Migrator::with_migrations(vec![v1.clone()])
+        .run(&mut *connection)
+        .await
+        .map_err(|error| sqlx::Error::Migrate(Box::new(error)))?;
+
+    let tenant_id = uuid::Uuid::now_v7();
+    let domain_id = uuid::Uuid::now_v7();
+    let store_id = uuid::Uuid::now_v7();
+    let offer_id = uuid::Uuid::now_v7();
+    let link_id = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1)")
+        .bind(tenant_id)
+        .execute(&mut *connection)
+        .await?;
+    sqlx::query("INSERT INTO domains (id, tenant_id) VALUES ($1, $2)")
+        .bind(domain_id)
+        .bind(tenant_id)
+        .execute(&mut *connection)
+        .await?;
+    sqlx::query("INSERT INTO stores (id, tenant_id, domain_id) VALUES ($1, $2, $3)")
+        .bind(store_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .execute(&mut *connection)
+        .await?;
+    sqlx::query(
+        "INSERT INTO marketplace_offers (id, tenant_id, domain_id, store_id)
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(offer_id)
+    .bind(tenant_id)
+    .bind(domain_id)
+    .bind(store_id)
+    .execute(&mut *connection)
+    .await?;
+    sqlx::query(
+        "INSERT INTO marketplace_acquisition_links
+             (id, tenant_id, domain_id, store_id, offer_id, token_digest, channel_key)
+         VALUES ($1, $2, $3, $4, $5, decode(repeat('11', 32), 'hex'), 'test')",
+    )
+    .bind(link_id)
+    .bind(tenant_id)
+    .bind(domain_id)
+    .bind(store_id)
+    .bind(offer_id)
+    .execute(&mut *connection)
+    .await?;
+    sqlx::query(
+        "INSERT INTO marketplace_acquisition_touchpoints
+             (id, tenant_id, link_id, anonymous_subject_digest, event_type, occurred_at)
+         VALUES ($1, $2, $3, decode(repeat('22', 32), 'hex'), 'landing_viewed',
+                 '2026-08-30T23:30:00Z'::timestamptz)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(tenant_id)
+    .bind(link_id)
+    .execute(&mut *connection)
+    .await?;
+
+    // A session-local date cast would incorrectly backfill 2026-08-31 here.
+    sqlx::query("SET TIME ZONE 'Pacific/Kiritimati'")
+        .execute(&mut *connection)
+        .await?;
+    let v2 = currency_settings_migration(
+        202608310001,
+        "acquisition touchpoint bounds",
+        ACQUISITION_TOUCHPOINT_BOUNDS,
+    );
+    let v2_checksum = v2.checksum.to_vec();
+    let migrator = Migrator::with_migrations(vec![v1.clone(), v2]);
+    migrator
+        .run(&mut *connection)
+        .await
+        .map_err(|error| sqlx::Error::Migrate(Box::new(error)))?;
+    migrator
+        .run(&mut *connection)
+        .await
+        .map_err(|error| sqlx::Error::Migrate(Box::new(error)))?;
+
+    let applied_checksums: Vec<(i64, Vec<u8>)> = sqlx::query_as(
+        "SELECT version, checksum FROM _sqlx_migrations
+          WHERE version IN (202608300002, 202608310001) ORDER BY version",
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+    assert_eq!(
+        applied_checksums,
+        vec![
+            (202608300002, v1.checksum.to_vec()),
+            (202608310001, v2_checksum),
+        ],
+        "the bounds migration must append after the immutable production migration",
+    );
+
+    let occurred_on: String = sqlx::query_scalar(
+        "SELECT occurred_on::text FROM marketplace_acquisition_touchpoints WHERE link_id = $1",
+    )
+    .bind(link_id)
+    .fetch_one(&mut *connection)
+    .await?;
+    assert_eq!(
+        occurred_on, "2026-08-30",
+        "the upgrade backfill must use UTC rather than the session timezone",
+    );
+
+    let occurred_on_column: (String, String, Option<String>) = sqlx::query_as(
+        "SELECT data_type, is_nullable, column_default
+           FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'marketplace_acquisition_touchpoints'
+            AND column_name = 'occurred_on'",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    assert_eq!(
+        occurred_on_column,
+        ("date".to_owned(), "NO".to_owned(), None),
+    );
+    let utc_check: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid)
+           FROM pg_constraint
+          WHERE conrelid = 'marketplace_acquisition_touchpoints'::regclass
+            AND conname = 'marketplace_acquisition_touchpoints_occurred_on_utc_check'",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    assert!(utc_check.contains("UTC") && utc_check.contains("occurred_at"));
+    let day_index: String = sqlx::query_scalar(
+        "SELECT indexdef
+           FROM pg_indexes
+          WHERE schemaname = current_schema()
+            AND tablename = 'marketplace_acquisition_touchpoints'
+            AND indexname = 'marketplace_acquisition_touchpoints_link_day_idx'",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    assert!(day_index.contains("(tenant_id, link_id, occurred_on)"));
+    let idempotency_constraint: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid)
+           FROM pg_constraint
+          WHERE conrelid = 'marketplace_acquisition_touchpoints'::regclass
+            AND conname = 'marketplace_acquisition_touchpoints_landing_idempotency'",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
+    assert!(
+        idempotency_constraint
+            .contains("UNIQUE (tenant_id, link_id, anonymous_subject_digest, event_type)")
+    );
 
     Ok(())
 }

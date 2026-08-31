@@ -3,18 +3,24 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
+  AcquisitionStorageError,
   anonymousAcquisitionSubject,
   recordAcquisitionLanding,
   resolveActiveAcquisitionLink,
-} = vi.hoisted(() => ({
-  anonymousAcquisitionSubject: vi.fn(),
-  recordAcquisitionLanding: vi.fn(),
-  resolveActiveAcquisitionLink: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  class AcquisitionStorageError extends Error {}
+  return {
+    AcquisitionStorageError,
+    anonymousAcquisitionSubject: vi.fn(),
+    recordAcquisitionLanding: vi.fn(),
+    resolveActiveAcquisitionLink: vi.fn(),
+  };
+});
 
 vi.mock("./lib/acquisition-links", () => ({
   ACQUISITION_SUBJECT_COOKIE: "matchplane_acquisition_subject",
   ACQUISITION_SUBJECT_COOKIE_MAX_AGE: 31_536_000,
+  AcquisitionStorageError,
   anonymousAcquisitionSubject,
   recordAcquisitionLanding,
   resolveActiveAcquisitionLink,
@@ -52,10 +58,11 @@ describe("anonymous acquisition redirect", () => {
       digest: subjectDigest,
       shouldSetCookie: true,
     });
-    recordAcquisitionLanding.mockReset().mockResolvedValue(undefined);
+    recordAcquisitionLanding.mockReset().mockResolvedValue("recorded");
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
@@ -80,21 +87,40 @@ describe("anonymous acquisition redirect", () => {
     expect(recordAcquisitionLanding).toHaveBeenCalledWith(link, subjectDigest);
   });
 
-  it("reuses a valid cookie without emitting another Set-Cookie header", async () => {
+  it("keeps a reused valid cookie idempotent without emitting Set-Cookie", async () => {
     anonymousAcquisitionSubject.mockReturnValue({
       value: subjectValue,
       digest: subjectDigest,
       shouldSetCookie: false,
     });
+    recordAcquisitionLanding
+      .mockResolvedValueOnce("recorded")
+      .mockResolvedValueOnce("duplicate");
 
-    const response = await GET(
+    const first = await GET(
+      request(`matchplane_acquisition_subject=${subjectValue}`),
+      context,
+    );
+    const second = await GET(
       request(`matchplane_acquisition_subject=${subjectValue}`),
       context,
     );
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("set-cookie")).toBeNull();
-    expect(recordAcquisitionLanding).toHaveBeenCalledOnce();
+    expect(first.status).toBe(307);
+    expect(second.status).toBe(307);
+    expect(first.headers.get("set-cookie")).toBeNull();
+    expect(second.headers.get("set-cookie")).toBeNull();
+    expect(recordAcquisitionLanding).toHaveBeenCalledTimes(2);
+    expect(recordAcquisitionLanding).toHaveBeenNthCalledWith(
+      1,
+      link,
+      subjectDigest,
+    );
+    expect(recordAcquisitionLanding).toHaveBeenNthCalledWith(
+      2,
+      link,
+      subjectDigest,
+    );
   });
 
   it.each([
@@ -121,16 +147,55 @@ describe("anonymous acquisition redirect", () => {
     expect(recordAcquisitionLanding).not.toHaveBeenCalled();
   });
 
-  it("collapses a touchpoint storage failure to the same non-enumerating 404", async () => {
-    recordAcquisitionLanding.mockRejectedValue(new Error("storage unavailable"));
+  it("still redirects when the link has reached its UTC-day analytics capacity", async () => {
+    recordAcquisitionLanding.mockResolvedValue("daily_capacity_reached");
+
+    const response = await GET(request(), context);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`/visit/${token}`);
+    expect(response.headers.get("set-cookie")).toContain(subjectValue);
+  });
+
+  it("still redirects after a transient analytics failure and logs no identifiers", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recordAcquisitionLanding.mockRejectedValue(
+      new AcquisitionStorageError("storage unavailable"),
+    );
+
+    const response = await GET(request(), context);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`/visit/${token}`);
+    expect(response.headers.get("set-cookie")).toContain(subjectValue);
+    expect(warning).toHaveBeenCalledWith(
+      "acquisition touchpoint storage unavailable",
+    );
+    const logged = JSON.stringify(warning.mock.calls);
+    expect(logged).not.toContain(token);
+    expect(logged).not.toContain(subjectValue);
+    expect(logged).not.toContain(link.id);
+  });
+
+  it("keeps acquisition resolution storage failures on the safe 404 path", async () => {
+    resolveActiveAcquisitionLink.mockRejectedValue(
+      new AcquisitionStorageError("storage unavailable"),
+    );
 
     const response = await GET(request(), context);
 
     expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: "访问链接不存在或已不可用",
-    });
     expect(response.headers.get("location")).toBeNull();
-    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(recordAcquisitionLanding).not.toHaveBeenCalled();
+  });
+
+  it("does not swallow programming errors after a link has resolved", async () => {
+    recordAcquisitionLanding.mockRejectedValue(
+      new TypeError("unexpected analytics result"),
+    );
+
+    await expect(GET(request(), context)).rejects.toThrow(
+      "unexpected analytics result",
+    );
   });
 });

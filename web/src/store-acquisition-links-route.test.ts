@@ -54,6 +54,7 @@ const activeLink = {
   configuredStatus: "active",
   expiresAt: "2999-09-01T00:00:00.000Z",
   expired: false,
+  destinationAvailable: true,
   version: "1",
   createdAt: "2026-08-30T08:00:00.000Z",
   updatedAt: "2026-08-30T08:00:00.000Z",
@@ -99,7 +100,10 @@ function patchBody(overrides: Record<string, unknown> = {}) {
 function defaultTransactionImplementation() {
   transactionQuery.mockImplementation(async (sql: string) => {
     if (sql.includes("SELECT offer.id::text")) {
-      return { rowCount: 1, rows: [{ id: offerId }] };
+      return {
+        rowCount: 1,
+        rows: [{ id: offerId, destinationAvailable: true }],
+      };
     }
     if (sql.includes("INSERT INTO marketplace_acquisition_links")) {
       return { rowCount: 1, rows: [activeLink] };
@@ -178,6 +182,8 @@ describe("store acquisition links API", () => {
       campaignRef: "campaign-b",
       status: "active",
       active: true,
+      effectiveStatus: "active",
+      unavailableReason: null,
       version: 1,
     });
     expect(body.shortPath).toMatch(/^\/r\/[A-Za-z0-9_-]{22}$/);
@@ -232,6 +238,8 @@ describe("store acquisition links API", () => {
           campaignRef: "campaign-b",
           status: "expired",
           active: false,
+          effectiveStatus: "expired",
+          unavailableReason: "expired",
           expiresAt: "2999-09-01T00:00:00.000Z",
           version: 1,
           createdAt: "2026-08-30T08:00:00.000Z",
@@ -241,6 +249,35 @@ describe("store acquisition links API", () => {
     });
     expect(JSON.stringify(body)).not.toMatch(/token|digest/i);
     expect(query.mock.calls[0]?.[0]).not.toContain("token_digest");
+  });
+
+  it("reports configured-active links as effectively unavailable when their destination cannot resolve", async () => {
+    query.mockResolvedValue({
+      rowCount: 1,
+      rows: [{ ...activeLink, destinationAvailable: false }],
+    });
+
+    const response = await GET(request("GET"), context);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      links: [
+        expect.objectContaining({
+          id: linkId,
+          status: "active",
+          active: false,
+          effectiveStatus: "unavailable",
+          unavailableReason: "destination_unavailable",
+        }),
+      ],
+    });
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("tenant.status = 'active'");
+    expect(sql).toContain("offer.status = 'active'");
+    expect(sql).toContain("offer.expires_at > statement_timestamp()");
+    expect(sql).toContain("canonical_store.status = 'active'");
+    expect(sql).toContain("canonical_store.visibility = 'public'");
+    expect(sql).toContain("scoped_domain.status = 'active'");
   });
 
   it("requires an authenticated Better Auth session", async () => {
@@ -390,6 +427,8 @@ describe("store acquisition links API", () => {
         campaignRef: "campaign-b",
         status: "disabled",
         active: false,
+        effectiveStatus: "disabled",
+        unavailableReason: "disabled",
         expiresAt: "2999-09-01T00:00:00.000Z",
         version: 2,
         createdAt: "2026-08-30T08:00:00.000Z",

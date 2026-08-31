@@ -9,15 +9,38 @@ const TOKEN_BYTES = 16;
 // Unpadded base64url encodes sixteen bytes in exactly twenty-two characters.
 const TOKEN_LENGTH = 22;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+const UTC_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const ACQUISITION_SUBJECT_COOKIE = "matchplane_acquisition_subject";
 export const ACQUISITION_SUBJECT_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+export const ACQUISITION_TOUCHPOINTS_PER_LINK_UTC_DAY_LIMIT = 10_000;
 
 interface Queryable {
   query<T extends QueryResultRow = QueryResultRow>(
     sql: string,
     values?: unknown[],
   ): Promise<QueryResult<T>>;
+}
+
+interface TransactionClient extends Queryable {
+  release(): void;
+}
+
+interface TransactionDatabase {
+  connect(): Promise<TransactionClient>;
+}
+
+export type AcquisitionLandingRecordResult =
+  | "recorded"
+  | "duplicate"
+  | "daily_capacity_reached";
+
+/** A token-free boundary error for expected acquisition storage failures. */
+export class AcquisitionStorageError extends Error {
+  constructor(cause: unknown) {
+    super("acquisition storage operation failed", { cause });
+    this.name = "AcquisitionStorageError";
+  }
 }
 
 export interface ResolvedAcquisitionLink {
@@ -93,7 +116,8 @@ export async function resolveActiveAcquisitionLink(
   queryable: Queryable = authDatabase,
 ): Promise<ResolvedAcquisitionLink | null> {
   if (!isCanonicalAcquisitionToken(rawToken)) return null;
-  const result = await queryable.query<ResolvedAcquisitionLink>(
+  const result = await acquisitionStorageQuery<ResolvedAcquisitionLink>(
+    queryable,
     `SELECT link.id::text,
             link.tenant_id::text AS "tenantId",
             link.domain_id::text AS "domainId",
@@ -132,24 +156,150 @@ export async function resolveActiveAcquisitionLink(
   return result.rows[0] ?? null;
 }
 
-/** Record the only phase-one event with a database-enforced idempotency key. */
+/**
+ * Record the only phase-one event under a per-link UTC-day capacity lock.
+ * The separate post-lock statement is intentional: under READ COMMITTED it observes a writer that
+ * committed before releasing the same transaction-scoped advisory lock.
+ */
 export async function recordAcquisitionLanding(
   link: Pick<ResolvedAcquisitionLink, "id" | "tenantId">,
   anonymousSubjectDigest: Buffer,
-  queryable: Queryable = authDatabase,
-): Promise<void> {
+  database: TransactionDatabase = authDatabase,
+): Promise<AcquisitionLandingRecordResult> {
   if (anonymousSubjectDigest.length !== 32) {
     throw new TypeError("anonymous subject digest must be SHA-256");
   }
-  await queryable.query(
-    `INSERT INTO marketplace_acquisition_touchpoints
-       (id, tenant_id, link_id, anonymous_subject_digest, event_type, occurred_at)
-     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::bytea,
-             'landing_viewed', clock_timestamp())
-     ON CONFLICT (tenant_id, link_id, anonymous_subject_digest, event_type)
-     DO NOTHING`,
-    [randomUUID(), link.tenantId, link.id, anonymousSubjectDigest],
-  );
+
+  const client = await acquisitionStorageConnect(database);
+  let transactionOpen = false;
+  try {
+    await acquisitionStorageQuery(
+      client,
+      "BEGIN ISOLATION LEVEL READ COMMITTED",
+    );
+    transactionOpen = true;
+
+    const clockResult = await acquisitionStorageQuery<{
+      occurredAt: Date;
+      occurredOn: string;
+    }>(
+      client,
+      `SELECT event_clock.occurred_at AS "occurredAt",
+              pg_catalog.timezone('UTC', event_clock.occurred_at)::date::text
+                AS "occurredOn"
+         FROM (VALUES (pg_catalog.clock_timestamp())) event_clock(occurred_at)`,
+    );
+    const eventClock = clockResult.rows[0];
+    if (!eventClock || !UTC_DAY_PATTERN.test(eventClock.occurredOn)) {
+      throw new TypeError("acquisition storage returned an invalid UTC event day");
+    }
+
+    await acquisitionStorageQuery(
+      client,
+      `SELECT pg_catalog.pg_advisory_xact_lock(
+                pg_catalog.hashtextextended(
+                  $1::text,
+                  ($2::date - DATE '2000-01-01')::bigint
+                )
+              )`,
+      [link.id, eventClock.occurredOn],
+    );
+
+    const insertResult = await acquisitionStorageQuery<{ inserted: boolean }>(
+      client,
+      `WITH inserted AS (
+         INSERT INTO marketplace_acquisition_touchpoints
+           (id, tenant_id, link_id, anonymous_subject_digest, event_type,
+            occurred_at, occurred_on)
+         SELECT $1::uuid, $2::uuid, $3::uuid, $4::bytea,
+                'landing_viewed', $5::timestamptz, $6::date
+          WHERE (
+            SELECT COUNT(*)
+              FROM marketplace_acquisition_touchpoints existing
+             WHERE existing.tenant_id = $2::uuid
+               AND existing.link_id = $3::uuid
+               AND existing.occurred_on = $6::date
+          ) < $7::bigint
+         ON CONFLICT (tenant_id, link_id, anonymous_subject_digest, event_type)
+         DO NOTHING
+         RETURNING 1
+       )
+       SELECT EXISTS (SELECT 1 FROM inserted) AS inserted`,
+      [
+        randomUUID(),
+        link.tenantId,
+        link.id,
+        anonymousSubjectDigest,
+        eventClock.occurredAt,
+        eventClock.occurredOn,
+        ACQUISITION_TOUCHPOINTS_PER_LINK_UTC_DAY_LIMIT,
+      ],
+    );
+    const inserted = insertResult.rows[0]?.inserted;
+    if (typeof inserted !== "boolean") {
+      throw new TypeError("acquisition storage returned an invalid insert result");
+    }
+
+    let outcome: AcquisitionLandingRecordResult = "recorded";
+    if (!inserted) {
+      const duplicateResult = await acquisitionStorageQuery<{
+        duplicate: boolean;
+      }>(
+        client,
+        `SELECT EXISTS (
+           SELECT 1
+             FROM marketplace_acquisition_touchpoints existing
+            WHERE existing.tenant_id = $1::uuid
+              AND existing.link_id = $2::uuid
+              AND existing.anonymous_subject_digest = $3::bytea
+              AND existing.event_type = 'landing_viewed'
+         ) AS duplicate`,
+        [link.tenantId, link.id, anonymousSubjectDigest],
+      );
+      const duplicate = duplicateResult.rows[0]?.duplicate;
+      if (typeof duplicate !== "boolean") {
+        throw new TypeError(
+          "acquisition storage returned an invalid idempotency result",
+        );
+      }
+      outcome = duplicate ? "duplicate" : "daily_capacity_reached";
+    }
+
+    await acquisitionStorageQuery(client, "COMMIT");
+    transactionOpen = false;
+    return outcome;
+  } catch (cause) {
+    if (transactionOpen) {
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
+    throw cause;
+  } finally {
+    client.release();
+  }
+}
+
+async function acquisitionStorageConnect(
+  database: TransactionDatabase,
+): Promise<TransactionClient> {
+  try {
+    return await database.connect();
+  } catch (cause) {
+    throw new AcquisitionStorageError(cause);
+  }
+}
+
+async function acquisitionStorageQuery<
+  Row extends QueryResultRow = QueryResultRow,
+>(
+  queryable: Queryable,
+  sql: string,
+  values?: unknown[],
+): Promise<QueryResult<Row>> {
+  try {
+    return await queryable.query<Row>(sql, values);
+  } catch (cause) {
+    throw new AcquisitionStorageError(cause);
+  }
 }
 
 function readUniqueCookie(
