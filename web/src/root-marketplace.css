@@ -773,20 +773,27 @@
 
 /* Once a conversation is active, give the task the full content width. */
 .root-marketplace-entry.has-results .root-marketplace-entry-frame,
-.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-entry-frame {
+.root-marketplace-entry:has(.home-chat.has-conversation)
+ .root-marketplace-entry-frame {
  grid-template-columns: minmax(0, 1fr);
  gap: 1rem;
 }
 .root-marketplace-entry.has-results .root-marketplace-catalog-intro > span,
 .root-marketplace-entry.has-results .root-marketplace-brand,
 .root-marketplace-entry.has-results .root-marketplace-scroll-cue,
-.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-catalog-intro > span,
-.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-brand,
-.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-scroll-cue {
+.root-marketplace-entry:has(.home-chat.has-conversation)
+ .root-marketplace-catalog-intro
+ > span,
+.root-marketplace-entry:has(.home-chat.has-conversation)
+ .root-marketplace-brand,
+.root-marketplace-entry:has(.home-chat.has-conversation)
+ .root-marketplace-scroll-cue {
  display: none;
 }
 .root-marketplace-entry.has-results .root-marketplace-catalog-intro h1,
-.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-catalog-intro h1 {
+.root-marketplace-entry:has(.home-chat.has-conversation)
+ .root-marketplace-catalog-intro
+ h1 {
  margin: 0;
  font-size: 1.25rem;
 }

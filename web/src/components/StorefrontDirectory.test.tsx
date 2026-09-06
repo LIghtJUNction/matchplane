@@ -128,10 +128,7 @@ describe("StorefrontDirectory", () => {
   });
 
   it("locks the root header and directory responsive interaction contract", () => {
-    const css = readFileSync(
-      join(process.cwd(), "src/retail-ui.css"),
-      "utf8",
-    );
+    const css = readFileSync(join(process.cwd(), "src/retail-ui.css"), "utf8");
 
     expect(css).toMatch(
       /\.app-shell:has\(\.root-marketplace-page\) \.brand-cluster \{\s*display: flex;/,

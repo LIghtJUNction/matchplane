@@ -1,0 +1,104 @@
+name: Web release artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ubuntu-web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921
+        with:
+          toolchain: "1.97.0"
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@b872784c4ccfbc0b39f5eabcc7476ba23a8e985f
+      - name: Install Bun
+        uses: oven-sh/setup-bun@2a5a378b42aeb1e2fc3c4db30f01e7a81c03d7f3
+        with:
+          bun-version: "1.3.14"
+      - name: Install archive dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev zstd
+      - name: Install locked web dependencies
+        run: bun install --frozen-lockfile && bun install --cwd web --frozen-lockfile
+      - name: Build and validate the standalone website
+        run: bun run --cwd web test:standalone-output && bun run --cwd web build
+      - name: Build the packaged operator and migration CLI
+        run: cargo build --release --locked -p xtask --bin matchplane
+      - name: Stage immutable web and operator artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/matchplane-web-$GITHUB_SHA"
+          standalone="$GITHUB_WORKSPACE/web/.next/standalone"
+          if [[ -f "$standalone/server.js" ]]; then
+            web_root="$standalone"
+          else
+            web_root="$standalone/web"
+          fi
+          test -f "$web_root/server.js"
+          install -d "$root/web" "$root/bin"
+          cp -a "$web_root/." "$root/web/"
+          # Preserve Bun's traced parent store, as in packaging/scripts/stage.sh.
+          if [[ "$web_root" != "$standalone" && -d "$standalone/node_modules" ]]; then
+            cp -a "$standalone/node_modules" "$root/"
+            install -d "$root/web/node_modules"
+            cp -a "$standalone/node_modules/.bun" "$root/web/node_modules/.bun"
+          fi
+          aliases=$(grep -RhoE '"[A-Za-z0-9@._/-]+-[0-9a-f]{14,}"' web/.next/server |
+            sed -E 's/^"|"$//g' | sort -u || true)
+          for alias in $aliases; do
+            package=$(printf '%s\n' "$alias" | sed -E 's/-[0-9a-f]{14,}$//')
+            link="web/node_modules/$package"
+            [[ -L "$link" ]] || continue
+            target=$(readlink "$link")
+            [[ "$target" == ../../node_modules/.bun/* ]] || continue
+            destination="$root/web/node_modules/$alias"
+            install -d "$(dirname "$destination")"
+            [[ -e "$destination" || -L "$destination" ]] ||
+              ln -s ".bun/${target#../../node_modules/.bun/}" "$destination"
+          done
+          helpers=$(find node_modules -type f -path '*/node_modules/@swc/helpers/package.json' -print -quit)
+          if [[ -n "$helpers" ]]; then
+            while IFS= read -r destination; do
+              cp -a "$(dirname "$helpers")/." "$(dirname "$destination")/"
+            done < <(find "$root" -type f -path '*/node_modules/@swc/helpers/package.json' -print)
+          fi
+          install -d "$root/web/public" "$root/web/.next/static"
+          cp -a web/public/. "$root/web/public/"
+          cp -a web/.next/static/. "$root/web/.next/static/"
+          install -m0755 target/release/matchplane "$root/bin/matchplane"
+          install -d "$root/licenses"
+          cp LICENSE web/THIRD_PARTY_NOTICES.md "$root/licenses/"
+          cp web/licenses/*.LICENSE "$root/licenses/"
+          printf '{"commit":"%s","run":"%s","platform":"ubuntu-24.04-x86_64"}\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$root/release.json"
+          find "$root/web" -type d -exec chmod 0755 {} +
+          find "$root/web" -type f -exec chmod 0644 {} +
+          mkdir -p dist-web
+          tar --zstd -cf "dist-web/matchplane-web-$GITHUB_SHA.tar.zst" \
+            -C "$RUNNER_TEMP" "matchplane-web-$GITHUB_SHA"
+          (cd dist-web && sha256sum -- ./*.tar.zst > SHA256SUMS)
+      - name: Upload versioned artifacts, never deploy from CI
+        uses: actions/upload-artifact@043fbbae3b1c692ed3d3b55931a2a866559b7d12
+        with:
+          name: web-release-${{ github.sha }}
+          path: dist-web/
+          retention-days: 3
+          if-no-files-found: error
