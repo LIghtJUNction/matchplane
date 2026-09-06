@@ -1806,13 +1806,6 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .marketplace-like-button span { min-width: 0.7rem; font-size: 0.7rem; font-variant-numeric: tabular-nums; }
 .marketplace-like-button[aria-pressed="true"] { color: var(--clay); }
 .marketplace-like-button:disabled, .marketplace-like-button[aria-disabled="true"] { cursor: default; opacity: 0.86; }
-@media (min-width: 56.001rem) {
-.app-shell:has(.root-marketplace-page) .app-header { position: fixed; z-index: 60; top: 0; right: 0; left: 15rem; width: auto; border-bottom: 0; background: transparent; pointer-events: none; }
-.app-shell:has(.root-marketplace-page) .app-header .header-inner { width: 100%; max-width: none; grid-template-columns: minmax(0, 1fr) auto; }
-.app-shell:has(.root-marketplace-page) .app-header .brand-cluster { visibility: hidden; }
-.app-shell:has(.root-marketplace-page) .app-header .header-actions { pointer-events: auto; }
-.app-shell:has(.root-marketplace-page) .header-store-action, .app-shell:has(.root-marketplace-page) .header-admin-action { display: none; }
-}
 @media (max-width: 56rem) {
 .root-marketplace-sidebar { display: none; }
 .root-marketplace-main { margin-left: 0; }

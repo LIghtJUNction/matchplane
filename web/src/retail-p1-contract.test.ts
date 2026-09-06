@@ -69,6 +69,18 @@ describe("public marketplace accessibility and layout contract", () => {
     );
   });
 
+  it("does not hide desktop branding or merchant entry behind retired sidebar styles", () => {
+    expect(legacyCss).not.toMatch(
+      /\.app-shell:has\(\.root-marketplace-page\)\s+\.app-header\s+\.brand-cluster\s*\{[^}]*visibility:\s*hidden;/s,
+    );
+    expect(legacyCss).not.toMatch(
+      /\.app-shell:has\(\.root-marketplace-page\)\s+\.header-store-action[^{}]*\{[^}]*display:\s*none;/s,
+    );
+    expect(
+      rule(retailCss, ".app-shell:has(.root-marketplace-page) .app-header"),
+    ).toContain("pointer-events: auto;");
+  });
+
   it("keeps actual muted text colors above the normal-text contrast floor", () => {
     // Guard readability, not the hex values of the retired warm-paper palette.
     for (const theme of [
