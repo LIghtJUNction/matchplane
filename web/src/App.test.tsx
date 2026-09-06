@@ -1041,10 +1041,12 @@ describe("MatchPlane workspaces", () => {
 
   it("applies and persists a curated palette", async () => {
     const user = userEvent.setup();
+    // Start from a saved non-default palette so this tests a real change.
+    window.localStorage.setItem("matchplane.palette", "ink");
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "显示与语言" }));
-    await user.click(screen.getByRole("radio", { name: "苔绿" }));
+    await user.click(await screen.findByRole("radio", { name: "苔绿" }));
 
     await waitFor(() =>
       expect(document.documentElement.dataset.palette).toBe("moss"),

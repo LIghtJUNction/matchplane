@@ -764,6 +764,33 @@
  }
 }
 
+/* Keep a high-contrast keyboard indicator, independent of hover and soft shadows. */
+.root-marketplace-page .match-chat-starter-card:focus-visible,
+.root-marketplace-page .home-chat-form:focus-within {
+ outline: 3px solid var(--retail-focus);
+ outline-offset: 3px;
+}
+
+/* Once a conversation is active, give the task the full content width. */
+.root-marketplace-entry.has-results .root-marketplace-entry-frame,
+.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-entry-frame {
+ grid-template-columns: minmax(0, 1fr);
+ gap: 1rem;
+}
+.root-marketplace-entry.has-results .root-marketplace-catalog-intro > span,
+.root-marketplace-entry.has-results .root-marketplace-brand,
+.root-marketplace-entry.has-results .root-marketplace-scroll-cue,
+.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-catalog-intro > span,
+.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-brand,
+.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-scroll-cue {
+ display: none;
+}
+.root-marketplace-entry.has-results .root-marketplace-catalog-intro h1,
+.root-marketplace-entry:has(.home-chat.has-conversation) .root-marketplace-catalog-intro h1 {
+ margin: 0;
+ font-size: 1.25rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
  .root-marketplace-page *,
  .catalog-filters * {

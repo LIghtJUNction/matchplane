@@ -134,7 +134,7 @@ describe("StorefrontDirectory", () => {
     );
 
     expect(css).toMatch(
-      /\.app-shell:has\(\.root-marketplace-page\) \.brand-cluster \{\s*display: none;/,
+      /\.app-shell:has\(\.root-marketplace-page\) \.brand-cluster \{\s*display: flex;/,
     );
     expect(css).toMatch(
       /\.app-shell:has\(\.root-marketplace-page\) \.header-navigation \{\s*pointer-events: auto;/,
