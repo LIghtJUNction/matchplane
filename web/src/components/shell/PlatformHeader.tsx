@@ -84,13 +84,17 @@ export function PlatformHeader({
   onSignOut,
   ui,
 }: PlatformHeaderProps) {
+  const isRootBuyer = subplatform.slug === "root" && role === "buyer";
   const canOpenPlatformConsole =
     authUser?.role === "rootSuperAdmin" || authUser?.role === "rootAdmin";
 
   return (
     <header className="app-header">
       <div className="header-inner">
-        <div className="header-navigation">
+        <nav
+          className="header-navigation"
+          aria-label={locale === "zh" ? "主导航" : "Main navigation"}
+        >
           <div className="brand-cluster">
             <Brand
               label={subplatform.brandName}
@@ -107,10 +111,15 @@ export function PlatformHeader({
               </a>
             )}
           </div>
+          {isRootBuyer ? (
+            <a className="header-browse-link" href="/#marketplace-products">
+              {locale === "zh" ? "逛商品" : "Browse"}
+            </a>
+          ) : null}
           {subplatform.slug === "root" ? (
             <PlatformMenu locale={locale} />
           ) : null}
-        </div>
+        </nav>
         <div className="header-actions">
           <PreferenceControls
             theme={theme}

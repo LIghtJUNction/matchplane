@@ -1,10 +1,11 @@
 "use client";
 
 import { Button } from "@appica/ui-react/button";
-import { Heart } from "lucide-react";
+import { Heart, ImageOff } from "lucide-react";
 import { useState } from "react";
 
 import { listingIdFromBackend } from "../api";
+import { isCategoryFact } from "../lib/catalog-browse";
 import type { InterfaceLocale } from "../lib/preferences";
 import type { AssetListing } from "../types";
 
@@ -24,14 +25,14 @@ function likeLabel(
     : `给${title}点赞：已点 ${viewerLikeCount}/5，共 ${likeTotal} 个赞`;
 }
 
-/** Key facts under the title, used-car-listing style: "2019年 · 3.2万公里 · 杭州". */
+/** Store-provided facts only; root cards must not assume a product vertical. */
 function keySpecs(listing: AssetListing) {
   const values = listing.facts
-    .filter((fact) => fact.key !== "category")
+    .filter((fact) => !isCategoryFact(fact))
     .map((fact) => fact.value.trim())
     .filter(Boolean);
-  if (listing.location) values.push(listing.location);
-  return values.slice(0, 3).join(" · ");
+  if (listing.location?.trim()) values.push(listing.location.trim());
+  return Array.from(new Set(values)).slice(0, 3).join(" · ");
 }
 
 export function MarketplaceListingCard({
@@ -48,7 +49,8 @@ export function MarketplaceListingCard({
   compact?: boolean;
 }) {
   const [liking, setLiking] = useState(false);
-  const [imageFailed, setImageFailed] = useState(false);
+  const [failedImage, setFailedImage] = useState<string | null>(null);
+  const imageUrl = listing.imageUrl || listing.imageUrls?.[0];
   const viewerLikeCount = listing.viewerLikeCount ?? 0;
   const likeTotal = listing.likeTotal ?? "0";
   const likeOfferId = listing.offerId ?? listingIdFromBackend(listing);
@@ -73,12 +75,15 @@ export function MarketplaceListingCard({
       data-accent={listing.accent || "cactus"}
     >
       <div className="marketplace-product-media">
-        {listing.imageUrl && !imageFailed ? (
+        {imageUrl && failedImage !== imageUrl ? (
           <img
-            src={listing.imageUrl}
+            src={imageUrl}
             alt={listing.title}
             loading="lazy"
-            onError={() => setImageFailed(true)}
+            decoding="async"
+            width={640}
+            height={480}
+            onError={() => setFailedImage(imageUrl)}
           />
         ) : (
           <div
@@ -86,7 +91,8 @@ export function MarketplaceListingCard({
             role="img"
             aria-label={listing.title}
           >
-            <span>{listing.title.slice(0, 2)}</span>
+            <ImageOff size={24} strokeWidth={1.5} aria-hidden="true" />
+            <span>{locale === "en" ? "No photo available" : "暂无图片"}</span>
           </div>
         )}
         {likeEnabled ? (
@@ -133,9 +139,15 @@ export function MarketplaceListingCard({
         >
           {listing.title}
         </button>
-        {specs ? <p className="marketplace-product-specs">{specs}</p> : null}
+        {specs ? (
+          <p className="marketplace-product-specs" title={specs}>
+            {specs}
+          </p>
+        ) : null}
         <div className="marketplace-product-price-row">
-          <strong>{listing.price}</strong>
+          <strong>
+            {listing.price || (locale === "en" ? "Ask for price" : "价格待询")}
+          </strong>
           {listing.priceLabel ? <span>{listing.priceLabel}</span> : null}
         </div>
         {sellerLabel ? (

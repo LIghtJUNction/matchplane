@@ -5,16 +5,6 @@ import "../src/retail-ui.css";
 import "../src/retail-polish.css";
 import "../src/root-marketplace.css";
 
-const DIRECTION_CONTRACT = `impeccable-direction:
-world: warm paper marketplace, carbon ink, one calm axis, no brand imitation
-first-viewport: one inline shopping prompt is the only primary action
-visitor-path: describe need -> real assistant response -> truthful result-store trace -> products
-signature-interaction: progressive search path rendered only from current visible recommendations
-cross-surface-reach: root marketplace only; subplatform storefronts retain their own shell
-motion-promise: short interruptible opacity/transform transitions; reduced motion is immediate
-reference-boundary: composition only; no Anthropic identity, copy, assets, or exact layout
-seed-key: home-routing-atlas-v1`;
-
 export const metadata: Metadata = {
   title: "MatchPlane · 找到真正适合你的匹配",
   description:
@@ -28,16 +18,18 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN" data-scroll-behavior="smooth" suppressHydrationWarning>
+    <html
+      lang="zh-CN"
+      data-theme="light"
+      data-palette="moss"
+      data-text-size="default"
+      data-scroll-behavior="smooth"
+      suppressHydrationWarning
+    >
       <head>
         <Script src="/theme-init.js" strategy="beforeInteractive" />
       </head>
-      <body>
-        <script>
-          {`document.body.insertBefore(document.createComment(${JSON.stringify(DIRECTION_CONTRACT)}),document.body.firstChild);`}
-        </script>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

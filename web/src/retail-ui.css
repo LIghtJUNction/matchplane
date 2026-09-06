@@ -1,28 +1,28 @@
-/* MatchPlane contemporary concept store.
-   Product imagery and readable commerce information carry the visual identity. */
+/* MatchPlane marketplace: neutral surfaces, clear prices, restrained actions.
+   Shared tokens also keep authentication, details and operator surfaces consistent. */
 
 :root {
   color-scheme: light;
   font-family:
-    "Avenir Next", "SF Pro Text", ui-sans-serif, -apple-system,
-    BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
   --retail-display:
-    "SF Pro Display", "Avenir Next", "PingFang SC", "Microsoft YaHei",
-    sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
   --retail-mono: "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, monospace;
-  --retail-canvas: #f3f0e9;
-  --retail-surface: #fffdf8;
-  --retail-surface-soft: #ece9e1;
-  --retail-surface-raised: #fffdf8;
-  --retail-ink: #171715;
-  --retail-ink-soft: #45443f;
-  --retail-muted: #6c6962;
-  --retail-line: #ded9cf;
-  --retail-line-strong: #c8c1b5;
-  --retail-accent: #171715;
-  --retail-accent-strong: #000000;
-  --retail-accent-soft: #e7e3da;
-  --retail-accent-contrast: #fffdf8;
+  --retail-canvas: #f5f7f6;
+  --retail-surface: #ffffff;
+  --retail-surface-soft: #edf1ee;
+  --retail-surface-raised: #ffffff;
+  --retail-ink: #19231e;
+  --retail-ink-soft: #39473e;
+  --retail-muted: #626e66;
+  --retail-line: #e0e6e2;
+  --retail-line-strong: #c5cec8;
+  --retail-accent: #19231e;
+  --retail-accent-strong: #080f0b;
+  --retail-accent-soft: #e9edeb;
+  --retail-accent-contrast: #ffffff;
   /* Compatibility aliases for existing component selectors. */
   --retail-blue: var(--retail-accent);
   --retail-blue-strong: var(--retail-accent-strong);
@@ -36,7 +36,7 @@
   --background: var(--retail-surface);
   --background-subtle: var(--retail-canvas);
   --background-muted: var(--retail-surface-soft);
-  --background-strong: #d8d2c7;
+  --background-strong: #dce3de;
   --background-inverse: var(--retail-ink);
   --foreground: var(--retail-ink-soft);
   --foreground-subtle: var(--retail-muted);
@@ -45,9 +45,9 @@
   --foreground-intense: var(--retail-ink);
   --foreground-inverse: var(--retail-accent-contrast);
   --border: var(--retail-line);
-  --border-muted: #ebe7de;
+  --border-muted: #edf1ee;
   --border-strong: var(--retail-line-strong);
-  --border-intense: #958f85;
+  --border-intense: #87998d;
   --primary: var(--retail-accent);
   --primary-strong: var(--retail-accent-strong);
   --primary-soft: color-mix(in srgb, var(--retail-accent) 28%, transparent);
@@ -64,7 +64,7 @@
   --focus-ring-input: var(--retail-focus);
   --focus-ring-primary: var(--retail-focus);
   --surface: var(--retail-surface);
-  --header-surface: rgba(255, 253, 248, 0.96);
+  --header-surface: var(--retail-surface);
   --header-veil: transparent;
   --shadow-small:
     0 2px 5px rgba(30, 27, 22, 0.05), 0 10px 24px rgba(30, 27, 22, 0.05);
@@ -78,19 +78,19 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --retail-canvas: #171715;
-  --retail-surface: #22211e;
-  --retail-surface-soft: #2c2a26;
-  --retail-surface-raised: #272622;
-  --retail-ink: #f4f1e8;
-  --retail-ink-soft: #d8d3c7;
-  --retail-muted: #aaa49a;
-  --retail-line: #3a3833;
-  --retail-line-strong: #514e47;
-  --retail-accent: #f4f1e8;
+  --retail-canvas: #131915;
+  --retail-surface: #1c241f;
+  --retail-surface-soft: #253029;
+  --retail-surface-raised: #222c26;
+  --retail-ink: #edf3ef;
+  --retail-ink-soft: #d2ddd6;
+  --retail-muted: #a2b3a8;
+  --retail-line: #35433b;
+  --retail-line-strong: #506156;
+  --retail-accent: #edf3ef;
   --retail-accent-strong: #ffffff;
-  --retail-accent-soft: #36342f;
-  --retail-accent-contrast: #171715;
+  --retail-accent-soft: #35433b;
+  --retail-accent-contrast: #131915;
   --retail-blue: var(--retail-accent);
   --retail-blue-strong: var(--retail-accent-strong);
   --retail-blue-soft: var(--retail-accent-soft);
@@ -102,7 +102,7 @@
   --background: var(--retail-surface);
   --background-subtle: var(--retail-canvas);
   --background-muted: var(--retail-surface-soft);
-  --background-strong: #35322d;
+  --background-strong: #303e35;
   --background-inverse: var(--retail-ink);
   --foreground: var(--retail-ink-soft);
   --foreground-subtle: var(--retail-muted);
@@ -111,9 +111,9 @@
   --foreground-intense: var(--retail-ink);
   --foreground-inverse: var(--retail-accent-contrast);
   --border: var(--retail-line);
-  --border-muted: #302e2a;
+  --border-muted: #2b382f;
   --border-strong: var(--retail-line-strong);
-  --border-intense: #777168;
+  --border-intense: #75887b;
   --primary: var(--retail-accent);
   --primary-strong: var(--retail-accent-strong);
   --primary-soft: color-mix(in srgb, var(--retail-accent) 28%, transparent);
@@ -121,16 +121,16 @@
   --primary-muted: color-mix(in srgb, var(--retail-accent) 72%, #000000);
   --primary-foreground: var(--retail-accent-contrast);
   --surface: var(--retail-surface);
-  --header-surface: rgba(34, 33, 30, 0.96);
+  --header-surface: var(--retail-surface);
   --shadow-small: 0 2px 16px rgba(0, 0, 0, 0.2);
   --shadow-large: 0 24px 70px rgba(0, 0, 0, 0.4);
 }
 
 :root:not([data-theme="dark"])[data-palette="moss"] {
-  --retail-accent: #315c47;
-  --retail-accent-strong: #244737;
-  --retail-accent-soft: #dfe9e1;
-  --retail-accent-contrast: #fffdf8;
+  --retail-accent: #16804a;
+  --retail-accent-strong: #11643a;
+  --retail-accent-soft: #e9f4ed;
+  --retail-accent-contrast: #ffffff;
 }
 
 :root:not([data-theme="dark"])[data-palette="clay"] {
@@ -155,10 +155,10 @@
 }
 
 :root[data-theme="dark"][data-palette="moss"] {
-  --retail-accent: #9ac2a8;
-  --retail-accent-strong: #bed8c7;
-  --retail-accent-soft: #2b3a31;
-  --retail-accent-contrast: #142019;
+  --retail-accent: #80cba4;
+  --retail-accent-strong: #abe0c2;
+  --retail-accent-soft: #263d30;
+  --retail-accent-contrast: #11291b;
 }
 
 :root[data-theme="dark"][data-palette="clay"] {
@@ -180,6 +180,23 @@
   --retail-accent-strong: #ecd19f;
   --retail-accent-soft: #3d3324;
   --retail-accent-contrast: #21190d;
+}
+
+/* Bridge legacy component colors instead of leaving warm islands in dialogs. */
+:root,
+:root[data-theme="dark"] {
+  --ink: var(--retail-ink);
+  --ink-soft: var(--retail-ink-soft);
+  --muted: var(--retail-muted);
+  --ivory: var(--retail-surface);
+  --paper: var(--retail-canvas);
+  --paper-deep: var(--retail-surface-soft);
+  --line: var(--retail-line);
+  --line-strong: var(--retail-line-strong);
+  --cactus-ink: var(--retail-accent);
+  --cactus: var(--retail-accent-soft);
+  --danger: var(--retail-danger);
+  --focus: var(--retail-focus);
 }
 
 html,
@@ -278,8 +295,8 @@ select {
   padding: 0 1.25rem;
   border-bottom: 1px solid var(--retail-line);
   background: var(--header-surface);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .app-header::after {
@@ -287,9 +304,26 @@ select {
 }
 
 .header-inner {
-  width: min(100%, 92rem);
+  width: min(100%, 78rem);
   min-height: 4.25rem;
   margin: 0 auto;
+}
+
+.header-browse-link {
+  display: inline-flex;
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  padding-inline: 0.75rem;
+  border-radius: 0.45rem;
+  color: var(--retail-ink-soft);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.header-browse-link:hover {
+  background: var(--retail-surface-soft);
+  color: var(--retail-ink);
 }
 
 .brand {
@@ -557,12 +591,14 @@ select {
   left: auto;
   width: 100%;
   height: auto;
+  border-bottom: 1px solid var(--retail-line);
+  background: var(--header-surface);
   pointer-events: auto;
 }
 
 .app-shell:has(.root-marketplace-page) .app-header .header-inner {
-  width: min(100%, 92rem);
-  max-width: 92rem;
+  width: min(100%, 78rem);
+  max-width: 78rem;
 }
 
 .header-navigation {
@@ -577,7 +613,7 @@ select {
 }
 
 .app-shell:has(.root-marketplace-page) .brand-cluster {
-  display: none;
+  display: flex;
 }
 
 .app-shell:has(.root-marketplace-page) .platform-menu-trigger {
@@ -590,7 +626,8 @@ select {
 
 .app-shell:has(.root-marketplace-page) .platform-menu-trigger:hover,
 .app-shell:has(.root-marketplace-page) .platform-menu-trigger:focus-visible,
-.app-shell:has(.root-marketplace-page) .platform-menu-trigger[aria-expanded="true"] {
+.app-shell:has(.root-marketplace-page)
+  .platform-menu-trigger[aria-expanded="true"] {
   background: transparent;
   color: var(--retail-ink);
 }
@@ -805,10 +842,13 @@ select {
 /* Product-first listing cards: photo, title, key specs, price, store. */
 .marketplace-product-card {
   position: relative;
+  display: block;
   min-width: 0;
+  overflow: hidden;
   padding: 0;
-  border: 0;
-  background: transparent;
+  border: 1px solid var(--retail-line);
+  border-radius: 0.75rem;
+  background: var(--retail-surface);
 }
 
 .marketplace-product-media {
@@ -816,12 +856,9 @@ select {
   aspect-ratio: 4 / 3;
   overflow: hidden;
   margin: 0;
-  border: 1px solid var(--retail-line);
-  border-radius: 0.9rem;
+  border: 0;
+  border-radius: 0;
   background: var(--retail-surface-soft);
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease;
 }
 
 .marketplace-product-media > img {
@@ -830,27 +867,23 @@ select {
   display: block;
   object-fit: cover;
   filter: none;
-  transition: transform 220ms ease;
 }
 
 .marketplace-product-fallback {
   width: 100%;
   height: 100%;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
   background: var(--retail-surface-soft);
   color: var(--retail-muted);
 }
 
 .marketplace-product-fallback > span {
-  width: 4rem;
-  height: 4rem;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--retail-line-strong);
-  border-radius: 50%;
-  font-size: 1rem;
-  font-weight: 700;
+  font-size: 0.75rem;
+  font-weight: 400;
 }
 
 .marketplace-like-button {
@@ -891,7 +924,7 @@ select {
 
 .marketplace-product-info {
   margin: 0;
-  padding: 0.8rem 0.1rem 0;
+  padding: 0.85rem;
   display: grid;
   gap: 0.3rem;
   border: 0;
@@ -998,13 +1031,8 @@ select {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .marketplace-product-card:hover .marketplace-product-media {
+  .marketplace-product-card:hover {
     border-color: var(--retail-line-strong);
-    box-shadow: var(--shadow-small);
-  }
-
-  .marketplace-product-card:hover .marketplace-product-media > img {
-    transform: scale(1.03);
   }
 
   .marketplace-product-card:hover .marketplace-product-title {
@@ -1312,12 +1340,16 @@ select {
   transition: transform 150ms ease;
 }
 
-.root-marketplace-page .root-marketplace-stores .storefront-directory-card:hover {
+.root-marketplace-page
+  .root-marketplace-stores
+  .storefront-directory-card:hover {
   border-color: var(--retail-line-strong);
   transform: translateY(-1px);
 }
 
-.root-marketplace-page .root-marketplace-stores .storefront-directory-link:hover {
+.root-marketplace-page
+  .root-marketplace-stores
+  .storefront-directory-link:hover {
   background: var(--retail-surface-soft);
   box-shadow: none;
 }
@@ -1369,7 +1401,9 @@ select {
     transition: none;
   }
 
-  .root-marketplace-page .root-marketplace-stores .storefront-directory-card:hover,
+  .root-marketplace-page
+    .root-marketplace-stores
+    .storefront-directory-card:hover,
   .root-marketplace-page
     .storefront-directory-link:hover
     .storefront-directory-entry
@@ -1943,17 +1977,17 @@ select {
 
 /* Public storefront */
 .storefront-view {
-  width: min(100%, 92rem);
+  width: min(100%, 81rem);
   margin: 0 auto;
-  padding: clamp(1rem, 2.5vw, 2rem) clamp(1rem, 3vw, 2.25rem) 5rem;
+  padding: 1.75rem 1.5rem 4rem;
 }
 
 .storefront-view-header {
   padding: clamp(1rem, 2vw, 1.55rem);
   border: 1px solid var(--retail-line);
-  border-radius: var(--radius-hero);
+  border-radius: 0.85rem;
   background: var(--retail-surface);
-  box-shadow: var(--shadow-small);
+  box-shadow: none;
 }
 
 .storefront-view-mark {
@@ -1968,8 +2002,8 @@ select {
 }
 
 .storefront-view-identity h1 {
-  font-size: clamp(1.8rem, 3.4vw, 2.85rem);
-  line-height: 1.06;
+  font-size: clamp(1.5rem, 2.8vw, 2.25rem);
+  line-height: 1.3;
 }
 
 .storefront-view-products {
@@ -2110,32 +2144,56 @@ select {
 
 .login-layout {
   width: min(100% - 2rem, 70rem);
-  min-height: 38rem;
-  margin: clamp(1.5rem, 5vh, 4rem) auto 4rem;
+  min-height: 32rem;
+  margin: clamp(1.5rem, 4vh, 3rem) auto 3rem;
   display: grid;
   grid-template-columns: minmax(18rem, 0.8fr) minmax(26rem, 1fr);
   align-items: stretch;
   overflow: hidden;
   border: 1px solid var(--retail-line);
-  border-radius: 1.25rem;
+  border-radius: 1rem;
   background: var(--retail-surface);
-  box-shadow: var(--shadow-large);
+  box-shadow: var(--shadow-small);
 }
 
 .login-layout::before {
-  padding: clamp(1.5rem, 4vw, 3.5rem);
+  content: none;
+}
+
+.login-intro-panel {
   display: flex;
-  align-items: end;
-  border: 0;
-  background: var(--retail-sage);
-  color: var(--retail-sage-ink);
-  content: "MATCHPLANE\A 发现适合你的选择";
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.1rem;
+  padding: clamp(1.5rem, 4vw, 3.5rem);
+  border-right: 1px solid var(--retail-line);
+  background: var(--retail-surface-soft);
+}
+
+.login-intro-panel h2 {
+  max-width: 11ch;
+  margin: 0;
+  color: var(--retail-ink);
   font-family: var(--retail-display);
-  font-size: clamp(1.8rem, 3.5vw, 3.2rem);
-  font-weight: 680;
-  letter-spacing: -0.045em;
-  line-height: 1.12;
-  white-space: pre-line;
+  font-size: clamp(1.8rem, 3vw, 2.5rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.login-intro-panel p {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--retail-muted);
+  font-size: 0.9rem;
+  line-height: 1.8;
+}
+.login-intro-panel .login-intro-brand {
+  color: var(--retail-accent);
+  font-size: 0.85rem;
+  font-weight: 650;
 }
 
 .login-card {
@@ -2495,6 +2553,25 @@ select {
 }
 
 @media (max-width: 56rem) {
+  .login-layout {
+    width: min(100% - 2rem, 34rem);
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .login-intro-panel {
+    gap: 0.6rem;
+    padding: 1.5rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--retail-line);
+  }
+  .login-intro-panel h2 {
+    max-width: none;
+    font-size: 1.6rem;
+  }
+  .login-intro-panel p {
+    max-width: none;
+  }
+
   .app-header {
     min-height: 3.8rem;
     padding: 0 0.75rem;
@@ -2606,6 +2683,13 @@ select {
 }
 
 @media (max-width: 42rem) {
+  .header-navigation {
+    gap: 0.4rem;
+  }
+  .header-browse-link {
+    padding-inline: 0.5rem;
+  }
+
   .login-layout {
     width: min(100% - 1rem, 34rem);
     min-height: 0;
@@ -2613,10 +2697,23 @@ select {
     display: block;
   }
 
-  .login-layout::before {
-    min-height: 9rem;
+  .login-intro-panel {
+    gap: 0.5rem;
     padding: 1.25rem;
-    font-size: 1.85rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--retail-line);
+  }
+
+  .login-intro-panel h2 {
+    max-width: none;
+    font-size: 1.5rem;
+  }
+  .login-intro-panel p {
+    max-width: none;
+    font-size: 0.8rem;
+  }
+  .login-intro-panel .login-intro-brand {
+    display: none;
   }
 
   .login-card {
@@ -2662,7 +2759,21 @@ select {
   }
 }
 
+@media (max-width: 26.25rem) {
+  .header-navigation .brand > span:last-child {
+    display: none;
+  }
+  .header-navigation .brand {
+    gap: 0;
+  }
+}
+
 @media (max-width: 22rem) {
+  .header-browse-link {
+    padding-inline: 0.35rem;
+    font-size: 0.8rem;
+  }
+
   .app-header {
     padding-inline: 0.5rem;
   }

@@ -14,11 +14,13 @@ try {
     "amber",
   ].includes(palette)
     ? palette
-    : "ink";
+    : "moss";
   const textSize = localStorage.getItem("matchplane.text-size");
-  document.documentElement.dataset.textSize = ["small", "default", "large"].includes(
-    textSize,
-  )
+  document.documentElement.dataset.textSize = [
+    "small",
+    "default",
+    "large",
+  ].includes(textSize)
     ? textSize
     : "default";
   const locale = localStorage.getItem("matchplane.locale");

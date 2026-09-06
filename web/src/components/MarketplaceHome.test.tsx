@@ -307,6 +307,89 @@ describe("MarketplaceHome actions", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("searches the loaded catalog, sorts exact prices and restores the original shelf", async () => {
+    const user = userEvent.setup();
+    const expensive: AssetListing = {
+      ...listing,
+      id: "speaker",
+      title: "便携音箱",
+      priceAmountMinor: "20000",
+      priceCurrency: "CNY",
+      priceCurrencyScale: 2,
+    };
+    const affordable: AssetListing = {
+      ...listing,
+      id: "cup",
+      title: "陶瓷杯",
+      priceAmountMinor: "3000",
+      priceCurrency: "CNY",
+      priceCurrencyScale: 2,
+    };
+    renderHome({ listings: [expensive, affordable] });
+    const search = screen.getByRole("searchbox", { name: "在当前商品中搜索" });
+    await user.type(search, "音箱");
+    expect(
+      screen.getByRole("button", { name: "便携音箱" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "陶瓷杯" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("1 / 2 件商品")).toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, "不存在的商品");
+    expect(screen.getByText("没有符合筛选的商品")).toBeInTheDocument();
+    expect(
+      screen.queryByText("暂时还没有通过审核的商品"),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看全部商品" }));
+    expect(search).toHaveValue("");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "商品排序" }),
+      "price-asc",
+    );
+    expect(
+      Array.from(
+        document.querySelectorAll(".marketplace-product-title"),
+        (node) => node.textContent,
+      ),
+    ).toEqual(["陶瓷杯", "便携音箱"]);
+    await user.click(screen.getByRole("button", { name: "清除筛选" }));
+    expect(
+      Array.from(
+        document.querySelectorAll(".marketplace-product-title"),
+        (node) => node.textContent,
+      ),
+    ).toEqual(["便携音箱", "陶瓷杯"]);
+  });
+
+  it("disables misleading cross-currency price sorting", () => {
+    renderHome({
+      listings: [
+        {
+          ...listing,
+          id: "cny",
+          priceAmountMinor: "100",
+          priceCurrency: "CNY",
+          priceCurrencyScale: 2,
+        },
+        {
+          ...listing,
+          id: "usd",
+          priceAmountMinor: "200",
+          priceCurrency: "USD",
+          priceCurrencyScale: 2,
+        },
+      ],
+    });
+    expect(screen.getByRole("option", { name: "价格从低到高" })).toBeDisabled();
+    expect(screen.getByRole("option", { name: "价格从高到低" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "商品排序" })).toHaveValue(
+      "default",
+    );
+    expect(screen.getByText(/仅筛选当前已加载的商品/)).toBeInTheDocument();
+  });
+
   it("uses a keyboard-navigable toggle group for category filtering", async () => {
     const user = userEvent.setup();
     const homeListing: AssetListing = {

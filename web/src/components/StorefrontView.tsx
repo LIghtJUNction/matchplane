@@ -36,9 +36,11 @@ import {
   type MallAssistantContactConsentAction,
   type MarketplaceContactResponse,
 } from "../api";
+import { useCatalogBrowse } from "../hooks/useCatalogBrowse";
 import type { InterfaceLocale } from "../lib/preferences";
 import { subplatformCopy, type SubplatformConfig } from "../subplatform";
 import type { AssetListing } from "../types";
+import { CatalogFilters } from "./CatalogFilters";
 import { MarketplaceListingCard } from "./MarketplaceListingCard";
 import { MatchChat } from "./MatchChat";
 
@@ -84,6 +86,7 @@ export function StorefrontView({
   onOpenStoreConsole?: () => void;
 }) {
   const english = locale === "en";
+  const browse = useCatalogBrowse(listings);
   const [managerOpen, setManagerOpen] = useState(false);
   const status = subplatform.status ?? "active";
   const isInactive = status !== "active";
@@ -354,6 +357,9 @@ export function StorefrontView({
               </span>
             ) : null}
           </div>
+          {catalogResolved && !catalogError && listings.length > 0 ? (
+            <CatalogFilters browse={browse} locale={locale} />
+          ) : null}
           {catalogError ? (
             <Alert
               className="storefront-catalog-error"
@@ -388,9 +394,9 @@ export function StorefrontView({
               ) : null}
             </Alert>
           ) : catalogResolved ? (
-            listings.length ? (
-              <div className="grid grid-cols-1 gap-0 lg:grid-cols-4 lg:gap-5">
-                {listings.map((listing) => (
+            browse.visibleListings.length ? (
+              <div className="catalog-products-grid">
+                {browse.visibleListings.map((listing) => (
                   <MarketplaceListingCard
                     key={listing.id}
                     listing={listing}
@@ -404,6 +410,33 @@ export function StorefrontView({
                     }
                   />
                 ))}
+              </div>
+            ) : listings.length ? (
+              <div
+                className="storefront-view-empty catalog-filter-empty"
+                role="status"
+              >
+                <PackageOpen size={24} aria-hidden="true" />
+                <div>
+                  <strong>
+                    {english
+                      ? "No products match these filters"
+                      : "没有符合筛选的商品"}
+                  </strong>
+                  <p>
+                    {english
+                      ? "Try another keyword or clear the filters."
+                      : "换个关键词，或清除筛选再看看。"}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={browse.reset}
+                >
+                  {english ? "View all products" : "查看全部商品"}
+                </Button>
               </div>
             ) : (
               <div className="storefront-view-empty">

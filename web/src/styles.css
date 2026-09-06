@@ -1801,27 +1801,7 @@ main > div > .match-chat.is-root.is-catalog-header { margin-top: 0.75rem; paddin
 .root-marketplace-products { padding-top: 1.35rem; }
 .root-marketplace-stores { padding-top: 0.25rem; padding-bottom: 6rem; }
 .root-marketplace-products-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15.5rem), 18.5rem)); gap: 2.5rem 2rem; }
-.marketplace-product-card { border: 0 !important; background: transparent !important; box-shadow: none; transition: transform 180ms ease, opacity 180ms ease; animation: marketplace-card-enter 420ms ease both; }
-.marketplace-product-card:nth-child(1) { animation-delay: 40ms; }
-.marketplace-product-card:nth-child(2) { animation-delay: 90ms; }
-.marketplace-product-card:nth-child(3) { animation-delay: 140ms; }
-.marketplace-product-card:nth-child(4) { animation-delay: 190ms; }
-.marketplace-product-card:nth-child(5) { animation-delay: 240ms; }
-.marketplace-product-card:nth-child(6) { animation-delay: 290ms; }
-@keyframes marketplace-card-enter {
-  from { opacity: 0; transform: translateY(0.55rem); }
-  to { opacity: 1; transform: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-.marketplace-product-card { animation: none; }
-.marketplace-product-card:hover { transform: none; }
-}
-.marketplace-product-card:hover { border: 0 !important; box-shadow: none; transform: translateY(-2px); }
-@media (prefers-reduced-motion: reduce) {
-.marketplace-product-card:hover { transform: none; }
-}
-.marketplace-product-card > div:first-child { aspect-ratio: 4 / 3; }
-.marketplace-like-button { min-width: 2.5rem; min-height: 2.5rem; padding: 0 0.65rem; display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; border: 0 !important; border-radius: 999px; background: color-mix(in srgb, var(--background-subtle) 88%, transparent) !important; color: var(--foreground-strong); box-shadow: none !important; backdrop-filter: blur(0.5rem); }
+/* Product-card surfaces and controls are owned by retail-ui.css. */
 .marketplace-like-button svg { width: 1rem; height: 1rem; }
 .marketplace-like-button span { min-width: 0.7rem; font-size: 0.7rem; font-variant-numeric: tabular-nums; }
 .marketplace-like-button[aria-pressed="true"] { color: var(--clay); }

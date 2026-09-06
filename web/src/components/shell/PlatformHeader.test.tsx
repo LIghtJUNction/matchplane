@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SubplatformConfig } from "../../subplatform";
@@ -43,6 +44,12 @@ function renderHeader(
     email: string;
     role: string;
   } | null,
+  options: Partial<
+    Pick<
+      ComponentProps<typeof PlatformHeader>,
+      "subplatform" | "role" | "locale"
+    >
+  > = {},
 ) {
   const onOpenAccountSection = vi.fn();
   const onOpenStoreCenter = vi.fn();
@@ -68,26 +75,69 @@ function renderHeader(
       onOpenAccountSection={onOpenAccountSection}
       onSignOut={vi.fn()}
       ui={ui}
+      {...options}
     />,
   );
   return { ...view, onOpenAccountSection, onOpenStoreCenter };
 }
 
 describe("PlatformHeader account actions", () => {
-  it("keeps root store navigation separate from the brand anchor", () => {
-    const { container } = renderHeader(null);
-    const navigation = container.querySelector<HTMLDivElement>(
-      ".header-navigation",
-    );
-    const brandCluster = container.querySelector<HTMLDivElement>(
-      ".brand-cluster",
-    );
+  it.each([
+    ["zh", "主导航", "逛商品"],
+    ["en", "Main navigation", "Browse"],
+  ] as const)("keeps the brand, browse link, and store menu as navigation siblings in %s", (locale, navigationLabel, browseLabel) => {
+    const { container } = renderHeader(null, { locale });
+    const navigation = screen.getByRole("navigation", {
+      name: navigationLabel,
+    });
+    const brandCluster =
+      container.querySelector<HTMLDivElement>(".brand-cluster");
+    const browse = within(navigation).getByRole("link", { name: browseLabel });
     const storeMenu = screen.getByTestId("platform-menu");
 
-    expect(navigation).toContainElement(brandCluster);
-    expect(navigation).toContainElement(storeMenu);
+    expect(Array.from(navigation.children)).toEqual([
+      brandCluster,
+      browse,
+      storeMenu,
+    ]);
+    expect(browse).toHaveClass("header-browse-link");
+    expect(browse).toHaveAttribute("href", "/#marketplace-products");
     expect(brandCluster).not.toContainElement(storeMenu);
     expect(storeMenu.parentElement).toBe(navigation);
+  });
+
+  it.each([
+    "seller",
+    "platform",
+    "subplatform_admin",
+  ] as const)("does not add a buyer browse link to the %s workspace", (role) => {
+    renderHeader(null, { role });
+
+    expect(
+      screen.queryByRole("link", { name: "逛商品" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("platform-menu").parentElement).toBe(
+      screen.getByRole("navigation", { name: "主导航" }),
+    );
+  });
+
+  it("keeps storefront navigation scoped to its store", () => {
+    renderHeader(null, {
+      subplatform: {
+        ...subplatform,
+        slug: "sample-store",
+        path: "/s/sample-store",
+      },
+    });
+
+    expect(
+      screen.queryByRole("link", { name: "逛商品" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("platform-menu")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "总平台" })).toHaveAttribute(
+      "href",
+      "/",
+    );
   });
 
   it("keeps merchant and platform administration inside one avatar menu", async () => {

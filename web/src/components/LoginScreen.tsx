@@ -56,7 +56,8 @@ export function LoginScreen({
 }: {
   intent?: "sign-in" | "sign-up";
 }) {
-  const { theme, locale, setTheme, setLocale } = useInterfacePreferences();
+  const { theme, locale, palette, setTheme, setLocale } =
+    useInterfacePreferences();
   const copy = loginCopy(locale);
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -765,11 +766,20 @@ export function LoginScreen({
         <PreferenceControls
           theme={theme}
           locale={locale}
+          palette={palette}
           onThemeChange={setTheme}
           onLocaleChange={setLocale}
         />
       </div>
       <div className="login-layout">
+        <aside
+          className="login-intro-panel"
+          aria-labelledby="login-intro-title"
+        >
+          <p className="login-intro-brand">MatchPlane</p>
+          <h2 id="login-intro-title">{copy.introTitle}</h2>
+          <p>{copy.introDescription}</p>
+        </aside>
         <section className="login-card" aria-labelledby="login-form-title">
           <div className="login-card-header">
             <Brand
@@ -1259,6 +1269,9 @@ function loginCopy(locale: "zh" | "en") {
   if (locale === "en") {
     return {
       back: "Back",
+      introTitle: "Find your fit. Then decide.",
+      introDescription:
+        "Tell us what you need and compare across stores. Contact details are only exchanged with your consent.",
       formTitle: "Continue with your account",
       formDescription: "Use email or another method enabled for this platform.",
       registrationTitle: "Create your account",
@@ -1349,6 +1362,8 @@ function loginCopy(locale: "zh" | "en") {
   }
   return {
     back: "返回",
+    introTitle: "找到合适的，再做决定。",
+    introDescription: "说说需求，跨店比较。未经你确认，不会交换联系方式。",
     formTitle: "继续使用你的账号",
     formDescription: "使用邮箱，或选择当前平台已启用的其他方式。",
     registrationTitle: "创建你的账号",

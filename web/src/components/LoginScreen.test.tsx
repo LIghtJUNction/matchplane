@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -49,6 +49,7 @@ vi.mock("../subplatform", () => ({
 import { LoginScreen } from "./LoginScreen";
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.stubGlobal(
     "fetch",
     vi.fn(
@@ -63,11 +64,80 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.localStorage.clear();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
 describe("LoginScreen", () => {
+  it.each([
+    "sign-in",
+    "sign-up",
+  ] as const)("renders an accessible marketplace introduction before the %s form", async (intent) => {
+    render(<LoginScreen intent={intent} />);
+    const intro = await screen.findByRole("complementary", {
+      name: "找到合适的，再做决定。",
+    });
+
+    expect(intro).toHaveClass("login-intro-panel");
+    expect(intro).toHaveAttribute("aria-labelledby", "login-intro-title");
+    expect(within(intro).getByText("MatchPlane")).toBeVisible();
+    expect(
+      within(intro).getByRole("heading", {
+        level: 2,
+        name: "找到合适的，再做决定。",
+      }),
+    ).toHaveAttribute("id", "login-intro-title");
+    expect(intro).toHaveTextContent(
+      "说说需求，跨店比较。未经你确认，不会交换联系方式。",
+    );
+    expect(intro.nextElementSibling).toHaveClass("login-card");
+    expect(screen.getByRole("link", { name: "返回" })).toHaveAttribute(
+      "href",
+      "/",
+    );
+  });
+
+  it("restores and switches the intro locale without losing the form or return path", async () => {
+    window.localStorage.setItem("matchplane.locale", "en");
+    window.localStorage.setItem("matchplane.theme", "dark");
+    window.history.replaceState(null, "", "/login?next=%2Fs%2Fsample-store");
+    const user = userEvent.setup();
+    render(<LoginScreen />);
+
+    const intro = await screen.findByRole("complementary", {
+      name: "Find your fit. Then decide.",
+    });
+    expect(intro).toHaveTextContent(
+      "Tell us what you need and compare across stores. Contact details are only exchanged with your consent.",
+    );
+    expect(intro).not.toHaveTextContent("找到合适的");
+    expect(screen.getByRole("link", { name: "Register" })).toHaveAttribute(
+      "href",
+      "/register?next=%2Fs%2Fsample-store",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Email" }),
+      "buyer@example.com",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Display and language" }),
+    );
+    await user.click(screen.getByRole("button", { name: "中文" }));
+
+    expect(
+      screen.getByRole("complementary", { name: "找到合适的，再做决定。" }),
+    ).not.toHaveTextContent("Find your fit");
+    expect(screen.getByRole("textbox", { name: "邮箱" })).toHaveValue(
+      "buyer@example.com",
+    );
+    expect(screen.getByRole("link", { name: "注册" })).toHaveAttribute(
+      "href",
+      "/register?next=%2Fs%2Fsample-store",
+    );
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(document.documentElement).toHaveAttribute("lang", "zh-CN");
+  });
   it("keeps every compact authentication action addressable by its polish selector", async () => {
     window.history.replaceState(null, "", "/login");
     render(<LoginScreen intent="sign-in" />);

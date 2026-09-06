@@ -13,7 +13,7 @@ export const INTERFACE_PALETTES: ReadonlyArray<{
   label: Record<InterfaceLocale, string>;
 }> = [
   { id: "ink", swatch: "#171715", label: { zh: "墨色", en: "Ink" } },
-  { id: "moss", swatch: "#315c47", label: { zh: "苔绿", en: "Moss" } },
+  { id: "moss", swatch: "#16804a", label: { zh: "苔绿", en: "Moss" } },
   { id: "clay", swatch: "#a34a2b", label: { zh: "赤陶", en: "Clay" } },
   { id: "plum", swatch: "#6f506b", label: { zh: "梅紫", en: "Plum" } },
   { id: "amber", swatch: "#8a5a10", label: { zh: "琥珀", en: "Amber" } },
@@ -27,7 +27,7 @@ const TEXT_SIZE_KEY = "matchplane.text-size";
 export function useInterfacePreferences() {
   const [theme, setThemeState] = useState<InterfaceTheme>("light");
   const [locale, setLocaleState] = useState<InterfaceLocale>("zh");
-  const [palette, setPaletteState] = useState<InterfacePalette>("ink");
+  const [palette, setPaletteState] = useState<InterfacePalette>("moss");
   const [textSize, setTextSizeState] = useState<InterfaceTextSize>("default");
   const [preferencesReady, setPreferencesReady] = useState(false);
 
@@ -40,7 +40,7 @@ export function useInterfacePreferences() {
     const nextLocale = storedLocale === "en" ? "en" : "zh";
     const nextPalette = isInterfacePalette(storedPalette)
       ? storedPalette
-      : "ink";
+      : "moss";
     const nextTextSize = isInterfaceTextSize(storedTextSize)
       ? storedTextSize
       : "default";
