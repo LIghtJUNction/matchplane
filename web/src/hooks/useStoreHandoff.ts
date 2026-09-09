@@ -76,6 +76,12 @@ function activeIntentIdempotencyKey(
   ].join(":");
 }
 
+function announceContactUpdate() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("matchplane.contact.updated"));
+  window.dispatchEvent(new Event("matchplane:notifications-updated"));
+}
+
 interface UseStoreHandoffOptions {
   subplatform: SubplatformConfig;
   listings: AssetListing[];
@@ -217,10 +223,7 @@ export function useStoreHandoff({
         }),
       ]);
       clearPendingConversion(selected.offerId);
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("matchplane.contact.updated"));
-        window.dispatchEvent(new Event("matchplane:notifications-updated"));
-      }
+      announceContactUpdate();
       onNotice(
         "联系申请已保存；店员侧投影状态待后台确认，双方同意前不会交换联系方式",
       );
@@ -273,10 +276,7 @@ export function useStoreHandoff({
         introductionId: introduction.introduction_id,
         idempotencyKey: `store-ai-contact-retrieve:${introduction.introduction_id}:${session.partyId}`,
       });
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("matchplane.contact.updated"));
-        window.dispatchEvent(new Event("matchplane:notifications-updated"));
-      }
+      announceContactUpdate();
       return contact;
     },
     [listings, subplatform],
@@ -538,10 +538,7 @@ export function useStoreHandoff({
             ),
           });
         }
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("matchplane.contact.updated"));
-          window.dispatchEvent(new Event("matchplane:notifications-updated"));
-        }
+        announceContactUpdate();
         onNotice(
           "联系申请已写入撮合系统；店员通知投递状态待后台确认，供给方同意前不会交换联系方式",
         );
